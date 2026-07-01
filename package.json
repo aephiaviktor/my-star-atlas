@@ -1,0 +1,21 @@
+{
+  "name": "my-star-atlas",
+  "version": "0.1.1",
+  "private": true,
+  "main": "electron/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "start:electron": "electron .",
+    "dev": "electron .",
+    "typecheck": "node --check electron/main.js && node --check electron/preload.js && node --check electron/renderer.js"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "@staratlas/anchor": "^0.25.1",
+    "@staratlas/sage": "^1.9.0-alpha.16",
+    "bs58": "^6.0.0",
+    "electron": "^42.1.0",
+    "rpc_limiter": "git+https://github.com/aephiaviktor/rpc-limiter.git#main"
+  }
+}

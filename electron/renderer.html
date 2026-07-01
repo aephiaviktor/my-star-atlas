@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Star Atlas</title>
+    <link rel="stylesheet" href="./renderer.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="left-nav" aria-label="Primary">
+        <div class="brand-block">
+          <img class="brand-mark" src="./assets/aephia-logo.webp" alt="" />
+          <div>
+            <h1>My Star Atlas</h1>
+            <p id="profile-label">USTUR</p>
+          </div>
+        </div>
+
+        <nav class="primary-tabs" aria-label="Sections">
+          <button class="nav-button nav-orange" type="button" data-section="fleet" aria-pressed="false">
+            <span class="nav-icon">FL</span>
+            <span>My Fleet</span>
+          </button>
+          <button class="nav-button nav-blue active" type="button" data-section="production" aria-pressed="true">
+            <span class="nav-icon">PC</span>
+            <span>Production/Consumption</span>
+          </button>
+          <button class="nav-button nav-blue" type="button" data-section="optimization" aria-pressed="false">
+            <span class="nav-icon">OP</span>
+            <span>Optimization</span>
+          </button>
+          <button class="nav-button nav-blue" type="button" data-section="earnings" aria-pressed="false">
+            <span class="nav-icon">EA</span>
+            <span>Earnings</span>
+          </button>
+        </nav>
+
+        <div class="nav-footer">
+          <button id="open-settings-btn" class="settings-launch nav-cyan" type="button">
+            <span class="nav-icon">ST</span>
+            <span>Settings</span>
+          </button>
+          <div class="version-line">v<span id="version-label">0.1.1</span></div>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="top-bar">
+          <div>
+            <p class="eyebrow" id="section-eyebrow">Production/Consumption</p>
+            <h2 id="section-title">Scanning</h2>
+          </div>
+          <div class="top-actions">
+            <div class="faction-switch" role="group" aria-label="Active faction">
+              <button class="faction-button faction-mud" type="button" data-faction="MUD" aria-pressed="false">MUD</button>
+              <button class="faction-button faction-oni" type="button" data-faction="ONI" aria-pressed="false">ONI</button>
+              <button class="faction-button faction-ustur active" type="button" data-faction="USTUR" aria-pressed="true">USTUR</button>
+            </div>
+            <div class="sync-strip">
+              <span class="sync-dot muted"></span>
+              <span id="settings-status">Settings incomplete</span>
+            </div>
+          </div>
+        </header>
+
+        <section class="section-view active" data-section-panel="production">
+          <div class="subtab-bar" role="tablist" aria-label="Production and consumption views">
+            <button class="subtab-button active" type="button" data-subtab="scanning" aria-selected="true">Scanning</button>
+            <button class="subtab-button" type="button" data-subtab="mining" aria-selected="false">Mining</button>
+            <button class="subtab-button" type="button" data-subtab="crafting" aria-selected="false">Crafting</button>
+            <button class="subtab-button" type="button" data-subtab="production" aria-selected="false">Production</button>
+            <button class="subtab-button" type="button" data-subtab="consumption" aria-selected="false">Consumption</button>
+            <button class="subtab-button" type="button" data-subtab="pct-charts" aria-selected="false">PCT Charts</button>
+            <button class="subtab-button" type="button" data-subtab="surplus" aria-selected="false">Surplus</button>
+          </div>
+
+          <div class="production-panel active" data-production-panel="scanning">
+            <div class="activity-filter-bar">
+              <label class="activity-filter">
+                <span>Fleet</span>
+                <select id="scanning-fleet-filter" aria-label="Filter scanning by fleet">
+                  <option value="">All Fleets</option>
+                </select>
+              </label>
+              <span id="scanning-fleet-note" class="activity-filter-note">Last 14 days</span>
+            </div>
+
+            <div class="dashboard-grid">
+              <section class="metric-card">
+                <span class="metric-label">14d SDU found</span>
+                <strong id="sdu-total-value">--</strong>
+                <small id="sdu-total-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">14d Consumption</span>
+                <strong id="sdu-consumption-value">--</strong>
+                <small id="sdu-consumption-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Surplus</span>
+                <strong id="sdu-surplus-value">--</strong>
+                <small id="sdu-surplus-note">Awaiting Influx connection</small>
+              </section>
+            </div>
+
+            <section class="work-surface">
+              <div class="placeholder-chart">
+                <div id="sdu-chart-bars" class="chart-bars" aria-label="Daily SDU found over the last 14 days">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div class="production-panel" data-production-panel="mining">
+            <div class="activity-filter-bar">
+              <label class="activity-filter">
+                <span>Fleet</span>
+                <select id="mining-fleet-filter" aria-label="Filter mining by fleet">
+                  <option value="">All Fleets</option>
+                </select>
+              </label>
+              <span id="mining-fleet-note" class="activity-filter-note">Last 14 days</span>
+            </div>
+
+            <div class="dashboard-grid">
+              <section class="metric-card">
+                <span class="metric-label">14d Raw Materials</span>
+                <strong id="mining-total-value">--</strong>
+                <small id="mining-total-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Top Material</span>
+                <strong id="mining-top-value">--</strong>
+                <small id="mining-top-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Materials</span>
+                <strong id="mining-material-count-value">--</strong>
+                <small id="mining-material-count-note">Awaiting Influx connection</small>
+              </section>
+            </div>
+
+            <section class="work-surface mining-surface">
+              <div id="mining-chart-grid" class="resource-chart-grid">
+                <div class="chart-empty">Awaiting Influx connection</div>
+              </div>
+            </section>
+          </div>
+
+          <div class="production-panel" data-production-panel="crafting">
+            <div class="activity-filter-bar">
+              <label class="activity-filter">
+                <span>Starbase</span>
+                <select id="crafting-starbase-filter" aria-label="Filter crafting by starbase">
+                  <option value="">All starbases</option>
+                </select>
+              </label>
+              <label class="activity-filter">
+                <span>Recipe</span>
+                <select id="crafting-recipe-filter" aria-label="Filter crafting by recipe">
+                  <option value="">All recipes</option>
+                </select>
+              </label>
+              <span id="crafting-filter-note" class="activity-filter-note">Last 14 days</span>
+            </div>
+
+            <div class="dashboard-grid">
+              <section class="metric-card">
+                <span class="metric-label">14d Crafted Output</span>
+                <strong id="crafting-total-value">--</strong>
+                <small id="crafting-total-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Top Recipe</span>
+                <strong id="crafting-top-value">--</strong>
+                <small id="crafting-top-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Recipes</span>
+                <strong id="crafting-count-value">--</strong>
+                <small id="crafting-count-note">Awaiting Influx connection</small>
+              </section>
+            </div>
+
+            <section class="work-surface crafting-surface">
+              <div id="crafting-chart-grid" class="crafting-chart-grid">
+                <div class="chart-empty">Awaiting Influx connection</div>
+              </div>
+            </section>
+          </div>
+
+          <div class="production-panel" data-production-panel="production">
+            <div class="activity-filter-bar">
+              <span id="production-filter-note" class="activity-filter-note">Last 14 days</span>
+            </div>
+
+            <div class="dashboard-grid">
+              <section class="metric-card">
+                <span class="metric-label">14d Production</span>
+                <strong id="production-total-value">--</strong>
+                <small id="production-total-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Top Product</span>
+                <strong id="production-top-value">--</strong>
+                <small id="production-top-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Products</span>
+                <strong id="production-count-value">--</strong>
+                <small id="production-count-note">Awaiting Influx connection</small>
+              </section>
+            </div>
+
+            <section class="work-surface production-surface">
+              <div id="production-chart-grid" class="crafting-chart-grid">
+                <div class="chart-empty">Awaiting Influx connection</div>
+              </div>
+            </section>
+          </div>
+
+          <div class="production-panel" data-production-panel="consumption">
+            <section class="work-surface quiet-panel">
+              <h2>Consumption</h2>
+            </section>
+          </div>
+
+          <div class="production-panel" data-production-panel="pct-charts">
+            <section class="work-surface quiet-panel">
+              <h2>PCT Charts</h2>
+            </section>
+          </div>
+
+          <div class="production-panel" data-production-panel="surplus">
+            <section class="work-surface quiet-panel">
+              <h2>Surplus</h2>
+            </section>
+          </div>
+        </section>
+
+        <section class="section-view" data-section-panel="fleet">
+          <div class="fleet-toolbar">
+            <div class="fleet-toolbar-group">
+              <label class="fleet-search">
+                <span>Search</span>
+                <input id="fleet-search-input" type="search" autocomplete="off" spellcheck="false" />
+              </label>
+            </div>
+          </div>
+
+          <section class="work-surface fleet-surface">
+            <div id="fleet-sync-status" class="fleet-sync-status" role="status">Awaiting blockchain sync</div>
+            <div class="fleet-table-wrap">
+              <table class="fleet-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Fleet</th>
+                    <th scope="col">Ownership</th>
+                    <th scope="col">State</th>
+                    <th scope="col">Account</th>
+                  </tr>
+                </thead>
+                <tbody id="fleet-table-body">
+                  <tr class="empty-row">
+                    <td colspan="4">No blockchain fleet data loaded</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="section-view" data-section-panel="optimization">
+          <section class="work-surface quiet-panel">
+            <h2>Optimization</h2>
+          </section>
+        </section>
+
+        <section class="section-view" data-section-panel="earnings">
+          <section class="work-surface quiet-panel">
+            <h2>Earnings</h2>
+          </section>
+        </section>
+      </main>
+
+      <div id="settings-overlay" class="settings-overlay hidden" aria-hidden="true">
+        <aside class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+          <form id="settings-form" class="settings-form sensitive-hidden">
+          <div class="settings-header">
+            <div>
+              <p class="eyebrow">Settings</p>
+              <h2 id="settings-title">USTUR Profile</h2>
+            </div>
+            <div class="settings-header-actions">
+              <button id="toggle-sensitive-btn" class="ghost-button" type="button">Show</button>
+              <button id="close-settings-btn" class="ghost-button icon-button" type="button" aria-label="Close settings">X</button>
+            </div>
+          </div>
+
+          <section class="settings-section">
+            <h3>Profile</h3>
+            <label>
+              Aephia API key
+              <input class="sensitive-field" name="aephiaApiKey" type="text" autocomplete="off" spellcheck="false" />
+            </label>
+            <label>
+              MUD player profile
+              <input name="mudPlayerProfile" type="text" autocomplete="off" spellcheck="false" />
+            </label>
+            <label>
+              ONI player profile
+              <input name="oniPlayerProfile" type="text" autocomplete="off" spellcheck="false" />
+            </label>
+            <label>
+              USTUR player profile
+              <input name="usturPlayerProfile" type="text" autocomplete="off" spellcheck="false" />
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <h3>InfluxDB</h3>
+            <label>
+              Influx URL
+              <input name="influxUrl" type="url" autocomplete="off" spellcheck="false" />
+            </label>
+            <label>
+              Influx auth token
+              <input class="sensitive-field" name="influxAuthToken" type="text" autocomplete="off" spellcheck="false" />
+            </label>
+            <label>
+              Influx database/bucket
+              <input name="influxBucket" type="text" autocomplete="off" spellcheck="false" />
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <h3>RPC Limiter</h3>
+            <label class="switch-row">
+              <input name="useRpcLimiter" type="checkbox" />
+              <span>Use RPC limiter</span>
+            </label>
+            <label>
+              RPC URL
+              <input class="sensitive-field" name="rpcUrl" type="url" autocomplete="off" spellcheck="false" />
+            </label>
+            <label>
+              Requests / sec
+              <input name="rpcRequestsPerSecond" type="number" min="0.1" step="0.1" autocomplete="off" />
+            </label>
+          </section>
+
+          <div class="settings-actions">
+            <button id="save-settings-btn" type="submit">Save Settings</button>
+            <button id="test-influx-btn" type="button">Test Influx</button>
+            <span id="save-status" role="status"></span>
+          </div>
+
+          <section class="settings-section measurement-section">
+            <h3>Discovered Measurements</h3>
+            <div id="measurement-list" class="measurement-list">Not checked</div>
+          </section>
+          </form>
+        </aside>
+      </div>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
