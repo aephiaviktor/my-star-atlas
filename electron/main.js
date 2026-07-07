@@ -279,45 +279,26 @@ schema.measurements(bucket: "${bucket}")`;
   };
 }
 
-function buildInstanceScopeFilter(settings, options = {}) {
+function buildInstanceScopeFilter(settings) {
+  // Every measurement written by SLYA / the bots now carries either
+  // r.instance (sdu) or r.faction (mining, movement, crafting, upgrade) and
+  // r.starbase. The legacy "untagged fleet fallback" and USTUR "broad
+  // untagged" branch are no longer needed: historical rows that lacked
+  // faction tags are now the minority and are simply out of scope.
   const faction = normalizeFaction(settings.faction);
   const aliases = factionInfluxAliases[faction] || factionInfluxAliases.USTUR;
   const instanceValues = makeFluxStringArray(aliases.instance);
   const factionValues = makeFluxStringArray(aliases.faction);
-  const bucket = String(settings.influxBucket || '').trim().toLowerCase();
-  const isUsturSlya = faction === 'USTUR' && bucket === 'slya';
-  const allowBroadUntaggedFallback = Boolean(options.allowUntaggedFallback) && isUsturSlya;
-  const untaggedFleetNames = Array.isArray(options.untaggedFleetNames)
-    ? options.untaggedFleetNames.map((fleet) => String(fleet || '').trim()).filter(Boolean)
-    : [];
-  const fleetSet = makeFluxStringArray(untaggedFleetNames);
-  // For MUD/ONI, the fleet list is used as a positive filter on tagged data too,
-  // so a fleet rented by MUD but tagged by the MUD bot does not show up in MUD
-  // views when the ONI player actually owns it. USTUR keeps the broad tagged
-  // path because the broad untagged fallback covers legacy rows.
-  const taggedFleetFilter = (!isUsturSlya && untaggedFleetNames.length)
-    ? ` and (not exists r.fleet or contains(value: r.fleet, set: ${fleetSet}))`
-    : '';
-  const untaggedFleetFallback = untaggedFleetNames.length
-    ? ` or (not exists r.instance and not exists r.faction and exists r.fleet and contains(value: r.fleet, set: ${fleetSet}))`
-    : '';
-  const untaggedBroadFallback = allowBroadUntaggedFallback
-    ? ' or (not exists r.instance and not exists r.faction)'
-    : '';
 
   return `  |> filter(fn: (r) =>
     ((exists r.instance and contains(value: r.instance, set: ${instanceValues})) or
-     (exists r.faction and contains(value: r.faction, set: ${factionValues})))${taggedFleetFilter}${untaggedFleetFallback}${untaggedBroadFallback}
+     (exists r.faction and contains(value: r.faction, set: ${factionValues})))
   )`;
 }
 
 function getInfluxScopeNote(settings) {
   const faction = normalizeFaction(settings.faction);
-  const bucket = String(settings.influxBucket || '').trim().toLowerCase();
-  if (faction === 'USTUR' && bucket === 'slya') {
-    return 'USTUR tagged + legacy untagged slya fallback';
-  }
-  return `${faction} tagged + ${faction.toLowerCase()} fleet fallback`;
+  return `${faction} tagged`;
 }
 
 async function measurementHasTag(settings, bucket, measurement, tagName) {
@@ -563,8 +544,7 @@ function createOptionSummary(totals) {
 async function fetchDailySdu(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const bucket = escapeFluxString(settings.influxBucket);
-  const untaggedFleetNames = await getProfileFleetLabels(settings);
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, { allowUntaggedFallback: true, untaggedFleetNames });
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const requestedFleet = normalizeFleetFilter(payload);
 
   async function queryDailySum(filterFlux) {
@@ -850,9 +830,8 @@ ${scopeFilterFlux}
 async function fetchDailyMining(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const bucket = escapeFluxString(settings.influxBucket);
-  const untaggedFleetNames = await getProfileFleetLabels(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings);
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, { untaggedFleetNames });
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const requestedFleet = normalizeFleetFilter(payload);
   const requestedStarbase = normalizeStarbaseFilter(payload);
   const flux = `from(bucket: "${bucket}")
@@ -995,9 +974,9 @@ function addProductionSlice(pieMap, starbase, label, value) {
   slices.set(cleanLabel, (slices.get(cleanLabel) || 0) + amount);
 }
 
-async function fetchProductionRows(settings, bucket, measurement, tagColumn, extraFilterFlux = '', scopeOptions = {}) {
+async function fetchProductionRows(settings, bucket, measurement, tagColumn, extraFilterFlux = '') {
   const groupColumns = tagColumn === 'starbase' ? '"starbase"' : `"starbase", "${tagColumn}"`;
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, scopeOptions);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "${measurement}")
@@ -1014,8 +993,8 @@ ${extraFilterFlux}
   return parseInfluxCsv(await queryInfluxFlux(settings, flux));
 }
 
-async function fetchProductionDailyRows(settings, bucket, measurement, tagColumn, starbase, extraFilterFlux = '', scopeOptions = {}) {
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, scopeOptions);
+async function fetchProductionDailyRows(settings, bucket, measurement, tagColumn, starbase, extraFilterFlux = '') {
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "${measurement}")
@@ -1033,8 +1012,8 @@ ${extraFilterFlux}
   return parseInfluxCsv(await queryInfluxFlux(settings, flux));
 }
 
-async function fetchSduProductionRowsByFleet(settings, bucket, scopeOptions = {}) {
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, scopeOptions);
+async function fetchSduProductionRowsByFleet(settings, bucket) {
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "sdu")
@@ -1049,8 +1028,8 @@ ${scopeFilterFlux}
   return parseInfluxCsv(await queryInfluxFlux(settings, flux));
 }
 
-async function fetchSduProductionDailyByFleet(settings, bucket, fleet, scopeOptions = {}) {
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, scopeOptions);
+async function fetchSduProductionDailyByFleet(settings, bucket, fleet) {
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "sdu")
@@ -1066,8 +1045,8 @@ ${scopeFilterFlux}
   return parseInfluxCsv(await queryInfluxFlux(settings, flux));
 }
 
-async function fetchSduProductionDailyAll(settings, bucket, scopeOptions = {}) {
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, scopeOptions);
+async function fetchSduProductionDailyAll(settings, bucket) {
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "sdu")
@@ -1086,20 +1065,19 @@ async function fetchDailyProduction(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const bucket = escapeFluxString(settings.influxBucket);
   const canGroupSduByStarbase = await measurementHasTag(settings, bucket, 'sdu', 'starbase');
-  const untaggedFleetNames = await getProfileFleetLabels(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings);
   const requestedStarbase = normalizeStarbaseFilter(payload);
-  const scopeOptions = { allowUntaggedFallback: true, untaggedFleetNames };
-  // SLYA does not yet write a `r.starbase` tag on the `sdu` measurement, so SDU
-  // cannot be attributed to a starbase. Until that lands, SDU is excluded from
-  // the per-starbase views and from the starbase filter dropdown entirely.
+  // SLYA started writing r.starbase on sdu rows; older rows are still missing
+  // the tag, so we only include sdu when the schema reports the column. The
+  // legacy "SLYA does not yet write..." comment is stale and the gate will
+  // flip to true for buckets that have the new tag.
   const includeSdu = canGroupSduByStarbase;
 
   const [sduRows, miningRows, craftingRows] = await Promise.all([
     includeSdu
-      ? fetchProductionRows(settings, bucket, 'sdu', 'starbase', '', { allowUntaggedFallback: true })
+      ? fetchProductionRows(settings, bucket, 'sdu', 'starbase')
       : Promise.resolve([]),
-    fetchProductionRows(settings, bucket, 'mining', 'rss', '', { untaggedFleetNames }),
+    fetchProductionRows(settings, bucket, 'mining', 'rss'),
     fetchProductionRows(settings, bucket, 'crafting', 'output', '  |> filter(fn: (r) => (exists r.type) and r.type == "Output")'),
   ]);
 
@@ -1167,9 +1145,9 @@ async function fetchDailyProduction(payload) {
 
   const [sduDailyRows, miningDailyRows, craftingDailyRows] = await Promise.all([
     includeSdu
-      ? fetchProductionDailyRows(settings, bucket, 'sdu', 'starbase', selectedStarbase, '', scopeOptions)
+      ? fetchProductionDailyRows(settings, bucket, 'sdu', 'starbase', selectedStarbase)
       : Promise.resolve([]),
-    fetchProductionDailyRows(settings, bucket, 'mining', 'rss', selectedStarbase, '', scopeOptions),
+    fetchProductionDailyRows(settings, bucket, 'mining', 'rss', selectedStarbase),
     fetchProductionDailyRows(settings, bucket, 'crafting', 'output', selectedStarbase, '  |> filter(fn: (r) => (exists r.type) and r.type == "Output")'),
   ]);
 
@@ -1233,9 +1211,8 @@ const CARGO_CONSUMPTION_FIELD_NAMES = Object.freeze({
 async function fetchConsumptionMining(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const bucket = escapeFluxString(settings.influxBucket);
-  const untaggedFleetNames = await getProfileFleetLabels(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings);
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, { untaggedFleetNames });
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const requestedStarbase = normalizeStarbaseFilter(payload);
   const requestedFleet = normalizeFleetFilter(payload);
 
@@ -1625,9 +1602,8 @@ ${scopeFilterFlux}
 async function fetchConsumptionScanning(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const bucket = escapeFluxString(settings.influxBucket);
-  const untaggedFleetNames = await getProfileFleetLabels(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings);
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, { untaggedFleetNames });
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const requestedStarbase = normalizeStarbaseFilter(payload);
   const requestedFleet = normalizeFleetFilter(payload);
 
@@ -1781,9 +1757,8 @@ ${scopeFilterFlux}
 async function fetchConsumptionCargo(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const bucket = escapeFluxString(settings.influxBucket);
-  const untaggedFleetNames = await getProfileFleetLabels(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings);
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, { untaggedFleetNames });
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const requestedStarbase = normalizeStarbaseFilter(payload);
   const requestedFleet = normalizeFleetFilter(payload);
 
@@ -1908,9 +1883,8 @@ ${scopeFilterFlux}
 async function fetchConsumptionTotal(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const bucket = escapeFluxString(settings.influxBucket);
-  const untaggedFleetNames = await getProfileFleetLabels(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings);
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, { untaggedFleetNames });
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const requestedStarbase = normalizeStarbaseFilter(payload);
 
   const sduFlux = `from(bucket: "${bucket}")
@@ -2351,110 +2325,6 @@ async function fetchProfileFleets(payload) {
   };
 }
 
-const FLEET_LABELS_CACHE_TTL_MS = 5 * 60 * 1000;
-const FLEET_LABELS_STALE_TTL_MS = 24 * 60 * 60 * 1000;
-const fleetLabelsCache = new Map();
-let fleetLabelsCacheLoaded = false;
-
-function fleetLabelsCachePath() {
-  return path.join(app.getPath('userData'), 'fleet-labels-cache.json');
-}
-
-async function loadFleetLabelsCache() {
-  try {
-    const raw = await fs.readFile(fleetLabelsCachePath(), 'utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') {
-      for (const [profile, entry] of Object.entries(parsed)) {
-        if (entry && Array.isArray(entry.labels)) {
-          fleetLabelsCache.set(profile, {
-            labels: entry.labels.map((label) => String(label || '')).filter(Boolean),
-            fetchedAt: Number(entry.fetchedAt) || 0,
-          });
-        }
-      }
-    }
-  } catch (error) {
-    if (!error || error.code !== 'ENOENT') {
-      console.error('[MyStarAtlas] Failed to load fleet labels cache:', error);
-    }
-  }
-  fleetLabelsCacheLoaded = true;
-}
-
-async function saveFleetLabelsCache() {
-  const obj = {};
-  for (const [profile, entry] of fleetLabelsCache.entries()) {
-    obj[profile] = { labels: entry.labels, fetchedAt: entry.fetchedAt };
-  }
-  try {
-    await fs.mkdir(app.getPath('userData'), { recursive: true });
-    await fs.writeFile(fleetLabelsCachePath(), `${JSON.stringify(obj, null, 2)}\n`, 'utf8');
-  } catch (error) {
-    console.error('[MyStarAtlas] Failed to save fleet labels cache:', error);
-  }
-}
-
-async function getProfileFleetLabels(settings) {
-  const profile = getSelectedPlayerProfile(settings);
-  if (!profile) return [];
-  const cached = fleetLabelsCache.get(profile);
-  const now = Date.now();
-  if (cached && now - cached.fetchedAt < FLEET_LABELS_CACHE_TTL_MS) {
-    return cached.labels;
-  }
-  try {
-    const result = await fetchProfileFleets(settings);
-    const labels = Array.from(
-      new Set(
-        (result.fleets || [])
-          .map((fleet) => String(fleet.label || '').trim())
-          .filter(Boolean)
-      )
-    );
-    fleetLabelsCache.set(profile, { labels, fetchedAt: now });
-    saveFleetLabelsCache().catch(() => {});
-    return labels;
-  } catch (error) {
-    console.error('[MyStarAtlas] Failed to load profile fleet labels for Influx fallback:', error);
-    if (cached && now - cached.fetchedAt < FLEET_LABELS_STALE_TTL_MS) {
-      return cached.labels;
-    }
-    return [];
-  }
-}
-
-async function prewarmFleetLabelsCache() {
-  await loadFleetLabelsCache();
-  let settings;
-  try {
-    settings = await readSettings();
-  } catch (error) {
-    return;
-  }
-  const profiles = settings?.playerProfiles && typeof settings.playerProfiles === 'object'
-    ? settings.playerProfiles
-    : {};
-  const queue = [];
-  for (const profile of Object.values(profiles)) {
-    const key = String(profile || '').trim();
-    if (!key || fleetLabelsCache.has(key)) continue;
-    queue.push(key);
-  }
-  for (const key of queue) {
-    try {
-      await getProfileFleetLabels({
-        ...settings,
-        faction: '',
-        playerProfile: key,
-        playerProfiles: { ...(settings.playerProfiles || {}), USTUR: key },
-      });
-    } catch (error) {
-      // best effort
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  }
-}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -2614,9 +2484,6 @@ ipcMain.handle('consumption:total', async (_event, payload) => {
 });
 
 app.whenReady().then(async () => {
-  prewarmFleetLabelsCache().catch((error) => {
-    console.error('[MyStarAtlas] Fleet labels prewarm failed:', error);
-  });
   createWindow();
 });
 
