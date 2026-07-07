@@ -395,6 +395,47 @@ select:focus {
   overflow: hidden;
 }
 
+.consumption-subtab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.consumption-subtab-button {
+  min-height: 30px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+
+.consumption-subtab-button:hover {
+  color: var(--text);
+}
+
+.consumption-subtab-button.active {
+  color: var(--text);
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.consumption-panel {
+  display: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.consumption-panel.active {
+  display: flex;
+}
+
 .activity-filter-bar {
   display: flex;
   align-items: center;
@@ -476,11 +517,27 @@ select:focus {
 
 .chart-bars {
   display: grid;
-  grid-template-columns: repeat(14, minmax(14px, 1fr));
+  grid-template-columns: 32px repeat(14, minmax(14px, 1fr));
   align-items: end;
   gap: 10px;
   width: 100%;
   height: 100%;
+}
+
+.chart-yaxis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  padding-right: 2px;
+  font-size: 9px;
+  color: var(--muted);
+  text-align: right;
+  line-height: 1;
+}
+
+.chart-yaxis span {
+  white-space: nowrap;
 }
 
 .chart-bar {
@@ -532,7 +589,7 @@ select:focus {
 
 .resource-chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -571,10 +628,10 @@ select:focus {
 
 .resource-chart-bars {
   display: grid;
-  grid-template-columns: repeat(14, minmax(6px, 1fr));
+  grid-template-columns: 32px repeat(14, minmax(6px, 1fr));
   align-items: end;
   gap: 5px;
-  height: 150px;
+  height: 300px;
 }
 
 .resource-chart-bar {
@@ -604,12 +661,12 @@ select:focus {
 
 .crafting-chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
 .crafting-chart-grid-detail {
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  /* grid-template-columns overridden by .crafting-chart-grid for fixed 3-column layout */
 }
 
 .crafting-pie-card {

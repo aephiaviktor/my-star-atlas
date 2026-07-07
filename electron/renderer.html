@@ -41,7 +41,7 @@
             <span class="nav-icon">ST</span>
             <span>Settings</span>
           </button>
-          <div class="version-line">v<span id="version-label">0.1.1</span></div>
+          <div class="version-line">v<span id="version-label">0.5.0</span></div>
         </div>
       </aside>
 
@@ -71,7 +71,7 @@
             <button class="subtab-button" type="button" data-subtab="crafting" aria-selected="false">Crafting</button>
             <button class="subtab-button" type="button" data-subtab="production" aria-selected="false">Production</button>
             <button class="subtab-button" type="button" data-subtab="consumption" aria-selected="false">Consumption</button>
-            <button class="subtab-button" type="button" data-subtab="pct-charts" aria-selected="false">PCT Charts</button>
+            <button class="subtab-button" type="button" data-subtab="pct-charts" aria-selected="false">PCR Charts</button>
             <button class="subtab-button" type="button" data-subtab="surplus" aria-selected="false">Surplus</button>
           </div>
 
@@ -93,14 +93,9 @@
                 <small id="sdu-total-note">Awaiting Influx connection</small>
               </section>
               <section class="metric-card">
-                <span class="metric-label">14d Consumption</span>
-                <strong id="sdu-consumption-value">--</strong>
-                <small id="sdu-consumption-note">Awaiting Influx connection</small>
-              </section>
-              <section class="metric-card">
-                <span class="metric-label">Surplus</span>
-                <strong id="sdu-surplus-value">--</strong>
-                <small id="sdu-surplus-note">Awaiting Influx connection</small>
+                <span class="metric-label">Daily Average</span>
+                <strong id="sdu-avg-value">--</strong>
+                <small id="sdu-avg-note">Awaiting Influx connection</small>
               </section>
             </div>
 
@@ -115,6 +110,12 @@
 
           <div class="production-panel" data-production-panel="mining">
             <div class="activity-filter-bar">
+              <label class="activity-filter">
+                <span>Starbase</span>
+                <select id="mining-starbase-filter" aria-label="Filter mining by starbase">
+                  <option value="">All starbases</option>
+                </select>
+              </label>
               <label class="activity-filter">
                 <span>Fleet</span>
                 <select id="mining-fleet-filter" aria-label="Filter mining by fleet">
@@ -193,6 +194,12 @@
 
           <div class="production-panel" data-production-panel="production">
             <div class="activity-filter-bar">
+              <label class="activity-filter">
+                <span>Starbase</span>
+                <select id="production-starbase-filter" aria-label="Filter production by starbase">
+                  <option value="">All starbases</option>
+                </select>
+              </label>
               <span id="production-filter-note" class="activity-filter-note">Last 14 days</span>
             </div>
 
@@ -222,14 +229,265 @@
           </div>
 
           <div class="production-panel" data-production-panel="consumption">
-            <section class="work-surface quiet-panel">
-              <h2>Consumption</h2>
-            </section>
+            <div class="consumption-subtab-bar" role="tablist" aria-label="Consumption views">
+              <button class="consumption-subtab-button active" type="button" data-consumption-subtab="scanning" aria-selected="true">Scanning</button>
+              <button class="consumption-subtab-button" type="button" data-consumption-subtab="mining" aria-selected="false">Mining</button>
+              <button class="consumption-subtab-button" type="button" data-consumption-subtab="cargo" aria-selected="false">Cargo</button>
+              <button class="consumption-subtab-button" type="button" data-consumption-subtab="crafting" aria-selected="false">Crafting</button>
+              <button class="consumption-subtab-button" type="button" data-consumption-subtab="upgrading" aria-selected="false">Upgrading</button>
+              <button class="consumption-subtab-button" type="button" data-consumption-subtab="total" aria-selected="false">Total</button>
+            </div>
+
+            <div class="consumption-panel active" data-consumption-panel="scanning">
+              <div class="activity-filter-bar">
+                <label class="activity-filter">
+                  <span>Starbase</span>
+                  <select id="consumption-scanning-starbase-filter" aria-label="Filter scanning consumption by starbase">
+                    <option value="">All starbases</option>
+                  </select>
+                </label>
+                <label class="activity-filter">
+                  <span>Fleet</span>
+                  <select id="consumption-scanning-fleet-filter" aria-label="Filter scanning consumption by fleet">
+                    <option value="">All Fleets</option>
+                  </select>
+                </label>
+                <span id="consumption-scanning-filter-note" class="activity-filter-note">Last 14 days</span>
+              </div>
+
+              <div class="dashboard-grid">
+                <section class="metric-card">
+                  <span class="metric-label">14d Consumed</span>
+                  <strong id="consumption-scanning-total-value">--</strong>
+                  <small id="consumption-scanning-total-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Top Asset</span>
+                  <strong id="consumption-scanning-top-value">--</strong>
+                  <small id="consumption-scanning-top-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Assets</span>
+                  <strong id="consumption-scanning-asset-count-value">--</strong>
+                  <small id="consumption-scanning-asset-count-note">Awaiting Influx connection</small>
+                </section>
+              </div>
+
+              <section class="work-surface">
+                <div id="consumption-scanning-chart-grid" class="crafting-chart-grid">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+              </section>
+            </div>
+
+            <div class="consumption-panel" data-consumption-panel="mining">
+              <div class="activity-filter-bar">
+                <label class="activity-filter">
+                  <span>Starbase</span>
+                  <select id="consumption-mining-starbase-filter" aria-label="Filter mining consumption by starbase">
+                    <option value="">All starbases</option>
+                  </select>
+                </label>
+                <label class="activity-filter">
+                  <span>Fleet</span>
+                  <select id="consumption-mining-fleet-filter" aria-label="Filter mining consumption by fleet">
+                    <option value="">All Fleets</option>
+                  </select>
+                </label>
+                <span id="consumption-mining-filter-note" class="activity-filter-note">Last 14 days</span>
+              </div>
+
+              <div class="dashboard-grid">
+                <section class="metric-card">
+                  <span class="metric-label">14d Consumed</span>
+                  <strong id="consumption-mining-total-value">--</strong>
+                  <small id="consumption-mining-total-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Top Asset</span>
+                  <strong id="consumption-mining-top-value">--</strong>
+                  <small id="consumption-mining-top-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Assets</span>
+                  <strong id="consumption-mining-asset-count-value">--</strong>
+                  <small id="consumption-mining-asset-count-note">Awaiting Influx connection</small>
+                </section>
+              </div>
+
+              <section class="work-surface">
+                <div id="consumption-mining-chart-grid" class="crafting-chart-grid">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+              </section>
+            </div>
+
+            <div class="consumption-panel" data-consumption-panel="cargo">
+              <div class="activity-filter-bar">
+                <label class="activity-filter">
+                  <span>Starbase</span>
+                  <select id="consumption-cargo-starbase-filter" aria-label="Filter cargo consumption by starbase">
+                    <option value="">All starbases</option>
+                  </select>
+                </label>
+                <label class="activity-filter">
+                  <span>Fleet</span>
+                  <select id="consumption-cargo-fleet-filter" aria-label="Filter cargo consumption by fleet">
+                    <option value="">All Fleets</option>
+                  </select>
+                </label>
+                <span id="consumption-cargo-filter-note" class="activity-filter-note">Last 14 days</span>
+              </div>
+
+              <div class="dashboard-grid">
+                <section class="metric-card">
+                  <span class="metric-label">14d Consumed</span>
+                  <strong id="consumption-cargo-total-value">--</strong>
+                  <small id="consumption-cargo-total-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Top Asset</span>
+                  <strong id="consumption-cargo-top-value">--</strong>
+                  <small id="consumption-cargo-top-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Assets</span>
+                  <strong id="consumption-cargo-asset-count-value">--</strong>
+                  <small id="consumption-cargo-asset-count-note">Awaiting Influx connection</small>
+                </section>
+              </div>
+
+              <section class="work-surface">
+                <div id="consumption-cargo-chart-grid" class="crafting-chart-grid">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+              </section>
+            </div>
+
+            <div class="consumption-panel" data-consumption-panel="crafting">
+              <div class="activity-filter-bar">
+                <label class="activity-filter">
+                  <span>Starbase</span>
+                  <select id="consumption-crafting-starbase-filter" aria-label="Filter crafting consumption by starbase">
+                    <option value="">All starbases</option>
+                  </select>
+                </label>
+                <label class="activity-filter">
+                  <span>Recipe</span>
+                  <select id="consumption-crafting-recipe-filter" aria-label="Filter crafting consumption by recipe">
+                    <option value="">All recipes</option>
+                  </select>
+                </label>
+                <span id="consumption-crafting-filter-note" class="activity-filter-note">Last 14 days</span>
+              </div>
+
+              <div class="dashboard-grid">
+                <section class="metric-card">
+                  <span class="metric-label">14d Consumed</span>
+                  <strong id="consumption-crafting-total-value">--</strong>
+                  <small id="consumption-crafting-total-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Top Ingredient</span>
+                  <strong id="consumption-crafting-top-value">--</strong>
+                  <small id="consumption-crafting-top-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Ingredients</span>
+                  <strong id="consumption-crafting-asset-count-value">--</strong>
+                  <small id="consumption-crafting-asset-count-note">Awaiting Influx connection</small>
+                </section>
+              </div>
+
+              <section class="work-surface">
+                <div id="consumption-crafting-chart-grid" class="crafting-chart-grid">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+              </section>
+            </div>
+
+            <div class="consumption-panel" data-consumption-panel="upgrading">
+              <div class="activity-filter-bar">
+                <label class="activity-filter">
+                  <span>Starbase</span>
+                  <select id="consumption-upgrading-starbase-filter" aria-label="Filter upgrading consumption by starbase">
+                    <option value="">All starbases</option>
+                  </select>
+                </label>
+                <label class="activity-filter">
+                  <span>Component</span>
+                  <select id="consumption-upgrading-component-filter" aria-label="Filter upgrading consumption by component">
+                    <option value="">All components</option>
+                  </select>
+                </label>
+                <span id="consumption-upgrading-filter-note" class="activity-filter-note">Last 14 days</span>
+              </div>
+
+              <div class="dashboard-grid">
+                <section class="metric-card">
+                  <span class="metric-label">14d Consumed</span>
+                  <strong id="consumption-upgrading-total-value">--</strong>
+                  <small id="consumption-upgrading-total-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Top Component</span>
+                  <strong id="consumption-upgrading-top-value">--</strong>
+                  <small id="consumption-upgrading-top-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Components</span>
+                  <strong id="consumption-upgrading-asset-count-value">--</strong>
+                  <small id="consumption-upgrading-asset-count-note">Awaiting Influx connection</small>
+                </section>
+              </div>
+
+              <section class="work-surface">
+                <div id="consumption-upgrading-chart-grid" class="crafting-chart-grid">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+              </section>
+            </div>
+
+            <div class="consumption-panel" data-consumption-panel="total">
+              <div class="activity-filter-bar">
+                <label class="activity-filter">
+                  <span>Starbase</span>
+                  <select id="consumption-total-starbase-filter" aria-label="Filter total consumption by starbase">
+                    <option value="">All starbases</option>
+                  </select>
+                </label>
+                <span id="consumption-total-filter-note" class="activity-filter-note">Last 14 days</span>
+              </div>
+
+              <div class="dashboard-grid">
+                <section class="metric-card">
+                  <span class="metric-label">14d Consumed</span>
+                  <strong id="consumption-total-total-value">--</strong>
+                  <small id="consumption-total-total-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Top Category</span>
+                  <strong id="consumption-total-top-value">--</strong>
+                  <small id="consumption-total-top-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
+                  <span class="metric-label">Categories</span>
+                  <strong id="consumption-total-asset-count-value">--</strong>
+                  <small id="consumption-total-asset-count-note">Awaiting Influx connection</small>
+                </section>
+              </div>
+
+              <section class="work-surface">
+                <div id="consumption-total-chart-grid" class="crafting-chart-grid">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+              </section>
+            </div>
           </div>
 
           <div class="production-panel" data-production-panel="pct-charts">
             <section class="work-surface quiet-panel">
-              <h2>PCT Charts</h2>
+              <h2>PCR Charts</h2>
             </section>
           </div>
 

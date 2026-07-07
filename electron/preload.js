@@ -11,4 +11,10 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getDailyMining: (payload) => ipcRenderer.invoke('mining:daily', payload),
   getDailyCrafting: (payload) => ipcRenderer.invoke('crafting:daily', payload),
   getDailyProduction: (payload) => ipcRenderer.invoke('production:daily', payload),
+  getDailyConsumptionMining: (payload) => ipcRenderer.invoke('consumption:mining', payload),
+  getDailyConsumptionCrafting: (payload) => ipcRenderer.invoke('consumption:crafting', payload),
+  getDailyConsumptionUpgrading: (payload) => ipcRenderer.invoke('consumption:upgrading', payload),
+  getDailyConsumptionScanning: (payload) => ipcRenderer.invoke('consumption:scanning', payload),
+  getDailyConsumptionCargo: (payload) => ipcRenderer.invoke('consumption:cargo', payload),
+  getDailyConsumptionTotal: (payload) => ipcRenderer.invoke('consumption:total', payload),
 });

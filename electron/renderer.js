@@ -13,7 +13,7 @@ const subtabLabels = {
   crafting: 'Crafting',
   production: 'Production',
   consumption: 'Consumption',
-  'pct-charts': 'PCT Charts',
+  'pct-charts': 'PCR Charts',
   surplus: 'Surplus',
 };
 
@@ -36,10 +36,8 @@ const fleetSyncStatus = document.querySelector('#fleet-sync-status');
 const fleetTableBody = document.querySelector('#fleet-table-body');
 const sduTotalValue = document.querySelector('#sdu-total-value');
 const sduTotalNote = document.querySelector('#sdu-total-note');
-const sduConsumptionValue = document.querySelector('#sdu-consumption-value');
-const sduConsumptionNote = document.querySelector('#sdu-consumption-note');
-const sduSurplusValue = document.querySelector('#sdu-surplus-value');
-const sduSurplusNote = document.querySelector('#sdu-surplus-note');
+const sduAvgValue = document.querySelector('#sdu-avg-value');
+const sduAvgNote = document.querySelector('#sdu-avg-note');
 const sduChartBars = document.querySelector('#sdu-chart-bars');
 const scanningFleetFilter = document.querySelector('#scanning-fleet-filter');
 const scanningFleetNote = document.querySelector('#scanning-fleet-note');
@@ -51,6 +49,7 @@ const miningMaterialCountValue = document.querySelector('#mining-material-count-
 const miningMaterialCountNote = document.querySelector('#mining-material-count-note');
 const miningChartGrid = document.querySelector('#mining-chart-grid');
 const miningFleetFilter = document.querySelector('#mining-fleet-filter');
+const miningStarbaseFilter = document.querySelector('#mining-starbase-filter');
 const miningFleetNote = document.querySelector('#mining-fleet-note');
 const craftingStarbaseFilter = document.querySelector('#crafting-starbase-filter');
 const craftingRecipeFilter = document.querySelector('#crafting-recipe-filter');
@@ -70,6 +69,72 @@ const productionTopNote = document.querySelector('#production-top-note');
 const productionCountValue = document.querySelector('#production-count-value');
 const productionCountNote = document.querySelector('#production-count-note');
 const productionChartGrid = document.querySelector('#production-chart-grid');
+const productionStarbaseFilter = document.querySelector('#production-starbase-filter');
+// Consumption — Mining
+const consMiningStarbaseFilter = document.querySelector('#consumption-mining-starbase-filter');
+const consMiningFleetFilter = document.querySelector('#consumption-mining-fleet-filter');
+const consMiningFilterNote = document.querySelector('#consumption-mining-filter-note');
+const consMiningTotalValue = document.querySelector('#consumption-mining-total-value');
+const consMiningTotalNote = document.querySelector('#consumption-mining-total-note');
+const consMiningTopValue = document.querySelector('#consumption-mining-top-value');
+const consMiningTopNote = document.querySelector('#consumption-mining-top-note');
+const consMiningAssetCountValue = document.querySelector('#consumption-mining-asset-count-value');
+const consMiningAssetCountNote = document.querySelector('#consumption-mining-asset-count-note');
+const consMiningChartGrid = document.querySelector('#consumption-mining-chart-grid');
+// Consumption — Crafting
+const consCraftingStarbaseFilter = document.querySelector('#consumption-crafting-starbase-filter');
+const consCraftingRecipeFilter = document.querySelector('#consumption-crafting-recipe-filter');
+const consCraftingFilterNote = document.querySelector('#consumption-crafting-filter-note');
+const consCraftingTotalValue = document.querySelector('#consumption-crafting-total-value');
+const consCraftingTotalNote = document.querySelector('#consumption-crafting-total-note');
+const consCraftingTopValue = document.querySelector('#consumption-crafting-top-value');
+const consCraftingTopNote = document.querySelector('#consumption-crafting-top-note');
+const consCraftingAssetCountValue = document.querySelector('#consumption-crafting-asset-count-value');
+const consCraftingAssetCountNote = document.querySelector('#consumption-crafting-asset-count-note');
+const consCraftingChartGrid = document.querySelector('#consumption-crafting-chart-grid');
+// Consumption — Upgrading
+const consUpgradingStarbaseFilter = document.querySelector('#consumption-upgrading-starbase-filter');
+const consUpgradingComponentFilter = document.querySelector('#consumption-upgrading-component-filter');
+const consUpgradingFilterNote = document.querySelector('#consumption-upgrading-filter-note');
+const consUpgradingTotalValue = document.querySelector('#consumption-upgrading-total-value');
+const consUpgradingTotalNote = document.querySelector('#consumption-upgrading-total-note');
+const consUpgradingTopValue = document.querySelector('#consumption-upgrading-top-value');
+const consUpgradingTopNote = document.querySelector('#consumption-upgrading-top-note');
+const consUpgradingAssetCountValue = document.querySelector('#consumption-upgrading-asset-count-value');
+const consUpgradingAssetCountNote = document.querySelector('#consumption-upgrading-asset-count-note');
+const consUpgradingChartGrid = document.querySelector('#consumption-upgrading-chart-grid');
+
+const consScanningStarbaseFilter = document.querySelector('#consumption-scanning-starbase-filter');
+const consScanningFleetFilter = document.querySelector('#consumption-scanning-fleet-filter');
+const consScanningFilterNote = document.querySelector('#consumption-scanning-filter-note');
+const consScanningTotalValue = document.querySelector('#consumption-scanning-total-value');
+const consScanningTotalNote = document.querySelector('#consumption-scanning-total-note');
+const consScanningTopValue = document.querySelector('#consumption-scanning-top-value');
+const consScanningTopNote = document.querySelector('#consumption-scanning-top-note');
+const consScanningAssetCountValue = document.querySelector('#consumption-scanning-asset-count-value');
+const consScanningAssetCountNote = document.querySelector('#consumption-scanning-asset-count-note');
+const consScanningChartGrid = document.querySelector('#consumption-scanning-chart-grid');
+
+const consCargoStarbaseFilter = document.querySelector('#consumption-cargo-starbase-filter');
+const consCargoFleetFilter = document.querySelector('#consumption-cargo-fleet-filter');
+const consCargoFilterNote = document.querySelector('#consumption-cargo-filter-note');
+const consCargoTotalValue = document.querySelector('#consumption-cargo-total-value');
+const consCargoTotalNote = document.querySelector('#consumption-cargo-total-note');
+const consCargoTopValue = document.querySelector('#consumption-cargo-top-value');
+const consCargoTopNote = document.querySelector('#consumption-cargo-top-note');
+const consCargoAssetCountValue = document.querySelector('#consumption-cargo-asset-count-value');
+const consCargoAssetCountNote = document.querySelector('#consumption-cargo-asset-count-note');
+const consCargoChartGrid = document.querySelector('#consumption-cargo-chart-grid');
+
+const consTotalStarbaseFilter = document.querySelector('#consumption-total-starbase-filter');
+const consTotalFilterNote = document.querySelector('#consumption-total-filter-note');
+const consTotalTotalValue = document.querySelector('#consumption-total-total-value');
+const consTotalTotalNote = document.querySelector('#consumption-total-total-note');
+const consTotalTopValue = document.querySelector('#consumption-total-top-value');
+const consTotalTopNote = document.querySelector('#consumption-total-top-note');
+const consTotalAssetCountValue = document.querySelector('#consumption-total-asset-count-value');
+const consTotalAssetCountNote = document.querySelector('#consumption-total-asset-count-note');
+const consTotalChartGrid = document.querySelector('#consumption-total-chart-grid');
 const factionButtons = Array.from(document.querySelectorAll('.faction-button'));
 
 let currentSection = 'production';
@@ -82,8 +147,28 @@ let latestCraftingResult = null;
 let latestProductionResult = null;
 let selectedScanningFleet = '';
 let selectedMiningFleet = '';
+let selectedMiningStarbase = '';
 let selectedCraftingStarbase = '';
 let selectedCraftingRecipe = '';
+let selectedProductionStarbase = '';
+let currentConsumptionSubtab = 'scanning';
+let latestConsMiningResult = null;
+let latestConsCraftingResult = null;
+let latestConsUpgradingResult = null;
+let latestConsScanningResult = null;
+let latestConsCargoResult = null;
+let latestConsTotalResult = null;
+let selectedConsMiningStarbase = '';
+let selectedConsMiningFleet = '';
+let selectedConsCraftingStarbase = '';
+let selectedConsCraftingRecipe = '';
+let selectedConsUpgradingStarbase = '';
+let selectedConsUpgradingComponent = '';
+let selectedConsScanningStarbase = '';
+let selectedConsScanningFleet = '';
+let selectedConsCargoStarbase = '';
+let selectedConsCargoFleet = '';
+let selectedConsTotalStarbase = '';
 
 const factionLabels = Object.freeze({
   MUD: 'MUD',
@@ -118,6 +203,74 @@ const assetChartColors = Object.freeze({
   Titanium: '#5f6674',
   'Titanium Ore': '#7f6f66',
 });
+
+// Per-faction caching for instant switching and per-filter caching
+const factionCache = new Map();
+
+function getCachedFactionResult(faction, key) {
+  const cache = factionCache.get(faction);
+  return cache ? cache[key] : null;
+}
+
+function setCachedFactionResult(faction, key, value) {
+  if (!factionCache.has(faction)) {
+    factionCache.set(faction, {});
+  }
+  factionCache.get(faction)[key] = value;
+}
+
+// Per-filter cache: stores results keyed by faction + filter combination
+function getFilterCacheKey(faction, section, ...filters) {
+  return `${faction}:${section}:${filters.join('|')}`;
+}
+
+function getCachedFilterResult(faction, section, ...filters) {
+  return getCachedFactionResult(faction, getFilterCacheKey(faction, section, ...filters));
+}
+
+function setCachedFilterResult(faction, section, value, ...filters) {
+  setCachedFactionResult(faction, getFilterCacheKey(faction, section, ...filters), value);
+}
+
+function recordFactionFilterState(faction) {
+  setCachedFactionResult(faction, 'selectedScanningFleet', selectedScanningFleet);
+  setCachedFactionResult(faction, 'selectedMiningFleet', selectedMiningFleet);
+  setCachedFactionResult(faction, 'selectedMiningStarbase', selectedMiningStarbase);
+  setCachedFactionResult(faction, 'selectedCraftingStarbase', selectedCraftingStarbase);
+  setCachedFactionResult(faction, 'selectedCraftingRecipe', selectedCraftingRecipe);
+  setCachedFactionResult(faction, 'selectedProductionStarbase', selectedProductionStarbase);
+  setCachedFactionResult(faction, 'selectedConsMiningStarbase', selectedConsMiningStarbase);
+  setCachedFactionResult(faction, 'selectedConsMiningFleet', selectedConsMiningFleet);
+  setCachedFactionResult(faction, 'selectedConsCraftingStarbase', selectedConsCraftingStarbase);
+  setCachedFactionResult(faction, 'selectedConsCraftingRecipe', selectedConsCraftingRecipe);
+  setCachedFactionResult(faction, 'selectedConsUpgradingStarbase', selectedConsUpgradingStarbase);
+  setCachedFactionResult(faction, 'selectedConsUpgradingComponent', selectedConsUpgradingComponent);
+  setCachedFactionResult(faction, 'selectedConsScanningStarbase', selectedConsScanningStarbase);
+  setCachedFactionResult(faction, 'selectedConsScanningFleet', selectedConsScanningFleet);
+  setCachedFactionResult(faction, 'selectedConsCargoStarbase', selectedConsCargoStarbase);
+  setCachedFactionResult(faction, 'selectedConsCargoFleet', selectedConsCargoFleet);
+  setCachedFactionResult(faction, 'selectedConsTotalStarbase', selectedConsTotalStarbase);
+}
+
+function restoreFactionFilterState(faction) {
+  selectedScanningFleet = getCachedFactionResult(faction, 'selectedScanningFleet') || '';
+  selectedMiningFleet = getCachedFactionResult(faction, 'selectedMiningFleet') || '';
+  selectedMiningStarbase = getCachedFactionResult(faction, 'selectedMiningStarbase') || '';
+  selectedCraftingStarbase = getCachedFactionResult(faction, 'selectedCraftingStarbase') || '';
+  selectedCraftingRecipe = getCachedFactionResult(faction, 'selectedCraftingRecipe') || '';
+  selectedProductionStarbase = getCachedFactionResult(faction, 'selectedProductionStarbase') || '';
+  selectedConsMiningStarbase = getCachedFactionResult(faction, 'selectedConsMiningStarbase') || '';
+  selectedConsMiningFleet = getCachedFactionResult(faction, 'selectedConsMiningFleet') || '';
+  selectedConsCraftingStarbase = getCachedFactionResult(faction, 'selectedConsCraftingStarbase') || '';
+  selectedConsCraftingRecipe = getCachedFactionResult(faction, 'selectedConsCraftingRecipe') || '';
+  selectedConsUpgradingStarbase = getCachedFactionResult(faction, 'selectedConsUpgradingStarbase') || '';
+  selectedConsUpgradingComponent = getCachedFactionResult(faction, 'selectedConsUpgradingComponent') || '';
+  selectedConsScanningStarbase = getCachedFactionResult(faction, 'selectedConsScanningStarbase') || '';
+  selectedConsScanningFleet = getCachedFactionResult(faction, 'selectedConsScanningFleet') || '';
+  selectedConsCargoStarbase = getCachedFactionResult(faction, 'selectedConsCargoStarbase') || '';
+  selectedConsCargoFleet = getCachedFactionResult(faction, 'selectedConsCargoFleet') || '';
+  selectedConsTotalStarbase = getCachedFactionResult(faction, 'selectedConsTotalStarbase') || '';
+}
 
 function openSettings() {
   settingsOverlay.classList.remove('hidden');
@@ -255,10 +408,12 @@ function resetFactionScopedState() {
   latestMiningResult = null;
   latestCraftingResult = null;
   latestProductionResult = null;
-  selectedScanningFleet = '';
-  selectedMiningFleet = '';
-  selectedCraftingStarbase = '';
-  selectedCraftingRecipe = '';
+  latestConsMiningResult = null;
+  latestConsCraftingResult = null;
+  latestConsUpgradingResult = null;
+  latestConsScanningResult = null;
+  latestConsCargoResult = null;
+  latestConsTotalResult = null;
 }
 
 function updateTitle() {
@@ -295,6 +450,35 @@ function formatCheckedAt(value) {
 
 function formatWholeNumber(value) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Number(value) || 0);
+}
+
+function formatCompactNumber(value) {
+  const n = Number(value) || 0;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+function createYAxis(maxValue) {
+  const axis = document.createElement('div');
+  axis.className = 'chart-yaxis';
+  const ticks = [maxValue, maxValue * 0.75, maxValue * 0.5, maxValue * 0.25, 0];
+  for (const tick of ticks) {
+    const label = document.createElement('span');
+    label.textContent = formatCompactNumber(tick);
+    axis.appendChild(label);
+  }
+  return axis;
+}
+
+function getUtcTodayKey() {
+  const now = new Date();
+  return [
+    now.getUTCFullYear(),
+    String(now.getUTCMonth() + 1).padStart(2, '0'),
+    String(now.getUTCDate()).padStart(2, '0'),
+  ].join('-');
 }
 
 function getHashColor(value) {
@@ -414,10 +598,8 @@ function renderSduEmpty(message) {
   latestSduResult = null;
   setText(sduTotalValue, '--');
   setText(sduTotalNote, message);
-  setText(sduConsumptionValue, '--');
-  setText(sduConsumptionNote, message);
-  setText(sduSurplusValue, '--');
-  setText(sduSurplusNote, message);
+  setText(sduAvgValue, '--');
+  setText(sduAvgNote, message);
   if (!String(message).startsWith('Loading')) {
     resetActivityFleetFilter(scanningFleetFilter, scanningFleetNote, message);
   }
@@ -434,6 +616,8 @@ function renderSduChart(result) {
     renderSduEmpty('Influx unavailable');
     return;
   }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'sdu', result);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'sdu', result, selectedScanningFleet);
 
   selectedScanningFleet = updateActivityFleetFilter(
     scanningFleetFilter,
@@ -451,22 +635,24 @@ function renderSduChart(result) {
   const maxValue = Math.max(...days.map((day) => Number(day.value) || 0), 1);
   setText(sduTotalValue, formatWholeNumber(result.total));
   setText(sduTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
-  if (selectedScanningFleet) {
-    setText(sduConsumptionValue, '--');
-    setText(sduConsumptionNote, 'Not fleet-scoped');
-    setText(sduSurplusValue, '--');
-    setText(sduSurplusNote, 'All Fleets only');
+
+  const todayKey = getUtcTodayKey();
+  const completedDays = days.filter((day) => day.isoDate !== todayKey);
+  const activeDays = completedDays.filter((day) => (Number(day.value) || 0) > 0);
+  if (activeDays.length > 0) {
+    const avg = activeDays.reduce((sum, day) => sum + (Number(day.value) || 0), 0) / activeDays.length;
+    setText(sduAvgValue, formatWholeNumber(avg));
+    setText(sduAvgNote, `Across ${activeDays.length} of ${completedDays.length} completed days`);
   } else {
-    setText(sduConsumptionValue, formatWholeNumber(result.consumption?.total || 0));
-    setText(sduConsumptionNote, 'Crafting + upgrading');
-    setText(sduSurplusValue, formatWholeNumber(result.surplus || 0));
-    setText(sduSurplusNote, 'Found minus consumed');
+    setText(sduAvgValue, '0');
+    setText(sduAvgNote, 'No completed days with SDU');
   }
   sduChartBars.textContent = '';
+  sduChartBars.appendChild(createYAxis(maxValue));
 
   for (const day of days) {
     const value = Number(day.value) || 0;
-    const height = Math.max(3, Math.round((value / maxValue) * 100));
+    const height = Math.max(3, Math.round((value / maxValue) * 75));
     const bar = document.createElement('div');
     bar.className = 'chart-bar';
     bar.title = `${day.label}: ${formatWholeNumber(value)} SDU`;
@@ -503,6 +689,7 @@ function renderMiningEmpty(message) {
   setText(miningMaterialCountValue, '--');
   setText(miningMaterialCountNote, message);
   if (!String(message).startsWith('Loading')) {
+    resetSelectWithAllOption(miningStarbaseFilter, 'All starbases');
     resetActivityFleetFilter(miningFleetFilter, miningFleetNote, message);
   }
   miningChartGrid.textContent = '';
@@ -518,7 +705,15 @@ function renderMiningCharts(result) {
     renderMiningEmpty('Influx unavailable');
     return;
   }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'mining', result);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'mining', result, selectedMiningStarbase, selectedMiningFleet);
 
+  selectedMiningStarbase = updateSelectOptions(
+    miningStarbaseFilter,
+    result.starbases,
+    result.selectedStarbase || selectedMiningStarbase,
+    'All starbases'
+  );
   selectedMiningFleet = updateActivityFleetFilter(
     miningFleetFilter,
     miningFleetNote,
@@ -526,21 +721,34 @@ function renderMiningCharts(result) {
     result.selectedFleet || selectedMiningFleet
   );
 
+  const total = result.total || 0;
+  setText(miningTotalValue, formatWholeNumber(total));
+  setText(miningTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
+  setText(miningTopValue, result.topMaterial || '--');
+  setText(miningTopNote, result.mode === 'detail' ? 'Largest material' : 'Largest output share');
+  setText(miningMaterialCountValue, formatWholeNumber(result.materialCount || 0));
+  setText(miningMaterialCountNote, 'Raw materials');
+  miningChartGrid.textContent = '';
+
+  if (result.mode === 'overview') {
+    const pies = Array.isArray(result.pies) ? result.pies : [];
+    if (!pies.length) {
+      renderMiningEmpty('No mining data found');
+      return;
+    }
+    miningChartGrid.classList.toggle('crafting-chart-grid-detail', false);
+    for (const pie of pies) {
+      miningChartGrid.appendChild(createCraftingPieCard(pie));
+    }
+    return;
+  }
+
   const materials = Array.isArray(result.materials) ? result.materials : [];
   if (!materials.length) {
     renderMiningEmpty('No mining data found');
     return;
   }
-
-  const topMaterial = materials[0];
-  setText(miningTotalValue, formatWholeNumber(result.total));
-  setText(miningTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
-  setText(miningTopValue, topMaterial.resource);
-  setText(miningTopNote, formatWholeNumber(topMaterial.total));
-  setText(miningMaterialCountValue, formatWholeNumber(result.materialCount || materials.length));
-  setText(miningMaterialCountNote, 'Raw materials');
-  miningChartGrid.textContent = '';
-
+  miningChartGrid.classList.toggle('crafting-chart-grid-detail', true);
   for (const [materialIndex, material] of materials.entries()) {
     const maxValue = Math.max(...material.days.map((day) => Number(day.value) || 0), 1);
     const card = document.createElement('section');
@@ -551,18 +759,19 @@ function renderMiningCharts(result) {
     const title = document.createElement('h3');
     title.className = 'resource-card-title';
     title.textContent = material.resource;
-    const total = document.createElement('span');
-    total.className = 'resource-card-total';
-    total.textContent = formatWholeNumber(material.total);
+    const totalEl = document.createElement('span');
+    totalEl.className = 'resource-card-total';
+    totalEl.textContent = formatWholeNumber(material.total);
     header.appendChild(title);
-    header.appendChild(total);
+    header.appendChild(totalEl);
 
     const bars = document.createElement('div');
     bars.className = 'resource-chart-bars';
     bars.setAttribute('aria-label', `${material.resource} mined over the last 14 days`);
+    bars.appendChild(createYAxis(maxValue));
     for (const day of material.days) {
       const value = Number(day.value) || 0;
-      const height = Math.max(3, Math.round((value / maxValue) * 100));
+      const height = Math.max(3, Math.round((value / maxValue) * 75));
       const bar = document.createElement('div');
       bar.className = 'resource-chart-bar';
       bar.title = `${day.label}: ${formatWholeNumber(value)}`;
@@ -641,9 +850,10 @@ function createCraftingBarCard(step, index) {
   const bars = document.createElement('div');
   bars.className = 'resource-chart-bars';
   bars.setAttribute('aria-label', `${step.label} crafted over the last 14 days`);
+  bars.appendChild(createYAxis(maxValue));
   for (const day of step.days) {
     const value = Number(day.value) || 0;
-    const height = Math.max(3, Math.round((value / maxValue) * 100));
+    const height = Math.max(3, Math.round((value / maxValue) * 75));
     const bar = document.createElement('div');
     bar.className = 'resource-chart-bar';
     bar.title = `${day.label}: ${formatWholeNumber(value)}`;
@@ -735,6 +945,8 @@ function renderCraftingCharts(result) {
     renderCraftingEmpty('Influx unavailable');
     return;
   }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'crafting', result);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'crafting', result, selectedCraftingStarbase, selectedCraftingRecipe);
 
   selectedCraftingStarbase = updateSelectOptions(
     craftingStarbaseFilter,
@@ -753,7 +965,7 @@ function renderCraftingCharts(result) {
   setText(craftingTotalValue, formatWholeNumber(result.total));
   setText(craftingTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(craftingTopValue, result.topRecipe || '--');
-  setText(craftingTopNote, result.mode === 'detail' ? 'Selected output' : 'Largest output share');
+  setText(craftingTopNote, result.mode === 'detail' ? (result.selectedRecipe ? 'Selected output' : 'Largest output') : 'Largest output share');
   setText(craftingCountValue, formatWholeNumber(itemCount));
   setText(craftingCountNote, result.mode === 'detail' ? 'Crafting steps' : 'Crafted outputs');
   setText(
@@ -794,6 +1006,9 @@ function renderProductionEmpty(message) {
   setText(productionTopNote, message);
   setText(productionCountValue, '--');
   setText(productionCountNote, message);
+  if (!String(message).startsWith('Loading')) {
+    resetSelectWithAllOption(productionStarbaseFilter, 'All starbases');
+  }
   setText(productionFilterNote, message);
   productionChartGrid.textContent = '';
   const empty = document.createElement('div');
@@ -808,30 +1023,719 @@ function renderProductionCharts(result) {
     renderProductionEmpty('Influx unavailable');
     return;
   }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'production', result);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'production', result, selectedProductionStarbase);
 
-  const pies = Array.isArray(result.pies) ? result.pies : [];
-  if (!pies.length) {
-    renderProductionEmpty('No production data found');
-    return;
-  }
+  selectedProductionStarbase = updateSelectOptions(
+    productionStarbaseFilter,
+    result.starbases,
+    result.selectedStarbase || selectedProductionStarbase,
+    'All starbases'
+  );
 
   setText(productionTotalValue, formatWholeNumber(result.total));
   setText(productionTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(productionTopValue, result.topProduct || '--');
-  setText(productionTopNote, 'Largest output share');
+  setText(productionTopNote, result.mode === 'detail' ? 'Largest product' : 'Largest output share');
   setText(productionCountValue, formatWholeNumber(result.productCount || 0));
   setText(productionCountNote, 'Produced outputs');
   setText(
     productionFilterNote,
-    `${result.starbaseCount || pies.length} active ${(result.starbaseCount || pies.length) === 1 ? 'starbase' : 'starbases'} in last 14 days${
+    `${result.starbaseCount || 0} active ${(result.starbaseCount || 0) === 1 ? 'starbase' : 'starbases'} in last 14 days${
       result.sduStarbaseTagged === false ? ' · SDU starbase tag missing' : ''
     }`
   );
 
   productionChartGrid.textContent = '';
-  for (const pie of pies) {
-    productionChartGrid.appendChild(createCraftingPieCard(pie));
+  if (result.mode === 'overview') {
+    const pies = Array.isArray(result.pies) ? result.pies : [];
+    if (!pies.length) {
+      renderProductionEmpty('No production data found');
+      return;
+    }
+    productionChartGrid.classList.toggle('crafting-chart-grid-detail', false);
+    for (const pie of pies) {
+      productionChartGrid.appendChild(createCraftingPieCard(pie));
+    }
+    return;
   }
+
+  const assets = Array.isArray(result.assets) ? result.assets : [];
+  if (!assets.length) {
+    renderProductionEmpty('No production data found');
+    return;
+  }
+  productionChartGrid.classList.toggle('crafting-chart-grid-detail', true);
+  for (const [index, asset] of assets.entries()) {
+    productionChartGrid.appendChild(createConsumptionBarCard(asset, index));
+  }
+}
+
+/* ---- Consumption: Mining ---- */
+
+function renderConsMiningEmpty(message) {
+  latestConsMiningResult = null;
+  setText(consMiningTotalValue, '--');
+  setText(consMiningTotalNote, message);
+  setText(consMiningTopValue, '--');
+  setText(consMiningTopNote, message);
+  setText(consMiningAssetCountValue, '--');
+  setText(consMiningAssetCountNote, message);
+  if (!String(message).startsWith('Loading')) {
+    resetSelectWithAllOption(consMiningStarbaseFilter, 'All starbases');
+    resetSelectWithAllOption(consMiningFleetFilter, 'All Fleets');
+    setText(consMiningFilterNote, message);
+  }
+  consMiningChartGrid.textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'chart-empty';
+  empty.textContent = message;
+  consMiningChartGrid.appendChild(empty);
+}
+
+function renderConsMining(result) {
+  latestConsMiningResult = result;
+  if (!result?.ok) {
+    renderConsMiningEmpty('Influx unavailable');
+    return;
+  }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'consMining', result);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'consMining', result, selectedConsMiningStarbase, selectedConsMiningFleet);
+
+  selectedConsMiningStarbase = updateSelectOptions(
+    consMiningStarbaseFilter,
+    result.starbases,
+    result.selectedStarbase || selectedConsMiningStarbase,
+    'All starbases'
+  );
+  selectedConsMiningFleet = updateSelectOptions(
+    consMiningFleetFilter,
+    result.fleets,
+    result.selectedFleet || selectedConsMiningFleet,
+    'All Fleets'
+  );
+
+  setText(consMiningTotalValue, formatWholeNumber(result.total));
+  setText(consMiningTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
+  setText(consMiningTopValue, result.topAsset || '--');
+  setText(consMiningTopNote, result.mode === 'detail' ? 'Largest consumed' : 'Largest consumed asset');
+  setText(consMiningAssetCountValue, formatWholeNumber(result.assetCount || 0));
+  setText(consMiningAssetCountNote, 'Consumed assets');
+  setText(
+    consMiningFilterNote,
+    `${result.starbases?.length || 0} active ${(result.starbases?.length || 0) === 1 ? 'starbase' : 'starbases'} / ${result.fleets?.length || 0} ${(result.fleets?.length || 0) === 1 ? 'fleet' : 'fleets'}`
+  );
+
+  consMiningChartGrid.textContent = '';
+  if (result.mode === 'overview') {
+    const pies = Array.isArray(result.pies) ? result.pies : [];
+    if (!pies.length) {
+      renderConsMiningEmpty('No mining consumption data found');
+      return;
+    }
+    consMiningChartGrid.classList.toggle('crafting-chart-grid-detail', false);
+    for (const pie of pies) {
+      consMiningChartGrid.appendChild(createCraftingPieCard(pie));
+    }
+    return;
+  }
+
+  const assets = Array.isArray(result.assets) ? result.assets : [];
+  if (!assets.length) {
+    renderConsMiningEmpty('No mining consumption data found');
+    return;
+  }
+  consMiningChartGrid.classList.toggle('crafting-chart-grid-detail', true);
+  for (const [index, asset] of assets.entries()) {
+    consMiningChartGrid.appendChild(createConsumptionBarCard(asset, index));
+  }
+}
+
+async function refreshConsMining() {
+  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
+    renderConsMiningEmpty('Awaiting Influx connection');
+    return;
+  }
+
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFilterResult(faction, 'consMining', selectedConsMiningStarbase, selectedConsMiningFleet);
+  if (cached) {
+    renderConsMining(cached);
+  } else {
+    renderConsMiningEmpty('Loading mining consumption...');
+  }
+  try {
+    const result = await api.getDailyConsumptionMining({
+      ...(latestSettings || getFormPayload()),
+      starbaseFilter: selectedConsMiningStarbase,
+      fleetFilter: selectedConsMiningFleet,
+    });
+    renderConsMining(result);
+  } catch (error) {
+    console.error(error);
+    if (!cached) renderConsMiningEmpty('Influx unavailable');
+  }
+}
+
+/* ---- Consumption: Crafting ---- */
+
+function renderConsCraftingEmpty(message) {
+  latestConsCraftingResult = null;
+  setText(consCraftingTotalValue, '--');
+  setText(consCraftingTotalNote, message);
+  setText(consCraftingTopValue, '--');
+  setText(consCraftingTopNote, message);
+  setText(consCraftingAssetCountValue, '--');
+  setText(consCraftingAssetCountNote, message);
+  if (!String(message).startsWith('Loading')) {
+    resetSelectWithAllOption(consCraftingStarbaseFilter, 'All starbases');
+    resetSelectWithAllOption(consCraftingRecipeFilter, 'All recipes');
+    setText(consCraftingFilterNote, message);
+  }
+  consCraftingChartGrid.textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'chart-empty';
+  empty.textContent = message;
+  consCraftingChartGrid.appendChild(empty);
+}
+
+function renderConsCrafting(result) {
+  latestConsCraftingResult = result;
+  if (!result?.ok) {
+    renderConsCraftingEmpty('Influx unavailable');
+    return;
+  }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'consCrafting', result);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'consCrafting', result, selectedConsCraftingStarbase, selectedConsCraftingRecipe);
+
+  selectedConsCraftingStarbase = updateSelectOptions(
+    consCraftingStarbaseFilter,
+    result.starbases,
+    result.selectedStarbase || selectedConsCraftingStarbase,
+    'All starbases'
+  );
+  selectedConsCraftingRecipe = updateSelectOptions(
+    consCraftingRecipeFilter,
+    result.recipes,
+    result.selectedRecipe || selectedConsCraftingRecipe,
+    'All recipes'
+  );
+
+  setText(consCraftingTotalValue, formatWholeNumber(result.total));
+  setText(consCraftingTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
+  setText(consCraftingTopValue, result.topAsset || '--');
+  setText(consCraftingTopNote, 'Largest consumed ingredient');
+  setText(consCraftingAssetCountValue, formatWholeNumber(result.assetCount || 0));
+  setText(consCraftingAssetCountNote, 'Consumed ingredients');
+  setText(
+    consCraftingFilterNote,
+    `${result.starbases?.length || 0} active ${(result.starbases?.length || 0) === 1 ? 'starbase' : 'starbases'} / ${result.recipes?.length || 0} ${(result.recipes?.length || 0) === 1 ? 'recipe' : 'recipes'}`
+  );
+
+  consCraftingChartGrid.textContent = '';
+  if (result.mode === 'overview') {
+    const pies = Array.isArray(result.pies) ? result.pies : [];
+    if (!pies.length) {
+      renderConsCraftingEmpty('No crafting consumption data found');
+      return;
+    }
+    consCraftingChartGrid.classList.toggle('crafting-chart-grid-detail', false);
+    for (const pie of pies) {
+      consCraftingChartGrid.appendChild(createCraftingPieCard(pie));
+    }
+    return;
+  }
+
+  const assets = Array.isArray(result.assets) ? result.assets : [];
+  if (!assets.length) {
+    renderConsCraftingEmpty('No crafting consumption data found');
+    return;
+  }
+  consCraftingChartGrid.classList.toggle('crafting-chart-grid-detail', true);
+  for (const [index, asset] of assets.entries()) {
+    consCraftingChartGrid.appendChild(createConsumptionBarCard(asset, index));
+  }
+}
+
+async function refreshConsCrafting() {
+  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
+    renderConsCraftingEmpty('Awaiting Influx connection');
+    return;
+  }
+
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFilterResult(faction, 'consCrafting', selectedConsCraftingStarbase, selectedConsCraftingRecipe);
+  if (cached) {
+    renderConsCrafting(cached);
+  } else {
+    renderConsCraftingEmpty('Loading crafting consumption...');
+  }
+  try {
+    const result = await api.getDailyConsumptionCrafting({
+      ...(latestSettings || getFormPayload()),
+      starbaseFilter: selectedConsCraftingStarbase,
+      recipeFilter: selectedConsCraftingRecipe,
+    });
+    renderConsCrafting(result);
+  } catch (error) {
+    console.error(error);
+    if (!cached) renderConsCraftingEmpty('Influx unavailable');
+  }
+}
+
+/* ---- Consumption: Upgrading ---- */
+
+function renderConsUpgradingEmpty(message) {
+  latestConsUpgradingResult = null;
+  setText(consUpgradingTotalValue, '--');
+  setText(consUpgradingTotalNote, message);
+  setText(consUpgradingTopValue, '--');
+  setText(consUpgradingTopNote, message);
+  setText(consUpgradingAssetCountValue, '--');
+  setText(consUpgradingAssetCountNote, message);
+  if (!String(message).startsWith('Loading')) {
+    resetSelectWithAllOption(consUpgradingStarbaseFilter, 'All starbases');
+    resetSelectWithAllOption(consUpgradingComponentFilter, 'All components');
+    setText(consUpgradingFilterNote, message);
+  }
+  consUpgradingChartGrid.textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'chart-empty';
+  empty.textContent = message;
+  consUpgradingChartGrid.appendChild(empty);
+}
+
+function renderConsUpgrading(result) {
+  latestConsUpgradingResult = result;
+  if (!result?.ok) {
+    renderConsUpgradingEmpty('Influx unavailable');
+    return;
+  }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'consUpgrading', result);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'consUpgrading', result, selectedConsUpgradingStarbase, selectedConsUpgradingComponent);
+
+  selectedConsUpgradingStarbase = updateSelectOptions(
+    consUpgradingStarbaseFilter,
+    result.starbases,
+    result.selectedStarbase || selectedConsUpgradingStarbase,
+    'All starbases'
+  );
+  selectedConsUpgradingComponent = updateSelectOptions(
+    consUpgradingComponentFilter,
+    result.components,
+    result.selectedComponent || selectedConsUpgradingComponent,
+    'All components'
+  );
+
+  setText(consUpgradingTotalValue, formatWholeNumber(result.total));
+  setText(consUpgradingTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
+  setText(consUpgradingTopValue, result.topAsset || '--');
+  setText(consUpgradingTopNote, 'Largest consumed component');
+  setText(consUpgradingAssetCountValue, formatWholeNumber(result.assetCount || 0));
+  setText(consUpgradingAssetCountNote, 'Consumed components');
+  setText(
+    consUpgradingFilterNote,
+    `${result.starbases?.length || 0} active ${(result.starbases?.length || 0) === 1 ? 'starbase' : 'starbases'} / ${result.components?.length || 0} ${(result.components?.length || 0) === 1 ? 'component' : 'components'}`
+  );
+
+  consUpgradingChartGrid.textContent = '';
+  if (result.mode === 'overview') {
+    const pies = Array.isArray(result.pies) ? result.pies : [];
+    if (!pies.length) {
+      renderConsUpgradingEmpty('No upgrading consumption data found');
+      return;
+    }
+    consUpgradingChartGrid.classList.toggle('crafting-chart-grid-detail', false);
+    for (const pie of pies) {
+      consUpgradingChartGrid.appendChild(createCraftingPieCard(pie));
+    }
+    return;
+  }
+
+  const assets = Array.isArray(result.assets) ? result.assets : [];
+  if (!assets.length) {
+    renderConsUpgradingEmpty('No upgrading consumption data found');
+    return;
+  }
+  consUpgradingChartGrid.classList.toggle('crafting-chart-grid-detail', true);
+  for (const [index, asset] of assets.entries()) {
+    consUpgradingChartGrid.appendChild(createConsumptionBarCard(asset, index));
+  }
+}
+
+async function refreshConsUpgrading() {
+  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
+    renderConsUpgradingEmpty('Awaiting Influx connection');
+    return;
+  }
+
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFilterResult(faction, 'consUpgrading', selectedConsUpgradingStarbase, selectedConsUpgradingComponent);
+  if (cached) {
+    renderConsUpgrading(cached);
+  } else {
+    renderConsUpgradingEmpty('Loading upgrading consumption...');
+  }
+  try {
+    const result = await api.getDailyConsumptionUpgrading({
+      ...(latestSettings || getFormPayload()),
+      starbaseFilter: selectedConsUpgradingStarbase,
+      componentFilter: selectedConsUpgradingComponent,
+    });
+    renderConsUpgrading(result);
+  } catch (error) {
+    console.error(error);
+    if (!cached) renderConsUpgradingEmpty('Influx unavailable');
+  }
+}
+
+/* ---- Consumption: Scanning ---- */
+
+function renderConsScanningEmpty(message) {
+  latestConsScanningResult = null;
+  setText(consScanningTotalValue, '--');
+  setText(consScanningTotalNote, message);
+  setText(consScanningTopValue, '--');
+  setText(consScanningTopNote, message);
+  setText(consScanningAssetCountValue, '--');
+  setText(consScanningAssetCountNote, message);
+  if (!String(message).startsWith('Loading')) {
+    resetSelectWithAllOption(consScanningStarbaseFilter, 'All starbases');
+    resetSelectWithAllOption(consScanningFleetFilter, 'All Fleets');
+    setText(consScanningFilterNote, message);
+  }
+  consScanningChartGrid.textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'chart-empty';
+  empty.textContent = message;
+  consScanningChartGrid.appendChild(empty);
+}
+
+function renderConsScanning(result) {
+  latestConsScanningResult = result;
+  if (!result?.ok) {
+    renderConsScanningEmpty('Influx unavailable');
+    return;
+  }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'consScanning', result);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'consScanning', result, selectedConsScanningStarbase, selectedConsScanningFleet);
+
+  selectedConsScanningStarbase = updateSelectOptions(
+    consScanningStarbaseFilter,
+    result.starbases,
+    result.selectedStarbase || selectedConsScanningStarbase,
+    'All starbases'
+  );
+  selectedConsScanningFleet = updateSelectOptions(
+    consScanningFleetFilter,
+    result.fleets,
+    result.selectedFleet || selectedConsScanningFleet,
+    'All Fleets'
+  );
+
+  setText(consScanningTotalValue, formatWholeNumber(result.total));
+  setText(consScanningTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
+  setText(consScanningTopValue, result.topAsset || '--');
+  setText(consScanningTopNote, result.mode === 'detail' ? 'Largest consumed' : 'Largest consumed asset');
+  setText(consScanningAssetCountValue, formatWholeNumber(result.assetCount || 0));
+  setText(consScanningAssetCountNote, 'Consumed assets');
+  setText(
+    consScanningFilterNote,
+    `${result.starbases?.length || 0} active ${(result.starbases?.length || 0) === 1 ? 'starbase' : 'starbases'} / ${result.fleets?.length || 0} ${(result.fleets?.length || 0) === 1 ? 'fleet' : 'fleets'}`
+  );
+
+  consScanningChartGrid.textContent = '';
+  if (result.mode === 'overview') {
+    const pies = Array.isArray(result.pies) ? result.pies : [];
+    if (!pies.length) {
+      renderConsScanningEmpty('No scanning consumption data found');
+      return;
+    }
+    consScanningChartGrid.classList.toggle('crafting-chart-grid-detail', false);
+    for (const pie of pies) {
+      consScanningChartGrid.appendChild(createCraftingPieCard(pie));
+    }
+    return;
+  }
+
+  const assets = Array.isArray(result.assets) ? result.assets : [];
+  if (!assets.length) {
+    renderConsScanningEmpty('No scanning consumption data found');
+    return;
+  }
+  consScanningChartGrid.classList.toggle('crafting-chart-grid-detail', true);
+  for (const [index, asset] of assets.entries()) {
+    consScanningChartGrid.appendChild(createConsumptionBarCard(asset, index));
+  }
+}
+
+async function refreshConsScanning() {
+  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
+    renderConsScanningEmpty('Awaiting Influx connection');
+    return;
+  }
+
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFilterResult(faction, 'consScanning', selectedConsScanningStarbase, selectedConsScanningFleet);
+  if (cached) {
+    renderConsScanning(cached);
+  } else {
+    renderConsScanningEmpty('Loading scanning consumption...');
+  }
+  try {
+    const result = await api.getDailyConsumptionScanning({
+      ...(latestSettings || getFormPayload()),
+      starbaseFilter: selectedConsScanningStarbase,
+      fleetFilter: selectedConsScanningFleet,
+    });
+    renderConsScanning(result);
+  } catch (error) {
+    console.error(error);
+    if (!cached) renderConsScanningEmpty('Influx unavailable');
+  }
+}
+
+/* ---- Consumption: Cargo ---- */
+
+function renderConsCargoEmpty(message) {
+  latestConsCargoResult = null;
+  setText(consCargoTotalValue, '--');
+  setText(consCargoTotalNote, message);
+  setText(consCargoTopValue, '--');
+  setText(consCargoTopNote, message);
+  setText(consCargoAssetCountValue, '--');
+  setText(consCargoAssetCountNote, message);
+  if (!String(message).startsWith('Loading')) {
+    resetSelectWithAllOption(consCargoStarbaseFilter, 'All starbases');
+    resetSelectWithAllOption(consCargoFleetFilter, 'All Fleets');
+    setText(consCargoFilterNote, message);
+  }
+  consCargoChartGrid.textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'chart-empty';
+  empty.textContent = message;
+  consCargoChartGrid.appendChild(empty);
+}
+
+function renderConsCargo(result) {
+  latestConsCargoResult = result;
+  if (!result?.ok) {
+    renderConsCargoEmpty('Influx unavailable');
+    return;
+  }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'consCargo', result);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'consCargo', result, selectedConsCargoStarbase, selectedConsCargoFleet);
+
+  selectedConsCargoStarbase = updateSelectOptions(
+    consCargoStarbaseFilter,
+    result.starbases,
+    result.selectedStarbase || selectedConsCargoStarbase,
+    'All starbases'
+  );
+  selectedConsCargoFleet = updateSelectOptions(
+    consCargoFleetFilter,
+    result.fleets,
+    result.selectedFleet || selectedConsCargoFleet,
+    'All Fleets'
+  );
+
+  setText(consCargoTotalValue, formatWholeNumber(result.total));
+  setText(consCargoTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
+  setText(consCargoTopValue, result.topAsset || '--');
+  setText(consCargoTopNote, result.mode === 'detail' ? 'Largest consumed' : 'Largest consumed asset');
+  setText(consCargoAssetCountValue, formatWholeNumber(result.assetCount || 0));
+  setText(consCargoAssetCountNote, 'Consumed assets');
+  setText(
+    consCargoFilterNote,
+    `${result.starbases?.length || 0} active ${(result.starbases?.length || 0) === 1 ? 'starbase' : 'starbases'} / ${result.fleets?.length || 0} ${(result.fleets?.length || 0) === 1 ? 'fleet' : 'fleets'}`
+  );
+
+  consCargoChartGrid.textContent = '';
+  if (result.mode === 'overview') {
+    const pies = Array.isArray(result.pies) ? result.pies : [];
+    if (!pies.length) {
+      renderConsCargoEmpty('No cargo consumption data found');
+      return;
+    }
+    consCargoChartGrid.classList.toggle('crafting-chart-grid-detail', false);
+    for (const pie of pies) {
+      consCargoChartGrid.appendChild(createCraftingPieCard(pie));
+    }
+    return;
+  }
+
+  const assets = Array.isArray(result.assets) ? result.assets : [];
+  if (!assets.length) {
+    renderConsCargoEmpty('No cargo consumption data found');
+    return;
+  }
+  consCargoChartGrid.classList.toggle('crafting-chart-grid-detail', true);
+  for (const [index, asset] of assets.entries()) {
+    consCargoChartGrid.appendChild(createConsumptionBarCard(asset, index));
+  }
+}
+
+async function refreshConsCargo() {
+  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
+    renderConsCargoEmpty('Awaiting Influx connection');
+    return;
+  }
+
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFilterResult(faction, 'consCargo', selectedConsCargoStarbase, selectedConsCargoFleet);
+  if (cached) {
+    renderConsCargo(cached);
+  } else {
+    renderConsCargoEmpty('Loading cargo consumption...');
+  }
+  try {
+    const result = await api.getDailyConsumptionCargo({
+      ...(latestSettings || getFormPayload()),
+      starbaseFilter: selectedConsCargoStarbase,
+      fleetFilter: selectedConsCargoFleet,
+    });
+    renderConsCargo(result);
+  } catch (error) {
+    console.error(error);
+    if (!cached) renderConsCargoEmpty('Influx unavailable');
+  }
+}
+
+/* ---- Consumption: Total ---- */
+
+function renderConsTotalEmpty(message) {
+  latestConsTotalResult = null;
+  setText(consTotalTotalValue, '--');
+  setText(consTotalTotalNote, message);
+  setText(consTotalTopValue, '--');
+  setText(consTotalTopNote, message);
+  setText(consTotalAssetCountValue, '--');
+  setText(consTotalAssetCountNote, message);
+  if (!String(message).startsWith('Loading')) {
+    resetSelectWithAllOption(consTotalStarbaseFilter, 'All starbases');
+    setText(consTotalFilterNote, message);
+  }
+  consTotalChartGrid.textContent = '';
+  const empty = document.createElement('div');
+  empty.className = 'chart-empty';
+  empty.textContent = message;
+  consTotalChartGrid.appendChild(empty);
+}
+
+function renderConsTotal(result) {
+  latestConsTotalResult = result;
+  if (!result?.ok) {
+    renderConsTotalEmpty('Influx unavailable');
+    return;
+  }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'consTotal', result);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'consTotal', result, selectedConsTotalStarbase, '');
+
+  selectedConsTotalStarbase = updateSelectOptions(
+    consTotalStarbaseFilter,
+    result.starbases,
+    result.selectedStarbase || selectedConsTotalStarbase,
+    'All starbases'
+  );
+
+  setText(consTotalTotalValue, formatWholeNumber(result.total));
+  setText(consTotalTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
+  setText(consTotalTopValue, result.topAsset || '--');
+  setText(consTotalTopNote, result.mode === 'detail' ? 'Largest category' : 'Top category');
+  setText(consTotalAssetCountValue, formatWholeNumber(result.assetCount || 0));
+  setText(consTotalAssetCountNote, 'Categories');
+  setText(
+    consTotalFilterNote,
+    `${result.starbases?.length || 0} active ${(result.starbases?.length || 0) === 1 ? 'starbase' : 'starbases'}`
+  );
+
+  consTotalChartGrid.textContent = '';
+  if (result.mode === 'overview') {
+    const pies = Array.isArray(result.pies) ? result.pies : [];
+    if (!pies.length) {
+      renderConsTotalEmpty('No total consumption data found');
+      return;
+    }
+    consTotalChartGrid.classList.toggle('crafting-chart-grid-detail', false);
+    for (const pie of pies) {
+      consTotalChartGrid.appendChild(createCraftingPieCard(pie));
+    }
+    return;
+  }
+
+  const assets = Array.isArray(result.assets) ? result.assets : [];
+  if (!assets.length) {
+    renderConsTotalEmpty('No total consumption data found');
+    return;
+  }
+  consTotalChartGrid.classList.toggle('crafting-chart-grid-detail', true);
+  for (const [index, asset] of assets.entries()) {
+    consTotalChartGrid.appendChild(createConsumptionBarCard(asset, index));
+  }
+}
+
+async function refreshConsTotal() {
+  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
+    renderConsTotalEmpty('Awaiting Influx connection');
+    return;
+  }
+
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFilterResult(faction, 'consTotal', selectedConsTotalStarbase, '');
+  if (cached) {
+    renderConsTotal(cached);
+  } else {
+    renderConsTotalEmpty('Loading total consumption...');
+  }
+  try {
+    const result = await api.getDailyConsumptionTotal({
+      ...(latestSettings || getFormPayload()),
+      starbaseFilter: selectedConsTotalStarbase,
+    });
+    renderConsTotal(result);
+  } catch (error) {
+    console.error(error);
+    if (!cached) renderConsTotalEmpty('Influx unavailable');
+  }
+}
+
+function createConsumptionBarCard(asset, fallbackIndex) {
+  const maxValue = Math.max(...asset.days.map((day) => Number(day.value) || 0), 1);
+  const card = document.createElement('section');
+  card.className = 'resource-card';
+
+  const header = document.createElement('div');
+  header.className = 'resource-card-header';
+  const title = document.createElement('h3');
+  title.className = 'resource-card-title';
+  title.textContent = asset.label;
+  const total = document.createElement('span');
+  total.className = 'resource-card-total';
+  total.textContent = formatWholeNumber(asset.total);
+  header.appendChild(title);
+  header.appendChild(total);
+
+  const bars = document.createElement('div');
+  bars.className = 'resource-chart-bars';
+  bars.setAttribute('aria-label', `${asset.label} consumed over the last 14 days`);
+  bars.appendChild(createYAxis(maxValue));
+  for (const day of asset.days) {
+    const value = Number(day.value) || 0;
+    const height = Math.max(3, Math.round((value / maxValue) * 75));
+    const bar = document.createElement('div');
+    bar.className = 'resource-chart-bar';
+    bar.title = `${day.label}: ${formatWholeNumber(value)}`;
+    const fill = document.createElement('span');
+    fill.className = 'resource-chart-fill';
+    fill.style.height = `${height}%`;
+    fill.style.background = getAssetChartFill(asset.label, fallbackIndex);
+    bar.appendChild(fill);
+    bars.appendChild(bar);
+  }
+
+  card.appendChild(header);
+  card.appendChild(bars);
+  return card;
 }
 
 async function refreshDailyProduction() {
@@ -840,13 +1744,22 @@ async function refreshDailyProduction() {
     return;
   }
 
-  renderProductionEmpty('Loading production data...');
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFilterResult(faction, 'production', selectedProductionStarbase);
+  if (cached) {
+    renderProductionCharts(cached);
+  } else {
+    renderProductionEmpty('Loading production data...');
+  }
   try {
-    const result = await api.getDailyProduction(latestSettings || getFormPayload());
+    const result = await api.getDailyProduction({
+      ...(latestSettings || getFormPayload()),
+      starbaseFilter: selectedProductionStarbase,
+    });
     renderProductionCharts(result);
   } catch (error) {
     console.error(error);
-    renderProductionEmpty('Influx unavailable');
+    if (!cached) renderProductionEmpty('Influx unavailable');
   }
 }
 
@@ -856,7 +1769,13 @@ async function refreshDailyCrafting() {
     return;
   }
 
-  renderCraftingEmpty('Loading crafting data...');
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFilterResult(faction, 'crafting', selectedCraftingStarbase, selectedCraftingRecipe);
+  if (cached) {
+    renderCraftingCharts(cached);
+  } else {
+    renderCraftingEmpty('Loading crafting data...');
+  }
   try {
     const result = await api.getDailyCrafting({
       ...(latestSettings || getFormPayload()),
@@ -866,7 +1785,7 @@ async function refreshDailyCrafting() {
     renderCraftingCharts(result);
   } catch (error) {
     console.error(error);
-    renderCraftingEmpty('Influx unavailable');
+    if (!cached) renderCraftingEmpty('Influx unavailable');
   }
 }
 
@@ -876,16 +1795,23 @@ async function refreshDailyMining() {
     return;
   }
 
-  renderMiningEmpty('Loading mining data...');
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFilterResult(faction, 'mining', selectedMiningStarbase, selectedMiningFleet);
+  if (cached) {
+    renderMiningCharts(cached);
+  } else {
+    renderMiningEmpty('Loading mining data...');
+  }
   try {
     const result = await api.getDailyMining({
       ...(latestSettings || getFormPayload()),
+      starbaseFilter: selectedMiningStarbase,
       fleetFilter: selectedMiningFleet,
     });
     renderMiningCharts(result);
   } catch (error) {
     console.error(error);
-    renderMiningEmpty('Influx unavailable');
+    if (!cached) renderMiningEmpty('Influx unavailable');
   }
 }
 
@@ -895,7 +1821,13 @@ async function refreshDailySdu() {
     return;
   }
 
-  renderSduEmpty('Loading SDU data...');
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFilterResult(faction, 'sdu', selectedScanningFleet);
+  if (cached) {
+    renderSduChart(cached);
+  } else {
+    renderSduEmpty('Loading SDU data...');
+  }
   try {
     const result = await api.getDailySdu({
       ...(latestSettings || getFormPayload()),
@@ -904,7 +1836,7 @@ async function refreshDailySdu() {
     renderSduChart(result);
   } catch (error) {
     console.error(error);
-    renderSduEmpty('Influx unavailable');
+    if (!cached) renderSduEmpty('Influx unavailable');
   }
 }
 
@@ -1004,6 +1936,7 @@ function renderFleets(result) {
     setFleetStatus('Blockchain sync failed');
     return;
   }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'fleet', result);
 
   const fleets = Array.isArray(result.fleets) ? result.fleets : [];
   if (!fleets.length) {
@@ -1068,6 +2001,14 @@ function setActiveSubtab(subtab) {
   if (subtab === 'production' && !latestProductionResult && hasInfluxSettings(latestSettings || getFormPayload())) {
     refreshDailyProduction();
   }
+  if (subtab === 'consumption') {
+    if (!latestConsScanningResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsScanning();
+    if (!latestConsMiningResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsMining();
+    if (!latestConsCargoResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsCargo();
+    if (!latestConsCraftingResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsCrafting();
+    if (!latestConsUpgradingResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsUpgrading();
+    if (!latestConsTotalResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsTotal();
+  }
 }
 
 async function loadInitialState() {
@@ -1089,6 +2030,12 @@ async function loadInitialState() {
   if (hasInfluxSettings(settings)) initialLoads.push(refreshDailyMining());
   if (hasInfluxSettings(settings)) initialLoads.push(refreshDailyCrafting());
   if (hasInfluxSettings(settings)) initialLoads.push(refreshDailyProduction());
+  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsScanning());
+  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsMining());
+  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsCargo());
+  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsCrafting());
+  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsUpgrading());
+  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsTotal());
   await Promise.all(initialLoads);
 }
 
@@ -1108,32 +2055,84 @@ async function refreshFactionScopedViews() {
   renderMiningEmpty(hasInfluxSettings(latestSettings) ? 'Loading mining data...' : 'Awaiting Influx connection');
   renderCraftingEmpty(hasInfluxSettings(latestSettings) ? 'Loading crafting data...' : 'Awaiting Influx connection');
   renderProductionEmpty(hasInfluxSettings(latestSettings) ? 'Loading production data...' : 'Awaiting Influx connection');
+  renderConsMiningEmpty(hasInfluxSettings(latestSettings) ? 'Loading mining consumption...' : 'Awaiting Influx connection');
+  renderConsCraftingEmpty(hasInfluxSettings(latestSettings) ? 'Loading crafting consumption...' : 'Awaiting Influx connection');
+  renderConsUpgradingEmpty(hasInfluxSettings(latestSettings) ? 'Loading upgrading consumption...' : 'Awaiting Influx connection');
+  renderConsScanningEmpty(hasInfluxSettings(latestSettings) ? 'Loading scanning consumption...' : 'Awaiting Influx connection');
+  renderConsCargoEmpty(hasInfluxSettings(latestSettings) ? 'Loading cargo consumption...' : 'Awaiting Influx connection');
+  renderConsTotalEmpty(hasInfluxSettings(latestSettings) ? 'Loading total consumption...' : 'Awaiting Influx connection');
   await Promise.all([
     refreshFleets(),
     hasInfluxSettings(latestSettings) ? refreshDailySdu() : Promise.resolve(),
     hasInfluxSettings(latestSettings) ? refreshDailyMining() : Promise.resolve(),
     hasInfluxSettings(latestSettings) ? refreshDailyCrafting() : Promise.resolve(),
     hasInfluxSettings(latestSettings) ? refreshDailyProduction() : Promise.resolve(),
+    hasInfluxSettings(latestSettings) ? refreshConsScanning() : Promise.resolve(),
+    hasInfluxSettings(latestSettings) ? refreshConsMining() : Promise.resolve(),
+    hasInfluxSettings(latestSettings) ? refreshConsCargo() : Promise.resolve(),
+    hasInfluxSettings(latestSettings) ? refreshConsCrafting() : Promise.resolve(),
+    hasInfluxSettings(latestSettings) ? refreshConsUpgrading() : Promise.resolve(),
+    hasInfluxSettings(latestSettings) ? refreshConsTotal() : Promise.resolve(),
   ]);
 }
 
 factionButtons.forEach((button) => {
   button.addEventListener('click', async () => {
-    const faction = normalizeFaction(button.dataset.faction);
-    if (latestSettings && normalizeFaction(latestSettings.faction) === faction) return;
-    const nextSettings = mergeSettingsFromForm({ faction });
+    const clickedFaction = normalizeFaction(button.dataset.faction);
+    if (latestSettings && normalizeFaction(latestSettings.faction) === clickedFaction) return;
+
+    // Cache current faction's filter state before switching
+    const oldFaction = normalizeFaction(latestSettings?.faction);
+    recordFactionFilterState(oldFaction);
+
+    const nextSettings = mergeSettingsFromForm({ faction: clickedFaction });
     latestSettings = nextSettings;
     updateFactionButtons(nextSettings);
     updateSettingsStatus(nextSettings);
-    saveStatus.textContent = `Switching to ${faction}...`;
+
+    // Restore cached filter selections for new faction
+    restoreFactionFilterState(clickedFaction);
+
+    // Render cached data immediately if available (per-filter cache)
+    const faction = clickedFaction;
+    const cachedFleet = getCachedFactionResult(faction, 'fleet');
+    if (cachedFleet) renderFleets(cachedFleet);
+    const cachedSdu = getCachedFilterResult(faction, 'sdu', selectedScanningFleet);
+    if (cachedSdu) renderSduChart(cachedSdu);
+    const cachedMining = getCachedFilterResult(faction, 'mining', selectedMiningStarbase, selectedMiningFleet);
+    if (cachedMining) renderMiningCharts(cachedMining);
+    const cachedCrafting = getCachedFilterResult(faction, 'crafting', selectedCraftingStarbase, selectedCraftingRecipe);
+    if (cachedCrafting) renderCraftingCharts(cachedCrafting);
+    const cachedProduction = getCachedFilterResult(faction, 'production', selectedProductionStarbase);
+    if (cachedProduction) renderProductionCharts(cachedProduction);
+    const cachedConsMining = getCachedFilterResult(faction, 'consMining', selectedConsMiningStarbase, selectedConsMiningFleet);
+    if (cachedConsMining) renderConsMining(cachedConsMining);
+    const cachedConsCrafting = getCachedFilterResult(faction, 'consCrafting', selectedConsCraftingStarbase, selectedConsCraftingRecipe);
+    if (cachedConsCrafting) renderConsCrafting(cachedConsCrafting);
+    const cachedConsUpgrading = getCachedFilterResult(faction, 'consUpgrading', selectedConsUpgradingStarbase, selectedConsUpgradingComponent);
+    if (cachedConsUpgrading) renderConsUpgrading(cachedConsUpgrading);
+
+    saveStatus.textContent = `Switching to ${clickedFaction}...`;
     try {
       const saved = await api.saveSettings(nextSettings);
       latestSettings = saved;
       setFormValues(saved);
-      await refreshFactionScopedViews();
-      saveStatus.textContent = `${faction} selected`;
+      await Promise.all([
+        refreshFleets(),
+        hasInfluxSettings(latestSettings) ? refreshDailySdu() : Promise.resolve(),
+        hasInfluxSettings(latestSettings) ? refreshDailyMining() : Promise.resolve(),
+        hasInfluxSettings(latestSettings) ? refreshDailyCrafting() : Promise.resolve(),
+        hasInfluxSettings(latestSettings) ? refreshDailyProduction() : Promise.resolve(),
+        hasInfluxSettings(latestSettings) ? refreshConsScanning() : Promise.resolve(),
+        hasInfluxSettings(latestSettings) ? refreshConsMining() : Promise.resolve(),
+        hasInfluxSettings(latestSettings) ? refreshConsCargo() : Promise.resolve(),
+        hasInfluxSettings(latestSettings) ? refreshConsCrafting() : Promise.resolve(),
+        hasInfluxSettings(latestSettings) ? refreshConsUpgrading() : Promise.resolve(),
+        hasInfluxSettings(latestSettings) ? refreshConsTotal() : Promise.resolve(),
+      ]);
+      saveStatus.textContent = `${clickedFaction} selected`;
       setTimeout(() => {
-        if (saveStatus.textContent === `${faction} selected`) {
+        if (saveStatus.textContent === `${clickedFaction} selected`) {
           saveStatus.textContent = '';
         }
       }, 2200);
@@ -1147,6 +2146,12 @@ factionButtons.forEach((button) => {
 scanningFleetFilter.addEventListener('change', () => {
   selectedScanningFleet = scanningFleetFilter.value;
   refreshDailySdu();
+});
+
+miningStarbaseFilter.addEventListener('change', () => {
+  selectedMiningStarbase = miningStarbaseFilter.value;
+  selectedMiningFleet = '';
+  refreshDailyMining();
 });
 
 miningFleetFilter.addEventListener('change', () => {
@@ -1163,6 +2168,88 @@ craftingStarbaseFilter.addEventListener('change', () => {
 craftingRecipeFilter.addEventListener('change', () => {
   selectedCraftingRecipe = craftingRecipeFilter.value;
   refreshDailyCrafting();
+});
+
+// Production starbase filter
+productionStarbaseFilter.addEventListener('change', () => {
+  selectedProductionStarbase = productionStarbaseFilter.value;
+  refreshDailyProduction();
+});
+
+// Consumption subtab switching
+document.querySelectorAll('.consumption-subtab-button').forEach((button) => {
+  button.addEventListener('click', () => {
+    currentConsumptionSubtab = button.dataset.consumptionSubtab;
+    document.querySelectorAll('.consumption-subtab-button').forEach((btn) => {
+      const active = btn.dataset.consumptionSubtab === currentConsumptionSubtab;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', String(active));
+    });
+    document.querySelectorAll('[data-consumption-panel]').forEach((panel) => {
+      panel.classList.toggle('active', panel.dataset.consumptionPanel === currentConsumptionSubtab);
+    });
+  });
+});
+
+// Consumption — Mining filters
+consMiningStarbaseFilter.addEventListener('change', () => {
+  selectedConsMiningStarbase = consMiningStarbaseFilter.value;
+  selectedConsMiningFleet = '';
+  refreshConsMining();
+});
+consMiningFleetFilter.addEventListener('change', () => {
+  selectedConsMiningFleet = consMiningFleetFilter.value;
+  refreshConsMining();
+});
+
+// Consumption — Crafting filters
+consCraftingStarbaseFilter.addEventListener('change', () => {
+  selectedConsCraftingStarbase = consCraftingStarbaseFilter.value;
+  selectedConsCraftingRecipe = '';
+  refreshConsCrafting();
+});
+consCraftingRecipeFilter.addEventListener('change', () => {
+  selectedConsCraftingRecipe = consCraftingRecipeFilter.value;
+  refreshConsCrafting();
+});
+
+// Consumption — Upgrading filters
+consUpgradingStarbaseFilter.addEventListener('change', () => {
+  selectedConsUpgradingStarbase = consUpgradingStarbaseFilter.value;
+  selectedConsUpgradingComponent = '';
+  refreshConsUpgrading();
+});
+consUpgradingComponentFilter.addEventListener('change', () => {
+  selectedConsUpgradingComponent = consUpgradingComponentFilter.value;
+  refreshConsUpgrading();
+});
+
+// Consumption — Scanning filters
+consScanningStarbaseFilter.addEventListener('change', () => {
+  selectedConsScanningStarbase = consScanningStarbaseFilter.value;
+  selectedConsScanningFleet = '';
+  refreshConsScanning();
+});
+consScanningFleetFilter.addEventListener('change', () => {
+  selectedConsScanningFleet = consScanningFleetFilter.value;
+  refreshConsScanning();
+});
+
+// Consumption — Cargo filters
+consCargoStarbaseFilter.addEventListener('change', () => {
+  selectedConsCargoStarbase = consCargoStarbaseFilter.value;
+  selectedConsCargoFleet = '';
+  refreshConsCargo();
+});
+consCargoFleetFilter.addEventListener('change', () => {
+  selectedConsCargoFleet = consCargoFleetFilter.value;
+  refreshConsCargo();
+});
+
+// Consumption — Total filter
+consTotalStarbaseFilter.addEventListener('change', () => {
+  selectedConsTotalStarbase = consTotalStarbaseFilter.value;
+  refreshConsTotal();
 });
 
 openSettingsButton.addEventListener('click', openSettings);
@@ -1200,6 +2287,12 @@ form.addEventListener('submit', async (event) => {
     refreshDailyMining();
     refreshDailyCrafting();
     refreshDailyProduction();
+    refreshConsMining();
+    refreshConsCrafting();
+    refreshConsUpgrading();
+    refreshConsScanning();
+    refreshConsCargo();
+    refreshConsTotal();
     saveStatus.textContent = 'Saved';
     setTimeout(() => {
       if (saveStatus.textContent === 'Saved') {
