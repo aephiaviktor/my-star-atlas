@@ -1976,22 +1976,40 @@ ${scopeFilterFlux}
   ]);
 
   const dayTemplates = createDayTemplates();
-  const starbaseDayTotals = new Map();
+  const starbaseEntries = new Map();
   const dayBuckets = new Map();
   for (const day of dayTemplates) {
     dayBuckets.set(day.isoDate, day);
   }
 
+  // Aggregate by asset name so the Total view matches the per-sub-tab views
+  // (Food, Fuel, Ammunition, plus the various crafting/upgrade inputs). The
+  // renderer colors slices by asset name via assetChartColors, so the same
+  // asset gets the same color in every sub-tab and in Total.
   const csvSets = [
-    { csv: sduCsv, category: 'Scanning' },
-    { csv: movementScanCsv, category: 'Scanning' },
-    { csv: movementTransportCsv, category: 'Cargo' },
-    { csv: miningCsv, category: 'Mining' },
-    { csv: craftingCsv, category: 'Crafting' },
-    { csv: upgradeCsv, category: 'Upgrading' },
+    { csv: sduCsv, resolveAsset: () => 'Food' },
+    { csv: movementScanCsv, resolveAsset: () => 'Fuel' },
+    { csv: movementTransportCsv, resolveAsset: () => 'Fuel' },
+    {
+      csv: miningCsv,
+      resolveAsset: (row) => {
+        if (row._field === 'burnedFuel') return 'Fuel';
+        if (row._field === 'burnedFood') return 'Food';
+        if (row._field === 'burnedAmmo') return 'Ammunition';
+        return null;
+      },
+    },
+    {
+      csv: craftingCsv,
+      resolveAsset: (row) => String(row.input || '').trim() || null,
+    },
+    {
+      csv: upgradeCsv,
+      resolveAsset: (row) => String(row.input || '').trim() || null,
+    },
   ];
 
-  for (const { csv, category } of csvSets) {
+  for (const { csv, resolveAsset } of csvSets) {
     const rows = parseInfluxCsv(csv);
     for (const row of rows) {
       const starbase = resolveStarbaseName(row, coordinateMap) || '__untagged__';
@@ -2000,28 +2018,35 @@ ${scopeFilterFlux}
       if (Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
       const key = getUtcDateKey(date);
       if (!dayBuckets.has(key)) continue;
-      if (!starbaseDayTotals.has(starbase)) {
-        starbaseDayTotals.set(starbase, {
+      const asset = resolveAsset(row);
+      if (!asset) continue;
+      if (!starbaseEntries.has(starbase)) {
+        starbaseEntries.set(starbase, {
           starbase,
           days: dayTemplates.map((day) => ({ ...day })),
-          categories: new Map(),
+          assets: new Map(),
+          assetDays: new Map(),
           total: 0,
         });
       }
-      const entry = starbaseDayTotals.get(starbase);
+      const entry = starbaseEntries.get(starbase);
       addValueToDay(entry.days, date, value);
-      entry.categories.set(category, (entry.categories.get(category) || 0) + value);
+      entry.assets.set(asset, (entry.assets.get(asset) || 0) + value);
+      if (!entry.assetDays.has(asset)) {
+        entry.assetDays.set(asset, dayTemplates.map((day) => ({ ...day })));
+      }
+      addValueToDay(entry.assetDays.get(asset), date, value);
       entry.total += value;
     }
   }
 
   const factionStarbases = await fetchFactionStarbases(settings);
   const faction = normalizeFaction(settings.faction);
-  const starbases = Array.from(starbaseDayTotals.values())
+  const starbases = Array.from(starbaseEntries.values())
     .filter((entry) => isStarbaseIncluded(entry.starbase, factionStarbases, faction))
     .map((entry) => {
-      const slices = createOptionSummary(entry.categories).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
-      return { starbase: entry.starbase, total: entry.total, slices, days: entry.days };
+      const slices = createOptionSummary(entry.assets).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+      return { starbase: entry.starbase, total: entry.total, slices, entry };
     })
     .filter((entry) => entry.total > 0)
     .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
@@ -2048,76 +2073,37 @@ ${scopeFilterFlux}
       starbases: starbases.map((sb) => ({ value: sb.starbase, label: sb.starbase, total: sb.total })),
       selectedStarbase: '',
       pies: starbases.map((sb) => ({ starbase: sb.starbase, total: sb.total, slices: sb.slices })),
-      faction: normalizeFaction(settings.faction),
+      faction,
       scopeNote: getInfluxScopeNote(settings),
       checkedAt: new Date().toISOString(),
     };
   }
 
   const selected = starbases.find((sb) => sb.starbase === selectedStarbase);
-  const categoryAssets = Array.from(selected.categories.entries())
-    .map(([label, total]) => ({
-      label,
-      total,
-      days: dayTemplates.map((day) => ({ ...day })),
-    }));
-  const categoryByDate = new Map();
-  for (const cat of categoryAssets) {
-    for (const day of cat.days) {
-      categoryByDate.set(`${cat.label}|${day.isoDate}`, day);
-    }
+  if (!selected) {
+    // Defensive: the dropdown only shows values from starbases, so this should
+    // not be reachable, but return an empty detail rather than throwing.
+    return {
+      ok: true,
+      mode: 'detail',
+      total: 0,
+      topAsset: null,
+      assetCount: 0,
+      starbases: starbases.map((sb) => ({ value: sb.starbase, label: sb.starbase, total: sb.total })),
+      selectedStarbase,
+      assets: [],
+      faction,
+      scopeNote: getInfluxScopeNote(settings),
+      checkedAt: new Date().toISOString(),
+    };
   }
-
-  const reCsv = `from(bucket: "${bucket}")
-  |> range(start: -15d)
-${scopeFilterFlux}
-  |> filter(fn: (r) => r.starbase == "${escapeFluxString(selectedStarbase)}")
-  |> filter(fn: (r) =>
-    (r._measurement == "sdu" and r._field == "burnedFood") or
-    (r._measurement == "movement" and r._field == "burnedFuel" and (r.assignment == "Scan" or r.assignment == "Transport")) or
-    (r._measurement == "mining" and (r._field == "burnedFuel" or r._field == "burnedFood" or r._field == "burnedAmmo")) or
-    (r._measurement == "crafting" and r._field == "amount" and r.type == "Input") or
-    (r._measurement == "upgrade" and r._field == "amount")
-  )
-  |> filter(fn: (r) => exists r.fleet or r._measurement == "crafting" or r._measurement == "upgrade")
-  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["_measurement", "_field", "assignment", "_time"])
-  |> sum(column: "_value")
-  |> group()
-  |> keep(columns: ["_measurement", "_field", "assignment", "_time", "_value"])
-  |> sort(columns: ["_measurement", "_field", "assignment", "_time"])`;
-
-  const detailCsv = await queryInfluxFlux(settings, reCsv);
-  const detailRows = parseInfluxCsv(detailCsv);
-  const categoryMap = new Map();
-  for (const row of detailRows) {
-    const measurement = String(row._measurement || '').trim();
-    const field = String(row._field || '').trim();
-    const assignment = String(row.assignment || '').trim();
-    const date = new Date(row._time);
-    const value = Number(row._value || 0);
-    if (Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
-    const key = getUtcDateKey(date);
-    if (!dayBuckets.has(key)) continue;
-    let category = 'Other';
-    if (measurement === 'sdu') category = 'Scanning';
-    else if (measurement === 'movement' && assignment === 'Scan') category = 'Scanning';
-    else if (measurement === 'movement' && assignment === 'Transport') category = 'Cargo';
-    else if (measurement === 'mining') category = 'Mining';
-    else if (measurement === 'crafting') category = 'Crafting';
-    else if (measurement === 'upgrade') category = 'Upgrading';
-    if (!categoryMap.has(category)) {
-      categoryMap.set(category, {
-        label: category,
-        total: 0,
-        days: dayTemplates.map((day) => ({ ...day })),
-      });
-    }
-    addValueToDay(categoryMap.get(category).days, date, value);
-    categoryMap.get(category).total += value;
-  }
-
-  const assets = Array.from(categoryMap.values()).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+  const assets = createOptionSummary(selected.entry.assets)
+    .map((slice) => ({
+      label: slice.label,
+      total: slice.total,
+      days: selected.entry.assetDays.get(slice.label) || dayTemplates.map((d) => ({ ...d })),
+    }))
+    .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const total = assets.reduce((sum, asset) => sum + asset.total, 0);
 
   return {
@@ -2129,7 +2115,7 @@ ${scopeFilterFlux}
     starbases: starbases.map((sb) => ({ value: sb.starbase, label: sb.starbase, total: sb.total })),
     selectedStarbase,
     assets,
-    faction: normalizeFaction(settings.faction),
+    faction,
     scopeNote: getInfluxScopeNote(settings),
     checkedAt: new Date().toISOString(),
   };

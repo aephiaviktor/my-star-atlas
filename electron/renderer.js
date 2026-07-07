@@ -1641,9 +1641,9 @@ function renderConsTotal(result) {
   setText(consTotalTotalValue, formatWholeNumber(result.total));
   setText(consTotalTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(consTotalTopValue, result.topAsset || '--');
-  setText(consTotalTopNote, result.mode === 'detail' ? 'Largest category' : 'Top category');
+  setText(consTotalTopNote, result.mode === 'detail' ? 'Largest asset' : 'Top asset');
   setText(consTotalAssetCountValue, formatWholeNumber(result.assetCount || 0));
-  setText(consTotalAssetCountNote, 'Categories');
+  setText(consTotalAssetCountNote, 'Assets');
   setText(
     consTotalFilterNote,
     `${result.starbases?.length || 0} active ${(result.starbases?.length || 0) === 1 ? 'starbase' : 'starbases'}`
