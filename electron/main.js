@@ -1936,10 +1936,10 @@ ${scopeFilterFlux}
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
   |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["starbase", "sectorX", "sectorY", "_time"])
+  |> group(columns: ["_field", "starbase", "sectorX", "sectorY", "_time"])
   |> sum(column: "_value")
   |> group()
-  |> keep(columns: ["starbase", "sectorX", "sectorY", "_time", "_value"])`;
+  |> keep(columns: ["_field", "starbase", "sectorX", "sectorY", "_time", "_value"])`;
 
   const craftingFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
@@ -1949,10 +1949,10 @@ ${scopeFilterFlux}
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.starbase)
   |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["starbase", "_time"])
+  |> group(columns: ["input", "starbase", "_time"])
   |> sum(column: "_value")
   |> group()
-  |> keep(columns: ["starbase", "_time", "_value"])`;
+  |> keep(columns: ["input", "starbase", "_time", "_value"])`;
 
   const upgradeFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
@@ -1961,10 +1961,10 @@ ${scopeFilterFlux}
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.starbase)
   |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["starbase", "_time"])
+  |> group(columns: ["input", "starbase", "_time"])
   |> sum(column: "_value")
   |> group()
-  |> keep(columns: ["starbase", "_time", "_value"])`;
+  |> keep(columns: ["input", "starbase", "_time", "_value"])`;
 
   const [sduCsv, movementScanCsv, movementTransportCsv, miningCsv, craftingCsv, upgradeCsv] = await Promise.all([
     queryInfluxFlux(settings, sduFlux),
