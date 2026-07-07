@@ -280,31 +280,44 @@ schema.measurements(bucket: "${bucket}")`;
 }
 
 function buildInstanceScopeFilter(settings, options = {}) {
-  const aliases = factionInfluxAliases[normalizeFaction(settings.faction)] || factionInfluxAliases.USTUR;
+  const faction = normalizeFaction(settings.faction);
+  const aliases = factionInfluxAliases[faction] || factionInfluxAliases.USTUR;
   const instanceValues = makeFluxStringArray(aliases.instance);
   const factionValues = makeFluxStringArray(aliases.faction);
   const bucket = String(settings.influxBucket || '').trim().toLowerCase();
-  const allowUntaggedFallback = Boolean(options.allowUntaggedFallback) && normalizeFaction(settings.faction) === 'USTUR' && bucket === 'slya';
+  const isUsturSlya = faction === 'USTUR' && bucket === 'slya';
+  const allowBroadUntaggedFallback = Boolean(options.allowUntaggedFallback) && isUsturSlya;
   const untaggedFleetNames = Array.isArray(options.untaggedFleetNames)
     ? options.untaggedFleetNames.map((fleet) => String(fleet || '').trim()).filter(Boolean)
     : [];
-  const untaggedFallback = allowUntaggedFallback
-    ? ' or (not exists r.instance and not exists r.faction)'
+  const fleetSet = makeFluxStringArray(untaggedFleetNames);
+  // For MUD/ONI, the fleet list is used as a positive filter on tagged data too,
+  // so a fleet rented by MUD but tagged by the MUD bot does not show up in MUD
+  // views when the ONI player actually owns it. USTUR keeps the broad tagged
+  // path because the broad untagged fallback covers legacy rows.
+  const taggedFleetFilter = (!isUsturSlya && untaggedFleetNames.length)
+    ? ` and (not exists r.fleet or contains(value: r.fleet, set: ${fleetSet}))`
     : '';
   const untaggedFleetFallback = untaggedFleetNames.length
-    ? ` or (not exists r.instance and not exists r.faction and exists r.fleet and contains(value: r.fleet, set: ${makeFluxStringArray(untaggedFleetNames)}))`
+    ? ` or (not exists r.instance and not exists r.faction and exists r.fleet and contains(value: r.fleet, set: ${fleetSet}))`
+    : '';
+  const untaggedBroadFallback = allowBroadUntaggedFallback
+    ? ' or (not exists r.instance and not exists r.faction)'
     : '';
 
   return `  |> filter(fn: (r) =>
-    (exists r.instance and contains(value: r.instance, set: ${instanceValues})) or
-    (exists r.faction and contains(value: r.faction, set: ${factionValues}))${untaggedFallback}${untaggedFleetFallback}
+    ((exists r.instance and contains(value: r.instance, set: ${instanceValues})) or
+     (exists r.faction and contains(value: r.faction, set: ${factionValues})))${taggedFleetFilter}${untaggedFleetFallback}${untaggedBroadFallback}
   )`;
 }
 
 function getInfluxScopeNote(settings) {
   const faction = normalizeFaction(settings.faction);
   const bucket = String(settings.influxBucket || '').trim().toLowerCase();
-  return faction === 'USTUR' && bucket === 'slya' ? 'USTUR tagged + legacy untagged slya fallback' : `${faction} tagged data`;
+  if (faction === 'USTUR' && bucket === 'slya') {
+    return 'USTUR tagged + legacy untagged slya fallback';
+  }
+  return `${faction} tagged + ${faction.toLowerCase()} fleet fallback`;
 }
 
 async function measurementHasTag(settings, bucket, measurement, tagName) {
@@ -408,14 +421,24 @@ async function fetchStarbaseCoordinateMap(settings) {
   return promise;
 }
 
+const STARBASE_COORDINATE_REGEX = /^-?\d+,-?\d+$/;
+
 function resolveStarbaseName(row, coordinateMap) {
   const direct = String(row.starbase || '').trim();
-  if (direct) return direct;
-  if (!coordinateMap) return '';
-  const x = String(row.sectorX || '').trim();
-  const y = String(row.sectorY || '').trim();
-  if (!x || !y) return '';
-  return String(coordinateMap.get(starbaseCoordinateKey(x, y)) || '').trim();
+  if (direct) {
+    // Some measurements (e.g. movement/cargo) write a literal "x,y" string into
+    // r.starbase when the bot doesn't know the starbase name. Look that up in
+    // the coordinate map. Sdu rows are deliberately NOT resolved via
+    // r.sectorX/Y because those are scanning coordinates, not starbase
+    // coordinates.
+    if (STARBASE_COORDINATE_REGEX.test(direct) && coordinateMap) {
+      const [x, y] = direct.split(',');
+      const mapped = String(coordinateMap.get(starbaseCoordinateKey(x, y)) || '').trim();
+      if (mapped) return mapped;
+    }
+    return direct;
+  }
+  return '';
 }
 
 function isStarbaseIncluded(entryStarbase, factionStarbases, faction) {
@@ -518,7 +541,8 @@ function createOptionSummary(totals) {
 async function fetchDailySdu(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const bucket = escapeFluxString(settings.influxBucket);
-  const scopeFilterFlux = buildInstanceScopeFilter(settings, { allowUntaggedFallback: true });
+  const untaggedFleetNames = await getProfileFleetLabels(settings);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings, { allowUntaggedFallback: true, untaggedFleetNames });
   const requestedFleet = normalizeFleetFilter(payload);
 
   async function queryDailySum(filterFlux) {
@@ -644,6 +668,7 @@ function getCraftingDependencyOutputs(targetRecipe, recipeInputs) {
 async function fetchDailyCrafting(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const bucket = escapeFluxString(settings.influxBucket);
+  const coordinateMap = await fetchStarbaseCoordinateMap(settings);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const requestedStarbase = normalizeStarbaseFilter(payload);
   const requestedRecipe = normalizeRecipeFilter(payload);
@@ -669,7 +694,7 @@ ${scopeFilterFlux}
   const outputEntries = [];
 
   for (const row of rows) {
-    const starbase = String(row.starbase || '').trim();
+    const starbase = resolveStarbaseName(row, coordinateMap);
     const output = String(row.output || '').trim();
     const input = String(row.input || '').trim();
     const type = String(row.type || '').trim();
@@ -804,6 +829,7 @@ async function fetchDailyMining(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const bucket = escapeFluxString(settings.influxBucket);
   const untaggedFleetNames = await getProfileFleetLabels(settings);
+  const coordinateMap = await fetchStarbaseCoordinateMap(settings);
   const scopeFilterFlux = buildInstanceScopeFilter(settings, { untaggedFleetNames });
   const requestedFleet = normalizeFleetFilter(payload);
   const requestedStarbase = normalizeStarbaseFilter(payload);
@@ -831,7 +857,7 @@ ${scopeFilterFlux}
   for (const row of rows) {
     const fleet = String(row.fleet || '').trim();
     const resource = String(row.rss || '').trim();
-    const starbase = String(row.starbase || '').trim();
+    const starbase = resolveStarbaseName(row, coordinateMap);
     const date = new Date(row._time);
     const value = Number(row._value || 0);
     if (!fleet || !resource || !starbase || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
@@ -926,6 +952,7 @@ ${scopeFilterFlux}
     materials,
     materialCount: materials.length,
     total,
+    topMaterial: materials[0]?.resource || null,
     starbases,
     fleets,
     selectedStarbase,
@@ -1038,35 +1065,31 @@ async function fetchDailyProduction(payload) {
   const bucket = escapeFluxString(settings.influxBucket);
   const canGroupSduByStarbase = await measurementHasTag(settings, bucket, 'sdu', 'starbase');
   const untaggedFleetNames = await getProfileFleetLabels(settings);
+  const coordinateMap = await fetchStarbaseCoordinateMap(settings);
   const requestedStarbase = normalizeStarbaseFilter(payload);
   const scopeOptions = { allowUntaggedFallback: true, untaggedFleetNames };
+  // SLYA does not yet write a `r.starbase` tag on the `sdu` measurement, so SDU
+  // cannot be attributed to a starbase. Until that lands, SDU is excluded from
+  // the per-starbase views and from the starbase filter dropdown entirely.
+  const includeSdu = canGroupSduByStarbase;
 
   const [sduRows, miningRows, craftingRows] = await Promise.all([
-    canGroupSduByStarbase
+    includeSdu
       ? fetchProductionRows(settings, bucket, 'sdu', 'starbase', '', { allowUntaggedFallback: true })
-      : fetchSduProductionRowsByFleet(settings, bucket, { allowUntaggedFallback: true, untaggedFleetNames }),
+      : Promise.resolve([]),
     fetchProductionRows(settings, bucket, 'mining', 'rss', '', { untaggedFleetNames }),
     fetchProductionRows(settings, bucket, 'crafting', 'output', '  |> filter(fn: (r) => (exists r.type) and r.type == "Output")'),
   ]);
 
   const pieMap = new Map();
-  const fleetToStarbaseMap = new Map();
-  if (!canGroupSduByStarbase && untaggedFleetNames?.length) {
-    for (const fleetLabel of untaggedFleetNames) {
-      fleetToStarbaseMap.set(fleetLabel, fleetLabel);
-    }
-  }
   for (const row of sduRows) {
-    const starbaseName = canGroupSduByStarbase
-      ? row.starbase
-      : (fleetToStarbaseMap.get(String(row.fleet || '').trim()) || String(row.fleet || '').trim() || 'Scanning');
-    addProductionSlice(pieMap, starbaseName, 'Survey Data Unit', row._value);
+    addProductionSlice(pieMap, resolveStarbaseName(row, coordinateMap), 'Survey Data Unit', row._value);
   }
   for (const row of miningRows) {
-    addProductionSlice(pieMap, row.starbase, row.rss, row._value);
+    addProductionSlice(pieMap, resolveStarbaseName(row, coordinateMap), row.rss, row._value);
   }
   for (const row of craftingRows) {
-    addProductionSlice(pieMap, row.starbase, row.output, row._value);
+    addProductionSlice(pieMap, resolveStarbaseName(row, coordinateMap), row.output, row._value);
   }
 
   const factionStarbases = await fetchFactionStarbases(settings);
@@ -1121,9 +1144,9 @@ async function fetchDailyProduction(payload) {
   const assetMap = new Map();
 
   const [sduDailyRows, miningDailyRows, craftingDailyRows] = await Promise.all([
-    canGroupSduByStarbase
+    includeSdu
       ? fetchProductionDailyRows(settings, bucket, 'sdu', 'starbase', selectedStarbase, '', scopeOptions)
-      : fetchSduProductionDailyAll(settings, bucket, scopeOptions),
+      : Promise.resolve([]),
     fetchProductionDailyRows(settings, bucket, 'mining', 'rss', selectedStarbase, '', scopeOptions),
     fetchProductionDailyRows(settings, bucket, 'crafting', 'output', selectedStarbase, '  |> filter(fn: (r) => (exists r.type) and r.type == "Output")'),
   ]);
