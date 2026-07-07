@@ -423,22 +423,44 @@ async function fetchStarbaseCoordinateMap(settings) {
 
 const STARBASE_COORDINATE_REGEX = /^-?\d+,-?\d+$/;
 
+// Throttle "unmapped coord" warnings so a single bad row doesn't spam stderr.
+let lastUnmappedCoordWarnAt = 0;
+let unmappedCoordWarnCount = 0;
+
 function resolveStarbaseName(row, coordinateMap) {
   const direct = String(row.starbase || '').trim();
-  if (direct) {
-    // Some measurements (e.g. movement/cargo) write a literal "x,y" string into
-    // r.starbase when the bot doesn't know the starbase name. Look that up in
-    // the coordinate map. Sdu rows are deliberately NOT resolved via
-    // r.sectorX/Y because those are scanning coordinates, not starbase
-    // coordinates.
-    if (STARBASE_COORDINATE_REGEX.test(direct) && coordinateMap) {
+  if (!direct) return '';
+  // The r.starbase tag is written in two formats across the bucket:
+  //   1. A literal starbase name (e.g. "MRZ-22", "MUD-PHANTOM"). SLYA has
+  //      always written this. The movement bot is also switching to this
+  //      format (the "old" coord-string format below only survives in
+  //      historical rows).
+  //   2. A coordinate string (e.g. "35,16"). Written by older versions of
+  //      the movement bot when the starbase name wasn't known. We resolve
+  //      these via the coordinate map built from the "starbase" measurement.
+  // Sdu rows are deliberately NOT resolved via r.sectorX/Y because those are
+  // scanning coordinates, not starbase coordinates.
+  if (STARBASE_COORDINATE_REGEX.test(direct)) {
+    if (coordinateMap) {
       const [x, y] = direct.split(',');
       const mapped = String(coordinateMap.get(starbaseCoordinateKey(x, y)) || '').trim();
       if (mapped) return mapped;
     }
+    // Coord string but no map entry. Likely old data from before the map was
+    // built, or a sector the panel hasn't seen. Log once per minute so we
+    // notice without spamming stderr.
+    unmappedCoordWarnCount += 1;
+    const now = Date.now();
+    if (now - lastUnmappedCoordWarnAt > 60000) {
+      console.warn(
+        `[MyStarAtlas] ${unmappedCoordWarnCount} movement row(s) had r.starbase="${direct}" with no coordinate-map entry; passing through as-is.`,
+      );
+      lastUnmappedCoordWarnAt = now;
+      unmappedCoordWarnCount = 0;
+    }
     return direct;
   }
-  return '';
+  return direct;
 }
 
 function isStarbaseIncluded(entryStarbase, factionStarbases, faction) {
