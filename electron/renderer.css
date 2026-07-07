@@ -582,7 +582,8 @@ select:focus {
   align-self: center;
 }
 
-.mining-surface {
+.mining-surface,
+.consumption-panel .work-surface {
   overflow: auto;
   scrollbar-gutter: stable;
 }
