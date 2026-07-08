@@ -392,7 +392,11 @@ select:focus {
   flex: 1 1 auto;
   min-height: 0;
   flex-direction: column;
-  overflow: hidden;
+  /* The Inventory tab is tall (line grid is 900px) so the whole panel
+     needs to scroll vertically on small windows. The subtab bar is
+     outside this panel, so it stays fixed. */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .consumption-subtab-bar {
