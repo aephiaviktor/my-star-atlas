@@ -2635,10 +2635,10 @@ function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
     for (const p of points) allPoints.push(p);
   }
 
-  // Hover overlay: vertical guideline + tooltip. Only enabled when
-  // the chart is the wide card (multi-asset) — single-asset cards
-  // already show the value in the summary header.
-  if (multiAssets && multiAssets.length > 1) {
+  // Hover overlay: vertical guideline + tooltip. Enabled for every
+  // line chart (single-asset and multi-asset) so the user can see
+  // the exact day + value at the cursor position.
+  if (assets.length > 0) {
     invInstallHoverOverlay(wrap, allPoints, padding, innerWidth, innerHeight, height);
   }
 }

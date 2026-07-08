@@ -1317,18 +1317,10 @@ label {
   color: var(--muted);
 }
 
-/* Temporary debug strip: always-visible status line for the wide card.
-   Sits next to the faction note in the toolbar so the user can see
-   what's happening regardless of scroll position. Styled muted so it
-   doesn't distract from the charts once things are working. */
+/* Debug strip is hidden now that the wide card is rendering. The
+   element is kept in the DOM in case we need to bring it back. */
 .inv-debug-strip {
-  font-size: 11px;
-  color: var(--muted);
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: transparent;
+  display: none;
 }
 
 .inv-line-grid {
