@@ -1471,20 +1471,21 @@ label {
 .inv-chart-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-  max-height: 56px;
-  overflow-y: auto;
+  gap: 5px;
+  margin-top: 8px;
+  /* No max-height: with 30+ assets the legend needs the vertical
+     room. The whole panel scrolls (overflow-y: auto on the
+     production-panel), so a tall legend is fine. */
 }
 
 .inv-legend-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: rgba(11, 69, 92, 0.18);
-  padding: 2px 7px 2px 5px;
+  padding: 3px 9px 3px 7px;
   color: var(--text);
   font-size: 11px;
   cursor: pointer;
@@ -1496,6 +1497,29 @@ label {
   color: var(--muted);
   background: transparent;
   border-color: rgba(77, 89, 98, 0.4);
+}
+
+/* The "Select All / Deselect All" toggle button sits at the end of
+   the legend and is visually distinct (accent background, bold
+   label) so it doesn't get confused with an asset chip. */
+.inv-legend-toggle-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--accent-bright);
+  border-radius: 999px;
+  background: var(--accent);
+  padding: 3px 11px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  margin-left: 4px;
+  letter-spacing: 0.2px;
+}
+.inv-legend-toggle-all:hover {
+  background: var(--accent-bright);
 }
 
 .inv-legend-swatch {

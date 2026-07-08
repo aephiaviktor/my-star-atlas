@@ -2497,14 +2497,20 @@ function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
 
-  // Determine common X axis (day index 0..13) and Y range across all assets.
-  // The Y axis is always anchored at zero on the bottom and at the global
-  // max value on the top, so small changes stay visible and the line never
-  // auto-zooms away from zero.
+  // Determine common X axis (day index 0..13) and Y range across the
+  // assets that are actually visible. Hiding the big-ticket assets
+  // shouldn't leave a small asset flat-lined at the bottom — the axis
+  // resizes to whatever's on screen, so the line movement stays
+  // visible no matter which combination of assets is selected.
+  // The Y axis is always anchored at zero on the bottom and at the
+  // (visible) max on the top, so we never auto-zoom away from zero.
   const numDays = assets[0].days.length;
   const xStep = numDays > 1 ? innerWidth / (numDays - 1) : 0;
+  const faction = normalizeFaction(latestSettings?.faction);
+  const visibility = invGetVisibility(faction, invSelectedStarbase);
   let maxY = 0;
   for (const a of assets) {
+    if (visibility.has(a.label)) continue;
     for (const d of a.days) {
       if (d.value > maxY) maxY = d.value;
     }
@@ -2564,9 +2570,6 @@ function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
     label.style.textAlign = 'center';
     wrap.appendChild(label);
   }
-
-  const faction = normalizeFaction(latestSettings?.faction);
-  const visibility = invGetVisibility(faction, invSelectedStarbase);
 
   // Build a flat list of all points across all visible assets. The
   // hover handler uses this to find the closest data point to the
@@ -2709,6 +2712,32 @@ function invRenderWideLegend(assets) {
     });
     legend.appendChild(chip);
   }
+
+  // Select All / Hide All toggle. Sits at the end of the legend and
+  // is visually distinct (accent background, no swatch) so it
+  // doesn't get confused with an asset chip. If any asset is hidden
+  // the button reads "Show All"; if everything is visible it reads
+  // "Hide All". Clicking it clears or fills the visibility set in
+  // one go, which is much faster than clicking 37 chips individually.
+  const hiddenCount = assets.filter((a) => visibility.has(a.label)).length;
+  const allVisible = hiddenCount === 0;
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'inv-legend-toggle-all';
+  toggle.textContent = allVisible ? 'Hide All' : 'Show All';
+  toggle.title = allVisible
+    ? 'Hide every asset line in the chart'
+    : 'Show every asset line in the chart';
+  toggle.addEventListener('click', () => {
+    const set = invGetVisibility(faction, invSelectedStarbase);
+    if (allVisible) {
+      for (const a of assets) set.add(a.label);
+    } else {
+      for (const a of assets) set.delete(a.label);
+    }
+    if (latestInventoryResult) renderInventory(latestInventoryResult);
+  });
+  legend.appendChild(toggle);
 }
 
 function invRenderBars(assets) {
