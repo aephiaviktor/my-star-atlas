@@ -2420,12 +2420,26 @@ function invRenderSmallCard(category, asset) {
 }
 
 function invRenderWideCard(assets) {
-  const wrap = invRefs.wideCard.wrap;
+  let wrap = invRefs.wideCard.wrap;
   const summary = invRefs.wideCard && invRefs.wideCard.summary;
   const dbg = invRefs.debugStrip;
   const writeDbg = (msg) => { if (dbg) dbg.textContent = `wide card: ${msg}`; };
+  // Lazy fallback: if initInventory's getElementById returned null
+  // for some reason, try to find the element on the fly. This is the
+  // most common reason the wide card is empty.
   if (!wrap) {
-    writeDbg('WRAP NULL (ref not set in initInventory)');
+    wrap = document.getElementById('inv-all-assets-svg-wrap')
+      || document.querySelector('[data-inv-category="all-assets"] .inv-chart-svg-wrap');
+    if (wrap) {
+      invRefs.wideCard.wrap = wrap;
+      invRefs.wideCard.summary = invRefs.wideCard.summary
+        || document.getElementById('inv-all-assets-summary');
+      invRefs.wideCard.legend = invRefs.wideCard.legend
+        || document.getElementById('inv-all-assets-legend');
+      writeDbg('wrap recovered via lazy lookup, retrying');
+      return invRenderWideCard(assets);
+    }
+    writeDbg('WRAP NULL and lazy lookup failed (element not in DOM)');
     if (summary) summary.textContent = 'WRAP NULL';
     return;
   }
@@ -2802,6 +2816,36 @@ function initInventory() {
   invRefs.bars.consumables = document.getElementById('inv-bars-consumables');
   invRefs.bars.other = document.getElementById('inv-bars-other');
   invRefs.debugStrip = document.getElementById('inv-debug-strip');
+
+  // Diagnostic: report which getElementById calls succeeded so we can
+  // see exactly which ref is missing. Writes to the debug strip and
+  // also to the console for when dev tools are open.
+  const diag = [
+    `select=${!!invRefs.starbaseSelect}`,
+    `note=${!!invRefs.factionNote}`,
+    `amm-wrap=${!!(invRefs.smallCards.ammunition && invRefs.smallCards.ammunition.wrap)}`,
+    `food-wrap=${!!(invRefs.smallCards.food && invRefs.smallCards.food.wrap)}`,
+    `fuel-wrap=${!!(invRefs.smallCards.fuel && invRefs.smallCards.fuel.wrap)}`,
+    `wide-wrap=${!!invRefs.wideCard.wrap}`,
+    `wide-summary=${!!invRefs.wideCard.summary}`,
+    `wide-legend=${!!invRefs.wideCard.legend}`,
+    `bar-cons=${!!invRefs.bars.consumables}`,
+    `bar-other=${!!invRefs.bars.other}`,
+    `dbg=${!!invRefs.debugStrip}`,
+  ].join(' | ');
+  if (invRefs.debugStrip) invRefs.debugStrip.textContent = `init: ${diag}`;
+  console.log('[inventory] initInventory', diag);
+  // Also query the wide-card wrap directly so we can see whether the
+  // element exists at all (and under what selector it can be found).
+  const directWide = document.getElementById('inv-all-assets-svg-wrap');
+  const queryWide = document.querySelector('[data-inv-category="all-assets"] .inv-chart-svg-wrap');
+  const diag2 = `direct=${!!directWide} query=${!!queryWide}`;
+  console.log('[inventory] wide card element lookup:', diag2);
+  if (invRefs.debugStrip) invRefs.debugStrip.textContent += ` | wide: ${diag2}`;
+  if (queryWide && !invRefs.wideCard.wrap) {
+    invRefs.wideCard.wrap = queryWide;
+    console.log('[inventory] wide card wrap recovered via querySelector');
+  }
   if (invRefs.starbaseSelect) {
     invRefs.starbaseSelect.addEventListener('change', () => {
       invSelectedStarbase = invRefs.starbaseSelect.value || '__all__';
