@@ -2312,17 +2312,37 @@ function invSetStarbaseOptions(starbases, current) {
   const select = invRefs.starbaseSelect;
   if (!select) return;
   select.textContent = '';
+  // Faction-scoped filter: only show starbases that belong to the
+  // active faction. MUD-*, ONI-*, and UST-* are obvious. The MRZ-*
+  // set is part of USTUR's territory. (This matches the prefix
+  // mapping the backend uses in main.js to derive a starbase's
+  // faction from its name.)
+  const faction = normalizeFaction(latestSettings?.faction);
+  const allowedPrefixes = {
+    MUD: ['MUD-'],
+    ONI: ['ONI-'],
+    USTUR: ['UST-', 'MRZ-'],
+  }[faction] || [];
+  const filtered = (starbases || []).filter((sb) =>
+    allowedPrefixes.some((p) => sb.startsWith(p)),
+  );
   const optAll = document.createElement('option');
   optAll.value = '__all__';
-  optAll.textContent = 'All Starbases';
+  optAll.textContent = filtered.length
+    ? `All ${faction} Starbases (${filtered.length})`
+    : `All ${faction} Starbases`;
   select.appendChild(optAll);
-  for (const sb of starbases) {
+  for (const sb of filtered) {
     const opt = document.createElement('option');
     opt.value = sb;
     opt.textContent = sb;
     select.appendChild(opt);
   }
-  select.value = starbases.includes(current) || current === '__all__' ? current : '__all__';
+  // If the currently selected starbase doesn't belong to the active
+  // faction (e.g. we just switched factions), fall back to __all__
+  // so the dropdown shows a valid value and the cached data key
+  // doesn't point at a starbase that's no longer in the list.
+  select.value = filtered.includes(current) || current === '__all__' ? current : '__all__';
   invSelectedStarbase = select.value;
 }
 
