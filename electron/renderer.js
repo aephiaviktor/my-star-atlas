@@ -2278,6 +2278,28 @@ async function refreshPcrCharts() {
 const INV_CONSUMABLE_ASSETS = Object.freeze(['Ammunition', 'Food', 'Fuel']);
 const INV_SMALL_CARD_IDS = Object.freeze(['ammunition', 'food', 'fuel']);
 const INV_WIDE_CARD_ID = 'all-assets';
+
+// Explicit per-faction starbase membership. The starbase measurement
+// in InfluxDB has no faction tag, so we derive the faction from the
+// starbase name. The mapping is NOT by prefix — MRZ-* starbases are
+// split across all three factions, so we have to enumerate them.
+const INV_FACTION_STARBASES = Object.freeze({
+  MUD: [
+    'MUD-1', 'MUD-2', 'MUD-3', 'MUD-4', 'MUD-5', 'MUD-PHANTOM',
+    'MRZ-1', 'MRZ-2', 'MRZ-3', 'MRZ-4', 'MRZ-5', 'MRZ-6', 'MRZ-7',
+    'MRZ-8', 'MRZ-9', 'MRZ-10', 'MRZ-11', 'MRZ-12',
+  ],
+  ONI: [
+    'ONI-1', 'ONI-2', 'ONI-3', 'ONI-4', 'ONI-5', 'ONI-PHANTOM',
+    'MRZ-13', 'MRZ-14', 'MRZ-18', 'MRZ-19', 'MRZ-20',
+    'MRZ-24', 'MRZ-25', 'MRZ-26', 'MRZ-29', 'MRZ-30', 'MRZ-31', 'MRZ-36',
+  ],
+  USTUR: [
+    'UST-1', 'UST-2', 'UST-3', 'UST-4', 'UST-5', 'UST-PHANTOM',
+    'MRZ-15', 'MRZ-16', 'MRZ-17', 'MRZ-21', 'MRZ-22', 'MRZ-23',
+    'MRZ-27', 'MRZ-28', 'MRZ-32', 'MRZ-33', 'MRZ-34', 'MRZ-35',
+  ],
+});
 const INV_DEFAULT_METHOD = 'regression'; // two-point vs linear-regression slope
 const invAssetVisibility = new Map(); // faction -> Map<starbase, Set<assetLabel>>
 
@@ -2313,24 +2335,16 @@ function invSetStarbaseOptions(starbases, current) {
   if (!select) return;
   select.textContent = '';
   // Faction-scoped filter: only show starbases that belong to the
-  // active faction. MUD-*, ONI-*, and UST-* are obvious. The MRZ-*
-  // set is part of USTUR's territory. (This matches the prefix
-  // mapping the backend uses in main.js to derive a starbase's
-  // faction from its name.)
+  // active faction, and only those with actual inventory data.
+  // The membership map is explicit (see INV_FACTION_STARBASES) —
+  // MRZ-* starbases are split across all three factions, so we
+  // can't use a prefix match.
   const faction = normalizeFaction(latestSettings?.faction);
-  const allowedPrefixes = {
-    MUD: ['MUD-'],
-    ONI: ['ONI-'],
-    USTUR: ['UST-', 'MRZ-'],
-  }[faction] || [];
-  const filtered = (starbases || []).filter((sb) =>
-    allowedPrefixes.some((p) => sb.startsWith(p)),
-  );
+  const membership = new Set(INV_FACTION_STARBASES[faction] || []);
+  const filtered = (starbases || []).filter((sb) => membership.has(sb));
   const optAll = document.createElement('option');
   optAll.value = '__all__';
-  optAll.textContent = filtered.length
-    ? `All ${faction} Starbases (${filtered.length})`
-    : `All ${faction} Starbases`;
+  optAll.textContent = 'All starbases';
   select.appendChild(optAll);
   for (const sb of filtered) {
     const opt = document.createElement('option');

@@ -2529,6 +2529,29 @@ async function fetchInventory(payload) {
 // sector is shared between MUD and USTUR; the MUD list is the MRZ
 // starbases NOT in ONI_STARBASE_EXCLUSIONS, and the USTUR list is
 // the rest.
+// Explicit per-faction starbase membership. The starbase measurement
+// in InfluxDB has no faction tag, so we derive the faction from the
+// starbase name. The mapping is NOT by prefix — MRZ-* starbases are
+// split across all three factions, so we have to enumerate them.
+// Must stay in sync with INV_FACTION_STARBASES in renderer.js.
+const FACTION_STARBASES = Object.freeze({
+  MUD: [
+    'MUD-1', 'MUD-2', 'MUD-3', 'MUD-4', 'MUD-5', 'MUD-PHANTOM',
+    'MRZ-1', 'MRZ-2', 'MRZ-3', 'MRZ-4', 'MRZ-5', 'MRZ-6', 'MRZ-7',
+    'MRZ-8', 'MRZ-9', 'MRZ-10', 'MRZ-11', 'MRZ-12',
+  ],
+  ONI: [
+    'ONI-1', 'ONI-2', 'ONI-3', 'ONI-4', 'ONI-5', 'ONI-PHANTOM',
+    'MRZ-13', 'MRZ-14', 'MRZ-18', 'MRZ-19', 'MRZ-20',
+    'MRZ-24', 'MRZ-25', 'MRZ-26', 'MRZ-29', 'MRZ-30', 'MRZ-31', 'MRZ-36',
+  ],
+  USTUR: [
+    'UST-1', 'UST-2', 'UST-3', 'UST-4', 'UST-5', 'UST-PHANTOM',
+    'MRZ-15', 'MRZ-16', 'MRZ-17', 'MRZ-21', 'MRZ-22', 'MRZ-23',
+    'MRZ-27', 'MRZ-28', 'MRZ-32', 'MRZ-33', 'MRZ-34', 'MRZ-35',
+  ],
+});
+
 async function listFactionStarbasesForInventory(settings, faction) {
   const bucket = escapeFluxString(settings.influxBucket);
   const flux = `from(bucket: "${bucket}")
@@ -2543,16 +2566,14 @@ async function listFactionStarbasesForInventory(settings, faction) {
   const rows = parseInfluxCsv(csv);
   const all = Array.from(new Set(rows.map((r) => String(r.starbase || '').trim()).filter(Boolean))).sort();
   if (!all.length) return [];
-  if (faction === 'MUD') {
-    return all.filter((s) => s.startsWith('MUD-'));
-  }
-  if (faction === 'ONI') {
-    return all.filter((s) => s.startsWith('ONI-'));
-  }
-  if (faction === 'USTUR') {
-    return all.filter((s) => s.startsWith('UST-') || s.startsWith('MRZ-'));
-  }
-  return all;
+  // Filter the active starbases down to those that belong to the
+  // active faction AND have actual inventory data. The membership
+  // map is explicit (FACTION_STARBASES) because MRZ-* starbases are
+  // split across all three factions.
+  const membership = FACTION_STARBASES[faction];
+  if (!membership) return all;
+  const set = new Set(membership);
+  return all.filter((s) => set.has(s));
 }
 
 function buildSharedRpcUrl(rpcBaseUrl, apiKey) {
