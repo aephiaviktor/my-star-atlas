@@ -486,9 +486,67 @@
           </div>
 
           <div class="production-panel" data-production-panel="pct-charts">
-            <section class="work-surface quiet-panel">
-              <h2>PCR Charts</h2>
-            </section>
+            <div class="pcr-toolbar">
+              <span class="pcr-toolbar-label">Production / Consumption</span>
+              <span id="pcr-faction-note" class="pcr-toolbar-note">Last 14 days · production ÷ consumption</span>
+            </div>
+
+            <div id="pcr-chart-grid" class="pcr-chart-grid">
+              <section class="pcr-chart-card" data-pcr-category="raw-material">
+                <header class="pcr-chart-header">
+                  <h3 class="pcr-chart-title">Raw Material</h3>
+                  <span id="pcr-raw-material-summary" class="pcr-chart-summary">--</span>
+                </header>
+                <div id="pcr-raw-material-svg-wrap" class="pcr-chart-svg-wrap" aria-label="Raw Material PCR over the last 14 days">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+                <div id="pcr-raw-material-legend" class="pcr-chart-legend"></div>
+              </section>
+
+              <section class="pcr-chart-card" data-pcr-category="consumable">
+                <header class="pcr-chart-header">
+                  <h3 class="pcr-chart-title">Consumable</h3>
+                  <span id="pcr-consumable-summary" class="pcr-chart-summary">--</span>
+                </header>
+                <div id="pcr-consumable-svg-wrap" class="pcr-chart-svg-wrap" aria-label="Consumable PCR over the last 14 days">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+                <div id="pcr-consumable-legend" class="pcr-chart-legend"></div>
+              </section>
+
+              <section class="pcr-chart-card" data-pcr-category="compound-material">
+                <header class="pcr-chart-header">
+                  <h3 class="pcr-chart-title">Compound Material</h3>
+                  <span id="pcr-compound-material-summary" class="pcr-chart-summary">--</span>
+                </header>
+                <div id="pcr-compound-material-svg-wrap" class="pcr-chart-svg-wrap" aria-label="Compound Material PCR over the last 14 days">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+                <div id="pcr-compound-material-legend" class="pcr-chart-legend"></div>
+              </section>
+
+              <section class="pcr-chart-card" data-pcr-category="component">
+                <header class="pcr-chart-header">
+                  <h3 class="pcr-chart-title">Component</h3>
+                  <span id="pcr-component-summary" class="pcr-chart-summary">--</span>
+                </header>
+                <div id="pcr-component-svg-wrap" class="pcr-chart-svg-wrap" aria-label="Component PCR over the last 14 days">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+                <div id="pcr-component-legend" class="pcr-chart-legend"></div>
+              </section>
+
+              <section class="pcr-chart-card pcr-chart-card-wide" data-pcr-category="data">
+                <header class="pcr-chart-header">
+                  <h3 class="pcr-chart-title">Data</h3>
+                  <span id="pcr-data-summary" class="pcr-chart-summary">--</span>
+                </header>
+                <div id="pcr-data-svg-wrap" class="pcr-chart-svg-wrap" aria-label="Data PCR over the last 14 days">
+                  <div class="chart-empty">Awaiting Influx connection</div>
+                </div>
+                <div id="pcr-data-legend" class="pcr-chart-legend"></div>
+              </section>
+            </div>
           </div>
 
           <div class="production-panel" data-production-panel="surplus">

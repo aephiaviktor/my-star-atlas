@@ -135,6 +135,35 @@ const consTotalTopNote = document.querySelector('#consumption-total-top-note');
 const consTotalAssetCountValue = document.querySelector('#consumption-total-asset-count-value');
 const consTotalAssetCountNote = document.querySelector('#consumption-total-asset-count-note');
 const consTotalChartGrid = document.querySelector('#consumption-total-chart-grid');
+const pcrChartGrid = document.querySelector('#pcr-chart-grid');
+const pcrFactionNote = document.querySelector('#pcr-faction-note');
+const pcrCategoryRefs = Object.freeze({
+  'raw-material': {
+    summary: document.querySelector('#pcr-raw-material-summary'),
+    svgWrap: document.querySelector('#pcr-raw-material-svg-wrap'),
+    legend: document.querySelector('#pcr-raw-material-legend'),
+  },
+  consumable: {
+    summary: document.querySelector('#pcr-consumable-summary'),
+    svgWrap: document.querySelector('#pcr-consumable-svg-wrap'),
+    legend: document.querySelector('#pcr-consumable-legend'),
+  },
+  'compound-material': {
+    summary: document.querySelector('#pcr-compound-material-summary'),
+    svgWrap: document.querySelector('#pcr-compound-material-svg-wrap'),
+    legend: document.querySelector('#pcr-compound-material-legend'),
+  },
+  component: {
+    summary: document.querySelector('#pcr-component-summary'),
+    svgWrap: document.querySelector('#pcr-component-svg-wrap'),
+    legend: document.querySelector('#pcr-component-legend'),
+  },
+  data: {
+    summary: document.querySelector('#pcr-data-summary'),
+    svgWrap: document.querySelector('#pcr-data-svg-wrap'),
+    legend: document.querySelector('#pcr-data-legend'),
+  },
+});
 const factionButtons = Array.from(document.querySelectorAll('.faction-button'));
 
 let currentSection = 'production';
@@ -158,6 +187,7 @@ let latestConsUpgradingResult = null;
 let latestConsScanningResult = null;
 let latestConsCargoResult = null;
 let latestConsTotalResult = null;
+let latestPcrResult = null;
 let selectedConsMiningStarbase = '';
 let selectedConsMiningFleet = '';
 let selectedConsCraftingStarbase = '';
@@ -202,7 +232,56 @@ const assetChartColors = Object.freeze({
   'Survey Data Unit': '#ab7b72',
   Titanium: '#5f6674',
   'Titanium Ore': '#7f6f66',
+  // Additional assets surfaced by PCR Charts (production + consumption sides)
+  'Copper Wire': '#a36a3d',
+  Diamond: '#9fd8e2',
+  Graphene: '#3f5e6e',
+  Ink: '#2f2a2c',
+  Magner: '#7d8da1',
+  Rochinol: '#8d5f9c',
+  Toolkits: '#9c7a4f',
+  'Energy Substrate': '#5e8b7a',
+  Electromagnet: '#a45c4f',
+  'Power Source': '#d6a64a',
+  'Particle Accelerator': '#6f8da0',
+  'Super Conductor': '#4f9ab2',
+  'Strange Emitter': '#b65d9a',
 });
+
+const PCR_CATEGORIES = Object.freeze([
+  Object.freeze({
+    id: 'raw-material',
+    label: 'Raw Material',
+    assets: ['Arco', 'Biomass', 'Carbon', 'Copper Ore', 'Diamond', 'Hydrogen', 'Iron Ore', 'Lumanite', 'Nitrogen', 'Rochinol', 'Silica', 'Titanium Ore'],
+  }),
+  Object.freeze({
+    id: 'consumable',
+    label: 'Consumable',
+    assets: ['Ammunition', 'Food', 'Fuel', 'Ink', 'Toolkits'],
+  }),
+  Object.freeze({
+    id: 'compound-material',
+    label: 'Compound Material',
+    assets: ['Aerogel', 'Crystal Lattice', 'Copper Wire', 'Copper', 'Electronics', 'Graphene', 'Hydrocarbon', 'Iron', 'Magner', 'Polymer', 'Steel', 'Titanium'],
+  }),
+  Object.freeze({
+    id: 'component',
+    label: 'Component',
+    assets: ['Energy Substrate', 'Electromagnet', 'Framework', 'Field Stabilizer', 'Power Source', 'Particle Accelerator', 'Super Conductor', 'Strange Emitter'],
+  }),
+  Object.freeze({
+    id: 'data',
+    label: 'Data',
+    assets: ['Survey Data Unit'],
+  }),
+]);
+
+// PCR chart state: which assets are visible per category. Persists across
+// sub-tab toggles and faction switches, scoped per faction.
+const pcrAssetVisibility = new Map(); // faction -> Map<categoryId, Set<assetName>>
+const PCR_MAX_RATIO = 3.0;
+const PCR_MAX_INF_RATIO = 3.0; // visual cap for production > 0, consumption == 0
+const PCR_RATIO_REFERENCE = 1.0;
 
 // Per-faction caching for instant switching and per-filter caching
 const factionCache = new Map();
@@ -414,6 +493,7 @@ function resetFactionScopedState() {
   latestConsScanningResult = null;
   latestConsCargoResult = null;
   latestConsTotalResult = null;
+  latestPcrResult = null;
 }
 
 function updateTitle() {
@@ -1699,6 +1779,426 @@ async function refreshConsTotal() {
   }
 }
 
+/* ---- PCR Charts ---- */
+
+function pcrGetCategoryVisibility(faction, categoryId) {
+  if (!pcrAssetVisibility.has(faction)) pcrAssetVisibility.set(faction, new Map());
+  const factionMap = pcrAssetVisibility.get(faction);
+  if (!factionMap.has(categoryId)) factionMap.set(categoryId, new Set());
+  return factionMap.get(categoryId);
+}
+
+function pcrToggleAsset(categoryId, assetName) {
+  const faction = normalizeFaction(latestSettings?.faction);
+  const set = pcrGetCategoryVisibility(faction, categoryId);
+  if (set.has(assetName)) set.delete(assetName);
+  else set.add(assetName);
+  if (latestPcrResult && latestPcrResult.faction === faction) {
+    renderPcrCharts(latestPcrResult);
+  }
+}
+
+function pcrBucketAssetsByCategory(result) {
+  const buckets = new Map();
+  for (const category of PCR_CATEGORIES) {
+    buckets.set(category.id, { category, assets: [] });
+  }
+  const assets = Array.isArray(result?.assets) ? result.assets : [];
+  const assetsByLabel = new Map(assets.map((asset) => [asset.label, asset]));
+  for (const category of PCR_CATEGORIES) {
+    const bucket = buckets.get(category.id);
+    for (const assetName of category.assets) {
+      const asset = assetsByLabel.get(assetName);
+      if (!asset) continue;
+      bucket.assets.push(asset);
+    }
+  }
+  return buckets;
+}
+
+function pcrRatioValue(asset, day) {
+  if (day.ratio === null) {
+    if (day.production > 0 && day.consumption === 0) {
+      return { ratio: PCR_MAX_INF_RATIO, clipped: true };
+    }
+    return null; // both zero → skip
+  }
+  if (day.ratio > PCR_MAX_RATIO) {
+    return { ratio: PCR_MAX_RATIO, clipped: true };
+  }
+  return { ratio: day.ratio, clipped: false };
+}
+
+function pcrFormatRatio(ratio) {
+  if (!Number.isFinite(ratio)) return '∞';
+  if (ratio >= PCR_MAX_RATIO - 1e-6) return '∞';
+  if (ratio === 0) return '0.00';
+  if (ratio >= 10) return ratio.toFixed(1);
+  if (ratio >= 1) return ratio.toFixed(2);
+  return ratio.toFixed(2);
+}
+
+function pcrFormatInteger(value) {
+  const n = Number(value) || 0;
+  if (!Number.isFinite(n)) return '--';
+  if (Math.abs(n) >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (Math.abs(n) >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(Math.round(n));
+}
+
+function pcrCategorySummary(bucket) {
+  const visible = bucket.assets;
+  if (!visible.length) return 'No assets in this category yet';
+  const totalProd = visible.reduce((sum, asset) => sum + asset.productionTotal, 0);
+  const totalCons = visible.reduce((sum, asset) => sum + asset.consumptionTotal, 0);
+  if (totalProd === 0 && totalCons === 0) {
+    return `${visible.length} asset${visible.length === 1 ? '' : 's'} · no activity`;
+  }
+  let ratioLabel;
+  if (totalProd > 0 && totalCons === 0) ratioLabel = '∞';
+  else if (totalCons === 0) ratioLabel = '--';
+  else ratioLabel = (totalProd / totalCons).toFixed(2);
+  return `${visible.length} asset${visible.length === 1 ? '' : 's'} · P/C ${ratioLabel} (${pcrFormatInteger(totalProd)} / ${pcrFormatInteger(totalCons)})`;
+}
+
+function pcrCreateLineChart(category, days, assets) {
+  const wrap = pcrCategoryRefs[category.id]?.svgWrap;
+  if (!wrap) return;
+
+  wrap.textContent = '';
+  if (!assets.length) {
+    const empty = document.createElement('div');
+    empty.className = 'pcr-empty-state';
+    empty.textContent = 'No activity for this player profile';
+    wrap.appendChild(empty);
+    return;
+  }
+
+  const padding = { top: 14, right: 14, bottom: 26, left: 40 };
+  const dayCount = days.length;
+
+  // Measure available space; default to 600x320 if the wrap hasn't been
+  // laid out yet.
+  const width = Math.max(wrap.clientWidth, 320);
+  const height = Math.max(wrap.clientHeight, 280);
+  const innerWidth = Math.max(width - padding.left - padding.right, 1);
+  const innerHeight = Math.max(height - padding.top - padding.bottom, 1);
+  const xStep = dayCount > 1 ? innerWidth / (dayCount - 1) : 0;
+
+  // Grid + balance line. Rendered as positioned divs so text stays at
+  // consistent CSS pixel size regardless of the wrap width.
+  const grid = document.createElement('div');
+  grid.className = 'pcr-chart-grid-overlay';
+  grid.style.position = 'absolute';
+  grid.style.left = '0';
+  grid.style.top = '0';
+  grid.style.right = '0';
+  grid.style.bottom = '0';
+  grid.style.pointerEvents = 'none';
+
+  const yTicks = [0, 0.5, 1, 1.5, 2, 2.5, 3];
+  for (const tick of yTicks) {
+    const y = padding.top + innerHeight - (tick / PCR_MAX_RATIO) * innerHeight;
+    const line = document.createElement('div');
+    line.className = `pcr-grid-line${Math.abs(tick - 1) < 1e-6 ? ' pcr-grid-balance' : ''}`;
+    line.style.position = 'absolute';
+    line.style.left = `${padding.left}px`;
+    line.style.right = `${padding.right}px`;
+    line.style.top = `${y}px`;
+    line.style.height = '1px';
+    line.style.background = 'rgba(143, 168, 178, 0.18)';
+    if (Math.abs(tick - 1) >= 1e-6) grid.appendChild(line);
+
+    const label = document.createElement('div');
+    label.className = 'pcr-axis-label';
+    label.textContent = String(tick);
+    label.style.position = 'absolute';
+    label.style.right = `${width - padding.left + 6}px`;
+    label.style.top = `${y - 6}px`;
+    label.style.color = 'var(--muted)';
+    label.style.fontSize = '10px';
+    label.style.lineHeight = '12px';
+    label.style.fontVariantNumeric = 'tabular-nums';
+    grid.appendChild(label);
+  }
+
+  // y-axis caption
+  const yCaption = document.createElement('div');
+  yCaption.className = 'pcr-y-caption';
+  yCaption.textContent = 'P/C ratio';
+  yCaption.style.position = 'absolute';
+  yCaption.style.left = `${padding.left}px`;
+  yCaption.style.top = '0px';
+  yCaption.style.color = 'var(--muted)';
+  yCaption.style.fontSize = '10px';
+  yCaption.style.lineHeight = '12px';
+  grid.appendChild(yCaption);
+
+  // x-axis day labels (every other day, plus first and last)
+  for (let i = 0; i < days.length; i += 1) {
+    if (i !== 0 && i !== days.length - 1 && i % 2 !== 0) continue;
+    const day = days[i];
+    const x = padding.left + (dayCount > 1 ? i * xStep : innerWidth / 2);
+    const label = document.createElement('div');
+    label.className = 'pcr-day-label';
+    label.textContent = day.label;
+    label.style.position = 'absolute';
+    label.style.left = `${x}px`;
+    label.style.top = `${padding.top + innerHeight + 4}px`;
+    label.style.transform = 'translateX(-50%)';
+    label.style.color = 'var(--muted)';
+    label.style.fontSize = '9px';
+    label.style.lineHeight = '12px';
+    label.style.fontVariantNumeric = 'tabular-nums';
+    grid.appendChild(label);
+  }
+
+  wrap.appendChild(grid);
+
+  // SVG layer for the lines and points. Uses 1:1 viewBox so the lines
+  // stay 1:1 with the CSS pixel grid above.
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'pcr-chart-svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', `${category.label} production to consumption ratio over the last 14 days`);
+
+  // Balance line as part of the SVG so it stays anchored to the data
+  // (CSS pixel lines would jitter on resize; the SVG is laid out once
+  // per render).
+  const balanceY = padding.top + innerHeight - (1 / PCR_MAX_RATIO) * innerHeight;
+  const balance = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  balance.setAttribute('x1', String(padding.left));
+  balance.setAttribute('x2', String(padding.left + innerWidth));
+  balance.setAttribute('y1', String(balanceY));
+  balance.setAttribute('y2', String(balanceY));
+  balance.setAttribute('class', 'pcr-balance-line');
+  svg.appendChild(balance);
+
+  const faction = normalizeFaction(latestSettings?.faction);
+  const visibilitySet = pcrGetCategoryVisibility(faction, category.id);
+  const hiddenAssets = new Set();
+  for (const asset of assets) {
+    if (!visibilitySet.has(asset.label)) hiddenAssets.add(asset.label);
+  }
+
+  const segments = [];
+  for (const asset of assets) {
+    const color = getAssetChartColor(asset.label);
+    const isHidden = hiddenAssets.has(asset.label);
+    const points = [];
+    for (let i = 0; i < asset.days.length; i += 1) {
+      const day = asset.days[i];
+      const resolved = pcrRatioValue(asset, day);
+      if (!resolved) continue;
+      const x = padding.left + (dayCount > 1 ? i * xStep : innerWidth / 2);
+      const y = padding.top + innerHeight - (resolved.ratio / PCR_MAX_RATIO) * innerHeight;
+      points.push({ x, y, day, resolved, asset });
+    }
+    if (points.length < 1) continue;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const d = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
+    path.setAttribute('d', d);
+    path.setAttribute('class', `pcr-line${isHidden ? ' muted' : ''}`);
+    path.setAttribute('stroke', isHidden ? 'rgba(143, 168, 178, 0.4)' : color);
+    path.dataset.asset = asset.label;
+    svg.appendChild(path);
+    segments.push({ asset, color, points, isHidden });
+
+    for (const p of points) {
+      if (p.resolved.clipped) {
+        const tri = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const size = 4;
+        const dTri = `M ${p.x} ${p.y - size} L ${p.x - size} ${p.y + size / 2} L ${p.x + size} ${p.y + size / 2} Z`;
+        tri.setAttribute('d', dTri);
+        tri.setAttribute('class', `pcr-clipped-point${isHidden ? ' muted' : ''}`);
+        tri.setAttribute('fill', isHidden ? 'rgba(143, 168, 178, 0.4)' : color);
+        tri.setAttribute('stroke', isHidden ? 'rgba(143, 168, 178, 0.4)' : color);
+        svg.appendChild(tri);
+      } else {
+        const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        dot.setAttribute('cx', String(p.x.toFixed(2)));
+        dot.setAttribute('cy', String(p.y.toFixed(2)));
+        dot.setAttribute('r', '2.4');
+        dot.setAttribute('class', `pcr-point${isHidden ? ' muted' : ''}`);
+        dot.setAttribute('fill', isHidden ? 'rgba(143, 168, 178, 0.4)' : color);
+        svg.appendChild(dot);
+      }
+    }
+  }
+
+  // Tooltip layer
+  const tooltip = document.createElement('div');
+  tooltip.className = 'pcr-tooltip';
+  tooltip.style.display = 'none';
+  wrap.appendChild(svg);
+  wrap.appendChild(tooltip);
+
+  const pxPerUnitX = () => wrap.clientWidth / width;
+  const pxPerUnitY = () => wrap.clientHeight / height;
+
+  const onMove = (event) => {
+    if (!segments.length) return;
+    const rect = svg.getBoundingClientRect();
+    const xPx = event.clientX - rect.left;
+    const xCss = (xPx / rect.width) * width;
+    if (xCss < padding.left - 4 || xCss > padding.left + innerWidth + 4) {
+      tooltip.style.display = 'none';
+      return;
+    }
+    let dayIndex;
+    if (dayCount === 1) dayIndex = 0;
+    else {
+      dayIndex = Math.round((xCss - padding.left) / xStep);
+      dayIndex = Math.max(0, Math.min(dayCount - 1, dayIndex));
+    }
+    const day = days[dayIndex];
+    const visibleSegments = segments.filter((s) => !s.isHidden);
+    if (!visibleSegments.length) {
+      tooltip.style.display = 'none';
+      return;
+    }
+    const rows = visibleSegments
+      .map((seg) => {
+        const assetDay = seg.asset.days[dayIndex];
+        const resolved = pcrRatioValue(seg.asset, assetDay);
+        const ratioText = !resolved
+          ? 'no data'
+          : resolved.clipped
+            ? '∞'
+            : pcrFormatRatio(resolved.ratio);
+        const prod = pcrFormatInteger(assetDay.production);
+        const cons = pcrFormatInteger(assetDay.consumption);
+        return `<div class="pcr-tooltip-row"><span class="pcr-tooltip-swatch" style="background:${seg.color}"></span><span>${seg.asset.label}</span><span style="color:var(--muted)">${prod} / ${cons}</span><span style="margin-left:6px">${ratioText}</span></div>`;
+      })
+      .join('');
+    tooltip.innerHTML = `<div style="font-weight:600;margin-bottom:4px">${day.label}</div>${rows}`;
+    tooltip.style.display = 'block';
+    const left = padding.left + dayIndex * xStep;
+    const tipRect = tooltip.getBoundingClientRect();
+    const wrapRect = wrap.getBoundingClientRect();
+    let tx = left * pxPerUnitX() - tipRect.width / 2;
+    tx = Math.max(4, Math.min(wrapRect.width - tipRect.width - 4, tx));
+    const ty = padding.top * pxPerUnitY() + 4;
+    tooltip.style.left = `${tx}px`;
+    tooltip.style.top = `${ty}px`;
+  };
+  const onLeave = () => {
+    tooltip.style.display = 'none';
+  };
+  svg.addEventListener('mousemove', onMove);
+  svg.addEventListener('mouseleave', onLeave);
+}
+
+function pcrRenderLegend(category, assets) {
+  const legend = pcrCategoryRefs[category.id]?.legend;
+  if (!legend) return;
+  legend.textContent = '';
+  if (!assets.length) return;
+  const faction = normalizeFaction(latestSettings?.faction);
+  const visibilitySet = pcrGetCategoryVisibility(faction, category.id);
+  for (const asset of assets) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'pcr-legend-chip';
+    const isHidden = !visibilitySet.has(asset.label);
+    if (isHidden) chip.classList.add('muted');
+    const color = getAssetChartColor(asset.label);
+    const swatch = document.createElement('span');
+    swatch.className = 'pcr-legend-swatch';
+    swatch.style.background = color;
+    chip.appendChild(swatch);
+    const label = document.createElement('span');
+    label.textContent = asset.label;
+    chip.appendChild(label);
+    const count = document.createElement('span');
+    count.className = 'pcr-legend-count';
+    count.textContent = `${pcrFormatInteger(asset.productionTotal)}/${pcrFormatInteger(asset.consumptionTotal)}`;
+    chip.appendChild(count);
+    chip.title = isHidden
+      ? `Click to show ${asset.label}`
+      : `Click to hide ${asset.label}`;
+    chip.addEventListener('click', () => pcrToggleAsset(category.id, asset.label));
+    legend.appendChild(chip);
+  }
+}
+
+function pcrRenderCategory(category, assets) {
+  const refs = pcrCategoryRefs[category.id];
+  if (!refs) return;
+  if (refs.summary) {
+    refs.summary.textContent = pcrCategorySummary({ assets });
+  }
+  pcrCreateLineChart(category, latestPcrResult?.days || [], assets);
+  pcrRenderLegend(category, assets);
+}
+
+function pcrRenderEmpty(message) {
+  if (pcrFactionNote) pcrFactionNote.textContent = `Last 14 days · production ÷ consumption · ${message}`;
+  for (const category of PCR_CATEGORIES) {
+    const refs = pcrCategoryRefs[category.id];
+    if (!refs) continue;
+    if (refs.summary) refs.summary.textContent = '--';
+    if (refs.svgWrap) {
+      refs.svgWrap.textContent = '';
+      const empty = document.createElement('div');
+      empty.className = 'chart-empty';
+      empty.textContent = message;
+      refs.svgWrap.appendChild(empty);
+    }
+    if (refs.legend) refs.legend.textContent = '';
+  }
+}
+
+function renderPcrCharts(result) {
+  if (!pcrChartGrid) return;
+  latestPcrResult = result;
+  if (!result || !result.ok) {
+    pcrRenderEmpty('Influx unavailable');
+    return;
+  }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'pcr', result);
+
+  if (pcrFactionNote) {
+    const faction = normalizeFaction(latestSettings?.faction);
+    const parts = ['Last 14 days', `Faction ${faction}`, 'production ÷ consumption'];
+    if (result.productionError) parts.push(`production: ${result.productionError}`);
+    if (result.consumptionError) parts.push(`consumption: ${result.consumptionError}`);
+    pcrFactionNote.textContent = parts.join(' · ');
+  }
+
+  const buckets = pcrBucketAssetsByCategory(result);
+  for (const category of PCR_CATEGORIES) {
+    const bucket = buckets.get(category.id);
+    pcrRenderCategory(category, bucket.assets);
+  }
+}
+
+async function refreshPcrCharts() {
+  if (!pcrChartGrid) return;
+  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
+    pcrRenderEmpty('Awaiting Influx connection');
+    return;
+  }
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cached = getCachedFactionResult(faction, 'pcr');
+  if (cached) {
+    renderPcrCharts(cached);
+  } else {
+    pcrRenderEmpty('Loading PCR data...');
+  }
+  try {
+    const result = await api.getPcrCharts(latestSettings || getFormPayload());
+    renderPcrCharts(result);
+  } catch (error) {
+    console.error(error);
+    if (!cached) pcrRenderEmpty('Influx unavailable');
+  }
+}
+
 function createConsumptionBarCard(asset, fallbackIndex) {
   const maxValue = Math.max(...asset.days.map((day) => Number(day.value) || 0), 1);
   const card = document.createElement('section');
@@ -2009,6 +2509,16 @@ function setActiveSubtab(subtab) {
     if (!latestConsUpgradingResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsUpgrading();
     if (!latestConsTotalResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsTotal();
   }
+  if (subtab === 'pct-charts') {
+    if (!latestPcrResult && hasInfluxSettings(latestSettings || getFormPayload())) {
+      refreshPcrCharts();
+    } else if (latestPcrResult) {
+      // The initial render may have happened while the panel was hidden
+      // (clientWidth was 0). Re-render now that the wrap is laid out so
+      // the HTML labels line up with the SVG.
+      renderPcrCharts(latestPcrResult);
+    }
+  }
 }
 
 async function loadInitialState() {
@@ -2036,6 +2546,7 @@ async function loadInitialState() {
   if (hasInfluxSettings(settings)) initialLoads.push(refreshConsCrafting());
   if (hasInfluxSettings(settings)) initialLoads.push(refreshConsUpgrading());
   if (hasInfluxSettings(settings)) initialLoads.push(refreshConsTotal());
+  if (hasInfluxSettings(settings)) initialLoads.push(refreshPcrCharts());
   await Promise.all(initialLoads);
 }
 
@@ -2061,6 +2572,7 @@ async function refreshFactionScopedViews() {
   renderConsScanningEmpty(hasInfluxSettings(latestSettings) ? 'Loading scanning consumption...' : 'Awaiting Influx connection');
   renderConsCargoEmpty(hasInfluxSettings(latestSettings) ? 'Loading cargo consumption...' : 'Awaiting Influx connection');
   renderConsTotalEmpty(hasInfluxSettings(latestSettings) ? 'Loading total consumption...' : 'Awaiting Influx connection');
+  pcrRenderEmpty(hasInfluxSettings(latestSettings) ? 'Loading PCR data...' : 'Awaiting Influx connection');
   await Promise.all([
     refreshFleets(),
     hasInfluxSettings(latestSettings) ? refreshDailySdu() : Promise.resolve(),
@@ -2073,6 +2585,7 @@ async function refreshFactionScopedViews() {
     hasInfluxSettings(latestSettings) ? refreshConsCrafting() : Promise.resolve(),
     hasInfluxSettings(latestSettings) ? refreshConsUpgrading() : Promise.resolve(),
     hasInfluxSettings(latestSettings) ? refreshConsTotal() : Promise.resolve(),
+    hasInfluxSettings(latestSettings) ? refreshPcrCharts() : Promise.resolve(),
   ]);
 }
 
@@ -2111,6 +2624,8 @@ factionButtons.forEach((button) => {
     if (cachedConsCrafting) renderConsCrafting(cachedConsCrafting);
     const cachedConsUpgrading = getCachedFilterResult(faction, 'consUpgrading', selectedConsUpgradingStarbase, selectedConsUpgradingComponent);
     if (cachedConsUpgrading) renderConsUpgrading(cachedConsUpgrading);
+    const cachedPcr = getCachedFactionResult(faction, 'pcr');
+    if (cachedPcr) renderPcrCharts(cachedPcr);
 
     saveStatus.textContent = `Switching to ${clickedFaction}...`;
     try {
@@ -2129,6 +2644,7 @@ factionButtons.forEach((button) => {
         hasInfluxSettings(latestSettings) ? refreshConsCrafting() : Promise.resolve(),
         hasInfluxSettings(latestSettings) ? refreshConsUpgrading() : Promise.resolve(),
         hasInfluxSettings(latestSettings) ? refreshConsTotal() : Promise.resolve(),
+        hasInfluxSettings(latestSettings) ? refreshPcrCharts() : Promise.resolve(),
       ]);
       saveStatus.textContent = `${clickedFaction} selected`;
       setTimeout(() => {

@@ -2117,6 +2117,240 @@ ${scopeFilterFlux}
   };
 }
 
+// PCR = Production / Consumption. One production query, three consumption
+// queries (the InfluxDB optimizer can only push a single _field filter down
+// per measurement, so consumption has to be split when the field names
+// differ). The renderer buckets the resulting series into the 5 categories
+// and draws the line charts.
+async function fetchPcrCharts(payload) {
+  const settings = normalizeSettings(payload || (await readSettings()));
+  const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+
+  // Production sources:
+  //   - mining  : _field == "amount"      → asset = r.rss
+  //   - crafting: _field == "amount" AND r.type == "Output" → asset = r.output
+  //   - sdu     : _field == "amount"      → asset = "Survey Data Unit"
+  // sdu rows may or may not carry r.starbase, so we don't require it for sdu.
+  const productionFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._field == "amount")
+  |> filter(fn: (r) =>
+    (r._measurement == "mining" and exists r.rss) or
+    (r._measurement == "crafting" and (exists r.type) and r.type == "Output" and exists r.output) or
+    (r._measurement == "sdu" and exists r.fleet)
+  )
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "sdu" or exists r.starbase)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["_measurement", "rss", "output", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["_measurement", "rss", "output", "_time", "_value"])
+  |> sort(columns: ["_measurement", "rss", "output", "_time"])`;
+
+  // Consumption has to be split because mining, sdu, movement use different
+  // _field names than crafting/upgrade. The InfluxDB planner only pushes a
+  // single _field filter per query, so we run three narrower queries and
+  // merge the per-day totals on the JS side.
+  const miningConsumptionFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "mining")
+  |> filter(fn: (r) => r._field == "burnedFuel" or r._field == "burnedFood" or r._field == "burnedAmmo")
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.fleet)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["_field", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["_field", "_time", "_value"])
+  |> sort(columns: ["_field", "_time"])`;
+
+  const craftUpgradeConsumptionFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._field == "amount")
+  |> filter(fn: (r) =>
+    (r._measurement == "crafting" and (exists r.type) and r.type == "Input" and exists r.input) or
+    (r._measurement == "upgrade" and exists r.input)
+  )
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.starbase)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["_measurement", "input", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["_measurement", "input", "_time", "_value"])
+  |> sort(columns: ["_measurement", "input", "_time"])`;
+
+  const sduMovementConsumptionFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) =>
+    (r._measurement == "sdu" and r._field == "burnedFood") or
+    (r._measurement == "movement" and r._field == "burnedFuel")
+  )
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "sdu" or exists r.fleet)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["_measurement", "_field", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["_measurement", "_field", "_time", "_value"])
+  |> sort(columns: ["_measurement", "_field", "_time"])`;
+
+  let productionError = null;
+  let miningConsumptionError = null;
+  let craftUpgradeConsumptionError = null;
+  let sduMovementConsumptionError = null;
+  const [productionCsv, miningConsumptionCsv, craftUpgradeConsumptionCsv, sduMovementConsumptionCsv] = await Promise.all([
+    queryInfluxFlux(settings, productionFlux).catch((error) => { productionError = error; return ''; }),
+    queryInfluxFlux(settings, miningConsumptionFlux).catch((error) => { miningConsumptionError = error; return ''; }),
+    queryInfluxFlux(settings, craftUpgradeConsumptionFlux).catch((error) => { craftUpgradeConsumptionError = error; return ''; }),
+    queryInfluxFlux(settings, sduMovementConsumptionFlux).catch((error) => { sduMovementConsumptionError = error; return ''; }),
+  ]);
+  if (productionError && miningConsumptionError && craftUpgradeConsumptionError && sduMovementConsumptionError) {
+    throw productionError;
+  }
+
+  const dayTemplates = createDayTemplates();
+  const dayKeySet = new Set(dayTemplates.map((day) => day.isoDate));
+
+  // Map<assetName, Map<isoDate, number>>
+  const productionTotals = new Map();
+  if (!productionError) {
+    const rows = parseInfluxCsv(productionCsv);
+    for (const row of rows) {
+      const measurement = String(row._measurement || '').trim();
+      const date = new Date(row._time);
+      if (Number.isNaN(date.getTime())) continue;
+      const key = getUtcDateKey(date);
+      if (!dayKeySet.has(key)) continue;
+      const value = Number(row._value || 0);
+      if (!Number.isFinite(value) || value <= 0) continue;
+      let asset = '';
+      if (measurement === 'mining') asset = String(row.rss || '').trim();
+      else if (measurement === 'crafting') asset = String(row.output || '').trim();
+      else if (measurement === 'sdu') asset = 'Survey Data Unit';
+      if (!asset) continue;
+      if (!productionTotals.has(asset)) productionTotals.set(asset, new Map());
+      const dayMap = productionTotals.get(asset);
+      dayMap.set(key, (dayMap.get(key) || 0) + value);
+    }
+  }
+
+  const consumptionTotals = new Map();
+  const addConsumption = (asset, dateKey, value) => {
+    if (!asset) return;
+    if (!consumptionTotals.has(asset)) consumptionTotals.set(asset, new Map());
+    const dayMap = consumptionTotals.get(asset);
+    dayMap.set(dateKey, (dayMap.get(dateKey) || 0) + value);
+  };
+
+  if (!miningConsumptionError) {
+    const rows = parseInfluxCsv(miningConsumptionCsv);
+    for (const row of rows) {
+      const field = String(row._field || '').trim();
+      const date = new Date(row._time);
+      if (Number.isNaN(date.getTime())) continue;
+      const key = getUtcDateKey(date);
+      if (!dayKeySet.has(key)) continue;
+      const value = Number(row._value || 0);
+      if (!Number.isFinite(value) || value <= 0) continue;
+      let asset = '';
+      if (field === 'burnedFuel') asset = 'Fuel';
+      else if (field === 'burnedFood') asset = 'Food';
+      else if (field === 'burnedAmmo') asset = 'Ammunition';
+      addConsumption(asset, key, value);
+    }
+  }
+
+  if (!craftUpgradeConsumptionError) {
+    const rows = parseInfluxCsv(craftUpgradeConsumptionCsv);
+    for (const row of rows) {
+      const input = String(row.input || '').trim();
+      const date = new Date(row._time);
+      if (Number.isNaN(date.getTime())) continue;
+      const key = getUtcDateKey(date);
+      if (!dayKeySet.has(key)) continue;
+      const value = Number(row._value || 0);
+      if (!Number.isFinite(value) || value <= 0) continue;
+      addConsumption(input, key, value);
+    }
+  }
+
+  if (!sduMovementConsumptionError) {
+    const rows = parseInfluxCsv(sduMovementConsumptionCsv);
+    for (const row of rows) {
+      const measurement = String(row._measurement || '').trim();
+      const field = String(row._field || '').trim();
+      const date = new Date(row._time);
+      if (Number.isNaN(date.getTime())) continue;
+      const key = getUtcDateKey(date);
+      if (!dayKeySet.has(key)) continue;
+      const value = Number(row._value || 0);
+      if (!Number.isFinite(value) || value <= 0) continue;
+      let asset = '';
+      if (measurement === 'sdu' && field === 'burnedFood') asset = 'Food';
+      else if (measurement === 'movement' && field === 'burnedFuel') asset = 'Fuel';
+      addConsumption(asset, key, value);
+    }
+  }
+
+  const assetsSet = new Set([...productionTotals.keys(), ...consumptionTotals.keys()]);
+  const assets = Array.from(assetsSet)
+    .map((label) => {
+      const productionMap = productionTotals.get(label) || new Map();
+      const consumptionMap = consumptionTotals.get(label) || new Map();
+      const days = dayTemplates.map((day) => {
+        const production = productionMap.get(day.isoDate) || 0;
+        const consumption = consumptionMap.get(day.isoDate) || 0;
+        let ratio = null;
+        if (production > 0 && consumption > 0) {
+          ratio = production / consumption;
+        } else if (production > 0 && consumption === 0) {
+          ratio = null; // infinity → renderer clips to y-max
+        } else if (production === 0 && consumption > 0) {
+          ratio = 0;
+        } else {
+          ratio = null; // both zero → omit
+        }
+        return {
+          isoDate: day.isoDate,
+          label: day.label,
+          production,
+          consumption,
+          ratio,
+        };
+      });
+      return {
+        label,
+        days,
+        productionTotal: days.reduce((sum, day) => sum + day.production, 0),
+        consumptionTotal: days.reduce((sum, day) => sum + day.consumption, 0),
+      };
+    })
+    .filter((asset) => asset.productionTotal > 0 || asset.consumptionTotal > 0)
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return {
+    ok: true,
+    days: dayTemplates.map((day) => ({ isoDate: day.isoDate, label: day.label })),
+    assets,
+    faction: normalizeFaction(settings.faction),
+    scopeNote: getInfluxScopeNote(settings),
+    productionError: productionError ? String(productionError?.message || productionError) : null,
+    consumptionError:
+      miningConsumptionError || craftUpgradeConsumptionError || sduMovementConsumptionError
+        ? String(
+            (miningConsumptionError || craftUpgradeConsumptionError || sduMovementConsumptionError).message ||
+              miningConsumptionError ||
+              craftUpgradeConsumptionError ||
+              sduMovementConsumptionError
+          )
+        : null,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
 function buildSharedRpcUrl(rpcBaseUrl, apiKey) {
   const base = String(rpcBaseUrl || '').trim();
   const key = String(apiKey || '').trim();
@@ -2478,6 +2712,17 @@ ipcMain.handle('consumption:total', async (_event, payload) => {
     return {
       ok: false,
       error: String(error?.message || error || 'consumption_total_failed'),
+      checkedAt: new Date().toISOString(),
+    };
+  }
+});
+ipcMain.handle('pcr:daily', async (_event, payload) => {
+  try {
+    return await fetchPcrCharts(payload);
+  } catch (error) {
+    return {
+      ok: false,
+      error: String(error?.message || error || 'pcr_daily_failed'),
       checkedAt: new Date().toISOString(),
     };
   }
