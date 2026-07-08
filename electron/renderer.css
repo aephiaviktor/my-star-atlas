@@ -1319,15 +1319,16 @@ label {
 
 /* Temporary debug strip: always-visible status line for the wide card.
    Sits next to the faction note in the toolbar so the user can see
-   what's happening regardless of scroll position. */
+   what's happening regardless of scroll position. Styled muted so it
+   doesn't distract from the charts once things are working. */
 .inv-debug-strip {
   font-size: 11px;
-  color: rgba(248, 113, 113, 0.9);
+  color: var(--muted);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   padding: 2px 8px;
-  border: 1px solid rgba(248, 113, 113, 0.4);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background: rgba(248, 113, 113, 0.06);
+  background: transparent;
 }
 
 .inv-line-grid {
@@ -1340,9 +1341,10 @@ label {
     "fuel        other";
   gap: 10px;
   margin-bottom: 14px;
-  /* 100% more height: was 450px, now 900px. Each small card is 300px
-     (1/3 of the grid), the wide card spans all three rows = 900px. */
-  height: 900px;
+  /* Each small card is ~250px (1/3 of 750), wide card spans 750px so
+     the legend at the bottom of the wide card stays visible on a
+     typical window without scrolling. */
+  height: 750px;
   flex: 0 0 auto;
 }
 
@@ -1400,14 +1402,53 @@ label {
   min-height: 280px;
 }
 
-/* Temporary debug: make the wide card border red so we can see exactly
-   where it is, and give the svg-wrap a subtle background so empty
-   space is visible. Remove once the chart is rendering. */
-.inv-chart-card-wide {
-  border-color: rgba(248, 113, 113, 0.7) !important;
+/* Hover overlay for the wide card: vertical guideline + tooltip that
+   shows the asset name and value at the hovered day. */
+.inv-chart-svg-wrap {
+  cursor: crosshair;
 }
-.inv-chart-card-wide .inv-chart-svg-wrap {
-  background: rgba(248, 113, 113, 0.04);
+.inv-hover-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(245, 158, 11, 0.7);
+  pointer-events: none;
+  display: none;
+}
+.inv-hover-tooltip {
+  position: absolute;
+  background: rgba(7, 21, 29, 0.95);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--text);
+  pointer-events: none;
+  display: none;
+  z-index: 10;
+  min-width: 120px;
+  font-variant-numeric: tabular-nums;
+}
+.inv-hover-tooltip .inv-hover-asset {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 2px;
+}
+.inv-hover-tooltip .inv-hover-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.inv-hover-tooltip .inv-hover-day {
+  color: var(--muted);
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+.inv-hover-tooltip .inv-hover-value {
+  font-weight: 600;
 }
 
 .inv-chart-svg {

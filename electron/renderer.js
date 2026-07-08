@@ -2443,19 +2443,16 @@ function invRenderWideCard(assets) {
     if (summary) summary.textContent = 'WRAP NULL';
     return;
   }
-  // Always-visible debug: the toolbar strip shows exactly what state
-  // the renderer is in. This survives scroll, gets overwritten on
-  // every call, and doesn't depend on the wide card being visible.
+  // Always-visible status: shows asset count and wrap dimensions so
+  // we can see at a glance whether the wide card is rendering.
   const w = Math.round(wrap.clientWidth);
   const h = Math.round(wrap.clientHeight);
-  const faction = normalizeFaction(latestSettings?.faction);
-  const hidden = Array.from(invGetVisibility(faction, invSelectedStarbase));
-  writeDbg(`called · ${assets.length} assets · wrap ${w}×${h} · hidden: [${hidden.join(', ') || 'none'}]`);
+  writeDbg(`${assets.length} assets · wrap ${w}×${h}`);
   // If the wrap hasn't been laid out yet (0×0), wait for the next
   // animation frame and re-measure. This is the most likely cause of
   // the "wide card is empty" bug when the panel is first shown.
   if (w === 0 || h === 0) {
-    writeDbg(`wrap 0×0, deferring to next frame · ${assets.length} assets`);
+    writeDbg(`deferring (wrap 0×0) · ${assets.length} assets`);
     requestAnimationFrame(() => {
       if (wrap.clientWidth > 0 && wrap.clientHeight > 0) {
         invRenderWideCard(assets);
@@ -2476,12 +2473,12 @@ function invRenderWideCard(assets) {
     writeDbg('drawn with 0 assets (empty state shown in card)');
     return;
   }
-  invRenderLineChart(wrap, null, { strokeWidth: 3, showAxis: false, color: '#fff' }, assets);
+  invRenderLineChart(wrap, null, { strokeWidth: 3, showAxis: true, color: '#fff' }, assets);
   if (summary) {
     summary.textContent = `${assets.length} asset${assets.length === 1 ? '' : 's'}`;
   }
   invRenderWideLegend(assets);
-  writeDbg(`drawn · ${assets.length} assets · wrap ${w}×${h}`);
+  writeDbg(`${assets.length} assets · wrap ${w}×${h}`);
 }
 
 function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
@@ -2571,6 +2568,10 @@ function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
   const faction = normalizeFaction(latestSettings?.faction);
   const visibility = invGetVisibility(faction, invSelectedStarbase);
 
+  // Build a flat list of all points across all visible assets. The
+  // hover handler uses this to find the closest data point to the
+  // mouse and show its asset name + value in a tooltip.
+  const allPoints = [];
   for (const asset of assets) {
     const isHidden = visibility.has(asset.label);
     if (isHidden) continue;
@@ -2581,7 +2582,7 @@ function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
       if (d.value <= 0) continue;
       const x = padding.left + (numDays > 1 ? i * xStep : innerWidth / 2);
       const y = padding.top + innerHeight - (d.value / maxY) * innerHeight;
-      points.push({ x, y, day: d, asset });
+      points.push({ x, y, day: d, asset, color });
     }
     if (points.length < 1) continue;
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -2594,7 +2595,90 @@ function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
     path.setAttribute('stroke-linejoin', 'round');
     path.setAttribute('opacity', '0.9');
     svg.appendChild(path);
+    for (const p of points) allPoints.push(p);
   }
+
+  // Hover overlay: vertical guideline + tooltip. Only enabled when
+  // the chart is the wide card (multi-asset) — single-asset cards
+  // already show the value in the summary header.
+  if (multiAssets && multiAssets.length > 1) {
+    invInstallHoverOverlay(wrap, allPoints, padding, innerWidth, innerHeight, height);
+  }
+}
+
+function invInstallHoverOverlay(wrap, points, padding, innerWidth, innerHeight, height) {
+  // Create the guide line and tooltip once and stash them on the wrap.
+  // They're repositioned on mousemove and hidden on mouseleave.
+  let guide = wrap.querySelector('.inv-hover-guide');
+  if (!guide) {
+    guide = document.createElement('div');
+    guide.className = 'inv-hover-guide';
+    wrap.appendChild(guide);
+  }
+  let tip = wrap.querySelector('.inv-hover-tooltip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.className = 'inv-hover-tooltip';
+    wrap.appendChild(tip);
+  }
+  const show = () => { guide.style.display = 'block'; tip.style.display = 'block'; };
+  const hide = () => { guide.style.display = 'none'; tip.style.display = 'none'; };
+
+  wrap.onmousemove = (event) => {
+    if (!points.length) return;
+    const rect = wrap.getBoundingClientRect();
+    const mx = event.clientX - rect.left;
+    const my = event.clientY - rect.top;
+    // Clamp the x position to the inner chart area.
+    if (mx < padding.left || mx > padding.left + innerWidth) {
+      hide();
+      return;
+    }
+    // Find the data point closest to the mouse (Euclidean distance).
+    let best = null;
+    let bestDist = Infinity;
+    for (const p of points) {
+      const dx = p.x - mx;
+      const dy = p.y - my;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = p;
+      }
+    }
+    if (!best) { hide(); return; }
+    show();
+    guide.style.left = `${best.x}px`;
+    tip.innerHTML = '';
+    const assetRow = document.createElement('div');
+    assetRow.className = 'inv-hover-asset';
+    const swatch = document.createElement('span');
+    swatch.className = 'inv-hover-swatch';
+    swatch.style.background = best.color;
+    assetRow.appendChild(swatch);
+    const assetLabel = document.createElement('span');
+    assetLabel.textContent = best.asset.label;
+    assetRow.appendChild(assetLabel);
+    tip.appendChild(assetRow);
+    const day = document.createElement('div');
+    day.className = 'inv-hover-day';
+    day.textContent = best.day.label;
+    tip.appendChild(day);
+    const value = document.createElement('div');
+    value.className = 'inv-hover-value';
+    value.textContent = invFormatInteger(best.day.value);
+    tip.appendChild(value);
+    // Position the tooltip near the point but keep it inside the wrap.
+    const tipW = tip.offsetWidth || 140;
+    const tipH = tip.offsetHeight || 60;
+    let tipX = best.x + 12;
+    if (tipX + tipW > rect.width) tipX = best.x - tipW - 12;
+    let tipY = best.y - tipH - 8;
+    if (tipY < 0) tipY = best.y + 12;
+    tip.style.left = `${Math.max(4, tipX)}px`;
+    tip.style.top = `${Math.max(4, tipY)}px`;
+  };
+  wrap.onmouseleave = hide;
 }
 
 function invRenderWideLegend(assets) {
@@ -2817,34 +2901,13 @@ function initInventory() {
   invRefs.bars.other = document.getElementById('inv-bars-other');
   invRefs.debugStrip = document.getElementById('inv-debug-strip');
 
-  // Diagnostic: report which getElementById calls succeeded so we can
-  // see exactly which ref is missing. Writes to the debug strip and
-  // also to the console for when dev tools are open.
-  const diag = [
-    `select=${!!invRefs.starbaseSelect}`,
-    `note=${!!invRefs.factionNote}`,
-    `amm-wrap=${!!(invRefs.smallCards.ammunition && invRefs.smallCards.ammunition.wrap)}`,
-    `food-wrap=${!!(invRefs.smallCards.food && invRefs.smallCards.food.wrap)}`,
-    `fuel-wrap=${!!(invRefs.smallCards.fuel && invRefs.smallCards.fuel.wrap)}`,
-    `wide-wrap=${!!invRefs.wideCard.wrap}`,
-    `wide-summary=${!!invRefs.wideCard.summary}`,
-    `wide-legend=${!!invRefs.wideCard.legend}`,
-    `bar-cons=${!!invRefs.bars.consumables}`,
-    `bar-other=${!!invRefs.bars.other}`,
-    `dbg=${!!invRefs.debugStrip}`,
-  ].join(' | ');
-  if (invRefs.debugStrip) invRefs.debugStrip.textContent = `init: ${diag}`;
-  console.log('[inventory] initInventory', diag);
-  // Also query the wide-card wrap directly so we can see whether the
-  // element exists at all (and under what selector it can be found).
-  const directWide = document.getElementById('inv-all-assets-svg-wrap');
-  const queryWide = document.querySelector('[data-inv-category="all-assets"] .inv-chart-svg-wrap');
-  const diag2 = `direct=${!!directWide} query=${!!queryWide}`;
-  console.log('[inventory] wide card element lookup:', diag2);
-  if (invRefs.debugStrip) invRefs.debugStrip.textContent += ` | wide: ${diag2}`;
-  if (queryWide && !invRefs.wideCard.wrap) {
-    invRefs.wideCard.wrap = queryWide;
-    console.log('[inventory] wide card wrap recovered via querySelector');
+  // Lightweight init status: shows which refs were set. The
+  // invRenderWideCard lazy lookup handles a missing wide-card ref
+  // at render time, so we don't need to be loud about it here.
+  if (invRefs.debugStrip) {
+    invRefs.debugStrip.textContent = `init: select=${!!invRefs.starbaseSelect} `
+      + `wide-wrap=${!!invRefs.wideCard.wrap} `
+      + `bars=${!!invRefs.bars.consumables}/${!!invRefs.bars.other}`;
   }
   if (invRefs.starbaseSelect) {
     invRefs.starbaseSelect.addEventListener('change', () => {
