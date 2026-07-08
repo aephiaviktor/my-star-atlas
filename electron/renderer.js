@@ -2048,7 +2048,7 @@ function pcrCreateLineChart(category, days, assets) {
   const visibilitySet = pcrGetCategoryVisibility(faction, category.id);
   const hiddenAssets = new Set();
   for (const asset of assets) {
-    if (!visibilitySet.has(asset.label)) hiddenAssets.add(asset.label);
+    if (visibilitySet.has(asset.label)) hiddenAssets.add(asset.label);
   }
 
   const segments = [];
@@ -2171,7 +2171,7 @@ function pcrRenderLegend(category, assets) {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'pcr-legend-chip';
-    const isHidden = !visibilitySet.has(asset.label);
+    const isHidden = visibilitySet.has(asset.label);
     if (isHidden) chip.classList.add('muted');
     const color = getAssetChartColor(asset.label);
     const swatch = document.createElement('span');
