@@ -2377,6 +2377,184 @@ ${scopeFilterFlux}
   };
 }
 
+async function fetchInventory(payload) {
+  const settings = normalizeSettings(payload || (await readSettings()));
+  const bucket = escapeFluxString(settings.influxBucket);
+  const faction = normalizeFaction(settings.faction);
+  const requestedStarbase = String(payload?.starbase || '').trim();
+
+  // For per-starbase view, just that starbase. For aggregate, the
+  // list of starbases that belong to the active faction. The starbase
+  // measurement has no faction tag, so we have to derive the list
+  // from the starbase names. MUD starbases are MUD-* (excluding the
+  // ONI-owned ones in the same sector). USTUR covers the rest
+  // (UST-*, UST-PHANTOM, and MRZ-*). ONI is ONI-* + ONI-PHANTOM.
+  const starbases = await listFactionStarbasesForInventory(settings, faction);
+  if (!starbases.length) {
+    return {
+      ok: false,
+      error: 'no_starbases',
+      faction,
+      starbase: requestedStarbase || '__all__',
+      days: createDayTemplates().map((day) => ({ isoDate: day.isoDate, label: day.label })),
+      assets: [],
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  const targetStarbases = requestedStarbase
+    ? starbases.includes(requestedStarbase)
+      ? [requestedStarbase]
+      : []
+    : starbases;
+
+  if (!targetStarbases.length) {
+    return {
+      ok: false,
+      error: 'starbase_not_in_faction',
+      faction,
+      starbase: requestedStarbase,
+      starbases,
+      days: createDayTemplates().map((day) => ({ isoDate: day.isoDate, label: day.label })),
+      assets: [],
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  // Same per-day per-asset value for a single starbase or the sum
+  // across multiple starbases in the aggregate view. We aggregate with
+  // `last` so a starbase that doesn't report every day still has a
+  // value, and we sum across starbases for the aggregate.
+  const starbaseOrClause = targetStarbases
+    .map((name) => `r.starbase == "${escapeFluxString(name)}"`)
+    .join(' or ');
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "starbase")
+  |> filter(fn: (r) => r._field == "curAmount")
+  |> filter(fn: (r) => ${starbaseOrClause})
+  |> filter(fn: (r) => exists r.rss and r._value > 0)
+  |> aggregateWindow(every: 1d, fn: last, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["rss", "starbase", "_time"])
+  |> last()
+  |> group()
+  |> keep(columns: ["rss", "starbase", "_time", "_value"])
+  |> sort(columns: ["rss", "starbase", "_time"])`;
+
+  let queryError = null;
+  const csv = await queryInfluxFlux(settings, flux).catch((error) => {
+    queryError = error;
+    return '';
+  });
+  if (queryError) {
+    return {
+      ok: false,
+      error: String(queryError.message || queryError),
+      faction,
+      starbase: requestedStarbase || '__all__',
+      starbases,
+      days: createDayTemplates().map((day) => ({ isoDate: day.isoDate, label: day.label })),
+      assets: [],
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  const dayTemplates = createDayTemplates();
+  const dayKeySet = new Set(dayTemplates.map((day) => day.isoDate));
+
+  // Map<assetName, Map<isoDate, sum>>
+  const assetDayTotals = new Map();
+  const rows = parseInfluxCsv(csv);
+  for (const row of rows) {
+    const rss = String(row.rss || '').trim();
+    if (!rss) continue;
+    const date = new Date(row._time);
+    if (Number.isNaN(date.getTime())) continue;
+    const key = getUtcDateKey(date);
+    if (!dayKeySet.has(key)) continue;
+    const value = Number(row._value || 0);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    if (!assetDayTotals.has(rss)) assetDayTotals.set(rss, new Map());
+    const dayMap = assetDayTotals.get(rss);
+    dayMap.set(key, (dayMap.get(key) || 0) + value);
+  }
+
+  // For the aggregate view, also track the first day each asset
+  // shows up at ANY of the starbases. The renderer uses this to
+  // hide days where a particular asset hasn't been seen yet for
+  // the aggregate. (For a single starbase the data is naturally
+  // sparse so we just plot what's there.)
+  const sourceFirstDays = { byAsset: {} };
+  for (const [rss, dayMap] of assetDayTotals.entries()) {
+    const keys = Array.from(dayMap.keys()).sort();
+    if (keys.length) sourceFirstDays.byAsset[rss] = keys[0];
+  }
+
+  const assets = Array.from(assetDayTotals.entries())
+    .map(([label, dayMap]) => {
+      const days = dayTemplates.map((day) => {
+        const value = dayMap.get(day.isoDate) || 0;
+        return { isoDate: day.isoDate, label: day.label, value };
+      });
+      const firstValue = days.find((d) => d.value > 0);
+      const lastValue = [...days].reverse().find((d) => d.value > 0);
+      return {
+        label,
+        days,
+        firstDay: firstValue ? firstValue.isoDate : null,
+        lastDay: lastValue ? lastValue.isoDate : null,
+        firstValue: firstValue ? firstValue.value : null,
+        lastValue: lastValue ? lastValue.value : null,
+      };
+    })
+    .filter((asset) => asset.days.some((d) => d.value > 0))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return {
+    ok: true,
+    faction,
+    starbase: requestedStarbase || '__all__',
+    starbases,
+    isAggregate: !requestedStarbase,
+    days: dayTemplates.map((day) => ({ isoDate: day.isoDate, label: day.label })),
+    assets,
+    sourceFirstDays,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+// Map a faction to the list of starbases that belong to it. The
+// starbase measurement has no faction tag, so we derive this from
+// the starbase name. MUD-*, ONI-*, and UST-* are obvious. The MRZ-*
+// sector is shared between MUD and USTUR; the MUD list is the MRZ
+// starbases NOT in ONI_STARBASE_EXCLUSIONS, and the USTUR list is
+// the rest.
+async function listFactionStarbasesForInventory(settings, faction) {
+  const bucket = escapeFluxString(settings.influxBucket);
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -7d)
+  |> filter(fn: (r) => r._measurement == "starbase")
+  |> filter(fn: (r) => r._field == "curAmount")
+  |> group(columns: ["starbase"])
+  |> last()
+  |> keep(columns: ["starbase"])
+  |> limit(n: 200)`;
+  const csv = await queryInfluxFlux(settings, flux).catch(() => '');
+  const rows = parseInfluxCsv(csv);
+  const all = Array.from(new Set(rows.map((r) => String(r.starbase || '').trim()).filter(Boolean))).sort();
+  if (!all.length) return [];
+  if (faction === 'MUD') {
+    return all.filter((s) => s.startsWith('MUD-'));
+  }
+  if (faction === 'ONI') {
+    return all.filter((s) => s.startsWith('ONI-'));
+  }
+  if (faction === 'USTUR') {
+    return all.filter((s) => s.startsWith('UST-') || s.startsWith('MRZ-'));
+  }
+  return all;
+}
+
 function buildSharedRpcUrl(rpcBaseUrl, apiKey) {
   const base = String(rpcBaseUrl || '').trim();
   const key = String(apiKey || '').trim();
@@ -2749,6 +2927,18 @@ ipcMain.handle('pcr:daily', async (_event, payload) => {
     return {
       ok: false,
       error: String(error?.message || error || 'pcr_daily_failed'),
+      checkedAt: new Date().toISOString(),
+    };
+  }
+});
+
+ipcMain.handle('inventory:daily', async (_event, payload) => {
+  try {
+    return await fetchInventory(payload);
+  } catch (error) {
+    return {
+      ok: false,
+      error: String(error?.message || error || 'inventory_daily_failed'),
       checkedAt: new Date().toISOString(),
     };
   }

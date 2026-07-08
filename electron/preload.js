@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getDailyConsumptionCargo: (payload) => ipcRenderer.invoke('consumption:cargo', payload),
   getDailyConsumptionTotal: (payload) => ipcRenderer.invoke('consumption:total', payload),
   getPcrCharts: (payload) => ipcRenderer.invoke('pcr:daily', payload),
+  getInventory: (payload) => ipcRenderer.invoke('inventory:daily', payload),
 });

@@ -14,7 +14,7 @@ const subtabLabels = {
   production: 'Production',
   consumption: 'Consumption',
   'pct-charts': 'PCR Charts',
-  surplus: 'Surplus',
+  inventory: 'Inventory',
 };
 
 const form = document.querySelector('#settings-form');
@@ -339,6 +339,7 @@ function recordFactionFilterState(faction) {
   setCachedFactionResult(faction, 'selectedConsCargoStarbase', selectedConsCargoStarbase);
   setCachedFactionResult(faction, 'selectedConsCargoFleet', selectedConsCargoFleet);
   setCachedFactionResult(faction, 'selectedConsTotalStarbase', selectedConsTotalStarbase);
+  setCachedFactionResult(faction, 'selectedInvStarbase', invSelectedStarbase);
 }
 
 function restoreFactionFilterState(faction) {
@@ -359,6 +360,7 @@ function restoreFactionFilterState(faction) {
   selectedConsCargoStarbase = getCachedFactionResult(faction, 'selectedConsCargoStarbase') || '';
   selectedConsCargoFleet = getCachedFactionResult(faction, 'selectedConsCargoFleet') || '';
   selectedConsTotalStarbase = getCachedFactionResult(faction, 'selectedConsTotalStarbase') || '';
+  invSelectedStarbase = getCachedFactionResult(faction, 'selectedInvStarbase') || '__all__';
 }
 
 function openSettings() {
@@ -2266,6 +2268,473 @@ async function refreshPcrCharts() {
   }
 }
 
+/* ---- Inventory ---- */
+
+const INV_CONSUMABLE_ASSETS = Object.freeze(['Ammunition', 'Food', 'Fuel']);
+const INV_SMALL_CARD_IDS = Object.freeze(['ammunition', 'food', 'fuel']);
+const INV_WIDE_CARD_ID = 'all-assets';
+const INV_DEFAULT_METHOD = 'regression'; // two-point vs linear-regression slope
+const invAssetVisibility = new Map(); // faction -> Map<starbase, Set<assetLabel>>
+
+const invRefs = {
+  starbaseSelect: null,
+  factionNote: null,
+  smallCards: {}, // id -> { wrap, summary }
+  wideCard: { wrap: null, summary: null, legend: null },
+  bars: { consumables: null, other: null },
+  methodNote: null,
+};
+let latestInventoryResult = null;
+let invSelectedStarbase = '__all__';
+let invMethod = INV_DEFAULT_METHOD;
+
+function invGetVisibility(faction, starbase) {
+  if (!invAssetVisibility.has(faction)) invAssetVisibility.set(faction, new Map());
+  const factionMap = invAssetVisibility.get(faction);
+  if (!factionMap.has(starbase)) factionMap.set(starbase, new Set());
+  return factionMap.get(starbase);
+}
+
+function invGetBucketAssets(result, predicate) {
+  if (!result?.ok) return [];
+  return (Array.isArray(result.assets) ? result.assets : []).filter(predicate);
+}
+
+function invSetStarbaseOptions(starbases, current) {
+  const select = invRefs.starbaseSelect;
+  if (!select) return;
+  select.textContent = '';
+  const optAll = document.createElement('option');
+  optAll.value = '__all__';
+  optAll.textContent = 'All starbases (faction aggregate)';
+  select.appendChild(optAll);
+  for (const sb of starbases) {
+    const opt = document.createElement('option');
+    opt.value = sb;
+    opt.textContent = sb;
+    select.appendChild(opt);
+  }
+  select.value = starbases.includes(current) || current === '__all__' ? current : '__all__';
+  invSelectedStarbase = select.value;
+}
+
+function invFormatInteger(n) {
+  if (!Number.isFinite(n)) return '--';
+  if (Math.abs(n) >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (Math.abs(n) >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+function invFormatAverage(n) {
+  if (!Number.isFinite(n)) return '--';
+  const sign = n > 0 ? '+' : n < 0 ? '' : '';
+  return `${sign}${invFormatInteger(Math.abs(n) === 0 ? 0 : n)}`;
+}
+
+// Compute the per-day average change for a single asset across the
+// window. Two modes:
+//   - 'two-point':  (lastValue - firstValue) / (numDays - 1)
+//   - 'regression': least-squares slope of value vs day index
+//     (N*sum(xy) - sum(x)*sum(y)) / (N*sum(x*x) - sum(x)^2)
+function invComputeAverage(asset, method) {
+  const points = asset.days
+    .map((d, i) => ({ x: i, y: d.value, has: d.value > 0 }))
+    .filter((p) => p.has);
+  if (points.length < 2) return null;
+  const firstX = points[0].x;
+  const lastX = points[points.length - 1].x;
+  const firstY = points[0].y;
+  const lastY = points[points.length - 1].y;
+  if (method === 'two-point') {
+    const span = Math.max(1, lastX - firstX);
+    return (lastY - firstY) / span;
+  }
+  // linear regression: use the per-day index as x, value as y
+  const n = points.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (const p of points) {
+    sumX += p.x;
+    sumY += p.y;
+    sumXY += p.x * p.y;
+    sumXX += p.x * p.x;
+  }
+  const denom = n * sumXX - sumX * sumX;
+  if (denom === 0) return null;
+  return (n * sumXY - sumX * sumY) / denom;
+}
+
+function invRenderEmpty(message) {
+  for (const id of INV_SMALL_CARD_IDS) {
+    const card = invRefs.smallCards[id];
+    if (!card) continue;
+    if (card.wrap) {
+      card.wrap.textContent = '';
+      const empty = document.createElement('div');
+      empty.className = 'pcr-empty-state';
+      empty.textContent = message;
+      card.wrap.appendChild(empty);
+    }
+    if (card.summary) card.summary.textContent = '--';
+  }
+  if (invRefs.wideCard.wrap) {
+    invRefs.wideCard.wrap.textContent = '';
+    const empty = document.createElement('div');
+    empty.className = 'pcr-empty-state';
+    empty.textContent = message;
+    invRefs.wideCard.wrap.appendChild(empty);
+  }
+  if (invRefs.wideCard.summary) invRefs.wideCard.summary.textContent = '--';
+  if (invRefs.wideCard.legend) invRefs.wideCard.legend.textContent = '';
+  if (invRefs.bars.consumables) invRefs.bars.consumables.textContent = '';
+  if (invRefs.bars.other) invRefs.bars.other.textContent = '';
+  if (invRefs.methodNote) invRefs.methodNote.textContent = '';
+  if (invRefs.factionNote) invRefs.factionNote.textContent = `Last 14 days · inventory at starbase · ${message}`;
+}
+
+function invRenderSmallCard(category, asset) {
+  const card = invRefs.smallCards[category];
+  if (!card || !card.wrap) return;
+  card.wrap.textContent = '';
+  if (!asset) {
+    const empty = document.createElement('div');
+    empty.className = 'pcr-empty-state';
+    empty.textContent = 'No data';
+    card.wrap.appendChild(empty);
+    if (card.summary) card.summary.textContent = 'No data';
+    return;
+  }
+  invRenderLineChart(card.wrap, asset, { strokeWidth: 3, showAxis: true, color: getAssetChartColor(asset.label) });
+  if (card.summary) {
+    const last = asset.days.findLast ? asset.days.findLast((d) => d.value > 0) : [...asset.days].reverse().find((d) => d.value > 0);
+    card.summary.textContent = last ? `${invFormatInteger(last.value)} (last)` : 'No data';
+  }
+}
+
+function invRenderWideCard(assets) {
+  const wrap = invRefs.wideCard.wrap;
+  if (!wrap) return;
+  wrap.textContent = '';
+  if (!assets.length) {
+    const empty = document.createElement('div');
+    empty.className = 'pcr-empty-state';
+    empty.textContent = 'No inventory data';
+    wrap.appendChild(empty);
+    if (invRefs.wideCard.summary) invRefs.wideCard.summary.textContent = 'No assets';
+    if (invRefs.wideCard.legend) invRefs.wideCard.legend.textContent = '';
+    return;
+  }
+  invRenderLineChart(wrap, null, { strokeWidth: 3, showAxis: false, color: '#fff' }, assets);
+  if (invRefs.wideCard.summary) {
+    invRefs.wideCard.summary.textContent = `${assets.length} asset${assets.length === 1 ? '' : 's'}`;
+  }
+  invRenderWideLegend(assets);
+}
+
+function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
+  const assets = multiAssets || (singleAsset ? [singleAsset] : []);
+  if (!assets.length) return;
+  const padding = { top: 8, right: 10, bottom: 18, left: 38 };
+  const width = Math.max(wrap.clientWidth, 200);
+  const height = Math.max(wrap.clientHeight, 140);
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+
+  // Determine common X axis (day index 0..13) and Y range across all assets.
+  const numDays = assets[0].days.length;
+  const xStep = numDays > 1 ? innerWidth / (numDays - 1) : 0;
+  let maxY = 0;
+  for (const a of assets) {
+    for (const d of a.days) {
+      if (d.value > maxY) maxY = d.value;
+    }
+  }
+  if (maxY === 0) maxY = 1;
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('class', 'inv-chart-svg');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  wrap.appendChild(svg);
+
+  // Y axis labels (3 ticks: 0, 50%, 100%)
+  if (opts.showAxis) {
+    for (let i = 0; i < 3; i += 1) {
+      const v = (maxY * (2 - i)) / 2;
+      const y = padding.top + (innerHeight * i) / 2;
+      const label = document.createElement('div');
+      label.className = 'inv-axis-label';
+      label.textContent = invFormatInteger(v);
+      label.style.position = 'absolute';
+      label.style.right = `${width - padding.left + 6}px`;
+      label.style.top = `${y - 7}px`;
+      label.style.fontSize = '10px';
+      label.style.color = 'var(--muted)';
+      wrap.appendChild(label);
+    }
+    for (let i = 0; i < 3; i += 1) {
+      const y = padding.top + (innerHeight * i) / 2;
+      const grid = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      grid.setAttribute('x1', String(padding.left));
+      grid.setAttribute('x2', String(padding.left + innerWidth));
+      grid.setAttribute('y1', String(y));
+      grid.setAttribute('y2', String(y));
+      grid.setAttribute('stroke', 'rgba(143, 168, 178, 0.15)');
+      grid.setAttribute('stroke-dasharray', '2 4');
+      svg.appendChild(grid);
+    }
+  }
+
+  // X axis day labels (every other day)
+  for (let i = 0; i < numDays; i += 1) {
+    if (i !== 0 && i !== numDays - 1 && i % 2 !== 0) continue;
+    const x = padding.left + (numDays > 1 ? i * xStep : innerWidth / 2);
+    const label = document.createElement('div');
+    label.className = 'inv-axis-label';
+    label.textContent = assets[0].days[i].label;
+    label.style.position = 'absolute';
+    label.style.left = `${x - 14}px`;
+    label.style.bottom = '2px';
+    label.style.fontSize = '10px';
+    label.style.color = 'var(--muted)';
+    label.style.width = '28px';
+    label.style.textAlign = 'center';
+    wrap.appendChild(label);
+  }
+
+  const faction = normalizeFaction(latestSettings?.faction);
+  const visibility = invGetVisibility(faction, invSelectedStarbase);
+
+  for (const asset of assets) {
+    const isHidden = visibility.has(asset.label);
+    if (isHidden) continue;
+    const color = getAssetChartColor(asset.label);
+    const points = [];
+    for (let i = 0; i < asset.days.length; i += 1) {
+      const d = asset.days[i];
+      if (d.value <= 0) continue;
+      const x = padding.left + (numDays > 1 ? i * xStep : innerWidth / 2);
+      const y = padding.top + innerHeight - (d.value / maxY) * innerHeight;
+      points.push({ x, y, day: d, asset });
+    }
+    if (points.length < 1) continue;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const d = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', color);
+    path.setAttribute('stroke-width', String(opts.strokeWidth || 3));
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    path.setAttribute('opacity', '0.9');
+    svg.appendChild(path);
+  }
+}
+
+function invRenderWideLegend(assets) {
+  const legend = invRefs.wideCard.legend;
+  if (!legend) return;
+  legend.textContent = '';
+  const faction = normalizeFaction(latestSettings?.faction);
+  const visibility = invGetVisibility(faction, invSelectedStarbase);
+  for (const asset of assets) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'inv-legend-chip';
+    const isHidden = visibility.has(asset.label);
+    if (isHidden) chip.classList.add('muted');
+    const swatch = document.createElement('span');
+    swatch.className = 'inv-legend-swatch';
+    swatch.style.background = getAssetChartColor(asset.label);
+    chip.appendChild(swatch);
+    const label = document.createElement('span');
+    label.textContent = asset.label;
+    chip.appendChild(label);
+    chip.title = isHidden ? `Click to show ${asset.label}` : `Click to hide ${asset.label}`;
+    chip.addEventListener('click', () => {
+      const set = invGetVisibility(faction, invSelectedStarbase);
+      if (set.has(asset.label)) set.delete(asset.label);
+      else set.add(asset.label);
+      if (latestInventoryResult) renderInventory(latestInventoryResult);
+    });
+    legend.appendChild(chip);
+  }
+}
+
+function invRenderBars(assets) {
+  const consumables = invRefs.bars.consumables;
+  const other = invRefs.bars.other;
+  if (!consumables || !other) return;
+  consumables.textContent = '';
+  other.textContent = '';
+
+  const consumableAssets = assets.filter((a) => INV_CONSUMABLE_ASSETS.includes(a.label));
+  const otherAssets = assets.filter((a) => !INV_CONSUMABLE_ASSETS.includes(a.label));
+
+  // Build per-asset averages.
+  const rows = [];
+  for (const a of assets) {
+    const avg = invComputeAverage(a, invMethod);
+    if (avg === null) continue;
+    rows.push({ label: a.label, avg, asset: a });
+  }
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'inv-bar-empty';
+    empty.textContent = 'Not enough data for averages yet';
+    consumables.appendChild(empty.cloneNode(true));
+    other.appendChild(empty);
+    return;
+  }
+
+  // Find the global max absolute value to set a common scale.
+  const maxAbs = Math.max(...rows.map((r) => Math.abs(r.avg)), 1);
+
+  const drawColumn = (container, list) => {
+    if (!list.length) {
+      const empty = document.createElement('div');
+      empty.className = 'inv-bar-empty';
+      empty.textContent = 'No assets in this column';
+      container.appendChild(empty);
+      return;
+    }
+    // Sort: largest positive first, then largest negative
+    const sorted = [...list].sort((a, b) => b.avg - a.avg);
+    for (const row of sorted) {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'inv-bar-row';
+      const labelEl = document.createElement('div');
+      labelEl.className = 'inv-bar-label';
+      labelEl.textContent = row.label;
+      labelEl.title = row.label;
+      const track = document.createElement('div');
+      track.className = 'inv-bar-track';
+      const zero = document.createElement('div');
+      zero.className = 'inv-bar-zero';
+      track.appendChild(zero);
+      const fill = document.createElement('div');
+      fill.className = `inv-bar-fill ${row.avg >= 0 ? 'positive' : 'negative'}`;
+      const widthPct = (Math.abs(row.avg) / maxAbs) * 50; // 50% = full bar in either direction
+      fill.style.width = `${widthPct}%`;
+      track.appendChild(fill);
+      const valueEl = document.createElement('div');
+      valueEl.className = 'inv-bar-value';
+      const sign = row.avg > 0 ? '+' : '';
+      valueEl.textContent = `${sign}${invFormatInteger(row.avg)}/d`;
+      valueEl.title = `${sign}${row.avg.toFixed(2)}/day`;
+      rowEl.appendChild(labelEl);
+      rowEl.appendChild(track);
+      rowEl.appendChild(valueEl);
+      container.appendChild(rowEl);
+    }
+  };
+
+  drawColumn(consumables, consumableAssets.map((a) => rows.find((r) => r.label === a.label)).filter(Boolean));
+  drawColumn(other, otherAssets.map((a) => rows.find((r) => r.label === a.label)).filter(Boolean));
+}
+
+function renderInventory(result) {
+  latestInventoryResult = result;
+  if (!result) {
+    invRenderEmpty('No data');
+    return;
+  }
+  if (!result.ok) {
+    invRenderEmpty(result.error || 'Influx unavailable');
+    return;
+  }
+
+  // Populate the starbase selector.
+  if (Array.isArray(result.starbases)) {
+    invSetStarbaseOptions(result.starbases, invSelectedStarbase);
+  }
+  if (invRefs.factionNote) {
+    const viewLabel = result.isAggregate
+      ? `${result.faction} · all starbases`
+      : `${result.faction} · ${result.starbase}`;
+    invRefs.factionNote.textContent = `Last 14 days · ${viewLabel}`;
+  }
+
+  // Filter to the selected starbase if the user picked one.
+  let assets = Array.isArray(result.assets) ? result.assets : [];
+  if (invSelectedStarbase !== '__all__') {
+    // Single-starbase view: just show the result (the query already
+    // filtered down). The result.assets is per-day per-rss for the
+    // one starbase.
+    assets = assets;
+  }
+
+  // Small cards: Ammunition, Food, Fuel
+  for (const id of INV_SMALL_CARD_IDS) {
+    const label = id.charAt(0).toUpperCase() + id.slice(1);
+    const asset = assets.find((a) => a.label === label);
+    invRenderSmallCard(id, asset);
+  }
+
+  // Wide card: all assets except the 3 consumables (which already have
+  // their own cards).
+  const wideAssets = assets.filter((a) => !INV_CONSUMABLE_ASSETS.includes(a.label));
+  invRenderWideCard(wideAssets);
+
+  // Bar charts.
+  invRenderBars(assets);
+
+  if (invRefs.methodNote) {
+    invRefs.methodNote.textContent = invMethod === 'regression'
+      ? 'Linear regression slope (per day)'
+      : 'Two-point (last − first) ÷ days';
+  }
+}
+
+async function refreshInventory() {
+  if (!invRefs.starbaseSelect) return;
+  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
+    invRenderEmpty('Awaiting Influx connection');
+    return;
+  }
+  const faction = normalizeFaction(latestSettings?.faction);
+  const cacheKey = `inventory::${invSelectedStarbase}`;
+  const cached = getCachedFactionResult(faction, cacheKey);
+  if (cached) renderInventory(cached);
+  else invRenderEmpty('Loading inventory data...');
+  try {
+    const result = await api.getInventory({
+      ...(latestSettings || getFormPayload()),
+      starbase: invSelectedStarbase === '__all__' ? '' : invSelectedStarbase,
+    });
+    setCachedFactionResult(faction, cacheKey, result);
+    renderInventory(result);
+  } catch (error) {
+    console.error(error);
+    if (!cached) invRenderEmpty('Influx unavailable');
+  }
+}
+
+function initInventory() {
+  invRefs.starbaseSelect = document.getElementById('inv-starbase-select');
+  invRefs.factionNote = document.getElementById('inv-faction-note');
+  invRefs.methodNote = document.getElementById('inv-method-note');
+  for (const id of INV_SMALL_CARD_IDS) {
+    invRefs.smallCards[id] = {
+      wrap: document.getElementById(`inv-${id}-svg-wrap`),
+      summary: document.getElementById(`inv-${id}-summary`),
+    };
+  }
+  invRefs.wideCard = {
+    wrap: document.getElementById(`${INV_WIDE_CARD_ID}-svg-wrap`),
+    summary: document.getElementById(`${INV_WIDE_CARD_ID}-summary`),
+    legend: document.getElementById(`${INV_WIDE_CARD_ID}-legend`),
+  };
+  invRefs.bars.consumables = document.getElementById('inv-bars-consumables');
+  invRefs.bars.other = document.getElementById('inv-bars-other');
+  if (invRefs.starbaseSelect) {
+    invRefs.starbaseSelect.addEventListener('change', () => {
+      invSelectedStarbase = invRefs.starbaseSelect.value || '__all__';
+      refreshInventory();
+    });
+  }
+}
+
 function createConsumptionBarCard(asset, fallbackIndex) {
   const maxValue = Math.max(...asset.days.map((day) => Number(day.value) || 0), 1);
   const card = document.createElement('section');
@@ -2586,6 +3055,16 @@ function setActiveSubtab(subtab) {
       renderPcrCharts(latestPcrResult);
     }
   }
+  if (subtab === 'inventory') {
+    if (!latestInventoryResult && hasInfluxSettings(latestSettings || getFormPayload())) {
+      refreshInventory();
+    } else if (latestInventoryResult) {
+      // The initial render may have happened while the panel was hidden
+      // (clientWidth was 0). Re-render now that the wrap is laid out so
+      // the HTML labels and SVG axes line up.
+      renderInventory(latestInventoryResult);
+    }
+  }
 }
 
 async function loadInitialState() {
@@ -2614,6 +3093,8 @@ async function loadInitialState() {
   if (hasInfluxSettings(settings)) initialLoads.push(refreshConsUpgrading());
   if (hasInfluxSettings(settings)) initialLoads.push(refreshConsTotal());
   if (hasInfluxSettings(settings)) initialLoads.push(refreshPcrCharts());
+  initInventory();
+  if (hasInfluxSettings(settings)) initialLoads.push(refreshInventory());
   await Promise.all(initialLoads);
 }
 
@@ -2640,6 +3121,7 @@ async function refreshFactionScopedViews() {
   renderConsCargoEmpty(hasInfluxSettings(latestSettings) ? 'Loading cargo consumption...' : 'Awaiting Influx connection');
   renderConsTotalEmpty(hasInfluxSettings(latestSettings) ? 'Loading total consumption...' : 'Awaiting Influx connection');
   pcrRenderEmpty(hasInfluxSettings(latestSettings) ? 'Loading PCR data...' : 'Awaiting Influx connection');
+  invRenderEmpty(hasInfluxSettings(latestSettings) ? 'Loading inventory data...' : 'Awaiting Influx connection');
   await Promise.all([
     refreshFleets(),
     hasInfluxSettings(latestSettings) ? refreshDailySdu() : Promise.resolve(),
@@ -2653,6 +3135,7 @@ async function refreshFactionScopedViews() {
     hasInfluxSettings(latestSettings) ? refreshConsUpgrading() : Promise.resolve(),
     hasInfluxSettings(latestSettings) ? refreshConsTotal() : Promise.resolve(),
     hasInfluxSettings(latestSettings) ? refreshPcrCharts() : Promise.resolve(),
+    hasInfluxSettings(latestSettings) ? refreshInventory() : Promise.resolve(),
   ]);
 }
 

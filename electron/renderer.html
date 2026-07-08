@@ -72,7 +72,7 @@
             <button class="subtab-button" type="button" data-subtab="production" aria-selected="false">Production</button>
             <button class="subtab-button" type="button" data-subtab="consumption" aria-selected="false">Consumption</button>
             <button class="subtab-button" type="button" data-subtab="pct-charts" aria-selected="false">PCR Charts</button>
-            <button class="subtab-button" type="button" data-subtab="surplus" aria-selected="false">Surplus</button>
+            <button class="subtab-button" type="button" data-subtab="inventory" aria-selected="false">Inventory</button>
           </div>
 
           <div class="production-panel active" data-production-panel="scanning">
@@ -549,10 +549,65 @@
             </div>
           </div>
 
-          <div class="production-panel" data-production-panel="surplus">
-            <section class="work-surface quiet-panel">
-              <h2>Surplus</h2>
-            </section>
+          <div class="production-panel" data-production-panel="inventory">
+            <div class="inv-toolbar">
+              <label class="inv-starbase-filter">
+                <span>Starbase</span>
+                <select id="inv-starbase-select" aria-label="Starbase filter">
+                  <option value="__all__">All starbases (faction aggregate)</option>
+                </select>
+              </label>
+              <div id="inv-faction-note" class="inv-faction-note">Last 14 days · inventory at starbase</div>
+            </div>
+
+            <div class="inv-line-grid">
+              <section class="inv-chart-card inv-chart-card-small" data-inv-category="ammunition">
+                <div class="inv-chart-header">
+                  <h3>Ammunition</h3>
+                  <span id="inv-ammunition-summary" class="inv-chart-summary">--</span>
+                </div>
+                <div id="inv-ammunition-svg-wrap" class="inv-chart-svg-wrap"></div>
+              </section>
+              <section class="inv-chart-card inv-chart-card-small" data-inv-category="food">
+                <div class="inv-chart-header">
+                  <h3>Food</h3>
+                  <span id="inv-food-summary" class="inv-chart-summary">--</span>
+                </div>
+                <div id="inv-food-svg-wrap" class="inv-chart-svg-wrap"></div>
+              </section>
+              <section class="inv-chart-card inv-chart-card-small" data-inv-category="fuel">
+                <div class="inv-chart-header">
+                  <h3>Fuel</h3>
+                  <span id="inv-fuel-summary" class="inv-chart-summary">--</span>
+                </div>
+                <div id="inv-fuel-svg-wrap" class="inv-chart-svg-wrap"></div>
+              </section>
+              <section class="inv-chart-card inv-chart-card-wide" data-inv-category="all-assets">
+                <div class="inv-chart-header">
+                  <h3>Starbase inventory</h3>
+                  <span id="inv-all-assets-summary" class="inv-chart-summary">--</span>
+                </div>
+                <div id="inv-all-assets-svg-wrap" class="inv-chart-svg-wrap"></div>
+                <div id="inv-all-assets-legend" class="inv-chart-legend"></div>
+              </section>
+            </div>
+
+            <div class="inv-bar-section">
+              <div class="inv-bar-section-header">
+                <h3>Average daily change</h3>
+                <span id="inv-method-note" class="inv-method-note"></span>
+              </div>
+              <div class="inv-bar-grid">
+                <div class="inv-bar-column" data-inv-bar-column="consumables">
+                  <h4>Consumables</h4>
+                  <div id="inv-bars-consumables" class="inv-bar-list"></div>
+                </div>
+                <div class="inv-bar-column" data-inv-bar-column="other">
+                  <h4>Other assets</h4>
+                  <div id="inv-bars-other" class="inv-bar-list"></div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
