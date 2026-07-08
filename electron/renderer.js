@@ -2305,7 +2305,7 @@ function invSetStarbaseOptions(starbases, current) {
   select.textContent = '';
   const optAll = document.createElement('option');
   optAll.value = '__all__';
-  optAll.textContent = 'All starbases (faction aggregate)';
+  optAll.textContent = 'All Starbases';
   select.appendChild(optAll);
   for (const sb of starbases) {
     const opt = document.createElement('option');
