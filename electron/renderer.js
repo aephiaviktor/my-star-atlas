@@ -2287,6 +2287,7 @@ const invRefs = {
   smallCards: {}, // id -> { wrap, summary }
   wideCard: { wrap: null, summary: null, legend: null },
   bars: { consumables: null, other: null },
+  debugStrip: null,
 };
 let latestInventoryResult = null;
 let invSelectedStarbase = '__all__';
@@ -2396,6 +2397,7 @@ function invRenderEmpty(message) {
   if (invRefs.bars.consumables) invRefs.bars.consumables.textContent = '';
   if (invRefs.bars.other) invRefs.bars.other.textContent = '';
   if (invRefs.factionNote) invRefs.factionNote.textContent = `Last 14 days · inventory at starbase · ${message}`;
+  if (invRefs.debugStrip) invRefs.debugStrip.textContent = `wide card: ${message} (empty state)`;
 }
 
 function invRenderSmallCard(category, asset) {
@@ -2420,24 +2422,30 @@ function invRenderSmallCard(category, asset) {
 function invRenderWideCard(assets) {
   const wrap = invRefs.wideCard.wrap;
   const summary = invRefs.wideCard && invRefs.wideCard.summary;
+  const dbg = invRefs.debugStrip;
+  const writeDbg = (msg) => { if (dbg) dbg.textContent = `wide card: ${msg}`; };
   if (!wrap) {
+    writeDbg('WRAP NULL (ref not set in initInventory)');
     if (summary) summary.textContent = 'WRAP NULL';
     return;
   }
-  // Show what's happening right in the card header so we can debug
-  // without dev tools. Format: "<count> assets · <w>×<h>".
-  if (summary) {
-    summary.textContent = `${assets.length} assets · ${Math.round(wrap.clientWidth)}×${Math.round(wrap.clientHeight)}`;
-  }
+  // Always-visible debug: the toolbar strip shows exactly what state
+  // the renderer is in. This survives scroll, gets overwritten on
+  // every call, and doesn't depend on the wide card being visible.
+  const w = Math.round(wrap.clientWidth);
+  const h = Math.round(wrap.clientHeight);
+  const faction = normalizeFaction(latestSettings?.faction);
+  const hidden = Array.from(invGetVisibility(faction, invSelectedStarbase));
+  writeDbg(`called · ${assets.length} assets · wrap ${w}×${h} · hidden: [${hidden.join(', ') || 'none'}]`);
   // If the wrap hasn't been laid out yet (0×0), wait for the next
   // animation frame and re-measure. This is the most likely cause of
   // the "wide card is empty" bug when the panel is first shown.
-  if (wrap.clientWidth === 0 || wrap.clientHeight === 0) {
+  if (w === 0 || h === 0) {
+    writeDbg(`wrap 0×0, deferring to next frame · ${assets.length} assets`);
     requestAnimationFrame(() => {
       if (wrap.clientWidth > 0 && wrap.clientHeight > 0) {
         invRenderWideCard(assets);
       } else {
-        // Still 0 — try once more on the next frame.
         requestAnimationFrame(() => invRenderWideCard(assets));
       }
     });
@@ -2451,6 +2459,7 @@ function invRenderWideCard(assets) {
     wrap.appendChild(empty);
     if (summary) summary.textContent = '0 assets';
     if (invRefs.wideCard.legend) invRefs.wideCard.legend.textContent = '';
+    writeDbg('drawn with 0 assets (empty state shown in card)');
     return;
   }
   invRenderLineChart(wrap, null, { strokeWidth: 3, showAxis: false, color: '#fff' }, assets);
@@ -2458,6 +2467,7 @@ function invRenderWideCard(assets) {
     summary.textContent = `${assets.length} asset${assets.length === 1 ? '' : 's'}`;
   }
   invRenderWideLegend(assets);
+  writeDbg(`drawn · ${assets.length} assets · wrap ${w}×${h}`);
 }
 
 function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
@@ -2791,6 +2801,7 @@ function initInventory() {
   };
   invRefs.bars.consumables = document.getElementById('inv-bars-consumables');
   invRefs.bars.other = document.getElementById('inv-bars-other');
+  invRefs.debugStrip = document.getElementById('inv-debug-strip');
   if (invRefs.starbaseSelect) {
     invRefs.starbaseSelect.addEventListener('change', () => {
       invSelectedStarbase = invRefs.starbaseSelect.value || '__all__';

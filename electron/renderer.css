@@ -1317,6 +1317,19 @@ label {
   color: var(--muted);
 }
 
+/* Temporary debug strip: always-visible status line for the wide card.
+   Sits next to the faction note in the toolbar so the user can see
+   what's happening regardless of scroll position. */
+.inv-debug-strip {
+  font-size: 11px;
+  color: rgba(248, 113, 113, 0.9);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  padding: 2px 8px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 4px;
+  background: rgba(248, 113, 113, 0.06);
+}
+
 .inv-line-grid {
   display: grid;
   grid-template-columns: 1fr 2fr;
@@ -1385,6 +1398,16 @@ label {
    zero-height wrap. */
 .inv-chart-card-wide .inv-chart-svg-wrap {
   min-height: 280px;
+}
+
+/* Temporary debug: make the wide card border red so we can see exactly
+   where it is, and give the svg-wrap a subtle background so empty
+   space is visible. Remove once the chart is rendering. */
+.inv-chart-card-wide {
+  border-color: rgba(248, 113, 113, 0.7) !important;
+}
+.inv-chart-card-wide .inv-chart-svg-wrap {
+  background: rgba(248, 113, 113, 0.04);
 }
 
 .inv-chart-svg {
