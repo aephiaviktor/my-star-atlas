@@ -2419,23 +2419,20 @@ function invRenderSmallCard(category, asset) {
 
 function invRenderWideCard(assets) {
   const wrap = invRefs.wideCard.wrap;
+  const summary = invRefs.wideCard && invRefs.wideCard.summary;
   if (!wrap) {
-    console.warn('[inventory] wide card wrap not found');
+    if (summary) summary.textContent = 'WRAP NULL';
     return;
   }
-  // Debug: log the wrap dimensions and asset count so we can see
-  // whether the chart is being created with proper dimensions.
-  console.log('[inventory] invRenderWideCard', {
-    assets: assets.length,
-    wrapWidth: wrap.clientWidth,
-    wrapHeight: wrap.clientHeight,
-    visibility: Array.from(invGetVisibility(normalizeFaction(latestSettings?.faction), invSelectedStarbase)),
-  });
+  // Show what's happening right in the card header so we can debug
+  // without dev tools. Format: "<count> assets · <w>×<h>".
+  if (summary) {
+    summary.textContent = `${assets.length} assets · ${Math.round(wrap.clientWidth)}×${Math.round(wrap.clientHeight)}`;
+  }
   // If the wrap hasn't been laid out yet (0×0), wait for the next
   // animation frame and re-measure. This is the most likely cause of
   // the "wide card is empty" bug when the panel is first shown.
   if (wrap.clientWidth === 0 || wrap.clientHeight === 0) {
-    console.log('[inventory] wide card wrap has 0 dimensions, deferring to next frame');
     requestAnimationFrame(() => {
       if (wrap.clientWidth > 0 && wrap.clientHeight > 0) {
         invRenderWideCard(assets);
@@ -2452,13 +2449,13 @@ function invRenderWideCard(assets) {
     empty.className = 'pcr-empty-state';
     empty.textContent = 'No inventory data';
     wrap.appendChild(empty);
-    if (invRefs.wideCard.summary) invRefs.wideCard.summary.textContent = 'No assets';
+    if (summary) summary.textContent = '0 assets';
     if (invRefs.wideCard.legend) invRefs.wideCard.legend.textContent = '';
     return;
   }
   invRenderLineChart(wrap, null, { strokeWidth: 3, showAxis: false, color: '#fff' }, assets);
-  if (invRefs.wideCard.summary) {
-    invRefs.wideCard.summary.textContent = `${assets.length} asset${assets.length === 1 ? '' : 's'}`;
+  if (summary) {
+    summary.textContent = `${assets.length} asset${assets.length === 1 ? '' : 's'}`;
   }
   invRenderWideLegend(assets);
 }
