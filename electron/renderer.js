@@ -253,26 +253,36 @@ const PCR_CATEGORIES = Object.freeze([
     id: 'raw-material',
     label: 'Raw Material',
     assets: ['Arco', 'Biomass', 'Carbon', 'Copper Ore', 'Diamond', 'Hydrogen', 'Iron Ore', 'Lumanite', 'Nitrogen', 'Rochinol', 'Silica', 'Titanium Ore'],
+    // Production: mining rss. Consumption: crafting input (raw materials are
+    // crafting ingredients; they aren't burned by mining or upgrade).
+    sources: { production: ['mining'], consumption: ['crafting'] },
   }),
   Object.freeze({
     id: 'consumable',
     label: 'Consumable',
     assets: ['Ammunition', 'Food', 'Fuel', 'Ink', 'Toolkits'],
+    // Production: crafting output. Consumption: every source that can
+    // burn a consumable (mining ammo/food/fuel, crafting input, upgrade
+    // input, sdu food, movement fuel).
+    sources: { production: ['crafting'], consumption: ['mining', 'crafting', 'upgrade', 'sdu', 'movement'] },
   }),
   Object.freeze({
     id: 'compound-material',
     label: 'Compound Material',
     assets: ['Aerogel', 'Crystal Lattice', 'Copper Wire', 'Copper', 'Electronics', 'Graphene', 'Hydrocarbon', 'Iron', 'Magner', 'Polymer', 'Steel', 'Titanium'],
+    sources: { production: ['crafting'], consumption: ['crafting', 'upgrade'] },
   }),
   Object.freeze({
     id: 'component',
     label: 'Component',
     assets: ['Energy Substrate', 'Electromagnet', 'Framework', 'Field Stabilizer', 'Power Source', 'Particle Accelerator', 'Super Conductor', 'Strange Emitter'],
+    sources: { production: ['crafting'], consumption: ['crafting', 'upgrade'] },
   }),
   Object.freeze({
     id: 'data',
     label: 'Data',
     assets: ['Survey Data Unit'],
+    sources: { production: ['sdu'], consumption: ['crafting', 'upgrade'] },
   }),
 ]);
 
@@ -1862,6 +1872,40 @@ function pcrCategorySummary(bucket) {
   return `${visible.length} asset${visible.length === 1 ? '' : 's'} · P/C ${ratioLabel} (${pcrFormatInteger(totalProd)} / ${pcrFormatInteger(totalCons)})`;
 }
 
+// Compute the first "complete" day for a category's chart: the first
+// day in the window where every relevant production + consumption
+// source has started reporting. If the latest first-day across sources
+// is the window's first day (all sources have been collecting for the
+// full 14 days), we return null to mean "no trimming needed" and show
+// the full window. If a source started mid-window, we trim to the day
+// after its first day (so we only show days where every source has
+// full coverage, not the partial first day).
+function pcrComputeFirstDay(category, days, sourceFirstDays) {
+  if (!days.length) return null;
+  const sources = category.sources || {};
+  const prodSources = sources.production || [];
+  const consSources = sources.consumption || [];
+  if (!prodSources.length && !consSources.length) return null;
+  const windowFirstDay = days[0].isoDate;
+  let latestFirstDay = null;
+  for (const source of prodSources) {
+    const first = sourceFirstDays?.production?.[source];
+    if (first && (!latestFirstDay || first > latestFirstDay)) latestFirstDay = first;
+  }
+  for (const source of consSources) {
+    const first = sourceFirstDays?.consumption?.[source];
+    if (first && (!latestFirstDay || first > latestFirstDay)) latestFirstDay = first;
+  }
+  if (!latestFirstDay) return null;
+  if (latestFirstDay <= windowFirstDay) return null;
+  // Add one day so the chart's first day is the first day where every
+  // source has been reporting for a full window, not the partial day
+  // the latest source actually started.
+  const next = new Date(`${latestFirstDay}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+}
+
 function pcrCreateLineChart(category, days, assets) {
   const wrap = pcrCategoryRefs[category.id]?.svgWrap;
   if (!wrap) return;
@@ -1876,6 +1920,29 @@ function pcrCreateLineChart(category, days, assets) {
   }
 
   const padding = { top: 14, right: 14, bottom: 26, left: 40 };
+
+  // Trim the days array to start from the first "complete" day for this
+  // category. Some categories (Raw Material, Consumable) are dominated
+  // by data sources that started mid-window (e.g. mining with the new
+  // faction tag) — showing the early days as a flat line with no
+  // consumption would be misleading. The first complete day is the day
+  // after the latest "first day with any data" across the category's
+  // production + consumption sources.
+  if (days.length && category.sources && latestPcrResult?.sourceFirstDays) {
+    const firstDay = pcrComputeFirstDay(category, days, latestPcrResult.sourceFirstDays);
+    if (firstDay) {
+      const trimmed = days.filter((d) => d.isoDate >= firstDay);
+      if (!trimmed.length) {
+        const empty = document.createElement('div');
+        empty.className = 'pcr-empty-state';
+        empty.textContent = 'No complete days yet for this category';
+        wrap.appendChild(empty);
+        return;
+      }
+      days = trimmed;
+    }
+  }
+
   const dayCount = days.length;
 
   // Measure available space; default to 600x320 if the wrap hasn't been

@@ -2214,6 +2214,22 @@ ${scopeFilterFlux}
   const dayTemplates = createDayTemplates();
   const dayKeySet = new Set(dayTemplates.map((day) => day.isoDate));
 
+  // Track the first day (in the 14-day window) where each data source
+  // has any data. The renderer uses this to find the first "complete
+  // day" per category — i.e. the first day where every relevant
+  // production + consumption source has at least started reporting.
+  // Some sources (e.g. mining with the new faction tag) were added
+  // mid-window, so categories dominated by them need a later start day.
+  const sourceFirstDays = {
+    production: { mining: null, crafting: null, sdu: null },
+    consumption: { mining: null, crafting: null, upgrade: null, sdu: null, movement: null },
+  };
+  const recordSourceFirstDay = (side, source, isoDate) => {
+    if (!source) return;
+    const current = sourceFirstDays[side][source];
+    if (!current || isoDate < current) sourceFirstDays[side][source] = isoDate;
+  };
+
   // Map<assetName, Map<isoDate, number>>
   const productionTotals = new Map();
   if (!productionError) {
@@ -2234,6 +2250,7 @@ ${scopeFilterFlux}
       if (!productionTotals.has(asset)) productionTotals.set(asset, new Map());
       const dayMap = productionTotals.get(asset);
       dayMap.set(key, (dayMap.get(key) || 0) + value);
+      recordSourceFirstDay('production', measurement, key);
     }
   }
 
@@ -2260,12 +2277,14 @@ ${scopeFilterFlux}
       else if (field === 'burnedFood') asset = 'Food';
       else if (field === 'burnedAmmo') asset = 'Ammunition';
       addConsumption(asset, key, value);
+      recordSourceFirstDay('consumption', 'mining', key);
     }
   }
 
   if (!craftUpgradeConsumptionError) {
     const rows = parseInfluxCsv(craftUpgradeConsumptionCsv);
     for (const row of rows) {
+      const measurement = String(row._measurement || '').trim();
       const input = String(row.input || '').trim();
       const date = new Date(row._time);
       if (Number.isNaN(date.getTime())) continue;
@@ -2274,6 +2293,9 @@ ${scopeFilterFlux}
       const value = Number(row._value || 0);
       if (!Number.isFinite(value) || value <= 0) continue;
       addConsumption(input, key, value);
+      if (measurement === 'crafting' || measurement === 'upgrade') {
+        recordSourceFirstDay('consumption', measurement, key);
+      }
     }
   }
 
@@ -2292,6 +2314,9 @@ ${scopeFilterFlux}
       if (measurement === 'sdu' && field === 'burnedFood') asset = 'Food';
       else if (measurement === 'movement' && field === 'burnedFuel') asset = 'Fuel';
       addConsumption(asset, key, value);
+      if (measurement === 'sdu' || measurement === 'movement') {
+        recordSourceFirstDay('consumption', measurement, key);
+      }
     }
   }
 
@@ -2335,6 +2360,7 @@ ${scopeFilterFlux}
     ok: true,
     days: dayTemplates.map((day) => ({ isoDate: day.isoDate, label: day.label })),
     assets,
+    sourceFirstDays,
     faction: normalizeFaction(settings.faction),
     scopeNote: getInfluxScopeNote(settings),
     productionError: productionError ? String(productionError?.message || productionError) : null,

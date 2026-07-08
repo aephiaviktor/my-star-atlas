@@ -1090,11 +1090,6 @@ label {
   background: #061017;
   padding: 12px 14px 14px;
 }
-
-.pcr-chart-card-wide {
-  grid-column: 1 / -1;
-}
-
 .pcr-chart-header {
   display: flex;
   align-items: baseline;
@@ -1146,7 +1141,7 @@ label {
 
 .pcr-chart-svg .pcr-line {
   fill: none;
-  stroke-width: 1.6;
+  stroke-width: 3;
   stroke-linecap: round;
   stroke-linejoin: round;
   opacity: 0.9;
@@ -1158,7 +1153,7 @@ label {
 }
 
 .pcr-chart-svg .pcr-line:hover {
-  stroke-width: 2.4;
+  stroke-width: 4;
   opacity: 1;
 }
 
@@ -1174,7 +1169,7 @@ label {
 
 .pcr-chart-svg .pcr-clipped-point {
   fill: none;
-  stroke-width: 1.5;
+  stroke-width: 2.5;
   stroke-linecap: round;
   stroke-linejoin: round;
   transition: opacity 0.12s;
