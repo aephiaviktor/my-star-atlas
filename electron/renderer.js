@@ -2419,7 +2419,33 @@ function invRenderSmallCard(category, asset) {
 
 function invRenderWideCard(assets) {
   const wrap = invRefs.wideCard.wrap;
-  if (!wrap) return;
+  if (!wrap) {
+    console.warn('[inventory] wide card wrap not found');
+    return;
+  }
+  // Debug: log the wrap dimensions and asset count so we can see
+  // whether the chart is being created with proper dimensions.
+  console.log('[inventory] invRenderWideCard', {
+    assets: assets.length,
+    wrapWidth: wrap.clientWidth,
+    wrapHeight: wrap.clientHeight,
+    visibility: Array.from(invGetVisibility(normalizeFaction(latestSettings?.faction), invSelectedStarbase)),
+  });
+  // If the wrap hasn't been laid out yet (0×0), wait for the next
+  // animation frame and re-measure. This is the most likely cause of
+  // the "wide card is empty" bug when the panel is first shown.
+  if (wrap.clientWidth === 0 || wrap.clientHeight === 0) {
+    console.log('[inventory] wide card wrap has 0 dimensions, deferring to next frame');
+    requestAnimationFrame(() => {
+      if (wrap.clientWidth > 0 && wrap.clientHeight > 0) {
+        invRenderWideCard(assets);
+      } else {
+        // Still 0 — try once more on the next frame.
+        requestAnimationFrame(() => invRenderWideCard(assets));
+      }
+    });
+    return;
+  }
   wrap.textContent = '';
   if (!assets.length) {
     const empty = document.createElement('div');
@@ -2440,9 +2466,16 @@ function invRenderWideCard(assets) {
 function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
   const assets = multiAssets || (singleAsset ? [singleAsset] : []);
   if (!assets.length) return;
+  // If the wrap hasn't been laid out yet (0×0), wait for the next
+  // animation frame and re-render. This handles the case where the
+  // panel was just shown and the flex layout hasn't settled.
+  if (wrap.clientWidth === 0 || wrap.clientHeight === 0) {
+    requestAnimationFrame(() => invRenderLineChart(wrap, singleAsset, opts, multiAssets));
+    return;
+  }
   const padding = { top: 8, right: 10, bottom: 18, left: 38 };
-  const width = Math.max(wrap.clientWidth, 200);
-  const height = Math.max(wrap.clientHeight, 140);
+  const width = wrap.clientWidth;
+  const height = wrap.clientHeight;
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
 
@@ -3104,8 +3137,14 @@ function setActiveSubtab(subtab) {
     } else if (latestInventoryResult) {
       // The initial render may have happened while the panel was hidden
       // (clientWidth was 0). Re-render now that the wrap is laid out so
-      // the HTML labels and SVG axes line up.
-      renderInventory(latestInventoryResult);
+      // the HTML labels and SVG axes line up. Use a double rAF so the
+      // flex layout (especially the 900px line grid) has fully settled
+      // before we measure the wide card's wrap.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (latestInventoryResult) renderInventory(latestInventoryResult);
+        });
+      });
     }
   }
 }

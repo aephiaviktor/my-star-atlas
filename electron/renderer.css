@@ -1448,10 +1448,10 @@ label {
   padding: 12px 14px 14px;
   flex: 1 1 auto;
   min-height: 200px;
-  /* Show every asset row in the bar list, even when the "Other
-     assets" column has many entries. The section scrolls only as a
-     last resort; the preferred behavior is that all rows fit. */
-  overflow-y: auto;
+  /* No internal scrollbar — the production panel scrolls as a whole
+     (see .production-panel.active), so the bar section just grows to
+     fit all rows. */
+  overflow: visible;
   display: flex;
   flex-direction: column;
 }
