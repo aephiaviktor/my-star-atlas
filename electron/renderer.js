@@ -506,6 +506,11 @@ function resetFactionScopedState() {
   latestConsCargoResult = null;
   latestConsTotalResult = null;
   latestPcrResult = null;
+  // Inventory is also faction-scoped: the starbase dropdown and the
+  // per-asset visibility are keyed by faction, so wipe the cached
+  // result and force a fresh fetch on the next render.
+  latestInventoryResult = null;
+  invSelectedStarbase = '__all__';
 }
 
 function updateTitle() {
@@ -2287,6 +2292,9 @@ let latestInventoryResult = null;
 let invSelectedStarbase = '__all__';
 let invMethod = INV_DEFAULT_METHOD;
 
+// Per-faction per-starbase Set of hidden asset labels. An empty
+// Set means "show every asset" — that's the default on first open
+// and on every starbase/faction switch.
 function invGetVisibility(faction, starbase) {
   if (!invAssetVisibility.has(faction)) invAssetVisibility.set(faction, new Map());
   const factionMap = invAssetVisibility.get(faction);
@@ -2439,6 +2447,9 @@ function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
   const innerHeight = height - padding.top - padding.bottom;
 
   // Determine common X axis (day index 0..13) and Y range across all assets.
+  // The Y axis is always anchored at zero on the bottom and at the global
+  // max value on the top, so small changes stay visible and the line never
+  // auto-zooms away from zero.
   const numDays = assets[0].days.length;
   const xStep = numDays > 1 ? innerWidth / (numDays - 1) : 0;
   let maxY = 0;
@@ -2455,9 +2466,12 @@ function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
   svg.setAttribute('preserveAspectRatio', 'none');
   wrap.appendChild(svg);
 
-  // Y axis labels (3 ticks: 0, 50%, 100%)
+  // Y axis labels (3 ticks: 0 at the bottom, 50%, then maxY on top).
+  // The bottom tick is always zero, the top tick is always the data
+  // maximum, so the y-axis never starts above zero.
   if (opts.showAxis) {
     for (let i = 0; i < 3; i += 1) {
+      // i=0 (top) -> maxY, i=1 (mid) -> maxY/2, i=2 (bot) -> 0
       const v = (maxY * (2 - i)) / 2;
       const y = padding.top + (innerHeight * i) / 2;
       const label = document.createElement('div');
@@ -2569,13 +2583,13 @@ function invRenderBars(assets) {
   const consumableAssets = assets.filter((a) => INV_CONSUMABLE_ASSETS.includes(a.label));
   const otherAssets = assets.filter((a) => !INV_CONSUMABLE_ASSETS.includes(a.label));
 
-  // Build per-asset averages.
-  const rows = [];
-  for (const a of assets) {
+  // Build per-asset rows. Every asset is included, even those that
+  // don't yet have two data points — we just render them in a muted
+  // "no average" state so the user always sees the full asset list.
+  const rows = assets.map((a) => {
     const avg = invComputeAverage(a, invMethod);
-    if (avg === null) continue;
-    rows.push({ label: a.label, avg, asset: a });
-  }
+    return { label: a.label, avg, asset: a };
+  });
   if (!rows.length) {
     const empty = document.createElement('div');
     empty.className = 'inv-bar-empty';
@@ -2585,8 +2599,11 @@ function invRenderBars(assets) {
     return;
   }
 
-  // Find the global max absolute value to set a common scale.
-  const maxAbs = Math.max(...rows.map((r) => Math.abs(r.avg)), 1);
+  // Find the global max absolute value among the rows that DO have an
+  // average, so the bar scale stays consistent even when some assets
+  // are in the no-average state.
+  const avgRows = rows.filter((r) => r.avg !== null);
+  const maxAbs = Math.max(1, ...avgRows.map((r) => Math.abs(r.avg)));
 
   const drawColumn = (container, list) => {
     if (!list.length) {
@@ -2596,30 +2613,47 @@ function invRenderBars(assets) {
       container.appendChild(empty);
       return;
     }
-    // Sort: largest positive first, then largest negative
-    const sorted = [...list].sort((a, b) => b.avg - a.avg);
+    // Sort: rows with an average go first (largest positive to largest
+    // negative), then no-average rows in alphabetical order. This keeps
+    // the meaningful chart on top and the "—" rows tucked below.
+    const sorted = [...list].sort((a, b) => {
+      const aHas = a.avg !== null;
+      const bHas = b.avg !== null;
+      if (aHas !== bHas) return aHas ? -1 : 1;
+      if (aHas && bHas) return b.avg - a.avg;
+      return a.label.localeCompare(b.label);
+    });
     for (const row of sorted) {
+      const hasAvg = row.avg !== null;
       const rowEl = document.createElement('div');
       rowEl.className = 'inv-bar-row';
+      if (!hasAvg) rowEl.classList.add('inv-bar-row-noavg');
       const labelEl = document.createElement('div');
       labelEl.className = 'inv-bar-label';
       labelEl.textContent = row.label;
       labelEl.title = row.label;
       const track = document.createElement('div');
       track.className = 'inv-bar-track';
-      const zero = document.createElement('div');
-      zero.className = 'inv-bar-zero';
-      track.appendChild(zero);
-      const fill = document.createElement('div');
-      fill.className = `inv-bar-fill ${row.avg >= 0 ? 'positive' : 'negative'}`;
-      const widthPct = (Math.abs(row.avg) / maxAbs) * 50; // 50% = full bar in either direction
-      fill.style.width = `${widthPct}%`;
-      track.appendChild(fill);
+      if (hasAvg) {
+        const zero = document.createElement('div');
+        zero.className = 'inv-bar-zero';
+        track.appendChild(zero);
+        const fill = document.createElement('div');
+        fill.className = `inv-bar-fill ${row.avg >= 0 ? 'positive' : 'negative'}`;
+        const widthPct = (Math.abs(row.avg) / maxAbs) * 50; // 50% = full bar in either direction
+        fill.style.width = `${widthPct}%`;
+        track.appendChild(fill);
+      }
       const valueEl = document.createElement('div');
       valueEl.className = 'inv-bar-value';
-      const sign = row.avg > 0 ? '+' : '';
-      valueEl.textContent = `${sign}${invFormatInteger(row.avg)}/d`;
-      valueEl.title = `${sign}${row.avg.toFixed(2)}/day`;
+      if (hasAvg) {
+        const sign = row.avg > 0 ? '+' : '';
+        valueEl.textContent = `${sign}${invFormatInteger(row.avg)}/d`;
+        valueEl.title = `${sign}${row.avg.toFixed(2)}/day`;
+      } else {
+        valueEl.textContent = '—';
+        valueEl.title = 'Not enough data for an average yet (need 2+ data points in the window)';
+      }
       rowEl.appendChild(labelEl);
       rowEl.appendChild(track);
       rowEl.appendChild(valueEl);
@@ -3177,6 +3211,8 @@ factionButtons.forEach((button) => {
     if (cachedCrafting) renderCraftingCharts(cachedCrafting);
     const cachedProduction = getCachedFilterResult(faction, 'production', selectedProductionStarbase);
     if (cachedProduction) renderProductionCharts(cachedProduction);
+    const cachedInventory = getCachedFactionResult(faction, 'inventory::__all__');
+    if (cachedInventory) renderInventory(cachedInventory);
     const cachedConsMining = getCachedFilterResult(faction, 'consMining', selectedConsMiningStarbase, selectedConsMiningFleet);
     if (cachedConsMining) renderConsMining(cachedConsMining);
     const cachedConsCrafting = getCachedFilterResult(faction, 'consCrafting', selectedConsCraftingStarbase, selectedConsCraftingRecipe);
@@ -3204,6 +3240,10 @@ factionButtons.forEach((button) => {
         hasInfluxSettings(latestSettings) ? refreshConsUpgrading() : Promise.resolve(),
         hasInfluxSettings(latestSettings) ? refreshConsTotal() : Promise.resolve(),
         hasInfluxSettings(latestSettings) ? refreshPcrCharts() : Promise.resolve(),
+        // Inventory re-fetches on faction switch so the starbase
+        // dropdown always reflects the new faction's starbases and
+        // the per-asset visibility is loaded from the right slot.
+        hasInfluxSettings(latestSettings) ? refreshInventory() : Promise.resolve(),
       ]);
       saveStatus.textContent = `${clickedFaction} selected`;
       setTimeout(() => {

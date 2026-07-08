@@ -1323,7 +1323,9 @@ label {
     "fuel        other";
   gap: 10px;
   margin-bottom: 14px;
-  height: 450px;
+  /* 100% more height: was 450px, now 900px. Each small card is 300px
+     (1/3 of the grid), the wide card spans all three rows = 900px. */
+  height: 900px;
   flex: 0 0 auto;
 }
 
@@ -1370,6 +1372,15 @@ label {
   flex: 1 1 auto;
   min-height: 140px;
   min-width: 0;
+}
+
+/* The wide "Other Assets" card needs an explicit floor so the SVG
+   always has room to render even before the flex layout settles.
+   Without this, the card can collapse to a sliver when the panel is
+   first shown (display: none → active) and the SVG is drawn into a
+   zero-height wrap. */
+.inv-chart-card-wide .inv-chart-svg-wrap {
+  min-height: 280px;
 }
 
 .inv-chart-svg {
@@ -1433,6 +1444,9 @@ label {
   padding: 12px 14px 14px;
   flex: 1 1 auto;
   min-height: 200px;
+  /* Show every asset row in the bar list, even when the "Other
+     assets" column has many entries. The section scrolls only as a
+     last resort; the preferred behavior is that all rows fit. */
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1567,4 +1581,18 @@ label {
   font-variant-numeric: tabular-nums;
   color: var(--muted);
   font-size: 11px;
+}
+
+/* Assets with fewer than 2 data points can't produce a meaningful
+   average. Show the row in a muted state with a dash so the user
+   still sees every asset in the list. */
+.inv-bar-row.inv-bar-row-noavg .inv-bar-label {
+  color: var(--muted);
+}
+.inv-bar-row.inv-bar-row-noavg .inv-bar-track {
+  background: transparent;
+}
+.inv-bar-row.inv-bar-row-noavg .inv-bar-value {
+  color: var(--muted);
+  font-style: italic;
 }
