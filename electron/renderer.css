@@ -1433,6 +1433,32 @@ label {
   color: var(--muted);
 }
 
+.inv-method-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.inv-method-button {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.inv-method-button:hover {
+  color: var(--text);
+}
+
+.inv-method-button.active {
+  background: var(--orange-soft);
+  color: var(--text);
+}
+
 .inv-bar-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

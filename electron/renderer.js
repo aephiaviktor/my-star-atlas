@@ -2282,7 +2282,6 @@ const invRefs = {
   smallCards: {}, // id -> { wrap, summary }
   wideCard: { wrap: null, summary: null, legend: null },
   bars: { consumables: null, other: null },
-  methodNote: null,
 };
 let latestInventoryResult = null;
 let invSelectedStarbase = '__all__';
@@ -2388,7 +2387,6 @@ function invRenderEmpty(message) {
   if (invRefs.wideCard.legend) invRefs.wideCard.legend.textContent = '';
   if (invRefs.bars.consumables) invRefs.bars.consumables.textContent = '';
   if (invRefs.bars.other) invRefs.bars.other.textContent = '';
-  if (invRefs.methodNote) invRefs.methodNote.textContent = '';
   if (invRefs.factionNote) invRefs.factionNote.textContent = `Last 14 days · inventory at starbase · ${message}`;
 }
 
@@ -2679,10 +2677,13 @@ function renderInventory(result) {
   // Bar charts.
   invRenderBars(assets);
 
-  if (invRefs.methodNote) {
-    invRefs.methodNote.textContent = invMethod === 'regression'
-      ? 'Linear regression slope (per day)'
-      : 'Two-point (last − first) ÷ days';
+  invSyncMethodToggle();
+}
+
+function invSyncMethodToggle() {
+  for (const button of document.querySelectorAll('.inv-method-button')) {
+    const isActive = button.dataset.invMethod === invMethod;
+    button.classList.toggle('active', isActive);
   }
 }
 
@@ -2713,7 +2714,6 @@ async function refreshInventory() {
 function initInventory() {
   invRefs.starbaseSelect = document.getElementById('inv-starbase-select');
   invRefs.factionNote = document.getElementById('inv-faction-note');
-  invRefs.methodNote = document.getElementById('inv-method-note');
   for (const id of INV_SMALL_CARD_IDS) {
     invRefs.smallCards[id] = {
       wrap: document.getElementById(`inv-${id}-svg-wrap`),
@@ -2731,6 +2731,15 @@ function initInventory() {
     invRefs.starbaseSelect.addEventListener('change', () => {
       invSelectedStarbase = invRefs.starbaseSelect.value || '__all__';
       refreshInventory();
+    });
+  }
+  for (const button of document.querySelectorAll('.inv-method-button')) {
+    button.addEventListener('click', () => {
+      const next = button.dataset.invMethod;
+      if (next !== 'regression' && next !== 'two-point') return;
+      if (invMethod === next) return;
+      invMethod = next;
+      if (latestInventoryResult) renderInventory(latestInventoryResult);
     });
   }
 }

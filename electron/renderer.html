@@ -595,7 +595,10 @@
             <div class="inv-bar-section">
               <div class="inv-bar-section-header">
                 <h3>Average daily change</h3>
-                <span id="inv-method-note" class="inv-method-note"></span>
+                <div class="inv-method-toggle" role="group" aria-label="Averaging method">
+                  <button id="inv-method-regression" class="inv-method-button active" type="button" data-inv-method="regression">Linear regression</button>
+                  <button id="inv-method-two-point" class="inv-method-button" type="button" data-inv-method="two-point">Two-point</button>
+                </div>
               </div>
               <div class="inv-bar-grid">
                 <div class="inv-bar-column" data-inv-bar-column="consumables">
