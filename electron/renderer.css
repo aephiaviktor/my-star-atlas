@@ -554,6 +554,20 @@ select:focus {
   gap: 5px;
 }
 
+.sdu-chart-card .chart-bar {
+  grid-template-rows: minmax(0, 1fr);
+  justify-items: center;
+}
+
+.sdu-chart-card .chart-bar-track {
+  width: 64%;
+}
+
+.sdu-chart-card .chart-bar-value,
+.sdu-chart-card .chart-bar-label {
+  display: none;
+}
+
 .chart-bars {
   display: grid;
   grid-template-columns: 32px repeat(14, minmax(14px, 1fr));
