@@ -536,6 +536,24 @@ select:focus {
   padding: 22px;
 }
 
+.scanning-surface {
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.sdu-chart-card {
+  box-sizing: border-box;
+  width: calc((100% - 24px) / 3);
+  min-width: 280px;
+  height: 360px;
+  padding: 12px;
+}
+
+.sdu-chart-card .chart-bars {
+  grid-template-columns: 32px repeat(14, minmax(6px, 1fr));
+  gap: 5px;
+}
+
 .chart-bars {
   display: grid;
   grid-template-columns: 32px repeat(14, minmax(14px, 1fr));

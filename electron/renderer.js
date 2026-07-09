@@ -2444,7 +2444,7 @@ const INV_FACTION_STARBASES = Object.freeze({
   ],
 });
 const INV_DEFAULT_METHOD = 'regression'; // two-point vs linear-regression slope
-const invAssetVisibility = new Map(); // faction -> Map<starbase, Set<assetLabel>>
+const invAssetVisibility = new Map(); // faction -> Set<assetLabel>
 
 const invRefs = {
   starbaseSelect: null,
@@ -2458,14 +2458,12 @@ let latestInventoryResult = null;
 let invSelectedStarbase = '__all__';
 let invMethod = INV_DEFAULT_METHOD;
 
-// Per-faction per-starbase Set of hidden asset labels. An empty
-// Set means "show every asset" — that's the default on first open
-// and on every starbase/faction switch.
-function invGetVisibility(faction, starbase) {
-  if (!invAssetVisibility.has(faction)) invAssetVisibility.set(faction, new Map());
-  const factionMap = invAssetVisibility.get(faction);
-  if (!factionMap.has(starbase)) factionMap.set(starbase, new Set());
-  return factionMap.get(starbase);
+// Per-faction Set of hidden asset labels. The same visibility selection
+// follows the user while they switch between "All starbases" and individual
+// starbases, so isolating Carbon stays isolated everywhere in that faction.
+function invGetVisibility(faction) {
+  if (!invAssetVisibility.has(faction)) invAssetVisibility.set(faction, new Set());
+  return invAssetVisibility.get(faction);
 }
 
 function invGetBucketAssets(result, predicate) {
@@ -2684,7 +2682,7 @@ function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
   const numDays = assets[0].days.length;
   const xStep = numDays > 1 ? innerWidth / (numDays - 1) : 0;
   const faction = normalizeFaction(latestSettings?.faction);
-  const visibility = invGetVisibility(faction, invSelectedStarbase);
+  const visibility = invGetVisibility(faction);
   let maxY = 0;
   for (const a of assets) {
     if (visibility.has(a.label)) continue;
@@ -2866,7 +2864,7 @@ function invRenderWideLegend(assets) {
   if (!legend) return;
   legend.textContent = '';
   const faction = normalizeFaction(latestSettings?.faction);
-  const visibility = invGetVisibility(faction, invSelectedStarbase);
+  const visibility = invGetVisibility(faction);
   for (const asset of assets) {
     const chip = document.createElement('button');
     chip.type = 'button';
@@ -2882,7 +2880,7 @@ function invRenderWideLegend(assets) {
     chip.appendChild(label);
     chip.title = isHidden ? `Click to show ${asset.label}` : `Click to hide ${asset.label}`;
     chip.addEventListener('click', () => {
-      const set = invGetVisibility(faction, invSelectedStarbase);
+      const set = invGetVisibility(faction);
       if (set.has(asset.label)) set.delete(asset.label);
       else set.add(asset.label);
       if (latestInventoryResult) renderInventory(latestInventoryResult);
@@ -2906,7 +2904,7 @@ function invRenderWideLegend(assets) {
     ? 'Hide every asset line in the chart'
     : 'Show every asset line in the chart';
   toggle.addEventListener('click', () => {
-    const set = invGetVisibility(faction, invSelectedStarbase);
+    const set = invGetVisibility(faction);
     if (allVisible) {
       for (const a of assets) set.add(a.label);
     } else {
