@@ -1632,11 +1632,14 @@ ${scopeFilterFlux}
   });
 
   const assetMap = new Map();
+  const assetStarbases = new Map();
   for (const entry of scopedEntries) {
     if (!assetMap.has(entry.input)) {
       assetMap.set(entry.input, dayTemplates.map((day) => ({ ...day })));
     }
     addValueToDay(assetMap.get(entry.input), entry.date, entry.value);
+    if (!assetStarbases.has(entry.input)) assetStarbases.set(entry.input, new Set());
+    assetStarbases.get(entry.input).add(entry.starbase);
   }
 
   const assets = Array.from(assetMap.entries())
@@ -1644,6 +1647,7 @@ ${scopeFilterFlux}
       label,
       days,
       total: days.reduce((sum, day) => sum + day.value, 0),
+      starbases: Array.from(assetStarbases.get(label) || []).sort((a, b) => a.localeCompare(b)),
     }))
     .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const total = assets.reduce((sum, asset) => sum + asset.total, 0);
@@ -1791,11 +1795,14 @@ ${scopeFilterFlux}
   });
 
   const assetMap = new Map();
+  const assetStarbases = new Map();
   for (const entry of scopedEntries) {
     if (!assetMap.has(entry.input)) {
       assetMap.set(entry.input, dayTemplates.map((day) => ({ ...day })));
     }
     addValueToDay(assetMap.get(entry.input), entry.date, entry.value);
+    if (!assetStarbases.has(entry.input)) assetStarbases.set(entry.input, new Set());
+    assetStarbases.get(entry.input).add(entry.starbase);
   }
 
   const assets = Array.from(assetMap.entries())
@@ -1803,6 +1810,7 @@ ${scopeFilterFlux}
       label,
       days,
       total: days.reduce((sum, day) => sum + day.value, 0),
+      starbases: Array.from(assetStarbases.get(label) || []).sort((a, b) => a.localeCompare(b)),
     }))
     .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const total = assets.reduce((sum, asset) => sum + asset.total, 0);
@@ -2151,6 +2159,7 @@ async function fetchConsumptionTotal(payload) {
   const coordinateMap = await fetchStarbaseCoordinateMap(settings);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const requestedStarbase = normalizeStarbaseFilter(payload);
+  const requestedAsset = normalizeAssetFilter(payload);
 
   const sduFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
@@ -2303,7 +2312,7 @@ ${scopeFilterFlux}
 
   const factionStarbases = await fetchFactionStarbases(settings);
   const faction = normalizeFaction(settings.faction);
-  const starbases = Array.from(starbaseEntries.values())
+  const allStarbases = Array.from(starbaseEntries.values())
     .filter((entry) => isStarbaseIncluded(entry.starbase, factionStarbases, faction))
     .map((entry) => {
       const slices = createOptionSummary(entry.assets).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
@@ -2321,6 +2330,33 @@ ${scopeFilterFlux}
     .filter((entry) => entry.total > 0)
     .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
 
+  const assetTotals = new Map();
+  for (const sb of allStarbases) {
+    for (const slice of sb.slices) {
+      assetTotals.set(slice.label, (assetTotals.get(slice.label) || 0) + slice.total);
+    }
+  }
+  const assetOptions = createOptionSummary(assetTotals);
+  const selectedAsset = assetOptions.some((asset) => asset.value === requestedAsset) ? requestedAsset : '';
+  const starbases = selectedAsset
+    ? allStarbases
+        .map((sb) => {
+          const selectedTotal = sb.entry.assets.get(selectedAsset) || 0;
+          if (selectedTotal <= 0) return null;
+          const selectedDays = sb.entry.assetDays.get(selectedAsset) || dayTemplates.map((day) => ({ ...day }));
+          const activeDays = selectedDays.filter((day) => (Number(day.value) || 0) > 0).length;
+          const divisor = activeDays > 0 ? activeDays : 1;
+          return {
+            ...sb,
+            total: selectedTotal,
+            activeDays,
+            dailyAverage: selectedTotal / divisor,
+            slices: [{ value: selectedAsset, label: selectedAsset, total: selectedTotal, dailyAverage: selectedTotal / divisor }],
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase))
+    : allStarbases;
   const selectedStarbase = starbases.some((s) => s.starbase === requestedStarbase) ? requestedStarbase : '';
   const isDetail = Boolean(selectedStarbase);
 
@@ -2329,7 +2365,10 @@ ${scopeFilterFlux}
     const activeDayKeys = new Set();
     const allSlices = new Map();
     for (const sb of starbases) {
-      for (const day of sb.entry.days) {
+      const activeSourceDays = selectedAsset
+        ? (sb.entry.assetDays.get(selectedAsset) || [])
+        : sb.entry.days;
+      for (const day of activeSourceDays) {
         if ((Number(day.value) || 0) > 0) activeDayKeys.add(day.isoDate);
       }
       for (const slice of sb.slices) {
@@ -2349,7 +2388,9 @@ ${scopeFilterFlux}
       topAsset: topSlice?.label || null,
       assetCount: allSlices.size,
       starbases: starbases.map((sb) => ({ value: sb.starbase, label: sb.starbase, total: sb.total })),
+      assetOptions,
       selectedStarbase: '',
+      selectedAsset,
       pies: starbases.map((sb) => ({
         starbase: sb.starbase,
         total: sb.total,
@@ -2376,7 +2417,9 @@ ${scopeFilterFlux}
       topAsset: null,
       assetCount: 0,
       starbases: starbases.map((sb) => ({ value: sb.starbase, label: sb.starbase, total: sb.total })),
+      assetOptions,
       selectedStarbase,
+      selectedAsset,
       assets: [],
       faction,
       scopeNote: getInfluxScopeNote(settings),
@@ -2389,9 +2432,13 @@ ${scopeFilterFlux}
       total: slice.total,
       days: selected.entry.assetDays.get(slice.label) || dayTemplates.map((d) => ({ ...d })),
     }))
+    .filter((asset) => !selectedAsset || asset.label === selectedAsset)
     .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const total = assets.reduce((sum, asset) => sum + asset.total, 0);
-  const activeDays = selected.entry.days.filter((day) => (Number(day.value) || 0) > 0).length;
+  const activeSourceDays = selectedAsset
+    ? (selected.entry.assetDays.get(selectedAsset) || [])
+    : selected.entry.days;
+  const activeDays = activeSourceDays.filter((day) => (Number(day.value) || 0) > 0).length;
   const dailyAverage = activeDays > 0 ? total / activeDays : 0;
 
   return {
@@ -2403,7 +2450,9 @@ ${scopeFilterFlux}
     topAsset: assets[0]?.label || null,
     assetCount: assets.length,
     starbases: starbases.map((sb) => ({ value: sb.starbase, label: sb.starbase, total: sb.total })),
+    assetOptions,
     selectedStarbase,
+    selectedAsset,
     assets,
     faction,
     scopeNote: getInfluxScopeNote(settings),

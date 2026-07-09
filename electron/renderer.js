@@ -148,6 +148,7 @@ const consCargoAssetCountNote = document.querySelector('#consumption-cargo-asset
 const consCargoChartGrid = document.querySelector('#consumption-cargo-chart-grid');
 
 const consTotalStarbaseFilter = document.querySelector('#consumption-total-starbase-filter');
+const consTotalAssetFilter = document.querySelector('#consumption-total-asset-filter');
 const consTotalFilterNote = document.querySelector('#consumption-total-filter-note');
 const consTotalTotalValue = document.querySelector('#consumption-total-total-value');
 const consTotalTotalNote = document.querySelector('#consumption-total-total-note');
@@ -223,6 +224,7 @@ let selectedConsScanningFleet = '';
 let selectedConsCargoStarbase = '';
 let selectedConsCargoFleet = '';
 let selectedConsTotalStarbase = '';
+let selectedConsTotalAsset = '';
 
 const factionLabels = Object.freeze({
   MUD: 'MUD',
@@ -364,6 +366,7 @@ function recordFactionFilterState(faction) {
   setCachedFactionResult(faction, 'selectedConsCargoStarbase', selectedConsCargoStarbase);
   setCachedFactionResult(faction, 'selectedConsCargoFleet', selectedConsCargoFleet);
   setCachedFactionResult(faction, 'selectedConsTotalStarbase', selectedConsTotalStarbase);
+  setCachedFactionResult(faction, 'selectedConsTotalAsset', selectedConsTotalAsset);
   setCachedFactionResult(faction, 'selectedInvStarbase', invSelectedStarbase);
 }
 
@@ -386,6 +389,7 @@ function restoreFactionFilterState(faction) {
   selectedConsCargoStarbase = getCachedFactionResult(faction, 'selectedConsCargoStarbase') || '';
   selectedConsCargoFleet = getCachedFactionResult(faction, 'selectedConsCargoFleet') || '';
   selectedConsTotalStarbase = getCachedFactionResult(faction, 'selectedConsTotalStarbase') || '';
+  selectedConsTotalAsset = getCachedFactionResult(faction, 'selectedConsTotalAsset') || '';
   invSelectedStarbase = getCachedFactionResult(faction, 'selectedInvStarbase') || '__all__';
 }
 
@@ -1091,6 +1095,14 @@ function createCraftingPieCard(pie) {
   return card;
 }
 
+function formatStarbaseList(starbases) {
+  const list = Array.isArray(starbases)
+    ? starbases.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
+  if (list.length <= 2) return list.join(', ');
+  return `${list[0]} +${list.length - 1}`;
+}
+
 function renderCraftingCharts(result) {
   latestCraftingResult = result;
   if (!result?.ok) {
@@ -1421,9 +1433,14 @@ function renderConsCrafting(result) {
     return;
   }
   consCraftingChartGrid.classList.toggle('crafting-chart-grid-detail', true);
-  const starbaseLabel = result.selectedRecipe && result.selectedStarbase ? result.selectedStarbase : '';
   for (const [index, asset] of assets.entries()) {
-    consCraftingChartGrid.appendChild(createConsumptionBarCard(asset, index, { headerRight: starbaseLabel }));
+    const starbaseLabel = result.selectedRecipe && !result.selectedStarbase
+      ? formatStarbaseList(asset.starbases)
+      : '';
+    consCraftingChartGrid.appendChild(createConsumptionBarCard(asset, index, {
+      headerRight: starbaseLabel,
+      headerRightTitle: (asset.starbases || []).join(', '),
+    }));
   }
 }
 
@@ -1531,9 +1548,14 @@ function renderConsUpgrading(result) {
     return;
   }
   consUpgradingChartGrid.classList.toggle('crafting-chart-grid-detail', true);
-  const starbaseLabel = result.selectedComponent && result.selectedStarbase ? result.selectedStarbase : '';
   for (const [index, asset] of assets.entries()) {
-    consUpgradingChartGrid.appendChild(createConsumptionBarCard(asset, index, { headerRight: starbaseLabel }));
+    const starbaseLabel = result.selectedComponent && !result.selectedStarbase
+      ? formatStarbaseList(asset.starbases)
+      : '';
+    consUpgradingChartGrid.appendChild(createConsumptionBarCard(asset, index, {
+      headerRight: starbaseLabel,
+      headerRightTitle: (asset.starbases || []).join(', '),
+    }));
   }
 }
 
@@ -1795,6 +1817,7 @@ function renderConsTotalEmpty(message) {
   setText(consTotalAssetCountNote, message);
   if (!String(message).startsWith('Loading')) {
     resetSelectWithAllOption(consTotalStarbaseFilter, 'All starbases');
+    resetSelectWithAllOption(consTotalAssetFilter, 'All assets');
     setText(consTotalFilterNote, message);
   }
   consTotalChartGrid.textContent = '';
@@ -1811,13 +1834,19 @@ function renderConsTotal(result) {
     return;
   }
   setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'consTotal', result);
-  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'consTotal', result, selectedConsTotalStarbase, '');
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'consTotal', result, selectedConsTotalStarbase, selectedConsTotalAsset);
 
   selectedConsTotalStarbase = updateSelectOptions(
     consTotalStarbaseFilter,
     result.starbases,
     result.selectedStarbase || selectedConsTotalStarbase,
     'All starbases'
+  );
+  selectedConsTotalAsset = updateSelectOptions(
+    consTotalAssetFilter,
+    result.assetOptions,
+    result.selectedAsset || selectedConsTotalAsset,
+    'All assets'
   );
 
   setDailyAverageMetric(consTotalAvgValue, consTotalAvgNote, result);
@@ -1864,7 +1893,7 @@ async function refreshConsTotal() {
   }
 
   const faction = normalizeFaction(latestSettings?.faction);
-  const cached = getCachedFilterResult(faction, 'consTotal', selectedConsTotalStarbase, '');
+  const cached = getCachedFilterResult(faction, 'consTotal', selectedConsTotalStarbase, selectedConsTotalAsset);
   if (cached) {
     renderConsTotal(cached);
   } else {
@@ -1874,6 +1903,7 @@ async function refreshConsTotal() {
     const result = await api.getDailyConsumptionTotal({
       ...(latestSettings || getFormPayload()),
       starbaseFilter: selectedConsTotalStarbase,
+      assetFilter: selectedConsTotalAsset,
     });
     renderConsTotal(result);
   } catch (error) {
@@ -1896,6 +1926,18 @@ function pcrToggleAsset(categoryId, assetName) {
   const set = pcrGetCategoryVisibility(faction, categoryId);
   if (set.has(assetName)) set.delete(assetName);
   else set.add(assetName);
+  if (latestPcrResult && latestPcrResult.faction === faction) {
+    renderPcrCharts(latestPcrResult);
+  }
+}
+
+function pcrSetAllAssets(categoryId, assets, hidden) {
+  const faction = normalizeFaction(latestSettings?.faction);
+  const set = pcrGetCategoryVisibility(faction, categoryId);
+  set.clear();
+  if (hidden) {
+    for (const asset of assets) set.add(asset.label);
+  }
   if (latestPcrResult && latestPcrResult.faction === faction) {
     renderPcrCharts(latestPcrResult);
   }
@@ -2036,6 +2078,13 @@ function pcrCreateLineChart(category, days, assets) {
     }
   }
 
+  const dayKeys = new Set(days.map((day) => day.isoDate));
+  const chartAssets = assets
+    .map((asset) => ({
+      ...asset,
+      days: (asset.days || []).filter((day) => dayKeys.has(day.isoDate)),
+    }))
+    .filter((asset) => asset.days.length > 0);
   const dayCount = days.length;
 
   // Measure available space; default to 600x320 if the wrap hasn't been
@@ -2140,12 +2189,12 @@ function pcrCreateLineChart(category, days, assets) {
   const faction = normalizeFaction(latestSettings?.faction);
   const visibilitySet = pcrGetCategoryVisibility(faction, category.id);
   const hiddenAssets = new Set();
-  for (const asset of assets) {
+  for (const asset of chartAssets) {
     if (visibilitySet.has(asset.label)) hiddenAssets.add(asset.label);
   }
 
   const segments = [];
-  for (const asset of assets) {
+  for (const asset of chartAssets) {
     const color = getAssetChartColor(asset.label);
     const isHidden = hiddenAssets.has(asset.label);
     const points = [];
@@ -2284,6 +2333,14 @@ function pcrRenderLegend(category, assets) {
     chip.addEventListener('click', () => pcrToggleAsset(category.id, asset.label));
     legend.appendChild(chip);
   }
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'pcr-legend-toggle-all';
+  const allHidden = assets.every((asset) => visibilitySet.has(asset.label));
+  toggle.textContent = allHidden ? 'Show All' : 'Hide All';
+  toggle.title = allHidden ? `Show all ${category.label} assets` : `Hide all ${category.label} assets`;
+  toggle.addEventListener('click', () => pcrSetAllAssets(category.id, assets, !allHidden));
+  legend.appendChild(toggle);
 }
 
 function pcrRenderCategory(category, assets) {
@@ -3089,7 +3146,9 @@ function createConsumptionBarCard(asset, fallbackIndex, options = {}) {
   const total = document.createElement('span');
   total.className = 'resource-card-total';
   total.textContent = options.headerRight || formatWholeNumber(asset.total);
-  total.title = options.headerRight ? String(options.headerRight) : `${formatWholeNumber(asset.total)} over 14 days`;
+  total.title = options.headerRight
+    ? String(options.headerRightTitle || options.headerRight)
+    : `${formatWholeNumber(asset.total)} over 14 days`;
   header.appendChild(title);
   header.appendChild(total);
 
@@ -3525,6 +3584,8 @@ factionButtons.forEach((button) => {
     if (cachedConsCrafting) renderConsCrafting(cachedConsCrafting);
     const cachedConsUpgrading = getCachedFilterResult(faction, 'consUpgrading', selectedConsUpgradingStarbase, selectedConsUpgradingComponent);
     if (cachedConsUpgrading) renderConsUpgrading(cachedConsUpgrading);
+    const cachedConsTotal = getCachedFilterResult(faction, 'consTotal', selectedConsTotalStarbase, selectedConsTotalAsset);
+    if (cachedConsTotal) renderConsTotal(cachedConsTotal);
     const cachedPcr = getCachedFactionResult(faction, 'pcr');
     if (cachedPcr) renderPcrCharts(cachedPcr);
 
@@ -3673,6 +3734,11 @@ consCargoFleetFilter.addEventListener('change', () => {
 // Consumption — Total filter
 consTotalStarbaseFilter.addEventListener('change', () => {
   selectedConsTotalStarbase = consTotalStarbaseFilter.value;
+  refreshConsTotal();
+});
+consTotalAssetFilter.addEventListener('change', () => {
+  selectedConsTotalAsset = consTotalAssetFilter.value;
+  selectedConsTotalStarbase = '';
   refreshConsTotal();
 });
 
