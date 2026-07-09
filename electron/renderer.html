@@ -110,10 +110,16 @@
             </div>
 
             <section class="work-surface scanning-surface">
-              <div class="placeholder-chart sdu-chart-card">
-                <div id="sdu-chart-bars" class="chart-bars" aria-label="Daily SDU found over the last 14 days">
-                  <div class="chart-empty">Awaiting Influx connection</div>
-                </div>
+              <div class="resource-chart-grid scanning-chart-grid">
+                <section class="resource-card">
+                  <div class="resource-card-header">
+                    <h3 class="resource-card-title">Survey Data Unit</h3>
+                    <span id="sdu-chart-total" class="resource-card-total">--</span>
+                  </div>
+                  <div id="sdu-chart-bars" class="resource-chart-bars" aria-label="Daily SDU found over the last 14 days">
+                    <div class="chart-empty">Awaiting Influx connection</div>
+                  </div>
+                </section>
               </div>
             </section>
           </div>

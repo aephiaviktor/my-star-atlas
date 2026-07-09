@@ -42,6 +42,7 @@ const sduTopFleetValue = document.querySelector('#sdu-top-fleet-value');
 const sduTopFleetNote = document.querySelector('#sdu-top-fleet-note');
 const sduDaysActiveValue = document.querySelector('#sdu-days-active-value');
 const sduDaysActiveNote = document.querySelector('#sdu-days-active-note');
+const sduChartTotal = document.querySelector('#sdu-chart-total');
 const sduChartBars = document.querySelector('#sdu-chart-bars');
 const scanningFleetFilter = document.querySelector('#scanning-fleet-filter');
 const scanningFleetNote = document.querySelector('#scanning-fleet-note');
@@ -737,6 +738,7 @@ function renderSduEmpty(message) {
   setText(sduTopFleetNote, message);
   setText(sduDaysActiveValue, '--');
   setText(sduDaysActiveNote, message);
+  setText(sduChartTotal, '--');
   if (!String(message).startsWith('Loading')) {
     resetActivityFleetFilter(scanningFleetFilter, scanningFleetNote, message);
   }
@@ -772,6 +774,7 @@ function renderSduChart(result) {
   const maxValue = Math.max(...days.map((day) => Number(day.value) || 0), 1);
   setText(sduTotalValue, formatWholeNumber(result.total));
   setText(sduTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
+  setText(sduChartTotal, formatWholeNumber(result.total));
 
   const todayKey = getUtcTodayKey();
   const completedDays = days.filter((day) => day.isoDate !== todayKey);
@@ -800,28 +803,14 @@ function renderSduChart(result) {
     const value = Number(day.value) || 0;
     const height = Math.max(3, Math.round((value / maxValue) * 75));
     const bar = document.createElement('div');
-    bar.className = 'chart-bar';
+    bar.className = 'resource-chart-bar';
     bar.title = `${day.label}: ${formatWholeNumber(value)} SDU`;
 
-    const track = document.createElement('div');
-    track.className = 'chart-bar-track';
     const fill = document.createElement('span');
-    fill.className = 'chart-bar-fill';
+    fill.className = 'resource-chart-fill';
     fill.style.height = `${height}%`;
     fill.style.background = getAssetChartFill('Survey Data Unit');
-    track.appendChild(fill);
-
-    const valueLabel = document.createElement('span');
-    valueLabel.className = 'chart-bar-value';
-    valueLabel.textContent = formatWholeNumber(value);
-
-    const dateLabel = document.createElement('span');
-    dateLabel.className = 'chart-bar-label';
-    dateLabel.textContent = day.label;
-
-    bar.appendChild(track);
-    bar.appendChild(valueLabel);
-    bar.appendChild(dateLabel);
+    bar.appendChild(fill);
     sduChartBars.appendChild(bar);
   }
 }
