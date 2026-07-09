@@ -513,6 +513,10 @@ function normalizeComponentFilter(payload) {
   return String(payload?.componentFilter || '').trim();
 }
 
+function normalizeAssetFilter(payload) {
+  return String(payload?.assetFilter || '').trim();
+}
+
 function addValueToDay(days, date, value) {
   const key = getUtcDateKey(date);
   const day = days.find((item) => item.isoDate === key);
@@ -539,6 +543,32 @@ function createOptionSummary(totals) {
       total,
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// Panel-wide active days: number of unique dates in `entries` with value > 0.
+function computeActiveDays(entries) {
+  const days = new Set();
+  for (const entry of entries) {
+    const date = entry.date;
+    const value = Number(entry.value || 0);
+    if (!date || Number.isNaN(date.getTime()) || !Number.isFinite(value) || value <= 0) continue;
+    days.add(getUtcDateKey(date));
+  }
+  return days.size;
+}
+
+// Per-starbase active days: Map<starbase, Set<dateKey>>.
+function computeStarbaseActiveDays(entries) {
+  const map = new Map();
+  for (const entry of entries) {
+    const starbase = entry.starbase;
+    const date = entry.date;
+    const value = Number(entry.value || 0);
+    if (!starbase || !date || Number.isNaN(date.getTime()) || !Number.isFinite(value) || value <= 0) continue;
+    if (!map.has(starbase)) map.set(starbase, new Set());
+    map.get(starbase).add(getUtcDateKey(date));
+  }
+  return map;
 }
 
 async function fetchDailySdu(payload) {
@@ -741,24 +771,34 @@ ${scopeFilterFlux}
       slices.set(entry.output, (slices.get(entry.output) || 0) + entry.value);
     }
 
+    const starbaseDays = computeStarbaseActiveDays(scopedOutputs);
     const pies = Array.from(pieMap.entries())
       .map(([starbase, sliceMap]) => {
         const slices = createOptionSummary(sliceMap).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+        const total = slices.reduce((sum, slice) => sum + slice.total, 0);
+        const activeDays = starbaseDays.get(starbase)?.size || 0;
+        const divisor = activeDays > 0 ? activeDays : 1;
         return {
           starbase,
-          total: slices.reduce((sum, slice) => sum + slice.total, 0),
-          slices,
+          total,
+          activeDays,
+          dailyAverage: total / divisor,
+          slices: slices.map((s) => ({ ...s, dailyAverage: s.total / divisor })),
         };
       })
       .filter((pie) => pie.total > 0)
       .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
     const total = pies.reduce((sum, pie) => sum + pie.total, 0);
     const topSlice = pies.flatMap((pie) => pie.slices).sort((a, b) => b.total - a.total)[0] || null;
+    const activeDays = computeActiveDays(scopedOutputs);
+    const dailyAverage = activeDays > 0 ? total / activeDays : 0;
 
     return {
       ok: true,
       mode: 'overview',
       total,
+      dailyAverage,
+      activeDays,
       topRecipe: topSlice?.label || null,
       outputCount: recipes.length,
       starbases,
@@ -808,11 +848,16 @@ ${scopeFilterFlux}
     .filter((step) => step.total > 0)
     .sort((a, b) => a.depth - b.depth || a.output.localeCompare(b.output));
   const finalStep = selectedRecipe ? (steps.find((step) => step.output === selectedRecipe) || null) : null;
+  const scopedActiveDays = computeActiveDays(scopedOutputs);
+  const detailTotal = selectedRecipe ? (finalStep?.total || 0) : steps.reduce((sum, s) => sum + s.total, 0);
+  const detailDailyAverage = scopedActiveDays > 0 ? detailTotal / scopedActiveDays : 0;
 
   return {
     ok: true,
     mode: 'detail',
-    total: selectedRecipe ? (finalStep?.total || 0) : steps.reduce((sum, s) => sum + s.total, 0),
+    total: detailTotal,
+    dailyAverage: detailDailyAverage,
+    activeDays: scopedActiveDays,
     topRecipe: selectedRecipe || steps.slice().sort((a, b) => b.total - a.total)[0]?.output || null,
     outputCount: recipes.length,
     stepCount: steps.length,
@@ -895,21 +940,35 @@ ${scopeFilterFlux}
       slices.set(entry.resource, (slices.get(entry.resource) || 0) + entry.value);
     }
 
+    const starbaseDays = computeStarbaseActiveDays(entries);
     const pies = Array.from(pieMap.entries())
       .map(([starbase, sliceMap]) => {
         const slices = createOptionSummary(sliceMap).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
-        return { starbase, total: slices.reduce((sum, s) => sum + s.total, 0), slices };
+        const total = slices.reduce((sum, s) => sum + s.total, 0);
+        const activeDays = starbaseDays.get(starbase)?.size || 0;
+        const divisor = activeDays > 0 ? activeDays : 1;
+        return {
+          starbase,
+          total,
+          activeDays,
+          dailyAverage: total / divisor,
+          slices: slices.map((s) => ({ ...s, dailyAverage: s.total / divisor })),
+        };
       })
       .filter((pie) => pie.total > 0)
       .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
     const total = pies.reduce((sum, pie) => sum + pie.total, 0);
     const topSlice = pies.flatMap((p) => p.slices).sort((a, b) => b.total - a.total)[0] || null;
+    const activeDays = computeActiveDays(entries);
+    const dailyAverage = activeDays > 0 ? total / activeDays : 0;
 
     return {
       ok: true,
       mode: 'overview',
       field: 'amount',
       total,
+      dailyAverage,
+      activeDays,
       topMaterial: topSlice?.label || null,
       materialCount: new Set(pies.flatMap((p) => p.slices.map((s) => s.label))).size,
       starbases,
@@ -945,6 +1004,8 @@ ${scopeFilterFlux}
     }))
     .sort((a, b) => b.total - a.total || a.resource.localeCompare(b.resource));
   const total = materials.reduce((sum, material) => sum + material.total, 0);
+  const scopedActiveDays = computeActiveDays(scopedEntries);
+  const dailyAverage = scopedActiveDays > 0 ? total / scopedActiveDays : 0;
 
   return {
     ok: true,
@@ -953,6 +1014,8 @@ ${scopeFilterFlux}
     materials,
     materialCount: materials.length,
     total,
+    dailyAverage,
+    activeDays: scopedActiveDays,
     topMaterial: materials[0]?.resource || null,
     starbases,
     fleets,
@@ -1045,6 +1108,28 @@ ${scopeFilterFlux}
   return parseInfluxCsv(await queryInfluxFlux(settings, flux));
 }
 
+// Daily production totals per starbase (sdu + mining + crafting combined).
+// Used to compute "active days" for the pie chart's daily average.
+async function fetchProductionDailyByStarbaseRows(settings, bucket) {
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._field == "amount")
+  |> filter(fn: (r) =>
+    (r._measurement == "mining" and exists r.rss) or
+    (r._measurement == "crafting" and (exists r.type) and r.type == "Output" and exists r.output) or
+    (r._measurement == "sdu" and exists r.fleet and exists r.starbase)
+  )
+${scopeFilterFlux}
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["starbase", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["starbase", "_time", "_value"])
+  |> sort(columns: ["starbase", "_time"])`;
+  return parseInfluxCsv(await queryInfluxFlux(settings, flux));
+}
+
 async function fetchSduProductionDailyAll(settings, bucket) {
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
@@ -1072,14 +1157,33 @@ async function fetchDailyProduction(payload) {
   // legacy "SLYA does not yet write..." comment is stale and the gate will
   // flip to true for buckets that have the new tag.
   const includeSdu = canGroupSduByStarbase;
+  const requestedAsset = normalizeAssetFilter(payload);
 
-  const [sduRows, miningRows, craftingRows] = await Promise.all([
+  const [sduRows, miningRows, craftingRows, dailyByStarbaseRows] = await Promise.all([
     includeSdu
       ? fetchProductionRows(settings, bucket, 'sdu', 'starbase')
       : Promise.resolve([]),
     fetchProductionRows(settings, bucket, 'mining', 'rss'),
     fetchProductionRows(settings, bucket, 'crafting', 'output', '  |> filter(fn: (r) => (exists r.type) and r.type == "Output")'),
+    fetchProductionDailyByStarbaseRows(settings, bucket),
   ]);
+
+  // Per-starbase active day set (any source: sdu/mining/crafting)
+  const starbaseDays = new Map();
+  for (const row of dailyByStarbaseRows) {
+    const starbase = resolveStarbaseName(row, coordinateMap);
+    if (!starbase) continue;
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (Number.isNaN(date.getTime()) || !Number.isFinite(value) || value <= 0) continue;
+    if (!starbaseDays.has(starbase)) starbaseDays.set(starbase, new Set());
+    starbaseDays.get(starbase).add(getUtcDateKey(date));
+  }
+  // Panel-wide active day set (deduped across all starbases)
+  const panelActiveDays = new Set();
+  for (const daySet of starbaseDays.values()) {
+    for (const key of daySet) panelActiveDays.add(key);
+  }
 
   const pieMap = new Map();
   for (const row of sduRows) {
@@ -1096,10 +1200,15 @@ async function fetchDailyProduction(payload) {
   let allPies = Array.from(pieMap.entries())
     .map(([starbase, sliceMap]) => {
       const slices = createOptionSummary(sliceMap).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+      const total = slices.reduce((sum, slice) => sum + slice.total, 0);
+      const activeDays = starbaseDays.get(starbase)?.size || 0;
+      const divisor = activeDays > 0 ? activeDays : 1;
       return {
         starbase,
-        total: slices.reduce((sum, slice) => sum + slice.total, 0),
-        slices,
+        total,
+        activeDays,
+        dailyAverage: total / divisor,
+        slices: slices.map((s) => ({ ...s, dailyAverage: s.total / divisor })),
       };
     })
     .filter((pie) => pie.total > 0);
@@ -1111,35 +1220,64 @@ async function fetchDailyProduction(payload) {
   }
   allPies.sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
 
-  const starbases = allPies.map((pie) => ({ value: pie.starbase, label: pie.starbase, total: pie.total }));
-  const selectedStarbase = starbases.some((s) => s.value === requestedStarbase) ? requestedStarbase : '';
-
-  const allSlices = allPies.flatMap((pie) => pie.slices);
+  // Asset list: union of all produced assets (Scanning, Mining, Crafting)
   const productTotals = new Map();
-  for (const slice of allSlices) {
-    productTotals.set(slice.label, (productTotals.get(slice.label) || 0) + slice.total);
+  for (const pie of allPies) {
+    for (const slice of pie.slices) {
+      productTotals.set(slice.label, (productTotals.get(slice.label) || 0) + slice.total);
+    }
   }
   const products = createOptionSummary(productTotals).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+  const assets = createOptionSummary(productTotals).sort((a, b) => a.label.localeCompare(b.label));
+
+  const selectedAsset = assets.some((a) => a.value === requestedAsset) ? requestedAsset : '';
+
+  // If an asset is selected, only keep starbases that produce that asset.
+  const starbasesForAsset = selectedAsset
+    ? allPies.filter((pie) => pie.slices.some((s) => s.label === requestedAsset))
+    : allPies;
+  const starbases = starbasesForAsset.map((pie) => ({ value: pie.starbase, label: pie.starbase, total: pie.total }));
+  const selectedStarbase = starbases.some((s) => s.value === requestedStarbase) ? requestedStarbase : '';
+
+  // Build the pies that the renderer will show (filtered by selectedAsset if any)
+  const visiblePies = selectedAsset
+    ? starbasesForAsset.map((pie) => ({
+        ...pie,
+        slices: pie.slices.filter((s) => s.label === requestedAsset),
+        total: pie.slices
+          .filter((s) => s.label === requestedAsset)
+          .reduce((sum, slice) => sum + slice.total, 0),
+        dailyAverage: pie.slices
+          .filter((s) => s.label === requestedAsset)
+          .reduce((sum, slice) => sum + (Number(slice.dailyAverage) || 0), 0),
+      }))
+    : starbasesForAsset;
+
+  const panelTotal = visiblePies.reduce((sum, pie) => sum + pie.total, 0);
+  const panelDailyAverage = visiblePies.reduce((sum, pie) => sum + (Number(pie.dailyAverage) || 0), 0);
 
   if (!selectedStarbase) {
     return {
       ok: true,
       mode: 'overview',
-      total: allPies.reduce((sum, pie) => sum + pie.total, 0),
-      topProduct: products[0]?.label || null,
-      productCount: products.length,
-      starbaseCount: allPies.length,
+      total: panelTotal,
+      dailyAverage: panelDailyAverage,
+      activeDays: panelActiveDays.size,
+      topProduct: selectedAsset || products[0]?.label || null,
+      productCount: selectedAsset ? 1 : products.length,
+      starbaseCount: starbasesForAsset.length,
       starbases,
       selectedStarbase: '',
+      selectedAsset,
       sduStarbaseTagged: canGroupSduByStarbase,
-      pies: allPies,
+      productOptions: assets,
+      pies: visiblePies,
       faction: normalizeFaction(settings.faction),
       scopeNote: getInfluxScopeNote(settings),
       checkedAt: new Date().toISOString(),
     };
   }
 
-  const scopedPie = allPies.find((pie) => pie.starbase === selectedStarbase) || null;
   const dayTemplates = createDayTemplates();
   const assetMap = new Map();
 
@@ -1167,7 +1305,7 @@ async function fetchDailyProduction(payload) {
     addValueToDay(assetMap.get(label), new Date(row._time), Number(row._value || 0));
   }
 
-  const assets = Array.from(assetMap.entries())
+  let detailAssets = Array.from(assetMap.entries())
     .map(([label, days]) => ({
       label,
       days,
@@ -1175,18 +1313,28 @@ async function fetchDailyProduction(payload) {
     }))
     .filter((asset) => asset.total > 0)
     .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+  if (selectedAsset) {
+    detailAssets = detailAssets.filter((asset) => asset.label === selectedAsset);
+  }
+  const detailActiveDays = (starbaseDays.get(selectedStarbase)?.size) || 0;
+  const detailTotal = detailAssets.reduce((sum, asset) => sum + asset.total, 0);
+  const detailDailyAverage = detailActiveDays > 0 ? detailTotal / detailActiveDays : 0;
 
   return {
     ok: true,
     mode: 'detail',
-    total: assets.reduce((sum, asset) => sum + asset.total, 0),
-    topProduct: assets[0]?.label || null,
-    productCount: assets.length,
+    total: detailTotal,
+    dailyAverage: detailDailyAverage,
+    activeDays: detailActiveDays,
+    topProduct: detailAssets[0]?.label || null,
+    productCount: detailAssets.length,
     starbaseCount: 1,
     starbases,
     selectedStarbase,
+    selectedAsset,
     sduStarbaseTagged: canGroupSduByStarbase,
-    assets,
+    productOptions: assets,
+    assets: detailAssets,
     faction: normalizeFaction(settings.faction),
     scopeNote: getInfluxScopeNote(settings),
     checkedAt: new Date().toISOString(),
@@ -1275,20 +1423,34 @@ ${scopeFilterFlux}
       slices.set(entry.assetName, (slices.get(entry.assetName) || 0) + entry.value);
     }
 
+    const starbaseDays = computeStarbaseActiveDays(entries);
     const pies = Array.from(pieMap.entries())
       .map(([starbase, sliceMap]) => {
         const slices = createOptionSummary(sliceMap).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
-        return { starbase, total: slices.reduce((sum, s) => sum + s.total, 0), slices };
+        const total = slices.reduce((sum, s) => sum + s.total, 0);
+        const activeDays = starbaseDays.get(starbase)?.size || 0;
+        const divisor = activeDays > 0 ? activeDays : 1;
+        return {
+          starbase,
+          total,
+          activeDays,
+          dailyAverage: total / divisor,
+          slices: slices.map((s) => ({ ...s, dailyAverage: s.total / divisor })),
+        };
       })
       .filter((pie) => pie.total > 0)
       .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
     const total = pies.reduce((sum, pie) => sum + pie.total, 0);
     const topSlice = pies.flatMap((p) => p.slices).sort((a, b) => b.total - a.total)[0] || null;
+    const activeDays = computeActiveDays(entries);
+    const dailyAverage = activeDays > 0 ? total / activeDays : 0;
 
     return {
       ok: true,
       mode: 'overview',
       total,
+      dailyAverage,
+      activeDays,
       topAsset: topSlice?.label || null,
       assetCount: new Set(pies.flatMap((p) => p.slices.map((s) => s.label))).size,
       starbases,
@@ -1324,11 +1486,15 @@ ${scopeFilterFlux}
     }))
     .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const total = assets.reduce((sum, asset) => sum + asset.total, 0);
+  const scopedActiveDays = computeActiveDays(scopedEntries);
+  const dailyAverage = scopedActiveDays > 0 ? total / scopedActiveDays : 0;
 
   return {
     ok: true,
     mode: 'detail',
     total,
+    dailyAverage,
+    activeDays: scopedActiveDays,
     topAsset: assets[0]?.label || null,
     assetCount: assets.length,
     starbases,
@@ -1391,8 +1557,21 @@ ${scopeFilterFlux}
   let starbases = createOptionSummary(starbaseTotals);
   starbases = filterStarbasesByFaction(starbases, factionStarbases_, normalizeFaction(settings.faction));
   const recipes = createOptionSummary(recipeTotals);
-  const selectedStarbase = starbases.some((s) => s.value === requestedStarbase) ? requestedStarbase : '';
   const selectedRecipe = recipes.some((r) => r.value === requestedRecipe) ? requestedRecipe : '';
+  // If a recipe is selected, only show starbases that actually consume it.
+  // This prevents the "starbase has no data for this recipe" empty state
+  // and stops the dropdowns from getting stuck.
+  if (selectedRecipe) {
+    const starbaseTotalsForRecipe = new Map();
+    for (const entry of entries) {
+      if (entry.output !== selectedRecipe) continue;
+      starbaseTotalsForRecipe.set(entry.starbase, (starbaseTotalsForRecipe.get(entry.starbase) || 0) + entry.value);
+    }
+    let starbasesForRecipe = createOptionSummary(starbaseTotalsForRecipe);
+    starbasesForRecipe = filterStarbasesByFaction(starbasesForRecipe, factionStarbases_, normalizeFaction(settings.faction));
+    starbases = starbasesForRecipe;
+  }
+  const selectedStarbase = starbases.some((s) => s.value === requestedStarbase) ? requestedStarbase : '';
   const isDetail = Boolean(selectedStarbase || selectedRecipe);
 
   if (!isDetail) {
@@ -1405,20 +1584,34 @@ ${scopeFilterFlux}
       slices.set(entry.input, (slices.get(entry.input) || 0) + entry.value);
     }
 
+    const starbaseDays = computeStarbaseActiveDays(entries);
     const pies = Array.from(pieMap.entries())
       .map(([starbase, sliceMap]) => {
         const slices = createOptionSummary(sliceMap).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
-        return { starbase, total: slices.reduce((sum, s) => sum + s.total, 0), slices };
+        const total = slices.reduce((sum, s) => sum + s.total, 0);
+        const activeDays = starbaseDays.get(starbase)?.size || 0;
+        const divisor = activeDays > 0 ? activeDays : 1;
+        return {
+          starbase,
+          total,
+          activeDays,
+          dailyAverage: total / divisor,
+          slices: slices.map((s) => ({ ...s, dailyAverage: s.total / divisor })),
+        };
       })
       .filter((pie) => pie.total > 0)
       .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
     const total = pies.reduce((sum, pie) => sum + pie.total, 0);
     const topSlice = pies.flatMap((p) => p.slices).sort((a, b) => b.total - a.total)[0] || null;
+    const activeDays = computeActiveDays(entries);
+    const dailyAverage = activeDays > 0 ? total / activeDays : 0;
 
     return {
       ok: true,
       mode: 'overview',
       total,
+      dailyAverage,
+      activeDays,
       topAsset: topSlice?.label || null,
       assetCount: new Set(pies.flatMap((p) => p.slices.map((s) => s.label))).size,
       starbases,
@@ -1454,11 +1647,15 @@ ${scopeFilterFlux}
     }))
     .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const total = assets.reduce((sum, asset) => sum + asset.total, 0);
+  const scopedActiveDays = computeActiveDays(scopedEntries);
+  const dailyAverage = scopedActiveDays > 0 ? total / scopedActiveDays : 0;
 
   return {
     ok: true,
     mode: 'detail',
     total,
+    dailyAverage,
+    activeDays: scopedActiveDays,
     topAsset: assets[0]?.label || null,
     assetCount: assets.length,
     starbases,
@@ -1518,8 +1715,22 @@ ${scopeFilterFlux}
   let starbases = createOptionSummary(starbaseTotals);
   starbases = filterStarbasesByFaction(starbases, factionStarbases__, normalizeFaction(settings.faction));
   const components = createOptionSummary(componentTotals);
-  const selectedStarbase = starbases.some((s) => s.value === requestedStarbase) ? requestedStarbase : '';
   const selectedComponent = components.some((c) => c.value === requestedComponent) ? requestedComponent : '';
+  // If a component is selected, only show starbases that actually consume it.
+  // (Same UX pattern as the Crafting consumption fix: avoid the empty-state
+  // trap where the user picks a starbase that doesn't consume the selected
+  // component and the dropdowns lock up.)
+  if (selectedComponent) {
+    const starbaseTotalsForComponent = new Map();
+    for (const entry of entries) {
+      if (entry.input !== selectedComponent) continue;
+      starbaseTotalsForComponent.set(entry.starbase, (starbaseTotalsForComponent.get(entry.starbase) || 0) + entry.value);
+    }
+    let starbasesForComponent = createOptionSummary(starbaseTotalsForComponent);
+    starbasesForComponent = filterStarbasesByFaction(starbasesForComponent, factionStarbases__, normalizeFaction(settings.faction));
+    starbases = starbasesForComponent;
+  }
+  const selectedStarbase = starbases.some((s) => s.value === requestedStarbase) ? requestedStarbase : '';
   const isDetail = Boolean(selectedStarbase || selectedComponent);
 
   if (!isDetail) {
@@ -1532,20 +1743,34 @@ ${scopeFilterFlux}
       slices.set(entry.input, (slices.get(entry.input) || 0) + entry.value);
     }
 
+    const starbaseDays = computeStarbaseActiveDays(entries);
     const pies = Array.from(pieMap.entries())
       .map(([starbase, sliceMap]) => {
         const slices = createOptionSummary(sliceMap).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
-        return { starbase, total: slices.reduce((sum, s) => sum + s.total, 0), slices };
+        const total = slices.reduce((sum, s) => sum + s.total, 0);
+        const activeDays = starbaseDays.get(starbase)?.size || 0;
+        const divisor = activeDays > 0 ? activeDays : 1;
+        return {
+          starbase,
+          total,
+          activeDays,
+          dailyAverage: total / divisor,
+          slices: slices.map((s) => ({ ...s, dailyAverage: s.total / divisor })),
+        };
       })
       .filter((pie) => pie.total > 0)
       .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
     const total = pies.reduce((sum, pie) => sum + pie.total, 0);
     const topSlice = pies.flatMap((p) => p.slices).sort((a, b) => b.total - a.total)[0] || null;
+    const activeDays = computeActiveDays(entries);
+    const dailyAverage = activeDays > 0 ? total / activeDays : 0;
 
     return {
       ok: true,
       mode: 'overview',
       total,
+      dailyAverage,
+      activeDays,
       topAsset: topSlice?.label || null,
       assetCount: new Set(pies.flatMap((p) => p.slices.map((s) => s.label))).size,
       starbases,
@@ -1581,11 +1806,15 @@ ${scopeFilterFlux}
     }))
     .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const total = assets.reduce((sum, asset) => sum + asset.total, 0);
+  const scopedActiveDays = computeActiveDays(scopedEntries);
+  const dailyAverage = scopedActiveDays > 0 ? total / scopedActiveDays : 0;
 
   return {
     ok: true,
     mode: 'detail',
     total,
+    dailyAverage,
+    activeDays: scopedActiveDays,
     topAsset: assets[0]?.label || null,
     assetCount: assets.length,
     starbases,
@@ -1687,20 +1916,34 @@ ${scopeFilterFlux}
       slices.set(entry.assetName, (slices.get(entry.assetName) || 0) + entry.value);
     }
 
+    const starbaseActiveDays = computeStarbaseActiveDays(entries);
     const pies = Array.from(pieMap.entries())
       .map(([starbase, sliceMap]) => {
         const slices = createOptionSummary(sliceMap).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
-        return { starbase, total: slices.reduce((sum, s) => sum + s.total, 0), slices };
+        const total = slices.reduce((sum, s) => sum + s.total, 0);
+        const activeDays = starbaseActiveDays.get(starbase)?.size || 0;
+        const divisor = activeDays > 0 ? activeDays : 1;
+        return {
+          starbase,
+          total,
+          activeDays,
+          dailyAverage: total / divisor,
+          slices: slices.map((s) => ({ ...s, dailyAverage: s.total / divisor })),
+        };
       })
       .filter((pie) => pie.total > 0)
       .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
     const total = pies.reduce((sum, pie) => sum + pie.total, 0);
+    const activeDays = computeActiveDays(entries);
+    const dailyAverage = activeDays > 0 ? total / activeDays : 0;
     const topSlice = pies.flatMap((p) => p.slices).sort((a, b) => b.total - a.total)[0] || null;
 
     return {
       ok: true,
       mode: 'overview',
       total,
+      dailyAverage,
+      activeDays,
       topAsset: topSlice?.label || null,
       assetCount: new Set(pies.flatMap((p) => p.slices.map((s) => s.label))).size,
       starbases,
@@ -1736,11 +1979,15 @@ ${scopeFilterFlux}
     }))
     .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const total = assets.reduce((sum, asset) => sum + asset.total, 0);
+  const scopedActiveDays = computeActiveDays(scopedEntries);
+  const dailyAverage = scopedActiveDays > 0 ? total / scopedActiveDays : 0;
 
   return {
     ok: true,
     mode: 'detail',
     total,
+    dailyAverage,
+    activeDays: scopedActiveDays,
     topAsset: assets[0]?.label || null,
     assetCount: assets.length,
     starbases,
@@ -1813,20 +2060,34 @@ ${scopeFilterFlux}
       slices.set(entry.assetName, (slices.get(entry.assetName) || 0) + entry.value);
     }
 
+    const starbaseActiveDays = computeStarbaseActiveDays(entries);
     const pies = Array.from(pieMap.entries())
       .map(([starbase, sliceMap]) => {
         const slices = createOptionSummary(sliceMap).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
-        return { starbase, total: slices.reduce((sum, s) => sum + s.total, 0), slices };
+        const total = slices.reduce((sum, s) => sum + s.total, 0);
+        const activeDays = starbaseActiveDays.get(starbase)?.size || 0;
+        const divisor = activeDays > 0 ? activeDays : 1;
+        return {
+          starbase,
+          total,
+          activeDays,
+          dailyAverage: total / divisor,
+          slices: slices.map((s) => ({ ...s, dailyAverage: s.total / divisor })),
+        };
       })
       .filter((pie) => pie.total > 0)
       .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
     const total = pies.reduce((sum, pie) => sum + pie.total, 0);
+    const activeDays = computeActiveDays(entries);
+    const dailyAverage = activeDays > 0 ? total / activeDays : 0;
     const topSlice = pies.flatMap((p) => p.slices).sort((a, b) => b.total - a.total)[0] || null;
 
     return {
       ok: true,
       mode: 'overview',
       total,
+      dailyAverage,
+      activeDays,
       topAsset: topSlice?.label || null,
       assetCount: new Set(pies.flatMap((p) => p.slices.map((s) => s.label))).size,
       starbases,
@@ -1862,11 +2123,15 @@ ${scopeFilterFlux}
     }))
     .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const total = assets.reduce((sum, asset) => sum + asset.total, 0);
+  const scopedActiveDays = computeActiveDays(scopedEntries);
+  const dailyAverage = scopedActiveDays > 0 ? total / scopedActiveDays : 0;
 
   return {
     ok: true,
     mode: 'detail',
     total,
+    dailyAverage,
+    activeDays: scopedActiveDays,
     topAsset: assets[0]?.label || null,
     assetCount: assets.length,
     starbases,
@@ -2042,7 +2307,16 @@ ${scopeFilterFlux}
     .filter((entry) => isStarbaseIncluded(entry.starbase, factionStarbases, faction))
     .map((entry) => {
       const slices = createOptionSummary(entry.assets).sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
-      return { starbase: entry.starbase, total: entry.total, slices, entry };
+      const activeDays = entry.days.filter((day) => (Number(day.value) || 0) > 0).length;
+      const divisor = activeDays > 0 ? activeDays : 1;
+      return {
+        starbase: entry.starbase,
+        total: entry.total,
+        activeDays,
+        dailyAverage: entry.total / divisor,
+        slices: slices.map((slice) => ({ ...slice, dailyAverage: slice.total / divisor })),
+        entry,
+      };
     })
     .filter((entry) => entry.total > 0)
     .sort((a, b) => b.total - a.total || a.starbase.localeCompare(b.starbase));
@@ -2052,23 +2326,37 @@ ${scopeFilterFlux}
 
   if (!isDetail) {
     const total = starbases.reduce((sum, sb) => sum + sb.total, 0);
+    const activeDayKeys = new Set();
     const allSlices = new Map();
     for (const sb of starbases) {
+      for (const day of sb.entry.days) {
+        if ((Number(day.value) || 0) > 0) activeDayKeys.add(day.isoDate);
+      }
       for (const slice of sb.slices) {
         allSlices.set(slice.label, (allSlices.get(slice.label) || 0) + slice.total);
       }
     }
+    const activeDays = activeDayKeys.size;
+    const dailyAverage = activeDays > 0 ? total / activeDays : 0;
     const topSlice = createOptionSummary(allSlices).sort((a, b) => b.total - a.total)[0] || null;
 
     return {
       ok: true,
       mode: 'overview',
       total,
+      dailyAverage,
+      activeDays,
       topAsset: topSlice?.label || null,
       assetCount: allSlices.size,
       starbases: starbases.map((sb) => ({ value: sb.starbase, label: sb.starbase, total: sb.total })),
       selectedStarbase: '',
-      pies: starbases.map((sb) => ({ starbase: sb.starbase, total: sb.total, slices: sb.slices })),
+      pies: starbases.map((sb) => ({
+        starbase: sb.starbase,
+        total: sb.total,
+        activeDays: sb.activeDays,
+        dailyAverage: sb.dailyAverage,
+        slices: sb.slices,
+      })),
       faction,
       scopeNote: getInfluxScopeNote(settings),
       checkedAt: new Date().toISOString(),
@@ -2083,6 +2371,8 @@ ${scopeFilterFlux}
       ok: true,
       mode: 'detail',
       total: 0,
+      dailyAverage: 0,
+      activeDays: 0,
       topAsset: null,
       assetCount: 0,
       starbases: starbases.map((sb) => ({ value: sb.starbase, label: sb.starbase, total: sb.total })),
@@ -2101,11 +2391,15 @@ ${scopeFilterFlux}
     }))
     .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const total = assets.reduce((sum, asset) => sum + asset.total, 0);
+  const activeDays = selected.entry.days.filter((day) => (Number(day.value) || 0) > 0).length;
+  const dailyAverage = activeDays > 0 ? total / activeDays : 0;
 
   return {
     ok: true,
     mode: 'detail',
     total,
+    dailyAverage,
+    activeDays,
     topAsset: assets[0]?.label || null,
     assetCount: assets.length,
     starbases: starbases.map((sb) => ({ value: sb.starbase, label: sb.starbase, total: sb.total })),

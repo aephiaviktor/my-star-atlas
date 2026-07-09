@@ -38,11 +38,17 @@ const sduTotalValue = document.querySelector('#sdu-total-value');
 const sduTotalNote = document.querySelector('#sdu-total-note');
 const sduAvgValue = document.querySelector('#sdu-avg-value');
 const sduAvgNote = document.querySelector('#sdu-avg-note');
+const sduTopFleetValue = document.querySelector('#sdu-top-fleet-value');
+const sduTopFleetNote = document.querySelector('#sdu-top-fleet-note');
+const sduDaysActiveValue = document.querySelector('#sdu-days-active-value');
+const sduDaysActiveNote = document.querySelector('#sdu-days-active-note');
 const sduChartBars = document.querySelector('#sdu-chart-bars');
 const scanningFleetFilter = document.querySelector('#scanning-fleet-filter');
 const scanningFleetNote = document.querySelector('#scanning-fleet-note');
 const miningTotalValue = document.querySelector('#mining-total-value');
 const miningTotalNote = document.querySelector('#mining-total-note');
+const miningAvgValue = document.querySelector('#mining-avg-value');
+const miningAvgNote = document.querySelector('#mining-avg-note');
 const miningTopValue = document.querySelector('#mining-top-value');
 const miningTopNote = document.querySelector('#mining-top-note');
 const miningMaterialCountValue = document.querySelector('#mining-material-count-value');
@@ -56,6 +62,8 @@ const craftingRecipeFilter = document.querySelector('#crafting-recipe-filter');
 const craftingFilterNote = document.querySelector('#crafting-filter-note');
 const craftingTotalValue = document.querySelector('#crafting-total-value');
 const craftingTotalNote = document.querySelector('#crafting-total-note');
+const craftingAvgValue = document.querySelector('#crafting-avg-value');
+const craftingAvgNote = document.querySelector('#crafting-avg-note');
 const craftingTopValue = document.querySelector('#crafting-top-value');
 const craftingTopNote = document.querySelector('#crafting-top-note');
 const craftingCountValue = document.querySelector('#crafting-count-value');
@@ -64,18 +72,23 @@ const craftingChartGrid = document.querySelector('#crafting-chart-grid');
 const productionFilterNote = document.querySelector('#production-filter-note');
 const productionTotalValue = document.querySelector('#production-total-value');
 const productionTotalNote = document.querySelector('#production-total-note');
+const productionAvgValue = document.querySelector('#production-avg-value');
+const productionAvgNote = document.querySelector('#production-avg-note');
 const productionTopValue = document.querySelector('#production-top-value');
 const productionTopNote = document.querySelector('#production-top-note');
 const productionCountValue = document.querySelector('#production-count-value');
 const productionCountNote = document.querySelector('#production-count-note');
 const productionChartGrid = document.querySelector('#production-chart-grid');
 const productionStarbaseFilter = document.querySelector('#production-starbase-filter');
+const productionAssetFilter = document.querySelector('#production-asset-filter');
 // Consumption — Mining
 const consMiningStarbaseFilter = document.querySelector('#consumption-mining-starbase-filter');
 const consMiningFleetFilter = document.querySelector('#consumption-mining-fleet-filter');
 const consMiningFilterNote = document.querySelector('#consumption-mining-filter-note');
 const consMiningTotalValue = document.querySelector('#consumption-mining-total-value');
 const consMiningTotalNote = document.querySelector('#consumption-mining-total-note');
+const consMiningAvgValue = document.querySelector('#consumption-mining-avg-value');
+const consMiningAvgNote = document.querySelector('#consumption-mining-avg-note');
 const consMiningTopValue = document.querySelector('#consumption-mining-top-value');
 const consMiningTopNote = document.querySelector('#consumption-mining-top-note');
 const consMiningAssetCountValue = document.querySelector('#consumption-mining-asset-count-value');
@@ -87,6 +100,8 @@ const consCraftingRecipeFilter = document.querySelector('#consumption-crafting-r
 const consCraftingFilterNote = document.querySelector('#consumption-crafting-filter-note');
 const consCraftingTotalValue = document.querySelector('#consumption-crafting-total-value');
 const consCraftingTotalNote = document.querySelector('#consumption-crafting-total-note');
+const consCraftingAvgValue = document.querySelector('#consumption-crafting-avg-value');
+const consCraftingAvgNote = document.querySelector('#consumption-crafting-avg-note');
 const consCraftingTopValue = document.querySelector('#consumption-crafting-top-value');
 const consCraftingTopNote = document.querySelector('#consumption-crafting-top-note');
 const consCraftingAssetCountValue = document.querySelector('#consumption-crafting-asset-count-value');
@@ -98,6 +113,8 @@ const consUpgradingComponentFilter = document.querySelector('#consumption-upgrad
 const consUpgradingFilterNote = document.querySelector('#consumption-upgrading-filter-note');
 const consUpgradingTotalValue = document.querySelector('#consumption-upgrading-total-value');
 const consUpgradingTotalNote = document.querySelector('#consumption-upgrading-total-note');
+const consUpgradingAvgValue = document.querySelector('#consumption-upgrading-avg-value');
+const consUpgradingAvgNote = document.querySelector('#consumption-upgrading-avg-note');
 const consUpgradingTopValue = document.querySelector('#consumption-upgrading-top-value');
 const consUpgradingTopNote = document.querySelector('#consumption-upgrading-top-note');
 const consUpgradingAssetCountValue = document.querySelector('#consumption-upgrading-asset-count-value');
@@ -109,6 +126,8 @@ const consScanningFleetFilter = document.querySelector('#consumption-scanning-fl
 const consScanningFilterNote = document.querySelector('#consumption-scanning-filter-note');
 const consScanningTotalValue = document.querySelector('#consumption-scanning-total-value');
 const consScanningTotalNote = document.querySelector('#consumption-scanning-total-note');
+const consScanningAvgValue = document.querySelector('#consumption-scanning-avg-value');
+const consScanningAvgNote = document.querySelector('#consumption-scanning-avg-note');
 const consScanningTopValue = document.querySelector('#consumption-scanning-top-value');
 const consScanningTopNote = document.querySelector('#consumption-scanning-top-note');
 const consScanningAssetCountValue = document.querySelector('#consumption-scanning-asset-count-value');
@@ -120,6 +139,8 @@ const consCargoFleetFilter = document.querySelector('#consumption-cargo-fleet-fi
 const consCargoFilterNote = document.querySelector('#consumption-cargo-filter-note');
 const consCargoTotalValue = document.querySelector('#consumption-cargo-total-value');
 const consCargoTotalNote = document.querySelector('#consumption-cargo-total-note');
+const consCargoAvgValue = document.querySelector('#consumption-cargo-avg-value');
+const consCargoAvgNote = document.querySelector('#consumption-cargo-avg-note');
 const consCargoTopValue = document.querySelector('#consumption-cargo-top-value');
 const consCargoTopNote = document.querySelector('#consumption-cargo-top-note');
 const consCargoAssetCountValue = document.querySelector('#consumption-cargo-asset-count-value');
@@ -130,6 +151,8 @@ const consTotalStarbaseFilter = document.querySelector('#consumption-total-starb
 const consTotalFilterNote = document.querySelector('#consumption-total-filter-note');
 const consTotalTotalValue = document.querySelector('#consumption-total-total-value');
 const consTotalTotalNote = document.querySelector('#consumption-total-total-note');
+const consTotalAvgValue = document.querySelector('#consumption-total-avg-value');
+const consTotalAvgNote = document.querySelector('#consumption-total-avg-note');
 const consTotalTopValue = document.querySelector('#consumption-total-top-value');
 const consTotalTopNote = document.querySelector('#consumption-total-top-note');
 const consTotalAssetCountValue = document.querySelector('#consumption-total-asset-count-value');
@@ -180,6 +203,7 @@ let selectedMiningStarbase = '';
 let selectedCraftingStarbase = '';
 let selectedCraftingRecipe = '';
 let selectedProductionStarbase = '';
+let selectedProductionAsset = '';
 let currentConsumptionSubtab = 'scanning';
 let latestConsMiningResult = null;
 let latestConsCraftingResult = null;
@@ -328,6 +352,7 @@ function recordFactionFilterState(faction) {
   setCachedFactionResult(faction, 'selectedCraftingStarbase', selectedCraftingStarbase);
   setCachedFactionResult(faction, 'selectedCraftingRecipe', selectedCraftingRecipe);
   setCachedFactionResult(faction, 'selectedProductionStarbase', selectedProductionStarbase);
+  setCachedFactionResult(faction, 'selectedProductionAsset', selectedProductionAsset);
   setCachedFactionResult(faction, 'selectedConsMiningStarbase', selectedConsMiningStarbase);
   setCachedFactionResult(faction, 'selectedConsMiningFleet', selectedConsMiningFleet);
   setCachedFactionResult(faction, 'selectedConsCraftingStarbase', selectedConsCraftingStarbase);
@@ -349,6 +374,7 @@ function restoreFactionFilterState(faction) {
   selectedCraftingStarbase = getCachedFactionResult(faction, 'selectedCraftingStarbase') || '';
   selectedCraftingRecipe = getCachedFactionResult(faction, 'selectedCraftingRecipe') || '';
   selectedProductionStarbase = getCachedFactionResult(faction, 'selectedProductionStarbase') || '';
+  selectedProductionAsset = getCachedFactionResult(faction, 'selectedProductionAsset') || '';
   selectedConsMiningStarbase = getCachedFactionResult(faction, 'selectedConsMiningStarbase') || '';
   selectedConsMiningFleet = getCachedFactionResult(faction, 'selectedConsMiningFleet') || '';
   selectedConsCraftingStarbase = getCachedFactionResult(faction, 'selectedConsCraftingStarbase') || '';
@@ -379,6 +405,12 @@ function setText(element, value) {
   if (element) {
     element.textContent = value;
   }
+}
+
+function setDailyAverageMetric(valueElement, noteElement, result, unitLabel = 'active days') {
+  const activeDays = Number(result?.activeDays || 0);
+  setText(valueElement, formatWholeNumber(result?.dailyAverage || 0));
+  setText(noteElement, activeDays > 0 ? `Across ${activeDays} ${unitLabel}` : 'No active days');
 }
 
 function normalizeFaction(value) {
@@ -697,6 +729,10 @@ function renderSduEmpty(message) {
   setText(sduTotalNote, message);
   setText(sduAvgValue, '--');
   setText(sduAvgNote, message);
+  setText(sduTopFleetValue, '--');
+  setText(sduTopFleetNote, message);
+  setText(sduDaysActiveValue, '--');
+  setText(sduDaysActiveNote, message);
   if (!String(message).startsWith('Loading')) {
     resetActivityFleetFilter(scanningFleetFilter, scanningFleetNote, message);
   }
@@ -740,10 +776,19 @@ function renderSduChart(result) {
     const avg = activeDays.reduce((sum, day) => sum + (Number(day.value) || 0), 0) / activeDays.length;
     setText(sduAvgValue, formatWholeNumber(avg));
     setText(sduAvgNote, `Across ${activeDays.length} of ${completedDays.length} completed days`);
+    setText(sduDaysActiveValue, formatWholeNumber(activeDays.length));
+    setText(sduDaysActiveNote, `${completedDays.length} completed days`);
   } else {
     setText(sduAvgValue, '0');
     setText(sduAvgNote, 'No completed days with SDU');
+    setText(sduDaysActiveValue, '0');
+    setText(sduDaysActiveNote, 'No completed days with SDU');
   }
+  const topFleet = Array.isArray(result.fleets)
+    ? result.fleets.slice().sort((a, b) => (Number(b.total) || 0) - (Number(a.total) || 0))[0]
+    : null;
+  setText(sduTopFleetValue, topFleet?.label || '--');
+  setText(sduTopFleetNote, topFleet ? `${formatWholeNumber(topFleet.total)} SDU` : 'No fleet data');
   sduChartBars.textContent = '';
   sduChartBars.appendChild(createYAxis(maxValue));
 
@@ -779,6 +824,8 @@ function renderSduChart(result) {
 
 function renderMiningEmpty(message) {
   latestMiningResult = null;
+  setText(miningAvgValue, '--');
+  setText(miningAvgNote, message);
   setText(miningTotalValue, '--');
   setText(miningTotalNote, message);
   setText(miningTopValue, '--');
@@ -819,6 +866,7 @@ function renderMiningCharts(result) {
   );
 
   const total = result.total || 0;
+  setDailyAverageMetric(miningAvgValue, miningAvgNote, result);
   setText(miningTotalValue, formatWholeNumber(total));
   setText(miningTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(miningTopValue, result.topMaterial || '--');
@@ -888,6 +936,8 @@ function renderMiningCharts(result) {
 
 function renderCraftingEmpty(message) {
   latestCraftingResult = null;
+  setText(craftingAvgValue, '--');
+  setText(craftingAvgNote, message);
   setText(craftingTotalValue, '--');
   setText(craftingTotalNote, message);
   setText(craftingTopValue, '--');
@@ -976,7 +1026,12 @@ function createCraftingPieCard(pie) {
   const title = document.createElement('h3');
   title.className = 'resource-card-title';
   title.textContent = pie.starbase;
+  const total = document.createElement('span');
+  total.className = 'resource-card-total';
+  total.textContent = formatWholeNumber(pie.dailyAverage ?? pie.total);
+  total.title = `Daily average: ${formatWholeNumber(pie.dailyAverage ?? pie.total)}`;
   header.appendChild(title);
+  header.appendChild(total);
 
   const pieGraphic = document.createElement('div');
   pieGraphic.className = 'crafting-pie';
@@ -995,7 +1050,7 @@ function createCraftingPieCard(pie) {
     path.setAttribute('d', createPieSlicePath(start, visibleEnd));
     path.setAttribute('fill', getPieColor(index, slice.label));
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = `${slice.label}: ${formatWholeNumber(slice.total)}`;
+    title.textContent = `${slice.label}: ${formatWholeNumber(slice.dailyAverage ?? slice.total)} daily average`;
     path.appendChild(title);
     svg.appendChild(path);
 
@@ -1024,7 +1079,7 @@ function createCraftingPieCard(pie) {
     const label = document.createElement('span');
     const percent = pie.total > 0 ? Math.round((slice.total / pie.total) * 100) : 0;
     label.textContent = `${slice.label} ${percent}%`;
-    item.title = `${slice.label}: ${formatWholeNumber(slice.total)}`;
+    item.title = `${slice.label}: ${formatWholeNumber(slice.dailyAverage ?? slice.total)} daily average`;
     item.appendChild(swatch);
     item.appendChild(label);
     legend.appendChild(item);
@@ -1059,6 +1114,7 @@ function renderCraftingCharts(result) {
   );
 
   const itemCount = result.mode === 'detail' ? Number(result.stepCount || 0) : Number(result.outputCount || 0);
+  setDailyAverageMetric(craftingAvgValue, craftingAvgNote, result);
   setText(craftingTotalValue, formatWholeNumber(result.total));
   setText(craftingTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(craftingTopValue, result.topRecipe || '--');
@@ -1097,6 +1153,8 @@ function renderCraftingCharts(result) {
 
 function renderProductionEmpty(message) {
   latestProductionResult = null;
+  setText(productionAvgValue, '--');
+  setText(productionAvgNote, message);
   setText(productionTotalValue, '--');
   setText(productionTotalNote, message);
   setText(productionTopValue, '--');
@@ -1105,6 +1163,7 @@ function renderProductionEmpty(message) {
   setText(productionCountNote, message);
   if (!String(message).startsWith('Loading')) {
     resetSelectWithAllOption(productionStarbaseFilter, 'All starbases');
+    resetSelectWithAllOption(productionAssetFilter, 'All assets');
   }
   setText(productionFilterNote, message);
   productionChartGrid.textContent = '';
@@ -1121,8 +1180,14 @@ function renderProductionCharts(result) {
     return;
   }
   setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'production', result);
-  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'production', result, selectedProductionStarbase);
+  setCachedFilterResult(normalizeFaction(latestSettings?.faction), 'production', result, selectedProductionStarbase, selectedProductionAsset);
 
+  selectedProductionAsset = updateSelectOptions(
+    productionAssetFilter,
+    result.productOptions,
+    result.selectedAsset || selectedProductionAsset,
+    'All assets'
+  );
   selectedProductionStarbase = updateSelectOptions(
     productionStarbaseFilter,
     result.starbases,
@@ -1130,6 +1195,7 @@ function renderProductionCharts(result) {
     'All starbases'
   );
 
+  setDailyAverageMetric(productionAvgValue, productionAvgNote, result);
   setText(productionTotalValue, formatWholeNumber(result.total));
   setText(productionTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(productionTopValue, result.topProduct || '--');
@@ -1164,7 +1230,7 @@ function renderProductionCharts(result) {
   }
   productionChartGrid.classList.toggle('crafting-chart-grid-detail', true);
   for (const [index, asset] of assets.entries()) {
-    productionChartGrid.appendChild(createConsumptionBarCard(asset, index));
+    productionChartGrid.appendChild(createConsumptionBarCard(asset, index, { actionLabel: 'produced' }));
   }
 }
 
@@ -1172,6 +1238,8 @@ function renderProductionCharts(result) {
 
 function renderConsMiningEmpty(message) {
   latestConsMiningResult = null;
+  setText(consMiningAvgValue, '--');
+  setText(consMiningAvgNote, message);
   setText(consMiningTotalValue, '--');
   setText(consMiningTotalNote, message);
   setText(consMiningTopValue, '--');
@@ -1212,6 +1280,7 @@ function renderConsMining(result) {
     'All Fleets'
   );
 
+  setDailyAverageMetric(consMiningAvgValue, consMiningAvgNote, result);
   setText(consMiningTotalValue, formatWholeNumber(result.total));
   setText(consMiningTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(consMiningTopValue, result.topAsset || '--');
@@ -1278,6 +1347,8 @@ async function refreshConsMining() {
 
 function renderConsCraftingEmpty(message) {
   latestConsCraftingResult = null;
+  setText(consCraftingAvgValue, '--');
+  setText(consCraftingAvgNote, message);
   setText(consCraftingTotalValue, '--');
   setText(consCraftingTotalNote, message);
   setText(consCraftingTopValue, '--');
@@ -1318,6 +1389,7 @@ function renderConsCrafting(result) {
     'All recipes'
   );
 
+  setDailyAverageMetric(consCraftingAvgValue, consCraftingAvgNote, result);
   setText(consCraftingTotalValue, formatWholeNumber(result.total));
   setText(consCraftingTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(consCraftingTopValue, result.topAsset || '--');
@@ -1349,8 +1421,9 @@ function renderConsCrafting(result) {
     return;
   }
   consCraftingChartGrid.classList.toggle('crafting-chart-grid-detail', true);
+  const starbaseLabel = result.selectedRecipe && result.selectedStarbase ? result.selectedStarbase : '';
   for (const [index, asset] of assets.entries()) {
-    consCraftingChartGrid.appendChild(createConsumptionBarCard(asset, index));
+    consCraftingChartGrid.appendChild(createConsumptionBarCard(asset, index, { headerRight: starbaseLabel }));
   }
 }
 
@@ -1384,6 +1457,8 @@ async function refreshConsCrafting() {
 
 function renderConsUpgradingEmpty(message) {
   latestConsUpgradingResult = null;
+  setText(consUpgradingAvgValue, '--');
+  setText(consUpgradingAvgNote, message);
   setText(consUpgradingTotalValue, '--');
   setText(consUpgradingTotalNote, message);
   setText(consUpgradingTopValue, '--');
@@ -1424,6 +1499,7 @@ function renderConsUpgrading(result) {
     'All components'
   );
 
+  setDailyAverageMetric(consUpgradingAvgValue, consUpgradingAvgNote, result);
   setText(consUpgradingTotalValue, formatWholeNumber(result.total));
   setText(consUpgradingTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(consUpgradingTopValue, result.topAsset || '--');
@@ -1455,8 +1531,9 @@ function renderConsUpgrading(result) {
     return;
   }
   consUpgradingChartGrid.classList.toggle('crafting-chart-grid-detail', true);
+  const starbaseLabel = result.selectedComponent && result.selectedStarbase ? result.selectedStarbase : '';
   for (const [index, asset] of assets.entries()) {
-    consUpgradingChartGrid.appendChild(createConsumptionBarCard(asset, index));
+    consUpgradingChartGrid.appendChild(createConsumptionBarCard(asset, index, { headerRight: starbaseLabel }));
   }
 }
 
@@ -1490,6 +1567,8 @@ async function refreshConsUpgrading() {
 
 function renderConsScanningEmpty(message) {
   latestConsScanningResult = null;
+  setText(consScanningAvgValue, '--');
+  setText(consScanningAvgNote, message);
   setText(consScanningTotalValue, '--');
   setText(consScanningTotalNote, message);
   setText(consScanningTopValue, '--');
@@ -1530,6 +1609,7 @@ function renderConsScanning(result) {
     'All Fleets'
   );
 
+  setDailyAverageMetric(consScanningAvgValue, consScanningAvgNote, result);
   setText(consScanningTotalValue, formatWholeNumber(result.total));
   setText(consScanningTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(consScanningTopValue, result.topAsset || '--');
@@ -1596,6 +1676,8 @@ async function refreshConsScanning() {
 
 function renderConsCargoEmpty(message) {
   latestConsCargoResult = null;
+  setText(consCargoAvgValue, '--');
+  setText(consCargoAvgNote, message);
   setText(consCargoTotalValue, '--');
   setText(consCargoTotalNote, message);
   setText(consCargoTopValue, '--');
@@ -1636,6 +1718,7 @@ function renderConsCargo(result) {
     'All Fleets'
   );
 
+  setDailyAverageMetric(consCargoAvgValue, consCargoAvgNote, result);
   setText(consCargoTotalValue, formatWholeNumber(result.total));
   setText(consCargoTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(consCargoTopValue, result.topAsset || '--');
@@ -1702,6 +1785,8 @@ async function refreshConsCargo() {
 
 function renderConsTotalEmpty(message) {
   latestConsTotalResult = null;
+  setText(consTotalAvgValue, '--');
+  setText(consTotalAvgNote, message);
   setText(consTotalTotalValue, '--');
   setText(consTotalTotalNote, message);
   setText(consTotalTopValue, '--');
@@ -1735,6 +1820,7 @@ function renderConsTotal(result) {
     'All starbases'
   );
 
+  setDailyAverageMetric(consTotalAvgValue, consTotalAvgNote, result);
   setText(consTotalTotalValue, formatWholeNumber(result.total));
   setText(consTotalTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
   setText(consTotalTopValue, result.topAsset || '--');
@@ -2989,8 +3075,9 @@ function initInventory() {
   }
 }
 
-function createConsumptionBarCard(asset, fallbackIndex) {
+function createConsumptionBarCard(asset, fallbackIndex, options = {}) {
   const maxValue = Math.max(...asset.days.map((day) => Number(day.value) || 0), 1);
+  const actionLabel = options.actionLabel || 'consumed';
   const card = document.createElement('section');
   card.className = 'resource-card';
 
@@ -3001,13 +3088,14 @@ function createConsumptionBarCard(asset, fallbackIndex) {
   title.textContent = asset.label;
   const total = document.createElement('span');
   total.className = 'resource-card-total';
-  total.textContent = formatWholeNumber(asset.total);
+  total.textContent = options.headerRight || formatWholeNumber(asset.total);
+  total.title = options.headerRight ? String(options.headerRight) : `${formatWholeNumber(asset.total)} over 14 days`;
   header.appendChild(title);
   header.appendChild(total);
 
   const bars = document.createElement('div');
   bars.className = 'resource-chart-bars';
-  bars.setAttribute('aria-label', `${asset.label} consumed over the last 14 days`);
+  bars.setAttribute('aria-label', `${asset.label} ${actionLabel} over the last 14 days`);
   bars.appendChild(createYAxis(maxValue));
   for (const day of asset.days) {
     const value = Number(day.value) || 0;
@@ -3035,7 +3123,7 @@ async function refreshDailyProduction() {
   }
 
   const faction = normalizeFaction(latestSettings?.faction);
-  const cached = getCachedFilterResult(faction, 'production', selectedProductionStarbase);
+  const cached = getCachedFilterResult(faction, 'production', selectedProductionStarbase, selectedProductionAsset);
   if (cached) {
     renderProductionCharts(cached);
   } else {
@@ -3045,6 +3133,7 @@ async function refreshDailyProduction() {
     const result = await api.getDailyProduction({
       ...(latestSettings || getFormPayload()),
       starbaseFilter: selectedProductionStarbase,
+      assetFilter: selectedProductionAsset,
     });
     renderProductionCharts(result);
   } catch (error) {
@@ -3426,7 +3515,7 @@ factionButtons.forEach((button) => {
     if (cachedMining) renderMiningCharts(cachedMining);
     const cachedCrafting = getCachedFilterResult(faction, 'crafting', selectedCraftingStarbase, selectedCraftingRecipe);
     if (cachedCrafting) renderCraftingCharts(cachedCrafting);
-    const cachedProduction = getCachedFilterResult(faction, 'production', selectedProductionStarbase);
+    const cachedProduction = getCachedFilterResult(faction, 'production', selectedProductionStarbase, selectedProductionAsset);
     if (cachedProduction) renderProductionCharts(cachedProduction);
     const cachedInventory = getCachedFactionResult(faction, 'inventory::__all__');
     if (cachedInventory) renderInventory(cachedInventory);
@@ -3507,6 +3596,11 @@ productionStarbaseFilter.addEventListener('change', () => {
   selectedProductionStarbase = productionStarbaseFilter.value;
   refreshDailyProduction();
 });
+productionAssetFilter.addEventListener('change', () => {
+  selectedProductionAsset = productionAssetFilter.value;
+  selectedProductionStarbase = '';
+  refreshDailyProduction();
+});
 
 // Consumption subtab switching
 document.querySelectorAll('.consumption-subtab-button').forEach((button) => {
@@ -3537,7 +3631,6 @@ consMiningFleetFilter.addEventListener('change', () => {
 // Consumption — Crafting filters
 consCraftingStarbaseFilter.addEventListener('change', () => {
   selectedConsCraftingStarbase = consCraftingStarbaseFilter.value;
-  selectedConsCraftingRecipe = '';
   refreshConsCrafting();
 });
 consCraftingRecipeFilter.addEventListener('change', () => {
@@ -3548,7 +3641,6 @@ consCraftingRecipeFilter.addEventListener('change', () => {
 // Consumption — Upgrading filters
 consUpgradingStarbaseFilter.addEventListener('change', () => {
   selectedConsUpgradingStarbase = consUpgradingStarbaseFilter.value;
-  selectedConsUpgradingComponent = '';
   refreshConsUpgrading();
 });
 consUpgradingComponentFilter.addEventListener('change', () => {

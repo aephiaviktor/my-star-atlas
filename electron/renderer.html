@@ -88,14 +88,24 @@
 
             <div class="dashboard-grid">
               <section class="metric-card">
+                <span class="metric-label">Daily Average</span>
+                <strong id="sdu-avg-value">--</strong>
+                <small id="sdu-avg-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
                 <span class="metric-label">14d SDU found</span>
                 <strong id="sdu-total-value">--</strong>
                 <small id="sdu-total-note">Awaiting Influx connection</small>
               </section>
               <section class="metric-card">
-                <span class="metric-label">Daily Average</span>
-                <strong id="sdu-avg-value">--</strong>
-                <small id="sdu-avg-note">Awaiting Influx connection</small>
+                <span class="metric-label">Top Fleet</span>
+                <strong id="sdu-top-fleet-value">--</strong>
+                <small id="sdu-top-fleet-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Days Active</span>
+                <strong id="sdu-days-active-value">--</strong>
+                <small id="sdu-days-active-note">Awaiting Influx connection</small>
               </section>
             </div>
 
@@ -126,6 +136,11 @@
             </div>
 
             <div class="dashboard-grid">
+              <section class="metric-card">
+                <span class="metric-label">Daily Average</span>
+                <strong id="mining-avg-value">--</strong>
+                <small id="mining-avg-note">Awaiting Influx connection</small>
+              </section>
               <section class="metric-card">
                 <span class="metric-label">14d Raw Materials</span>
                 <strong id="mining-total-value">--</strong>
@@ -169,6 +184,11 @@
 
             <div class="dashboard-grid">
               <section class="metric-card">
+                <span class="metric-label">Daily Average</span>
+                <strong id="crafting-avg-value">--</strong>
+                <small id="crafting-avg-note">Awaiting Influx connection</small>
+              </section>
+              <section class="metric-card">
                 <span class="metric-label">14d Crafted Output</span>
                 <strong id="crafting-total-value">--</strong>
                 <small id="crafting-total-note">Awaiting Influx connection</small>
@@ -200,10 +220,21 @@
                   <option value="">All starbases</option>
                 </select>
               </label>
+              <label class="activity-filter">
+                <span>Asset</span>
+                <select id="production-asset-filter" aria-label="Filter production by asset">
+                  <option value="">All assets</option>
+                </select>
+              </label>
               <span id="production-filter-note" class="activity-filter-note">Last 14 days</span>
             </div>
 
             <div class="dashboard-grid">
+              <section class="metric-card">
+                <span class="metric-label">Daily Average</span>
+                <strong id="production-avg-value">--</strong>
+                <small id="production-avg-note">Awaiting Influx connection</small>
+              </section>
               <section class="metric-card">
                 <span class="metric-label">14d Production</span>
                 <strong id="production-total-value">--</strong>
@@ -257,6 +288,11 @@
 
               <div class="dashboard-grid">
                 <section class="metric-card">
+                  <span class="metric-label">Daily Average</span>
+                  <strong id="consumption-scanning-avg-value">--</strong>
+                  <small id="consumption-scanning-avg-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
                   <span class="metric-label">14d Consumed</span>
                   <strong id="consumption-scanning-total-value">--</strong>
                   <small id="consumption-scanning-total-note">Awaiting Influx connection</small>
@@ -298,6 +334,11 @@
               </div>
 
               <div class="dashboard-grid">
+                <section class="metric-card">
+                  <span class="metric-label">Daily Average</span>
+                  <strong id="consumption-mining-avg-value">--</strong>
+                  <small id="consumption-mining-avg-note">Awaiting Influx connection</small>
+                </section>
                 <section class="metric-card">
                   <span class="metric-label">14d Consumed</span>
                   <strong id="consumption-mining-total-value">--</strong>
@@ -341,6 +382,11 @@
 
               <div class="dashboard-grid">
                 <section class="metric-card">
+                  <span class="metric-label">Daily Average</span>
+                  <strong id="consumption-cargo-avg-value">--</strong>
+                  <small id="consumption-cargo-avg-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
                   <span class="metric-label">14d Consumed</span>
                   <strong id="consumption-cargo-total-value">--</strong>
                   <small id="consumption-cargo-total-note">Awaiting Influx connection</small>
@@ -382,6 +428,11 @@
               </div>
 
               <div class="dashboard-grid">
+                <section class="metric-card">
+                  <span class="metric-label">Daily Average</span>
+                  <strong id="consumption-crafting-avg-value">--</strong>
+                  <small id="consumption-crafting-avg-note">Awaiting Influx connection</small>
+                </section>
                 <section class="metric-card">
                   <span class="metric-label">14d Consumed</span>
                   <strong id="consumption-crafting-total-value">--</strong>
@@ -425,6 +476,11 @@
 
               <div class="dashboard-grid">
                 <section class="metric-card">
+                  <span class="metric-label">Daily Average</span>
+                  <strong id="consumption-upgrading-avg-value">--</strong>
+                  <small id="consumption-upgrading-avg-note">Awaiting Influx connection</small>
+                </section>
+                <section class="metric-card">
                   <span class="metric-label">14d Consumed</span>
                   <strong id="consumption-upgrading-total-value">--</strong>
                   <small id="consumption-upgrading-total-note">Awaiting Influx connection</small>
@@ -460,6 +516,11 @@
               </div>
 
               <div class="dashboard-grid">
+                <section class="metric-card">
+                  <span class="metric-label">Daily Average</span>
+                  <strong id="consumption-total-avg-value">--</strong>
+                  <small id="consumption-total-avg-note">Awaiting Influx connection</small>
+                </section>
                 <section class="metric-card">
                   <span class="metric-label">14d Consumed</span>
                   <strong id="consumption-total-total-value">--</strong>
