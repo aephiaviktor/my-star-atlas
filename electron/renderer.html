@@ -727,8 +727,49 @@
         </section>
 
         <section class="section-view" data-section-panel="earnings">
-          <section class="work-surface quiet-panel">
-            <h2>Earnings</h2>
+          <div class="dashboard-grid">
+            <section class="metric-card">
+              <span class="metric-label">SDU Price</span>
+              <strong id="earnings-sdu-price-value">--</strong>
+              <small id="earnings-sdu-price-note">Awaiting Aephia data</small>
+            </section>
+            <section class="metric-card">
+              <span class="metric-label">Expected SDU / Scan</span>
+              <strong id="earnings-sdu-scan-value">--</strong>
+              <small id="earnings-sdu-scan-note">Awaiting fleet decode</small>
+            </section>
+            <section class="metric-card">
+              <span class="metric-label">Expected Value / Scan</span>
+              <strong id="earnings-sdu-value-value">--</strong>
+              <small id="earnings-sdu-value-note">Awaiting price data</small>
+            </section>
+            <section class="metric-card">
+              <span class="metric-label">Rental Cost / Day</span>
+              <strong id="earnings-rental-value">--</strong>
+              <small id="earnings-rental-note">Awaiting rental decode</small>
+            </section>
+          </div>
+
+          <section class="work-surface earnings-surface">
+            <div id="earnings-sync-status" class="fleet-sync-status" role="status">Awaiting earnings data</div>
+            <div class="fleet-table-wrap">
+              <table class="fleet-table earnings-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Fleet</th>
+                    <th scope="col">Ships</th>
+                    <th scope="col">SDU / Scan</th>
+                    <th scope="col">Value / Scan</th>
+                    <th scope="col">Rental / Day</th>
+                  </tr>
+                </thead>
+                <tbody id="earnings-table-body">
+                  <tr class="empty-row">
+                    <td colspan="5">No earnings data loaded</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </section>
         </section>
       </main>

@@ -34,6 +34,16 @@ const versionLabel = document.querySelector('#version-label');
 const measurementList = document.querySelector('#measurement-list');
 const fleetSyncStatus = document.querySelector('#fleet-sync-status');
 const fleetTableBody = document.querySelector('#fleet-table-body');
+const earningsSyncStatus = document.querySelector('#earnings-sync-status');
+const earningsTableBody = document.querySelector('#earnings-table-body');
+const earningsSduPriceValue = document.querySelector('#earnings-sdu-price-value');
+const earningsSduPriceNote = document.querySelector('#earnings-sdu-price-note');
+const earningsSduScanValue = document.querySelector('#earnings-sdu-scan-value');
+const earningsSduScanNote = document.querySelector('#earnings-sdu-scan-note');
+const earningsSduValueValue = document.querySelector('#earnings-sdu-value-value');
+const earningsSduValueNote = document.querySelector('#earnings-sdu-value-note');
+const earningsRentalValue = document.querySelector('#earnings-rental-value');
+const earningsRentalNote = document.querySelector('#earnings-rental-note');
 const sduTotalValue = document.querySelector('#sdu-total-value');
 const sduTotalNote = document.querySelector('#sdu-total-note');
 const sduAvgValue = document.querySelector('#sdu-avg-value');
@@ -195,6 +205,7 @@ let currentSection = 'production';
 let currentSubtab = 'scanning';
 let latestSettings = null;
 let latestFleetResult = null;
+let latestEarningsResult = null;
 let latestSduResult = null;
 let latestMiningResult = null;
 let latestCraftingResult = null;
@@ -532,6 +543,7 @@ function mergeSettingsFromForm(overrides = {}) {
 
 function resetFactionScopedState() {
   latestFleetResult = null;
+  latestEarningsResult = null;
   latestSduResult = null;
   latestMiningResult = null;
   latestCraftingResult = null;
@@ -584,6 +596,15 @@ function formatCheckedAt(value) {
 
 function formatWholeNumber(value) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Number(value) || 0);
+}
+
+function formatDecimal(value, digits = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '--';
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: digits,
+  }).format(number);
 }
 
 function formatCompactNumber(value) {
@@ -3393,6 +3414,115 @@ async function refreshFleets() {
   }
 }
 
+function setEarningsStatus(message) {
+  setText(earningsSyncStatus, message);
+}
+
+function renderEarningsEmpty(message) {
+  latestEarningsResult = null;
+  setText(earningsSduPriceValue, '--');
+  setText(earningsSduPriceNote, message);
+  setText(earningsSduScanValue, '--');
+  setText(earningsSduScanNote, message);
+  setText(earningsSduValueValue, '--');
+  setText(earningsSduValueNote, message);
+  setText(earningsRentalValue, '--');
+  setText(earningsRentalNote, message);
+  if (!earningsTableBody) return;
+  earningsTableBody.textContent = '';
+  const row = document.createElement('tr');
+  row.className = 'empty-row';
+  const cell = document.createElement('td');
+  cell.colSpan = 5;
+  cell.textContent = message;
+  row.appendChild(cell);
+  earningsTableBody.appendChild(row);
+}
+
+function formatAtlas(value, digits = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '--';
+  return `${formatDecimal(number, digits)} ATLAS`;
+}
+
+function describeFleetShips(fleet) {
+  const ships = Array.isArray(fleet.ships) ? fleet.ships : [];
+  if (!ships.length) return 'No ship composition';
+  return ships
+    .slice(0, 3)
+    .map((ship) => `${formatWholeNumber(ship.amount)}x ${ship.name || 'Unknown ship'}`)
+    .join(', ') + (ships.length > 3 ? ` +${ships.length - 3}` : '');
+}
+
+function renderEarnings(result) {
+  latestEarningsResult = result;
+  if (!result?.ok) {
+    renderEarningsEmpty(result?.error || 'Earnings sync failed');
+    setEarningsStatus('Earnings sync failed');
+    return;
+  }
+  setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'earnings', result);
+
+  setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
+  setText(earningsSduPriceNote, result.sduPriceSource || 'Aephia priceATL');
+  setText(earningsSduScanValue, formatWholeNumber(result.totalExpectedSduPerScan || 0));
+  setText(
+    earningsSduScanNote,
+    `${formatWholeNumber(result.mappedShipTypeCount || 0)} mapped / ${formatWholeNumber(result.unmappedShipTypeCount || 0)} unmapped ship types`
+  );
+  setText(earningsSduValueValue, result.totalExpectedSduValueAtl == null ? '--' : formatAtlas(result.totalExpectedSduValueAtl, 2));
+  setText(earningsSduValueNote, result.shipStatsSource || 'SES SoT');
+  setText(earningsRentalValue, formatAtlas(result.rentalAtlasPerDay || 0, 2));
+  setText(earningsRentalNote, 'Current SRSLY contractState.rate');
+  setEarningsStatus(`${formatWholeNumber(result.fleetCount || 0)} fleets calculated at ${formatCheckedAt(result.checkedAt)}`);
+
+  if (!earningsTableBody) return;
+  earningsTableBody.textContent = '';
+  const fleets = Array.isArray(result.fleets) ? result.fleets : [];
+  if (!fleets.length) {
+    renderEarningsEmpty(`No ${normalizeFaction(latestSettings?.faction)} fleets found`);
+    return;
+  }
+  for (const fleet of fleets) {
+    const row = document.createElement('tr');
+    row.appendChild(createFleetCell(fleet));
+    row.appendChild(createTextCell(describeFleetShips(fleet)));
+    row.appendChild(createTextCell(formatWholeNumber(fleet.expectedSduPerScan || 0)));
+    row.appendChild(createTextCell(fleet.expectedSduValueAtl == null ? '--' : formatAtlas(fleet.expectedSduValueAtl, 2)));
+    row.appendChild(createTextCell(fleet.rentalRateAtlasPerDay == null ? '--' : formatAtlas(fleet.rentalRateAtlasPerDay, 2)));
+    earningsTableBody.appendChild(row);
+  }
+}
+
+async function refreshEarnings() {
+  const settings = latestSettings || getFormPayload();
+  if (!getActivePlayerProfile(settings)) {
+    renderEarningsEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
+    setEarningsStatus('Awaiting player profile');
+    return;
+  }
+
+  const faction = normalizeFaction(settings.faction);
+  const cached = getCachedFactionResult(faction, 'earnings');
+  if (cached) {
+    renderEarnings(cached);
+  } else {
+    renderEarningsEmpty('Loading earnings data...');
+    setEarningsStatus('Loading earnings data...');
+  }
+
+  try {
+    const result = await api.getEarningsSnapshot(settings);
+    renderEarnings(result);
+  } catch (error) {
+    console.error(error);
+    if (!cached) {
+      renderEarningsEmpty('Earnings data unavailable');
+      setEarningsStatus('Earnings sync failed');
+    }
+  }
+}
+
 function setActiveSection(section) {
   currentSection = section;
   document.querySelectorAll('.nav-button').forEach((button) => {
@@ -3404,6 +3534,9 @@ function setActiveSection(section) {
     panel.classList.toggle('active', panel.dataset.sectionPanel === section);
   });
   updateTitle();
+  if (section === 'earnings' && !latestEarningsResult) {
+    refreshEarnings();
+  }
 }
 
 function setActiveSubtab(subtab) {
@@ -3477,6 +3610,7 @@ async function loadInitialState() {
   updateSettingsStatus(settings);
   const initialLoads = [];
   if (getActivePlayerProfile(settings)) initialLoads.push(refreshFleets());
+  if (getActivePlayerProfile(settings)) initialLoads.push(refreshEarnings());
   if (hasInfluxSettings(settings)) initialLoads.push(refreshDailySdu());
   if (hasInfluxSettings(settings)) initialLoads.push(refreshDailyMining());
   if (hasInfluxSettings(settings)) initialLoads.push(refreshDailyCrafting());
@@ -3517,8 +3651,10 @@ async function refreshFactionScopedViews() {
   renderConsTotalEmpty(hasInfluxSettings(latestSettings) ? 'Loading total consumption...' : 'Awaiting Influx connection');
   pcrRenderEmpty(hasInfluxSettings(latestSettings) ? 'Loading PCR data...' : 'Awaiting Influx connection');
   invRenderEmpty(hasInfluxSettings(latestSettings) ? 'Loading inventory data...' : 'Awaiting Influx connection');
+  renderEarningsEmpty(getActivePlayerProfile(latestSettings) ? 'Loading earnings data...' : 'Awaiting player profile');
   await Promise.all([
     refreshFleets(),
+    refreshEarnings(),
     hasInfluxSettings(latestSettings) ? refreshDailySdu() : Promise.resolve(),
     hasInfluxSettings(latestSettings) ? refreshDailyMining() : Promise.resolve(),
     hasInfluxSettings(latestSettings) ? refreshDailyCrafting() : Promise.resolve(),
@@ -3555,6 +3691,8 @@ factionButtons.forEach((button) => {
     const faction = clickedFaction;
     const cachedFleet = getCachedFactionResult(faction, 'fleet');
     if (cachedFleet) renderFleets(cachedFleet);
+    const cachedEarnings = getCachedFactionResult(faction, 'earnings');
+    if (cachedEarnings) renderEarnings(cachedEarnings);
     const cachedSdu = getCachedFilterResult(faction, 'sdu', selectedScanningFleet);
     if (cachedSdu) renderSduChart(cachedSdu);
     const cachedMining = getCachedFilterResult(faction, 'mining', selectedMiningStarbase, selectedMiningFleet);
@@ -3583,6 +3721,7 @@ factionButtons.forEach((button) => {
       setFormValues(saved);
       await Promise.all([
         refreshFleets(),
+        refreshEarnings(),
         hasInfluxSettings(latestSettings) ? refreshDailySdu() : Promise.resolve(),
         hasInfluxSettings(latestSettings) ? refreshDailyMining() : Promise.resolve(),
         hasInfluxSettings(latestSettings) ? refreshDailyCrafting() : Promise.resolve(),
@@ -3760,6 +3899,7 @@ form.addEventListener('submit', async (event) => {
     updateSettingsStatus(saved);
     resetFactionScopedState();
     refreshFleets();
+    refreshEarnings();
     refreshDailySdu();
     refreshDailyMining();
     refreshDailyCrafting();

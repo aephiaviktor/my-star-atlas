@@ -807,6 +807,15 @@ select:focus {
   overflow: hidden;
 }
 
+.earnings-surface {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
 .fleet-sync-status {
   flex: 0 0 auto;
   border-bottom: 1px solid rgba(36, 70, 85, 0.74);
@@ -829,6 +838,10 @@ select:focus {
   min-width: 760px;
   border-collapse: collapse;
   font-size: 13px;
+}
+
+.earnings-table {
+  min-width: 920px;
 }
 
 .fleet-table th,

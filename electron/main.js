@@ -67,6 +67,8 @@ const defaultSettings = Object.freeze({
 let mainWindow = null;
 const INFLUX_ORG = '67793e21353b170';
 const DEFAULT_RPC_URL = 'https://api.mainnet-beta.solana.com';
+const AEPHIA_RESOURCE_URL = 'https://get-ship-data.aephia.workers.dev/gm/resource';
+const SES_SHIP_STATS_URL = 'https://ses.staratlas.com/tools/ship-stats/engine/data/sot.js';
 const SAGE_PROGRAM_ID = new PublicKey('SAGE2HAwep459SNq61LHvjxPk4pLPEJLoMETef7f7EE');
 const SAGE_GAME_ID = new PublicKey('GAMEzqJehF8yAnKiTARUuhZMvLvkZVAsCVri5vSfemLr');
 const SRSLY_PROGRAM_ID = new PublicKey('SRSLY1fq9TJqCk1gNSE7VZL2bztvTn9wm4VR8u8jMKT');
@@ -99,10 +101,32 @@ const fleetFieldOffsets = Object.freeze({
 });
 
 const srslyFieldOffsets = Object.freeze({
+  contractRate: 10,
   contractCurrentRentalState: 99,
   rentalEndTime: 153,
   rentalCancelled: 161,
 });
+
+const fleetShipsOffsets = Object.freeze({
+  version: 8,
+  fleet: 9,
+  count: 41,
+  bump: 45,
+  entries: 46,
+  entrySize: 48,
+});
+
+const shipFieldOffsets = Object.freeze({
+  version: 8,
+  gameId: 9,
+  mint: 41,
+  name: 73,
+  nameLength: 64,
+  sizeClass: 137,
+});
+
+let aephiaResourceCache = null;
+let shipStatsCache = null;
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -2960,11 +2984,155 @@ function readFleetLabel(data) {
     .trim();
 }
 
+function readFixedString(data, offset, length) {
+  return data
+    .subarray(offset, offset + length)
+    .filter((value) => value !== 0)
+    .toString('utf8')
+    .trim();
+}
+
 function deriveRentalContract(fleetAccount) {
   return PublicKey.findProgramAddressSync(
     [Buffer.from('rental_contract'), fleetAccount.toBuffer()],
     SRSLY_PROGRAM_ID
   )[0];
+}
+
+function normalizeAtlasRate(raw) {
+  if (raw == null) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value > 1_000_000 ? value / 10 ** 8 : value;
+}
+
+function normalizeShipName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseFleetShipsAccount(data) {
+  if (!data || data.length < fleetShipsOffsets.entries) return [];
+  const count = data.readUInt32LE(fleetShipsOffsets.count);
+  const entries = [];
+  for (let index = 0; index < count; index += 1) {
+    const offset = fleetShipsOffsets.entries + index * fleetShipsOffsets.entrySize;
+    if (offset + fleetShipsOffsets.entrySize > data.length) break;
+    const amount = Number(data.readBigUInt64LE(offset + 32));
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    entries.push({
+      shipAccount: readPublicKey(data, offset),
+      amount,
+      updateId: Number(data.readBigUInt64LE(offset + 40)),
+    });
+  }
+  return entries;
+}
+
+function parseShipAccount(data, key) {
+  if (!data || data.length < shipFieldOffsets.sizeClass + 1) {
+    return { key, name: key, mint: '', sizeClass: null };
+  }
+  return {
+    key,
+    version: data[shipFieldOffsets.version],
+    gameId: readPublicKey(data, shipFieldOffsets.gameId),
+    mint: readPublicKey(data, shipFieldOffsets.mint),
+    name: readFixedString(data, shipFieldOffsets.name, shipFieldOffsets.nameLength) || key,
+    sizeClass: data[shipFieldOffsets.sizeClass],
+  };
+}
+
+function extractExportedJsonObject(source, exportName) {
+  const marker = `export const ${exportName} = `;
+  const start = String(source || '').indexOf(marker);
+  if (start < 0) return null;
+  const objectStart = String(source).indexOf('{', start + marker.length);
+  if (objectStart < 0) return null;
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = objectStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = quoted;
+      continue;
+    }
+    if (char === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (quoted) continue;
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(objectStart, index + 1);
+      }
+    }
+  }
+  return null;
+}
+
+async function fetchAephiaResourceData() {
+  const now = Date.now();
+  if (aephiaResourceCache && aephiaResourceCache.expiresAt > now) return aephiaResourceCache.data;
+  const response = await fetch(AEPHIA_RESOURCE_URL);
+  if (!response.ok) throw new Error(`aephia_resource_${response.status}`);
+  const data = await response.json();
+  aephiaResourceCache = { data: Array.isArray(data) ? data : [], expiresAt: now + 5 * 60 * 1000 };
+  return aephiaResourceCache.data;
+}
+
+async function fetchSduPriceAtl() {
+  const resources = await fetchAephiaResourceData();
+  const sdu = resources.find((item) => normalizeShipName(item?.name) === 'survey data unit');
+  const price = Number(sdu?.pricingATL?.priceATL);
+  return Number.isFinite(price) ? price : null;
+}
+
+async function fetchShipStatsSot() {
+  const now = Date.now();
+  if (shipStatsCache && shipStatsCache.expiresAt > now) return shipStatsCache.data;
+  const response = await fetch(SES_SHIP_STATS_URL);
+  if (!response.ok) throw new Error(`ses_ship_stats_${response.status}`);
+  const source = await response.text();
+  const sourceMatch = source.match(/export const SOT_SOURCE = "([^"]+)"/);
+  const json = extractExportedJsonObject(source, 'SOT_BY_MODEL');
+  if (!json) throw new Error('ses_ship_stats_parse_failed');
+  const byKey = JSON.parse(json);
+  const byName = new Map();
+  for (const [key, row] of Object.entries(byKey)) {
+    const names = [key, row?.sotName, row?.['Ship Name']].filter(Boolean);
+    for (const name of names) byName.set(normalizeShipName(name), { key, ...row });
+  }
+  const data = {
+    source: sourceMatch ? sourceMatch[1] : 'SES SoT',
+    byKey,
+    byName,
+  };
+  shipStatsCache = { data, expiresAt: now + 60 * 60 * 1000 };
+  return data;
+}
+
+async function readRentalRate(connection, fleetKey) {
+  const contract = deriveRentalContract(new PublicKey(fleetKey));
+  const contractInfo = await connection.getAccountInfo(contract, 'confirmed');
+  if (!contractInfo || contractInfo.data.length < srslyFieldOffsets.contractRate + 8) {
+    return { contract: contract.toBase58(), rateAtlasPerDay: null };
+  }
+  return {
+    contract: contract.toBase58(),
+    rateAtlasPerDay: normalizeAtlasRate(Number(contractInfo.data.readBigUInt64LE(srslyFieldOffsets.contractRate))),
+  };
 }
 
 function formatShortDate(date) {
@@ -3127,6 +3295,124 @@ async function fetchProfileFleets(payload) {
   };
 }
 
+async function fetchEarningsSnapshot(payload) {
+  const settings = normalizeSettings(payload || (await readSettings()));
+  const fleetResult = await fetchProfileFleets(settings);
+  const fleets = Array.isArray(fleetResult.fleets) ? fleetResult.fleets : [];
+  const connection = new Connection(getRpcUrl(settings), {
+    commitment: 'confirmed',
+    disableRetryOnRateLimit: false,
+  });
+
+  const [sduPriceAtl, sot] = await Promise.all([
+    fetchSduPriceAtl().catch(() => null),
+    fetchShipStatsSot(),
+  ]);
+
+  const fleetShipsKeys = fleets
+    .map((fleet) => {
+      try {
+        return new PublicKey(fleet.fleetShips);
+      } catch (_error) {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  const fleetShipsInfos = fleetShipsKeys.length
+    ? await connection.getMultipleAccountsInfo(fleetShipsKeys, 'confirmed')
+    : [];
+
+  const compositionByFleet = new Map();
+  const shipAccountSet = new Set();
+  fleets.forEach((fleet, index) => {
+    const info = fleetShipsInfos[index];
+    const composition = parseFleetShipsAccount(info?.data);
+    compositionByFleet.set(fleet.key, composition);
+    for (const entry of composition) shipAccountSet.add(entry.shipAccount);
+  });
+
+  const shipAccountKeys = Array.from(shipAccountSet);
+  const shipInfos = shipAccountKeys.length
+    ? await connection.getMultipleAccountsInfo(shipAccountKeys.map((key) => new PublicKey(key)), 'confirmed')
+    : [];
+  const shipByAccount = new Map();
+  shipAccountKeys.forEach((key, index) => {
+    shipByAccount.set(key, parseShipAccount(shipInfos[index]?.data, key));
+  });
+
+  const rentalFleetKeys = fleets
+    .filter((fleet) => fleet.relationship === 'managed' || fleet.relationship === 'owned-managed')
+    .map((fleet) => fleet.key);
+  const rentalRates = new Map();
+  await Promise.all(rentalFleetKeys.map(async (fleetKey) => {
+    try {
+      rentalRates.set(fleetKey, await readRentalRate(connection, fleetKey));
+    } catch (_error) {
+      rentalRates.set(fleetKey, { contract: deriveRentalContract(new PublicKey(fleetKey)).toBase58(), rateAtlasPerDay: null });
+    }
+  }));
+
+  let totalExpectedSduPerScan = 0;
+  let mappedShipTypeCount = 0;
+  let unmappedShipTypeCount = 0;
+  let rentalAtlasPerDay = 0;
+  const rows = fleets.map((fleet) => {
+    const composition = compositionByFleet.get(fleet.key) || [];
+    let expectedSduPerScan = 0;
+    const ships = composition.map((entry) => {
+      const ship = shipByAccount.get(entry.shipAccount) || { key: entry.shipAccount, name: entry.shipAccount };
+      const sotRow = sot.byName.get(normalizeShipName(ship.name));
+      const sduPerScan = Number(sotRow?.sduPerScan);
+      const mapped = Number.isFinite(sduPerScan);
+      if (mapped) {
+        mappedShipTypeCount += 1;
+        expectedSduPerScan += entry.amount * sduPerScan;
+      } else {
+        unmappedShipTypeCount += 1;
+      }
+      return {
+        shipAccount: entry.shipAccount,
+        mint: ship.mint || '',
+        name: ship.name || entry.shipAccount,
+        amount: entry.amount,
+        sduPerScan: mapped ? sduPerScan : null,
+        expectedSduPerScan: mapped ? entry.amount * sduPerScan : null,
+        mapped,
+      };
+    });
+    const rental = rentalRates.get(fleet.key) || { contract: null, rateAtlasPerDay: null };
+    const rentalRate = Number(rental.rateAtlasPerDay);
+    if (Number.isFinite(rentalRate)) rentalAtlasPerDay += rentalRate;
+    totalExpectedSduPerScan += expectedSduPerScan;
+    return {
+      ...fleet,
+      rentalContract: rental.contract,
+      rentalRateAtlasPerDay: Number.isFinite(rentalRate) ? rentalRate : null,
+      expectedSduPerScan,
+      expectedSduValueAtl: sduPriceAtl != null ? expectedSduPerScan * sduPriceAtl : null,
+      shipTypes: ships.length,
+      ships,
+    };
+  });
+
+  rows.sort((a, b) => (Number(b.expectedSduPerScan) || 0) - (Number(a.expectedSduPerScan) || 0));
+
+  return {
+    ok: true,
+    checkedAt: new Date().toISOString(),
+    sduPriceAtl,
+    sduPriceSource: 'Aephia /gm/resource pricingATL.priceATL',
+    shipStatsSource: sot.source,
+    fleetCount: rows.length,
+    mappedShipTypeCount,
+    unmappedShipTypeCount,
+    totalExpectedSduPerScan,
+    totalExpectedSduValueAtl: sduPriceAtl != null ? totalExpectedSduPerScan * sduPriceAtl : null,
+    rentalAtlasPerDay,
+    fleets: rows,
+  };
+}
+
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -3159,6 +3445,17 @@ ipcMain.handle('fleet:list', async (_event, payload) => {
     return {
       ok: false,
       error: String(error?.message || error || 'fleet_list_failed'),
+      checkedAt: new Date().toISOString(),
+    };
+  }
+});
+ipcMain.handle('earnings:snapshot', async (_event, payload) => {
+  try {
+    return await fetchEarningsSnapshot(payload);
+  } catch (error) {
+    return {
+      ok: false,
+      error: String(error?.message || error || 'earnings_snapshot_failed'),
       checkedAt: new Date().toISOString(),
     };
   }
