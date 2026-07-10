@@ -462,6 +462,14 @@ select:focus {
   overflow: hidden;
 }
 
+.section-view[data-section-panel="earnings"].active {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .subtab-bar {
   display: flex;
   flex-wrap: wrap;
@@ -485,6 +493,10 @@ select:focus {
   display: none;
 }
 
+.earnings-panel {
+  display: none;
+}
+
 .production-panel.active {
   display: flex;
   flex: 1 1 auto;
@@ -495,6 +507,14 @@ select:focus {
      outside this panel, so it stays fixed. */
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.earnings-panel.active {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .consumption-subtab-bar {

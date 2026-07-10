@@ -27,10 +27,6 @@
             <span class="nav-icon">PC</span>
             <span>Production/Consumption</span>
           </button>
-          <button class="nav-button nav-blue" type="button" data-section="optimization" aria-pressed="false">
-            <span class="nav-icon">OP</span>
-            <span>Optimization</span>
-          </button>
           <button class="nav-button nav-blue" type="button" data-section="earnings" aria-pressed="false">
             <span class="nav-icon">EA</span>
             <span>Earnings</span>
@@ -133,52 +129,6 @@
               </div>
             </section>
 
-            <div class="dashboard-grid earnings-metrics-grid">
-              <section class="metric-card">
-                <span class="metric-label">SDU Price</span>
-                <strong id="earnings-sdu-price-value">--</strong>
-                <small id="earnings-sdu-price-note">Awaiting Aephia data</small>
-              </section>
-              <section class="metric-card">
-                <span class="metric-label">Expected SDU / Scan</span>
-                <strong id="earnings-sdu-scan-value">--</strong>
-                <small id="earnings-sdu-scan-note">Awaiting fleet decode</small>
-              </section>
-              <section class="metric-card">
-                <span class="metric-label">Expected Value / Scan</span>
-                <strong id="earnings-sdu-value-value">--</strong>
-                <small id="earnings-sdu-value-note">Awaiting price data</small>
-              </section>
-              <section class="metric-card">
-                <span class="metric-label">Rental Cost / Day</span>
-                <strong id="earnings-rental-value">--</strong>
-                <small id="earnings-rental-note">Awaiting rental decode</small>
-              </section>
-            </div>
-
-            <section class="work-surface earnings-surface">
-              <div id="earnings-sync-status" class="fleet-sync-status" role="status">Awaiting earnings data</div>
-              <div class="fleet-table-wrap">
-                <table class="fleet-table earnings-table">
-                  <thead id="earnings-table-head">
-                    <tr>
-                      <th scope="col">Date</th>
-                      <th scope="col">Fleet</th>
-                      <th scope="col">Ships</th>
-                      <th scope="col">SDU Found</th>
-                      <th scope="col">SDU / Scan</th>
-                      <th scope="col">Value / Scan</th>
-                      <th scope="col">Rental / Day</th>
-                    </tr>
-                  </thead>
-                  <tbody id="earnings-table-body">
-                    <tr class="empty-row">
-                      <td colspan="7">No earnings data loaded</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
           </div>
 
           <div class="production-panel" data-production-panel="mining">
@@ -777,10 +727,84 @@
           </section>
         </section>
 
-        <section class="section-view" data-section-panel="optimization">
-          <section class="work-surface quiet-panel">
-            <h2>Optimization</h2>
-          </section>
+        <section class="section-view" data-section-panel="earnings">
+          <div class="subtab-bar" role="tablist" aria-label="Earnings views">
+            <button class="earnings-subtab-button subtab-button active" type="button" data-earnings-subtab="scanning" aria-selected="true">Scanning</button>
+            <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="mining" aria-selected="false">Mining</button>
+            <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="cargo" aria-selected="false">Cargo</button>
+            <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="crafting" aria-selected="false">Crafting</button>
+            <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="upgrading" aria-selected="false">Upgrading</button>
+          </div>
+
+          <div class="earnings-panel active" data-earnings-panel="scanning">
+            <div class="dashboard-grid earnings-metrics-grid">
+              <section class="metric-card">
+                <span class="metric-label">SDU Price</span>
+                <strong id="earnings-sdu-price-value">--</strong>
+                <small id="earnings-sdu-price-note">Awaiting Aephia data</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Expected SDU / Scan</span>
+                <strong id="earnings-sdu-scan-value">--</strong>
+                <small id="earnings-sdu-scan-note">Awaiting fleet decode</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Expected Value / Scan</span>
+                <strong id="earnings-sdu-value-value">--</strong>
+                <small id="earnings-sdu-value-note">Awaiting price data</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Rental Cost / Day</span>
+                <strong id="earnings-rental-value">--</strong>
+                <small id="earnings-rental-note">Awaiting rental decode</small>
+              </section>
+            </div>
+
+            <section class="work-surface earnings-surface">
+              <div id="earnings-sync-status" class="fleet-sync-status" role="status">Awaiting earnings data</div>
+              <div class="fleet-table-wrap">
+                <table class="fleet-table earnings-table">
+                  <thead id="earnings-table-head">
+                    <tr>
+                      <th scope="col">Date</th>
+                      <th scope="col">Fleet</th>
+                      <th scope="col">Ships</th>
+                      <th scope="col">SDU Found</th>
+                      <th scope="col">SDU / Scan</th>
+                      <th scope="col">Value / Scan</th>
+                      <th scope="col">Rental / Day</th>
+                    </tr>
+                  </thead>
+                  <tbody id="earnings-table-body">
+                    <tr class="empty-row">
+                      <td colspan="7">No earnings data loaded</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <div class="earnings-panel" data-earnings-panel="mining">
+            <section class="work-surface quiet-panel">
+              <h2>Mining</h2>
+            </section>
+          </div>
+          <div class="earnings-panel" data-earnings-panel="cargo">
+            <section class="work-surface quiet-panel">
+              <h2>Cargo</h2>
+            </section>
+          </div>
+          <div class="earnings-panel" data-earnings-panel="crafting">
+            <section class="work-surface quiet-panel">
+              <h2>Crafting</h2>
+            </section>
+          </div>
+          <div class="earnings-panel" data-earnings-panel="upgrading">
+            <section class="work-surface quiet-panel">
+              <h2>Upgrading</h2>
+            </section>
+          </div>
         </section>
 
       </main>

@@ -3,7 +3,6 @@ const api = window.myStarAtlas;
 const sectionLabels = {
   production: 'Production/Consumption',
   fleet: 'My Fleet',
-  optimization: 'Optimization',
   earnings: 'Earnings',
 };
 
@@ -15,6 +14,14 @@ const subtabLabels = {
   consumption: 'Consumption',
   'pct-charts': 'PCR Charts',
   inventory: 'Inventory',
+};
+
+const earningsSubtabLabels = {
+  scanning: 'Scanning',
+  mining: 'Mining',
+  cargo: 'Cargo',
+  crafting: 'Crafting',
+  upgrading: 'Upgrading',
 };
 
 const form = document.querySelector('#settings-form');
@@ -207,6 +214,7 @@ const factionButtons = Array.from(document.querySelectorAll('.faction-button'));
 
 let currentSection = 'production';
 let currentSubtab = 'scanning';
+let currentEarningsSubtab = 'scanning';
 let latestSettings = null;
 let latestFleetResult = null;
 let latestEarningsResult = null;
@@ -577,7 +585,11 @@ function resetFactionScopedState() {
 
 function updateTitle() {
   const section = sectionLabels[currentSection] || '';
-  const title = currentSection === 'production' ? subtabLabels[currentSubtab] : section;
+  const title = currentSection === 'production'
+    ? subtabLabels[currentSubtab]
+    : currentSection === 'earnings'
+      ? earningsSubtabLabels[currentEarningsSubtab]
+      : section;
   setText(sectionEyebrow, section);
   setText(sectionTitle, title);
 }
@@ -3501,14 +3513,6 @@ function createEarningsFleetCell(entry) {
   const name = document.createElement('strong');
   name.textContent = entry.fleetName || entry.fleet || 'Unnamed fleet';
   cell.appendChild(name);
-  const detail = [entry.ownership, entry.relationship === 'managed' ? 'rented' : '']
-    .filter(Boolean)
-    .join(' · ');
-  if (detail) {
-    const span = document.createElement('span');
-    span.textContent = detail;
-    cell.appendChild(span);
-  }
   return cell;
 }
 
@@ -3606,7 +3610,7 @@ async function refreshEarnings() {
 function setActiveSection(section) {
   currentSection = section;
   document.querySelectorAll('.nav-button').forEach((button) => {
-    const active = button.dataset.section === section || (button.dataset.section === 'earnings' && section === 'production' && currentSubtab === 'scanning');
+    const active = button.dataset.section === section;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
@@ -3614,6 +3618,9 @@ function setActiveSection(section) {
     panel.classList.toggle('active', panel.dataset.sectionPanel === section);
   });
   updateTitle();
+  if (section === 'earnings' && !latestEarningsResult) {
+    refreshEarnings();
+  }
 }
 
 function setActiveSubtab(subtab) {
@@ -3625,11 +3632,6 @@ function setActiveSubtab(subtab) {
   });
   document.querySelectorAll('[data-production-panel]').forEach((panel) => {
     panel.classList.toggle('active', panel.dataset.productionPanel === subtab);
-  });
-  document.querySelectorAll('.nav-button').forEach((button) => {
-    const active = button.dataset.section === currentSection || (button.dataset.section === 'earnings' && currentSection === 'production' && subtab === 'scanning');
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
   });
   updateTitle();
   if (subtab === 'mining' && !latestMiningResult && hasInfluxSettings(latestSettings || getFormPayload())) {
@@ -3677,6 +3679,22 @@ function setActiveSubtab(subtab) {
   }
 }
 
+function setActiveEarningsSubtab(subtab) {
+  currentEarningsSubtab = subtab;
+  document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
+    const active = button.dataset.earningsSubtab === subtab;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll('[data-earnings-panel]').forEach((panel) => {
+    panel.classList.toggle('active', panel.dataset.earningsPanel === subtab);
+  });
+  updateTitle();
+  if (subtab === 'scanning' && !latestEarningsResult) {
+    refreshEarnings();
+  }
+}
+
 async function loadInitialState() {
   const [profileName, version, settings] = await Promise.all([
     api.getProfileName(),
@@ -3710,20 +3728,15 @@ async function loadInitialState() {
 }
 
 document.querySelectorAll('.nav-button').forEach((button) => {
-  button.addEventListener('click', () => {
-    if (button.dataset.section === 'earnings') {
-      setActiveSection('production');
-      setActiveSubtab('scanning');
-      if (!latestEarningsResult) refreshEarnings();
-      document.querySelector('.earnings-surface')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      return;
-    }
-    setActiveSection(button.dataset.section);
-  });
+  button.addEventListener('click', () => setActiveSection(button.dataset.section));
 });
 
-document.querySelectorAll('.subtab-button').forEach((button) => {
+document.querySelectorAll('.subtab-button[data-subtab]').forEach((button) => {
   button.addEventListener('click', () => setActiveSubtab(button.dataset.subtab));
+});
+
+document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
+  button.addEventListener('click', () => setActiveEarningsSubtab(button.dataset.earningsSubtab));
 });
 
 earningsColumnControls.forEach((input) => {
