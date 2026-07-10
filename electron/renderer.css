@@ -933,9 +933,9 @@ select:focus {
 .earnings-chart-header {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: center;
   margin-bottom: 8px;
+  text-align: center;
 }
 
 .earnings-chart-header h3 {
@@ -944,14 +944,11 @@ select:focus {
   letter-spacing: 0;
 }
 
-.earnings-chart-header span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
 .earnings-net-profit-chart {
+  position: relative;
+  max-width: 1120px;
   min-height: 286px;
+  margin: 0 auto;
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -983,6 +980,28 @@ select:focus {
 
 .earnings-chart-axis-label {
   fill: var(--text);
+}
+
+.earnings-chart-segment {
+  cursor: default;
+}
+
+.earnings-chart-tooltip {
+  position: fixed;
+  z-index: 50;
+  display: none;
+  max-width: 240px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: rgba(2, 7, 10, 0.94);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
+  pointer-events: none;
+  white-space: pre-line;
 }
 
 .earnings-chart-empty {

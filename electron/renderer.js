@@ -3643,7 +3643,7 @@ function renderEarningsNetProfitChart(result, colorMap) {
 
   const width = 1040;
   const height = 320;
-  const margin = { top: 18, right: 18, bottom: 42, left: 72 };
+  const margin = { top: 18, right: 18, bottom: 42, left: 96 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
   const yMax = niceCeil(maxPositive);
@@ -3706,9 +3706,12 @@ function renderEarningsNetProfitChart(result, colorMap) {
         height: rectHeight,
         fill: segment.color,
         rx: 2,
+        class: 'earnings-chart-segment',
+        'data-fleet': segment.fleet,
+        'data-net-profit': formatAtlasNumber(value, 2),
       });
       const title = createSvgElement('title');
-      title.textContent = `${day.label} · ${segment.fleet}: ${formatAtlasNumber(value, 2)}`;
+      title.textContent = `${segment.fleet}\nNet Profit: ${formatAtlasNumber(value, 2)}`;
       rect.appendChild(title);
       svg.appendChild(rect);
       if (value >= 0) positiveStack = yEnd;
@@ -3726,16 +3729,35 @@ function renderEarningsNetProfitChart(result, colorMap) {
   });
 
   const yAxisLabel = createSvgElement('text', {
-    x: 18,
+    x: 26,
     y: margin.top + plotHeight / 2,
     class: 'earnings-chart-axis-label',
-    transform: `rotate(-90 18 ${margin.top + plotHeight / 2})`,
+    transform: `rotate(-90 26 ${margin.top + plotHeight / 2})`,
     'text-anchor': 'middle',
   });
   yAxisLabel.textContent = 'ATLAS';
   svg.appendChild(yAxisLabel);
 
   earningsNetProfitChart.appendChild(svg);
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'earnings-chart-tooltip';
+  earningsNetProfitChart.appendChild(tooltip);
+
+  svg.addEventListener('mousemove', (event) => {
+    const target = event.target?.closest?.('.earnings-chart-segment');
+    if (!target) {
+      tooltip.style.display = 'none';
+      return;
+    }
+    tooltip.textContent = `${target.dataset.fleet || 'Fleet'}\nNet Profit: ${target.dataset.netProfit || '--'}`;
+    tooltip.style.display = 'block';
+    tooltip.style.left = `${event.clientX + 14}px`;
+    tooltip.style.top = `${event.clientY + 14}px`;
+  });
+  svg.addEventListener('mouseleave', () => {
+    tooltip.style.display = 'none';
+  });
 }
 
 function describeFleetShips(fleet) {
