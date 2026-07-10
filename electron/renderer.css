@@ -916,8 +916,8 @@ select:focus {
 .earnings-surface {
   display: flex;
   flex: 1 1 auto;
-  min-height: 360px;
-  max-height: 520px;
+  min-height: 440px;
+  max-height: 720px;
   flex-direction: column;
   padding: 0;
   overflow: hidden;
