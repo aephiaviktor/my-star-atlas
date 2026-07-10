@@ -3463,6 +3463,7 @@ async function fetchEarningsSnapshot(payload) {
       ...scanRow,
       fleetName: scanRow.fleet,
       fleetAccount: fleet?.key || '',
+      rented: fleet?.relationship === 'managed' || fleet?.relationship === 'owned-managed',
       ownership: fleet?.ownership || '',
       relationship: fleet?.relationship || '',
       activity: fleet?.activity || '',
@@ -3470,6 +3471,7 @@ async function fetchEarningsSnapshot(payload) {
       shipTypes: fleet?.shipTypes || 0,
       expectedSduPerScan: fleet?.expectedSduPerScan ?? null,
       expectedSduValueAtl: fleet?.expectedSduValueAtl ?? null,
+      revenueAtlasPerDay: sduPriceAtl != null ? scanRow.sduFound * sduPriceAtl : null,
       rentalContract: fleet?.rentalContract || null,
       rentalRateAtlasPerDay: fleet?.rentalRateAtlasPerDay ?? null,
     };
@@ -3489,6 +3491,7 @@ async function fetchEarningsSnapshot(payload) {
     checkedAt: new Date().toISOString(),
     sduPriceAtl,
     sduPriceSource: 'Aephia /gm/resource pricingATL.priceATL',
+    sduPriceHistoryAvailable: false,
     shipStatsSource: sot.source,
     fleetCount: fleetRows.length,
     activeScanningFleetCount: activeFleetKeys.size,

@@ -33,10 +33,12 @@
           </button>
           <div class="nav-subsection" id="earnings-column-controls" aria-label="Earnings table columns">
             <span class="nav-subsection-title">Columns</span>
-            <label><input type="checkbox" data-earnings-column="ships" checked /> Ships</label>
+            <label><input type="checkbox" data-earnings-column="rented" /> Rented</label>
+            <label><input type="checkbox" data-earnings-column="ships" /> Ships</label>
+            <label><input type="checkbox" data-earnings-column="sduMax" checked /> SDU MAX</label>
+            <label><input type="checkbox" data-earnings-column="atlasPerScan" /> ATLAS / SCAN</label>
             <label><input type="checkbox" data-earnings-column="sduFound" checked /> SDU Found</label>
-            <label><input type="checkbox" data-earnings-column="sduPerScan" checked /> SDU / Scan</label>
-            <label><input type="checkbox" data-earnings-column="valuePerScan" checked /> Value / Scan</label>
+            <label><input type="checkbox" data-earnings-column="revenue" checked /> Revenue</label>
             <label><input type="checkbox" data-earnings-column="rental" checked /> Rental / Day</label>
             <label><input type="checkbox" data-earnings-column="account" /> Account</label>
           </div>
@@ -744,12 +746,12 @@
                 <small id="earnings-sdu-price-note">Awaiting Aephia data</small>
               </section>
               <section class="metric-card">
-                <span class="metric-label">Expected SDU / Scan</span>
+                <span class="metric-label">SDU MAX</span>
                 <strong id="earnings-sdu-scan-value">--</strong>
                 <small id="earnings-sdu-scan-note">Awaiting fleet decode</small>
               </section>
               <section class="metric-card">
-                <span class="metric-label">Expected Value / Scan</span>
+                <span class="metric-label">ATLAS / SCAN</span>
                 <strong id="earnings-sdu-value-value">--</strong>
                 <small id="earnings-sdu-value-note">Awaiting price data</small>
               </section>
@@ -768,16 +770,15 @@
                     <tr>
                       <th scope="col">Date</th>
                       <th scope="col">Fleet</th>
-                      <th scope="col">Ships</th>
+                      <th scope="col">SDU MAX</th>
                       <th scope="col">SDU Found</th>
-                      <th scope="col">SDU / Scan</th>
-                      <th scope="col">Value / Scan</th>
+                      <th scope="col">Revenue</th>
                       <th scope="col">Rental / Day</th>
                     </tr>
                   </thead>
                   <tbody id="earnings-table-body">
                     <tr class="empty-row">
-                      <td colspan="7">No earnings data loaded</td>
+                      <td colspan="6">No earnings data loaded</td>
                     </tr>
                   </tbody>
                 </table>

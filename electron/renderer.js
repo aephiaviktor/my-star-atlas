@@ -257,10 +257,12 @@ const factionLabels = Object.freeze({
 });
 
 const earningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'rented', label: 'Rented' }),
   Object.freeze({ id: 'ships', label: 'Ships' }),
+  Object.freeze({ id: 'sduMax', label: 'SDU MAX' }),
+  Object.freeze({ id: 'atlasPerScan', label: 'ATLAS / SCAN' }),
   Object.freeze({ id: 'sduFound', label: 'SDU Found' }),
-  Object.freeze({ id: 'sduPerScan', label: 'SDU / Scan' }),
-  Object.freeze({ id: 'valuePerScan', label: 'Value / Scan' }),
+  Object.freeze({ id: 'revenue', label: 'REVENUE' }),
   Object.freeze({ id: 'rental', label: 'Rental / Day' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
@@ -3471,6 +3473,12 @@ function formatAtlas(value, digits = 2) {
   return `${formatDecimal(number, digits)} ATLAS`;
 }
 
+function formatAtlasNumber(value, digits = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '--';
+  return formatDecimal(number, digits);
+}
+
 function describeFleetShips(fleet) {
   const ships = Array.isArray(fleet.ships) ? fleet.ships : [];
   if (!ships.length) return 'No ship composition';
@@ -3516,11 +3524,25 @@ function createEarningsFleetCell(entry) {
   return cell;
 }
 
+function createCheckboxCell(checked) {
+  const cell = document.createElement('td');
+  const input = document.createElement('input');
+  input.className = 'table-checkbox';
+  input.type = 'checkbox';
+  input.checked = Boolean(checked);
+  input.disabled = true;
+  input.setAttribute('aria-label', checked ? 'Rented fleet' : 'Not rented');
+  cell.appendChild(input);
+  return cell;
+}
+
 function createEarningsOptionalCell(entry, columnId) {
+  if (columnId === 'rented') return createCheckboxCell(entry.rented);
   if (columnId === 'ships') return createTextCell(describeFleetShips(entry));
+  if (columnId === 'sduMax') return createTextCell(entry.expectedSduPerScan == null ? '--' : formatWholeNumber(entry.expectedSduPerScan));
+  if (columnId === 'atlasPerScan') return createTextCell(entry.expectedSduValueAtl == null ? '--' : formatAtlasNumber(entry.expectedSduValueAtl, 2));
   if (columnId === 'sduFound') return createTextCell(formatWholeNumber(entry.sduFound || 0));
-  if (columnId === 'sduPerScan') return createTextCell(entry.expectedSduPerScan == null ? '--' : formatWholeNumber(entry.expectedSduPerScan));
-  if (columnId === 'valuePerScan') return createTextCell(entry.expectedSduValueAtl == null ? '--' : formatAtlas(entry.expectedSduValueAtl, 2));
+  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasNumber(entry.revenueAtlasPerDay, 2));
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlas(entry.rentalRateAtlasPerDay, 2));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
@@ -3537,7 +3559,12 @@ function renderEarnings(result) {
   renderEarningsHeader();
 
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
-  setText(earningsSduPriceNote, result.sduPriceSource || 'Aephia priceATL');
+  setText(
+    earningsSduPriceNote,
+    result.sduPriceHistoryAvailable === false
+      ? `${result.sduPriceSource || 'Aephia priceATL'} · current price only`
+      : result.sduPriceSource || 'Aephia priceATL'
+  );
   setText(earningsSduScanValue, formatWholeNumber(result.totalExpectedSduPerScan || 0));
   setText(
     earningsSduScanNote,

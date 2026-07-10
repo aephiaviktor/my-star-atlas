@@ -995,6 +995,13 @@ select:focus {
   text-overflow: ellipsis;
 }
 
+.table-checkbox {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  accent-color: var(--cyan);
+}
+
 .state-pill {
   display: inline-flex;
   align-items: center;
