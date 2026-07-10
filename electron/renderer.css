@@ -518,7 +518,8 @@ select:focus {
   flex: 1 1 auto;
   min-height: 0;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .consumption-subtab-bar {
@@ -920,6 +921,86 @@ select:focus {
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+}
+
+.earnings-chart-surface {
+  flex: 0 0 auto;
+  min-height: 340px;
+  margin-bottom: 14px;
+  padding: 14px 16px 10px;
+}
+
+.earnings-chart-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.earnings-chart-header h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.earnings-chart-header span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.earnings-net-profit-chart {
+  min-height: 286px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.earnings-net-profit-chart svg {
+  display: block;
+  min-width: 940px;
+  width: 100%;
+  height: 286px;
+}
+
+.earnings-chart-gridline {
+  stroke: rgba(143, 168, 178, 0.28);
+  stroke-width: 1;
+}
+
+.earnings-chart-zero-line {
+  stroke: rgba(244, 247, 248, 0.54);
+  stroke-width: 1.2;
+}
+
+.earnings-chart-y-label,
+.earnings-chart-x-label,
+.earnings-chart-axis-label {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.earnings-chart-axis-label {
+  fill: var(--text);
+}
+
+.earnings-chart-empty {
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.earnings-color-swatch {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(244, 247, 248, 0.42);
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px rgba(2, 7, 10, 0.32);
 }
 
 .fleet-sync-status {

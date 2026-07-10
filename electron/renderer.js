@@ -55,6 +55,7 @@ const earningsSduValueValue = document.querySelector('#earnings-sdu-value-value'
 const earningsSduValueNote = document.querySelector('#earnings-sdu-value-note');
 const earningsRentalValue = document.querySelector('#earnings-rental-value');
 const earningsRentalNote = document.querySelector('#earnings-rental-note');
+const earningsNetProfitChart = document.querySelector('#earnings-net-profit-chart');
 const sduTotalValue = document.querySelector('#sdu-total-value');
 const sduTotalNote = document.querySelector('#sdu-total-note');
 const sduAvgValue = document.querySelector('#sdu-avg-value');
@@ -257,6 +258,7 @@ const factionLabels = Object.freeze({
 });
 
 const earningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'color', label: 'Color' }),
   Object.freeze({ id: 'ownership', label: 'Ownership' }),
   Object.freeze({ id: 'ships', label: 'Ships' }),
   Object.freeze({ id: 'sduMax', label: 'SDU MAX' }),
@@ -275,6 +277,37 @@ const earningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
   Object.freeze({ id: 'account', label: 'Account' }),
+]);
+
+const earningsFleetPalette = Object.freeze([
+  '#f43f5e',
+  '#22d3ee',
+  '#facc15',
+  '#a855f7',
+  '#34d399',
+  '#fb923c',
+  '#60a5fa',
+  '#f472b6',
+  '#84cc16',
+  '#e879f9',
+  '#2dd4bf',
+  '#f97316',
+  '#c084fc',
+  '#06b6d4',
+  '#fde047',
+  '#4ade80',
+  '#38bdf8',
+  '#e11d48',
+  '#14b8a6',
+  '#d946ef',
+  '#f59e0b',
+  '#10b981',
+  '#8b5cf6',
+  '#ef4444',
+  '#0ea5e9',
+  '#65a30d',
+  '#ec4899',
+  '#fcd34d',
 ]);
 
 const assetChartColors = Object.freeze({
@@ -646,9 +679,10 @@ function formatDecimal(value, digits = 2) {
 
 function formatCompactNumber(value) {
   const n = Number(value) || 0;
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
   return String(Math.round(n));
 }
 
@@ -3458,6 +3492,7 @@ function setEarningsStatus(message) {
 function renderEarningsEmpty(message) {
   latestEarningsResult = null;
   renderEarningsHeader();
+  renderEarningsNetProfitChart(null, new Map());
   setText(earningsSduPriceValue, '--');
   setText(earningsSduPriceNote, message);
   setText(earningsSduScanValue, '--');
@@ -3495,6 +3530,214 @@ function formatPercentNumber(value, digits = 1) {
   return `${formatDecimal(number, digits)}%`;
 }
 
+function getUtcDateKeyFromDate(date) {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, '0'),
+    String(date.getUTCDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function getLastUtcDayLabels(dayCount = 14) {
+  const today = new Date();
+  const todayStart = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return Array.from({ length: dayCount }, (_value, index) => {
+    const offset = dayCount - 1 - index;
+    const date = new Date(todayStart - offset * 24 * 60 * 60 * 1000);
+    return {
+      isoDate: getUtcDateKeyFromDate(date),
+      label: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }),
+    };
+  });
+}
+
+function getEarningsFleetLabel(entry) {
+  return String(entry?.fleetName || entry?.fleet || 'Unnamed fleet');
+}
+
+function getGeneratedFleetColor(index) {
+  const hue = (index * 137.508) % 360;
+  return `hsl(${hue.toFixed(0)} 82% 58%)`;
+}
+
+function buildEarningsFleetColorMap(rows) {
+  const names = Array.from(new Set((Array.isArray(rows) ? rows : []).map(getEarningsFleetLabel).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b)
+  );
+  const map = new Map();
+  names.forEach((name, index) => {
+    map.set(name, earningsFleetPalette[index] || getGeneratedFleetColor(index));
+  });
+  return map;
+}
+
+function getEarningsFleetColor(entry, colorMap) {
+  const label = getEarningsFleetLabel(entry);
+  return colorMap?.get(label) || earningsFleetPalette[0];
+}
+
+function createSvgElement(tagName, attributes = {}) {
+  const element = document.createElementNS('http://www.w3.org/2000/svg', tagName);
+  Object.entries(attributes).forEach(([key, value]) => {
+    element.setAttribute(key, String(value));
+  });
+  return element;
+}
+
+function createColorCell(entry, colorMap) {
+  const cell = document.createElement('td');
+  const swatch = document.createElement('span');
+  swatch.className = 'earnings-color-swatch';
+  swatch.style.background = getEarningsFleetColor(entry, colorMap);
+  swatch.title = getEarningsFleetLabel(entry);
+  cell.appendChild(swatch);
+  return cell;
+}
+
+function renderEarningsNetProfitChart(result, colorMap) {
+  if (!earningsNetProfitChart) return;
+  earningsNetProfitChart.textContent = '';
+
+  const rows = Array.isArray(result?.rows) ? result.rows : [];
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'earnings-chart-empty';
+    empty.textContent = 'No net profit data loaded';
+    earningsNetProfitChart.appendChild(empty);
+    return;
+  }
+
+  const days = getLastUtcDayLabels(14).map((day) => ({ ...day, positiveTotal: 0, negativeTotal: 0, segments: [] }));
+  const dayByIso = new Map(days.map((day) => [day.isoDate, day]));
+  for (const row of rows) {
+    const day = dayByIso.get(row.isoDate);
+    const value = Number(row.netProfitAtlas);
+    if (!day || !Number.isFinite(value) || value === 0) continue;
+    const segment = {
+      fleet: getEarningsFleetLabel(row),
+      color: getEarningsFleetColor(row, colorMap),
+      value,
+    };
+    day.segments.push(segment);
+    if (value > 0) day.positiveTotal += value;
+    else day.negativeTotal += value;
+  }
+
+  const maxPositive = Math.max(0, ...days.map((day) => day.positiveTotal));
+  const maxNegative = Math.max(0, ...days.map((day) => Math.abs(day.negativeTotal)));
+  if (maxPositive === 0 && maxNegative === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'earnings-chart-empty';
+    empty.textContent = 'No net profit values available';
+    earningsNetProfitChart.appendChild(empty);
+    return;
+  }
+
+  const niceCeil = (value) => {
+    if (!Number.isFinite(value) || value <= 0) return 1;
+    const power = 10 ** Math.floor(Math.log10(value));
+    const scaled = value / power;
+    const nice = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10;
+    return nice * power;
+  };
+
+  const width = 1040;
+  const height = 320;
+  const margin = { top: 18, right: 18, bottom: 42, left: 72 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const yMax = niceCeil(maxPositive);
+  const yMin = maxNegative > 0 ? -niceCeil(maxNegative) : 0;
+  const yRange = yMax - yMin || 1;
+  const yScale = (value) => margin.top + ((yMax - value) / yRange) * plotHeight;
+  const baselineY = yScale(0);
+  const slotWidth = plotWidth / days.length;
+  const barWidth = Math.min(40, slotWidth * 0.58);
+  const svg = createSvgElement('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': 'Scanning fleets net profit in ATLAS by day',
+  });
+
+  const tickValues = Array.from({ length: 5 }, (_value, index) => yMin + (index * yRange) / 4);
+  for (const tickValue of tickValues) {
+    const y = yScale(tickValue);
+    svg.appendChild(createSvgElement('line', {
+      x1: margin.left,
+      x2: width - margin.right,
+      y1: y,
+      y2: y,
+      class: 'earnings-chart-gridline',
+    }));
+    const label = createSvgElement('text', {
+      x: margin.left - 12,
+      y: y + 4,
+      class: 'earnings-chart-y-label',
+      'text-anchor': 'end',
+    });
+    label.textContent = formatCompactNumber(tickValue);
+    svg.appendChild(label);
+  }
+
+  const zeroLine = createSvgElement('line', {
+    x1: margin.left,
+    x2: width - margin.right,
+    y1: baselineY,
+    y2: baselineY,
+    class: 'earnings-chart-zero-line',
+  });
+  svg.appendChild(zeroLine);
+
+  days.forEach((day, index) => {
+    const x = margin.left + index * slotWidth + (slotWidth - barWidth) / 2;
+    let positiveStack = 0;
+    let negativeStack = 0;
+    const sortedSegments = day.segments.slice().sort((a, b) => a.fleet.localeCompare(b.fleet));
+    for (const segment of sortedSegments) {
+      const value = segment.value;
+      const yStart = value >= 0 ? positiveStack : negativeStack;
+      const yEnd = yStart + value;
+      const y = value >= 0 ? yScale(yEnd) : yScale(yStart);
+      const rectHeight = Math.max(1, Math.abs(yScale(yStart) - yScale(yEnd)));
+      const rect = createSvgElement('rect', {
+        x,
+        y,
+        width: barWidth,
+        height: rectHeight,
+        fill: segment.color,
+        rx: 2,
+      });
+      const title = createSvgElement('title');
+      title.textContent = `${day.label} · ${segment.fleet}: ${formatAtlasNumber(value, 2)}`;
+      rect.appendChild(title);
+      svg.appendChild(rect);
+      if (value >= 0) positiveStack = yEnd;
+      else negativeStack = yEnd;
+    }
+
+    const label = createSvgElement('text', {
+      x: x + barWidth / 2,
+      y: height - 14,
+      class: 'earnings-chart-x-label',
+      'text-anchor': 'middle',
+    });
+    label.textContent = day.label;
+    svg.appendChild(label);
+  });
+
+  const yAxisLabel = createSvgElement('text', {
+    x: 18,
+    y: margin.top + plotHeight / 2,
+    class: 'earnings-chart-axis-label',
+    transform: `rotate(-90 18 ${margin.top + plotHeight / 2})`,
+    'text-anchor': 'middle',
+  });
+  yAxisLabel.textContent = 'ATLAS';
+  svg.appendChild(yAxisLabel);
+
+  earningsNetProfitChart.appendChild(svg);
+}
+
 function describeFleetShips(fleet) {
   const ships = Array.isArray(fleet.ships) ? fleet.ships : [];
   if (!ships.length) return 'No ship composition';
@@ -3516,13 +3759,16 @@ function getVisibleEarningsColumns() {
 function renderEarningsHeader() {
   if (!earningsTableHead) return;
   const row = document.createElement('tr');
-  for (const label of ['Date', 'Fleet']) {
+  const visibleColumns = getVisibleEarningsColumns();
+  const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
+  const labels = colorColumnVisible ? ['Date', 'Color', 'Fleet'] : ['Date', 'Fleet'];
+  for (const label of labels) {
     const th = document.createElement('th');
     th.scope = 'col';
     th.textContent = label;
     row.appendChild(th);
   }
-  for (const column of getVisibleEarningsColumns()) {
+  for (const column of visibleColumns.filter((column) => column.id !== 'color')) {
     const th = document.createElement('th');
     th.scope = 'col';
     th.textContent = column.label;
@@ -3549,7 +3795,8 @@ function createOwnershipCell(entry) {
   return cell;
 }
 
-function createEarningsOptionalCell(entry, columnId) {
+function createEarningsOptionalCell(entry, columnId, colorMap) {
+  if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
   if (columnId === 'ships') return createTextCell(describeFleetShips(entry));
@@ -3580,21 +3827,21 @@ function renderEarnings(result) {
   }
   setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'earnings', result);
   renderEarningsHeader();
+  const rows = Array.isArray(result.rows) ? result.rows : [];
+  const colorMap = buildEarningsFleetColorMap(rows);
+  renderEarningsNetProfitChart(result, colorMap);
 
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
   setText(earningsSduPriceNote, '');
   setText(earningsSduScanValue, `${formatWholeNumber(result.todaySduFound || 0)} | ${formatWholeNumber(result.averageSduFoundPerDay || 0)}`);
-  setText(
-    earningsSduScanNote,
-    'Today vs Average'
-  );
+  setText(earningsSduScanNote, '');
   setText(
     earningsSduValueValue,
     `${result.todayRevenueAtlas == null ? '--' : formatAtlasNumber(result.todayRevenueAtlas, 2)} | ${
       result.averageRevenueAtlasPerDay == null ? '--' : formatAtlasNumber(result.averageRevenueAtlasPerDay, 2)
     }`
   );
-  setText(earningsSduValueNote, 'Today vs Average');
+  setText(earningsSduValueNote, '');
   setText(earningsRentalValue, formatAtlasNumber(result.rentalAtlasPerDay || 0, 2));
   setText(earningsRentalNote, '');
   setEarningsStatus(
@@ -3605,7 +3852,6 @@ function renderEarnings(result) {
 
   if (!earningsTableBody) return;
   earningsTableBody.textContent = '';
-  const rows = Array.isArray(result.rows) ? result.rows : [];
   if (!rows.length) {
     const row = document.createElement('tr');
     row.className = 'empty-row';
@@ -3617,12 +3863,15 @@ function renderEarnings(result) {
     return;
   }
   const visibleColumns = getVisibleEarningsColumns();
+  const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
+  const remainingColumns = visibleColumns.filter((column) => column.id !== 'color');
   for (const entry of rows) {
     const row = document.createElement('tr');
     row.appendChild(createTextCell(entry.label || entry.isoDate));
+    if (colorColumnVisible) row.appendChild(createColorCell(entry, colorMap));
     row.appendChild(createEarningsFleetCell(entry));
-    for (const column of visibleColumns) {
-      row.appendChild(createEarningsOptionalCell(entry, column.id));
+    for (const column of remainingColumns) {
+      row.appendChild(createEarningsOptionalCell(entry, column.id, colorMap));
     }
     earningsTableBody.appendChild(row);
   }

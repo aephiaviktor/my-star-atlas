@@ -33,6 +33,7 @@
           </button>
           <div class="nav-subsection" id="earnings-column-controls" aria-label="Earnings table columns">
             <span class="nav-subsection-title">Columns</span>
+            <label><input type="checkbox" data-earnings-column="color" /> Color</label>
             <label><input type="checkbox" data-earnings-column="ownership" /> Ownership</label>
             <label><input type="checkbox" data-earnings-column="ships" /> Ships</label>
             <label><input type="checkbox" data-earnings-column="sduMax" checked /> SDU MAX</label>
@@ -756,12 +757,12 @@
                 <small id="earnings-sdu-price-note">Awaiting Aephia data</small>
               </section>
               <section class="metric-card">
-                <span class="metric-label">SDU found today vs Average</span>
+                <span class="metric-label">SDU Found</span>
                 <strong id="earnings-sdu-scan-value">--</strong>
                 <small id="earnings-sdu-scan-note">Awaiting fleet decode</small>
               </section>
               <section class="metric-card">
-                <span class="metric-label">Revenue today vs Average</span>
+                <span class="metric-label">Revenue</span>
                 <strong id="earnings-sdu-value-value">--</strong>
                 <small id="earnings-sdu-value-note">Awaiting price data</small>
               </section>
@@ -771,6 +772,14 @@
                 <small id="earnings-rental-note">Awaiting rental decode</small>
               </section>
             </div>
+
+            <section class="work-surface earnings-chart-surface">
+              <div class="earnings-chart-header">
+                <h3>Scanning Fleets Net Profit</h3>
+                <span>ATLAS</span>
+              </div>
+              <div id="earnings-net-profit-chart" class="earnings-net-profit-chart" aria-label="Scanning fleets net profit over the last 14 days"></div>
+            </section>
 
             <section class="work-surface earnings-surface">
               <div id="earnings-sync-status" class="fleet-sync-status" role="status">Awaiting earnings data</div>
