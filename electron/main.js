@@ -3363,7 +3363,7 @@ async function fetchScanningEarningsRows(settings) {
   const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
-  const flux = `from(bucket: "${bucket}")
+  const costsFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
 ${scopeFilterFlux}
   |> filter(fn: (r) =>
@@ -3378,14 +3378,16 @@ ${scopeFilterFlux}
   |> keep(columns: ["fleet", "_measurement", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
 
+  const scanStatsFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "sdu" and (r._field == "amount" or r._field == "chance"))
+  |> filter(fn: (r) => exists r.fleet)
+  |> keep(columns: ["fleet", "_field", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet"])`;
+
   const rowsByDayFleet = new Map();
-  for (const row of parseInfluxCsv(await queryInfluxFlux(settings, flux))) {
-    const fleet = String(row.fleet || '').trim();
-    const date = new Date(row._time);
-    const value = Number(row._value || 0);
-    if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
-    const isoDate = getUtcDateKey(date);
-    if (!includedDays.has(isoDate)) continue;
+  const ensureRow = (isoDate, fleet, date) => {
     const key = `${isoDate}\n${fleet}`;
     if (!rowsByDayFleet.has(key)) {
       rowsByDayFleet.set(key, {
@@ -3396,17 +3398,56 @@ ${scopeFilterFlux}
         burnedFood: 0,
         burnedFuel: 0,
         txCostSol: 0,
+        scanAttempts: 0,
+        successfulScans: 0,
+        chanceSumPercent: 0,
       });
     }
-    const entry = rowsByDayFleet.get(key);
+    return rowsByDayFleet.get(key);
+  };
+
+  const [costsCsv, scanStatsCsv] = await Promise.all([
+    queryInfluxFlux(settings, costsFlux),
+    queryInfluxFlux(settings, scanStatsFlux),
+  ]);
+
+  for (const row of parseInfluxCsv(costsCsv)) {
+    const fleet = String(row.fleet || '').trim();
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, fleet, date);
     if (row._measurement === 'sdu' && row._field === 'amount') entry.sduFound += value;
     if (row._measurement === 'sdu' && row._field === 'burnedFood') entry.burnedFood += value;
     if (row._measurement === 'sdu' && row._field === 'txCostSol') entry.txCostSol += value;
     if (row._measurement === 'movement' && row._field === 'burnedFuel') entry.burnedFuel += value;
   }
 
+  for (const row of parseInfluxCsv(scanStatsCsv)) {
+    const fleet = String(row.fleet || '').trim();
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, fleet, date);
+    if (row._field === 'chance') {
+      entry.scanAttempts += 1;
+      entry.chanceSumPercent += value <= 1 ? value * 100 : value;
+    } else if (row._field === 'amount' && value > 0) {
+      entry.successfulScans += 1;
+    }
+  }
+
   return Array.from(rowsByDayFleet.values())
-    .filter((row) => row.sduFound > 0 || row.burnedFood > 0 || row.burnedFuel > 0 || row.txCostSol > 0);
+    .filter((row) => row.scanAttempts > 0 || row.sduFound > 0 || row.burnedFood > 0 || row.burnedFuel > 0 || row.txCostSol > 0)
+    .map((row) => ({
+      ...row,
+      scanSuccessRatePercent: row.scanAttempts > 0 ? (row.successfulScans / row.scanAttempts) * 100 : null,
+      averageChancePercent: row.scanAttempts > 0 ? row.chanceSumPercent / row.scanAttempts : null,
+    }));
 }
 
 async function fetchEarningsSnapshot(payload) {
@@ -3544,6 +3585,11 @@ async function fetchEarningsSnapshot(payload) {
     const txsCostsAtlas = atlasPerSol != null ? scanRow.txCostSol * atlasPerSol : null;
     const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
     const costParts = [foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
+    const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
+    const revenueAtlasPerDay = sduPriceAtl != null ? scanRow.sduFound * sduPriceAtl : null;
+    const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
+      ? revenueAtlasPerDay - totalCostsAtlas
+      : null;
     return {
       ...scanRow,
       fleetName: scanRow.fleet,
@@ -3556,11 +3602,15 @@ async function fetchEarningsSnapshot(payload) {
       shipTypes: fleet?.shipTypes || 0,
       expectedSduPerScan: fleet?.expectedSduPerScan ?? null,
       expectedSduValueAtl: fleet?.expectedSduValueAtl ?? null,
-      revenueAtlasPerDay: sduPriceAtl != null ? scanRow.sduFound * sduPriceAtl : null,
+      revenueAtlasPerDay,
       foodCostsAtlas,
       fuelCostsAtlas,
       txsCostsAtlas,
-      totalCostsAtlas: costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null,
+      totalCostsAtlas,
+      netProfitAtlas,
+      profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
+        ? (netProfitAtlas / revenueAtlasPerDay) * 100
+        : null,
       rentalContract: fleet?.rentalContract || null,
       rentalRateAtlasPerDay,
     };

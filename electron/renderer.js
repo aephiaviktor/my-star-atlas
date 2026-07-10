@@ -261,6 +261,10 @@ const earningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'ships', label: 'Ships' }),
   Object.freeze({ id: 'sduMax', label: 'SDU MAX' }),
   Object.freeze({ id: 'atlasPerScan', label: 'ATLAS / SCAN' }),
+  Object.freeze({ id: 'scanAttempts', label: 'Scan Attempts' }),
+  Object.freeze({ id: 'successfulScans', label: 'Successful Scans' }),
+  Object.freeze({ id: 'scanSuccessRate', label: 'SCAN SUCCESS RATE' }),
+  Object.freeze({ id: 'averageChance', label: 'AVG CHANCE' }),
   Object.freeze({ id: 'sduFound', label: 'SDU Found' }),
   Object.freeze({ id: 'revenue', label: 'REVENUE' }),
   Object.freeze({ id: 'foodCosts', label: 'Food Costs' }),
@@ -268,6 +272,8 @@ const earningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'rental', label: 'RENTAL COSTS' }),
   Object.freeze({ id: 'txsCosts', label: 'TXS COSTS' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
+  Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
+  Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
 
@@ -3483,6 +3489,12 @@ function formatAtlasNumber(value, digits = 2) {
   return formatDecimal(number, digits);
 }
 
+function formatPercentNumber(value, digits = 1) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '--';
+  return `${formatDecimal(number, digits)}%`;
+}
+
 function describeFleetShips(fleet) {
   const ships = Array.isArray(fleet.ships) ? fleet.ships : [];
   if (!ships.length) return 'No ship composition';
@@ -3543,12 +3555,18 @@ function createEarningsOptionalCell(entry, columnId) {
   if (columnId === 'ships') return createTextCell(describeFleetShips(entry));
   if (columnId === 'sduMax') return createTextCell(entry.expectedSduPerScan == null ? '--' : formatWholeNumber(entry.expectedSduPerScan));
   if (columnId === 'atlasPerScan') return createTextCell(entry.expectedSduValueAtl == null ? '--' : formatAtlasNumber(entry.expectedSduValueAtl, 2));
+  if (columnId === 'scanAttempts') return createTextCell(formatWholeNumber(entry.scanAttempts || 0));
+  if (columnId === 'successfulScans') return createTextCell(formatWholeNumber(entry.successfulScans || 0));
+  if (columnId === 'scanSuccessRate') return createTextCell(formatPercentNumber(entry.scanSuccessRatePercent, 1));
+  if (columnId === 'averageChance') return createTextCell(formatPercentNumber(entry.averageChancePercent, 1));
   if (columnId === 'sduFound') return createTextCell(formatWholeNumber(entry.sduFound || 0));
   if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasNumber(entry.revenueAtlasPerDay, 2));
   if (columnId === 'foodCosts') return createTextCell(entry.foodCostsAtlas == null ? '--' : formatAtlasNumber(entry.foodCostsAtlas, 2));
   if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasNumber(entry.fuelCostsAtlas, 2));
   if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasNumber(entry.txsCostsAtlas, 2));
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasNumber(entry.totalCostsAtlas, 2));
+  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasNumber(entry.netProfitAtlas, 2));
+  if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
 }

@@ -37,6 +37,10 @@
             <label><input type="checkbox" data-earnings-column="ships" /> Ships</label>
             <label><input type="checkbox" data-earnings-column="sduMax" checked /> SDU MAX</label>
             <label><input type="checkbox" data-earnings-column="atlasPerScan" /> ATLAS / SCAN</label>
+            <label><input type="checkbox" data-earnings-column="scanAttempts" /> Scan Attempts</label>
+            <label><input type="checkbox" data-earnings-column="successfulScans" /> Successful Scans</label>
+            <label><input type="checkbox" data-earnings-column="scanSuccessRate" /> SCAN SUCCESS RATE</label>
+            <label><input type="checkbox" data-earnings-column="averageChance" /> AVG CHANCE</label>
             <label><input type="checkbox" data-earnings-column="sduFound" checked /> SDU Found</label>
             <label><input type="checkbox" data-earnings-column="revenue" checked /> Revenue</label>
             <label><input type="checkbox" data-earnings-column="foodCosts" checked /> Food Costs</label>
@@ -44,6 +48,8 @@
             <label><input type="checkbox" data-earnings-column="rental" checked /> Rental Costs</label>
             <label><input type="checkbox" data-earnings-column="txsCosts" checked /> TXS COSTS</label>
             <label><input type="checkbox" data-earnings-column="totalCosts" checked /> Total Costs</label>
+            <label><input type="checkbox" data-earnings-column="netProfit" checked /> Net Profit</label>
+            <label><input type="checkbox" data-earnings-column="profitMargin" checked /> Profit Margin</label>
             <label><input type="checkbox" data-earnings-column="account" /> Account</label>
           </div>
         </nav>
@@ -782,11 +788,13 @@
                       <th scope="col">RENTAL COSTS</th>
                       <th scope="col">TXS COSTS</th>
                       <th scope="col">Total Costs</th>
+                      <th scope="col">Net Profit</th>
+                      <th scope="col">Profit Margin</th>
                     </tr>
                   </thead>
                   <tbody id="earnings-table-body">
                     <tr class="empty-row">
-                      <td colspan="10">No earnings data loaded</td>
+                      <td colspan="12">No earnings data loaded</td>
                     </tr>
                   </tbody>
                 </table>
