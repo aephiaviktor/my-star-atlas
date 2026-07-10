@@ -266,7 +266,7 @@ const earningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'revenue', label: 'REVENUE' }),
   Object.freeze({ id: 'foodCosts', label: 'Food Costs' }),
   Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
-  Object.freeze({ id: 'txsCosts', label: 'txs_costs' }),
+  Object.freeze({ id: 'txsCosts', label: 'TXS COSTS' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
