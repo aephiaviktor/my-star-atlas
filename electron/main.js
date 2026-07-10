@@ -3015,6 +3015,10 @@ function normalizeShipName(value) {
     .trim();
 }
 
+function normalizeFleetLabel(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function parseFleetShipsAccount(data) {
   if (!data || data.length < fleetShipsOffsets.entries) return [];
   const count = data.readUInt32LE(fleetShipsOffsets.count);
@@ -3295,6 +3299,45 @@ async function fetchProfileFleets(payload) {
   };
 }
 
+async function fetchScanningEarningsRows(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
+    return [];
+  }
+
+  const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
+  const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "sdu")
+  |> filter(fn: (r) => r._field == "amount")
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.fleet)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["fleet", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["fleet", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet"])`;
+
+  return parseInfluxCsv(await queryInfluxFlux(settings, flux))
+    .map((row) => {
+      const fleet = String(row.fleet || '').trim();
+      const date = new Date(row._time);
+      const value = Number(row._value || 0);
+      if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value) || value <= 0) return null;
+      const isoDate = getUtcDateKey(date);
+      if (!includedDays.has(isoDate)) return null;
+      return {
+        fleet,
+        isoDate,
+        label: formatShortUtcDate(date),
+        sduFound: value,
+      };
+    })
+    .filter(Boolean);
+}
+
 async function fetchEarningsSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const fleetResult = await fetchProfileFleets(settings);
@@ -3352,11 +3395,9 @@ async function fetchEarningsSnapshot(payload) {
     }
   }));
 
-  let totalExpectedSduPerScan = 0;
   let mappedShipTypeCount = 0;
   let unmappedShipTypeCount = 0;
-  let rentalAtlasPerDay = 0;
-  const rows = fleets.map((fleet) => {
+  const fleetRows = fleets.map((fleet) => {
     const composition = compositionByFleet.get(fleet.key) || [];
     let expectedSduPerScan = 0;
     const ships = composition.map((entry) => {
@@ -3382,8 +3423,6 @@ async function fetchEarningsSnapshot(payload) {
     });
     const rental = rentalRates.get(fleet.key) || { contract: null, rateAtlasPerDay: null };
     const rentalRate = Number(rental.rateAtlasPerDay);
-    if (Number.isFinite(rentalRate)) rentalAtlasPerDay += rentalRate;
-    totalExpectedSduPerScan += expectedSduPerScan;
     return {
       ...fleet,
       rentalContract: rental.contract,
@@ -3395,7 +3434,55 @@ async function fetchEarningsSnapshot(payload) {
     };
   });
 
-  rows.sort((a, b) => (Number(b.expectedSduPerScan) || 0) - (Number(a.expectedSduPerScan) || 0));
+  fleetRows.sort((a, b) => (Number(b.expectedSduPerScan) || 0) - (Number(a.expectedSduPerScan) || 0));
+
+  const fleetByLabel = new Map();
+  for (const fleet of fleetRows) {
+    const key = normalizeFleetLabel(fleet.label);
+    if (key && !fleetByLabel.has(key)) fleetByLabel.set(key, fleet);
+  }
+
+  let scanningRows = [];
+  let scanningError = '';
+  try {
+    scanningRows = await fetchScanningEarningsRows(settings);
+  } catch (error) {
+    scanningError = String(error?.message || error || 'scan_rows_unavailable');
+  }
+
+  const activeFleetKeys = new Set();
+  const activeMappedFleetKeys = new Set();
+  let totalSduFound = 0;
+  const rows = scanningRows.map((scanRow) => {
+    const fleet = fleetByLabel.get(normalizeFleetLabel(scanRow.fleet));
+    const activeKey = fleet?.key || normalizeFleetLabel(scanRow.fleet);
+    activeFleetKeys.add(activeKey);
+    totalSduFound += scanRow.sduFound;
+    if (fleet) activeMappedFleetKeys.add(fleet.key);
+    return {
+      ...scanRow,
+      fleetName: scanRow.fleet,
+      fleetAccount: fleet?.key || '',
+      ownership: fleet?.ownership || '',
+      relationship: fleet?.relationship || '',
+      activity: fleet?.activity || '',
+      ships: fleet?.ships || [],
+      shipTypes: fleet?.shipTypes || 0,
+      expectedSduPerScan: fleet?.expectedSduPerScan ?? null,
+      expectedSduValueAtl: fleet?.expectedSduValueAtl ?? null,
+      rentalContract: fleet?.rentalContract || null,
+      rentalRateAtlasPerDay: fleet?.rentalRateAtlasPerDay ?? null,
+    };
+  });
+
+  rows.sort((a, b) => {
+    const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));
+    return dateSort || String(a.fleetName || '').localeCompare(String(b.fleetName || ''));
+  });
+
+  const activeFleetRows = fleetRows.filter((fleet) => activeMappedFleetKeys.has(fleet.key));
+  const totalExpectedSduPerScan = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.expectedSduPerScan) || 0), 0);
+  const rentalAtlasPerDay = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.rentalRateAtlasPerDay) || 0), 0);
 
   return {
     ok: true,
@@ -3403,13 +3490,19 @@ async function fetchEarningsSnapshot(payload) {
     sduPriceAtl,
     sduPriceSource: 'Aephia /gm/resource pricingATL.priceATL',
     shipStatsSource: sot.source,
-    fleetCount: rows.length,
+    fleetCount: fleetRows.length,
+    activeScanningFleetCount: activeFleetKeys.size,
+    activeMappedFleetCount: activeMappedFleetKeys.size,
+    scanRowCount: rows.length,
+    totalSduFound,
     mappedShipTypeCount,
     unmappedShipTypeCount,
     totalExpectedSduPerScan,
     totalExpectedSduValueAtl: sduPriceAtl != null ? totalExpectedSduPerScan * sduPriceAtl : null,
     rentalAtlasPerDay,
-    fleets: rows,
+    scanningError,
+    fleets: fleetRows,
+    rows,
   };
 }
 

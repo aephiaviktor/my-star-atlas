@@ -15,6 +15,7 @@
             <h1>My Star Atlas</h1>
             <p id="profile-label">USTUR</p>
           </div>
+          <button id="sidebar-toggle-btn" class="sidebar-toggle" type="button" aria-label="Collapse sidebar" aria-pressed="false">&lt;</button>
         </div>
 
         <nav class="primary-tabs" aria-label="Sections">
@@ -34,6 +35,15 @@
             <span class="nav-icon">EA</span>
             <span>Earnings</span>
           </button>
+          <div class="nav-subsection" id="earnings-column-controls" aria-label="Earnings table columns">
+            <span class="nav-subsection-title">Columns</span>
+            <label><input type="checkbox" data-earnings-column="ships" checked /> Ships</label>
+            <label><input type="checkbox" data-earnings-column="sduFound" checked /> SDU Found</label>
+            <label><input type="checkbox" data-earnings-column="sduPerScan" checked /> SDU / Scan</label>
+            <label><input type="checkbox" data-earnings-column="valuePerScan" checked /> Value / Scan</label>
+            <label><input type="checkbox" data-earnings-column="rental" checked /> Rental / Day</label>
+            <label><input type="checkbox" data-earnings-column="account" /> Account</label>
+          </div>
         </nav>
 
         <div class="nav-footer">
@@ -120,6 +130,53 @@
                     <div class="chart-empty">Awaiting Influx connection</div>
                   </div>
                 </section>
+              </div>
+            </section>
+
+            <div class="dashboard-grid earnings-metrics-grid">
+              <section class="metric-card">
+                <span class="metric-label">SDU Price</span>
+                <strong id="earnings-sdu-price-value">--</strong>
+                <small id="earnings-sdu-price-note">Awaiting Aephia data</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Expected SDU / Scan</span>
+                <strong id="earnings-sdu-scan-value">--</strong>
+                <small id="earnings-sdu-scan-note">Awaiting fleet decode</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Expected Value / Scan</span>
+                <strong id="earnings-sdu-value-value">--</strong>
+                <small id="earnings-sdu-value-note">Awaiting price data</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Rental Cost / Day</span>
+                <strong id="earnings-rental-value">--</strong>
+                <small id="earnings-rental-note">Awaiting rental decode</small>
+              </section>
+            </div>
+
+            <section class="work-surface earnings-surface">
+              <div id="earnings-sync-status" class="fleet-sync-status" role="status">Awaiting earnings data</div>
+              <div class="fleet-table-wrap">
+                <table class="fleet-table earnings-table">
+                  <thead id="earnings-table-head">
+                    <tr>
+                      <th scope="col">Date</th>
+                      <th scope="col">Fleet</th>
+                      <th scope="col">Ships</th>
+                      <th scope="col">SDU Found</th>
+                      <th scope="col">SDU / Scan</th>
+                      <th scope="col">Value / Scan</th>
+                      <th scope="col">Rental / Day</th>
+                    </tr>
+                  </thead>
+                  <tbody id="earnings-table-body">
+                    <tr class="empty-row">
+                      <td colspan="7">No earnings data loaded</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </section>
           </div>
@@ -726,52 +783,6 @@
           </section>
         </section>
 
-        <section class="section-view" data-section-panel="earnings">
-          <div class="dashboard-grid">
-            <section class="metric-card">
-              <span class="metric-label">SDU Price</span>
-              <strong id="earnings-sdu-price-value">--</strong>
-              <small id="earnings-sdu-price-note">Awaiting Aephia data</small>
-            </section>
-            <section class="metric-card">
-              <span class="metric-label">Expected SDU / Scan</span>
-              <strong id="earnings-sdu-scan-value">--</strong>
-              <small id="earnings-sdu-scan-note">Awaiting fleet decode</small>
-            </section>
-            <section class="metric-card">
-              <span class="metric-label">Expected Value / Scan</span>
-              <strong id="earnings-sdu-value-value">--</strong>
-              <small id="earnings-sdu-value-note">Awaiting price data</small>
-            </section>
-            <section class="metric-card">
-              <span class="metric-label">Rental Cost / Day</span>
-              <strong id="earnings-rental-value">--</strong>
-              <small id="earnings-rental-note">Awaiting rental decode</small>
-            </section>
-          </div>
-
-          <section class="work-surface earnings-surface">
-            <div id="earnings-sync-status" class="fleet-sync-status" role="status">Awaiting earnings data</div>
-            <div class="fleet-table-wrap">
-              <table class="fleet-table earnings-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Fleet</th>
-                    <th scope="col">Ships</th>
-                    <th scope="col">SDU / Scan</th>
-                    <th scope="col">Value / Scan</th>
-                    <th scope="col">Rental / Day</th>
-                  </tr>
-                </thead>
-                <tbody id="earnings-table-body">
-                  <tr class="empty-row">
-                    <td colspan="5">No earnings data loaded</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </section>
       </main>
 
       <div id="settings-overlay" class="settings-overlay hidden" aria-hidden="true">

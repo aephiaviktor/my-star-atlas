@@ -18,6 +18,7 @@ const subtabLabels = {
 };
 
 const form = document.querySelector('#settings-form');
+const appShell = document.querySelector('.app-shell');
 const saveStatus = document.querySelector('#save-status');
 const settingsStatus = document.querySelector('#settings-status');
 const syncDot = document.querySelector('.sync-dot');
@@ -26,6 +27,7 @@ const testInfluxButton = document.querySelector('#test-influx-btn');
 const fleetSearchInput = document.querySelector('#fleet-search-input');
 const openSettingsButton = document.querySelector('#open-settings-btn');
 const closeSettingsButton = document.querySelector('#close-settings-btn');
+const sidebarToggleButton = document.querySelector('#sidebar-toggle-btn');
 const settingsOverlay = document.querySelector('#settings-overlay');
 const sectionEyebrow = document.querySelector('#section-eyebrow');
 const sectionTitle = document.querySelector('#section-title');
@@ -35,7 +37,9 @@ const measurementList = document.querySelector('#measurement-list');
 const fleetSyncStatus = document.querySelector('#fleet-sync-status');
 const fleetTableBody = document.querySelector('#fleet-table-body');
 const earningsSyncStatus = document.querySelector('#earnings-sync-status');
+const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
+const earningsColumnControls = Array.from(document.querySelectorAll('[data-earnings-column]'));
 const earningsSduPriceValue = document.querySelector('#earnings-sdu-price-value');
 const earningsSduPriceNote = document.querySelector('#earnings-sdu-price-note');
 const earningsSduScanValue = document.querySelector('#earnings-sdu-scan-value');
@@ -243,6 +247,15 @@ const factionLabels = Object.freeze({
   ONI: 'ONI',
   USTUR: 'USTUR',
 });
+
+const earningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'ships', label: 'Ships' }),
+  Object.freeze({ id: 'sduFound', label: 'SDU Found' }),
+  Object.freeze({ id: 'sduPerScan', label: 'SDU / Scan' }),
+  Object.freeze({ id: 'valuePerScan', label: 'Value / Scan' }),
+  Object.freeze({ id: 'rental', label: 'Rental / Day' }),
+  Object.freeze({ id: 'account', label: 'Account' }),
+]);
 
 const assetChartColors = Object.freeze({
   Aerogel: '#8fb9d8',
@@ -3420,6 +3433,7 @@ function setEarningsStatus(message) {
 
 function renderEarningsEmpty(message) {
   latestEarningsResult = null;
+  renderEarningsHeader();
   setText(earningsSduPriceValue, '--');
   setText(earningsSduPriceNote, message);
   setText(earningsSduScanValue, '--');
@@ -3433,7 +3447,7 @@ function renderEarningsEmpty(message) {
   const row = document.createElement('tr');
   row.className = 'empty-row';
   const cell = document.createElement('td');
-  cell.colSpan = 5;
+  cell.colSpan = 2 + getVisibleEarningsColumns().length;
   cell.textContent = message;
   row.appendChild(cell);
   earningsTableBody.appendChild(row);
@@ -3454,6 +3468,60 @@ function describeFleetShips(fleet) {
     .join(', ') + (ships.length > 3 ? ` +${ships.length - 3}` : '');
 }
 
+function getVisibleEarningsColumns() {
+  const visible = new Set(
+    earningsColumnControls
+      .filter((input) => input.checked)
+      .map((input) => input.dataset.earningsColumn)
+  );
+  return earningsOptionalColumns.filter((column) => visible.has(column.id));
+}
+
+function renderEarningsHeader() {
+  if (!earningsTableHead) return;
+  const row = document.createElement('tr');
+  for (const label of ['Date', 'Fleet']) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = label;
+    row.appendChild(th);
+  }
+  for (const column of getVisibleEarningsColumns()) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = column.label;
+    row.appendChild(th);
+  }
+  earningsTableHead.textContent = '';
+  earningsTableHead.appendChild(row);
+}
+
+function createEarningsFleetCell(entry) {
+  const cell = document.createElement('td');
+  const name = document.createElement('strong');
+  name.textContent = entry.fleetName || entry.fleet || 'Unnamed fleet';
+  cell.appendChild(name);
+  const detail = [entry.ownership, entry.relationship === 'managed' ? 'rented' : '']
+    .filter(Boolean)
+    .join(' · ');
+  if (detail) {
+    const span = document.createElement('span');
+    span.textContent = detail;
+    cell.appendChild(span);
+  }
+  return cell;
+}
+
+function createEarningsOptionalCell(entry, columnId) {
+  if (columnId === 'ships') return createTextCell(describeFleetShips(entry));
+  if (columnId === 'sduFound') return createTextCell(formatWholeNumber(entry.sduFound || 0));
+  if (columnId === 'sduPerScan') return createTextCell(entry.expectedSduPerScan == null ? '--' : formatWholeNumber(entry.expectedSduPerScan));
+  if (columnId === 'valuePerScan') return createTextCell(entry.expectedSduValueAtl == null ? '--' : formatAtlas(entry.expectedSduValueAtl, 2));
+  if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlas(entry.rentalRateAtlasPerDay, 2));
+  if (columnId === 'account') return createAccountCell(entry.fleetAccount);
+  return createTextCell('--');
+}
+
 function renderEarnings(result) {
   latestEarningsResult = result;
   if (!result?.ok) {
@@ -3462,34 +3530,46 @@ function renderEarnings(result) {
     return;
   }
   setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'earnings', result);
+  renderEarningsHeader();
 
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
   setText(earningsSduPriceNote, result.sduPriceSource || 'Aephia priceATL');
   setText(earningsSduScanValue, formatWholeNumber(result.totalExpectedSduPerScan || 0));
   setText(
     earningsSduScanNote,
-    `${formatWholeNumber(result.mappedShipTypeCount || 0)} mapped / ${formatWholeNumber(result.unmappedShipTypeCount || 0)} unmapped ship types`
+    `${formatWholeNumber(result.activeMappedFleetCount || 0)} mapped of ${formatWholeNumber(result.activeScanningFleetCount || 0)} active fleets`
   );
   setText(earningsSduValueValue, result.totalExpectedSduValueAtl == null ? '--' : formatAtlas(result.totalExpectedSduValueAtl, 2));
   setText(earningsSduValueNote, result.shipStatsSource || 'SES SoT');
   setText(earningsRentalValue, formatAtlas(result.rentalAtlasPerDay || 0, 2));
   setText(earningsRentalNote, 'Current SRSLY contractState.rate');
-  setEarningsStatus(`${formatWholeNumber(result.fleetCount || 0)} fleets calculated at ${formatCheckedAt(result.checkedAt)}`);
+  setEarningsStatus(
+    `${formatWholeNumber(result.scanRowCount || 0)} scan rows from ${formatWholeNumber(result.activeScanningFleetCount || 0)} active fleets at ${formatCheckedAt(result.checkedAt)}${
+      result.scanningError ? ' · Influx scan rows unavailable' : ''
+    }`
+  );
 
   if (!earningsTableBody) return;
   earningsTableBody.textContent = '';
-  const fleets = Array.isArray(result.fleets) ? result.fleets : [];
-  if (!fleets.length) {
-    renderEarningsEmpty(`No ${normalizeFaction(latestSettings?.faction)} fleets found`);
+  const rows = Array.isArray(result.rows) ? result.rows : [];
+  if (!rows.length) {
+    const row = document.createElement('tr');
+    row.className = 'empty-row';
+    const cell = document.createElement('td');
+    cell.colSpan = 2 + getVisibleEarningsColumns().length;
+    cell.textContent = `No ${normalizeFaction(latestSettings?.faction)} fleets scanned in the last 14 days`;
+    row.appendChild(cell);
+    earningsTableBody.appendChild(row);
     return;
   }
-  for (const fleet of fleets) {
+  const visibleColumns = getVisibleEarningsColumns();
+  for (const entry of rows) {
     const row = document.createElement('tr');
-    row.appendChild(createFleetCell(fleet));
-    row.appendChild(createTextCell(describeFleetShips(fleet)));
-    row.appendChild(createTextCell(formatWholeNumber(fleet.expectedSduPerScan || 0)));
-    row.appendChild(createTextCell(fleet.expectedSduValueAtl == null ? '--' : formatAtlas(fleet.expectedSduValueAtl, 2)));
-    row.appendChild(createTextCell(fleet.rentalRateAtlasPerDay == null ? '--' : formatAtlas(fleet.rentalRateAtlasPerDay, 2)));
+    row.appendChild(createTextCell(entry.label || entry.isoDate));
+    row.appendChild(createEarningsFleetCell(entry));
+    for (const column of visibleColumns) {
+      row.appendChild(createEarningsOptionalCell(entry, column.id));
+    }
     earningsTableBody.appendChild(row);
   }
 }
@@ -3526,7 +3606,7 @@ async function refreshEarnings() {
 function setActiveSection(section) {
   currentSection = section;
   document.querySelectorAll('.nav-button').forEach((button) => {
-    const active = button.dataset.section === section;
+    const active = button.dataset.section === section || (button.dataset.section === 'earnings' && section === 'production' && currentSubtab === 'scanning');
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
@@ -3534,9 +3614,6 @@ function setActiveSection(section) {
     panel.classList.toggle('active', panel.dataset.sectionPanel === section);
   });
   updateTitle();
-  if (section === 'earnings' && !latestEarningsResult) {
-    refreshEarnings();
-  }
 }
 
 function setActiveSubtab(subtab) {
@@ -3548,6 +3625,11 @@ function setActiveSubtab(subtab) {
   });
   document.querySelectorAll('[data-production-panel]').forEach((panel) => {
     panel.classList.toggle('active', panel.dataset.productionPanel === subtab);
+  });
+  document.querySelectorAll('.nav-button').forEach((button) => {
+    const active = button.dataset.section === currentSection || (button.dataset.section === 'earnings' && currentSection === 'production' && subtab === 'scanning');
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
   });
   updateTitle();
   if (subtab === 'mining' && !latestMiningResult && hasInfluxSettings(latestSettings || getFormPayload())) {
@@ -3628,11 +3710,37 @@ async function loadInitialState() {
 }
 
 document.querySelectorAll('.nav-button').forEach((button) => {
-  button.addEventListener('click', () => setActiveSection(button.dataset.section));
+  button.addEventListener('click', () => {
+    if (button.dataset.section === 'earnings') {
+      setActiveSection('production');
+      setActiveSubtab('scanning');
+      if (!latestEarningsResult) refreshEarnings();
+      document.querySelector('.earnings-surface')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      return;
+    }
+    setActiveSection(button.dataset.section);
+  });
 });
 
 document.querySelectorAll('.subtab-button').forEach((button) => {
   button.addEventListener('click', () => setActiveSubtab(button.dataset.subtab));
+});
+
+earningsColumnControls.forEach((input) => {
+  input.addEventListener('change', () => {
+    if (latestEarningsResult) {
+      renderEarnings(latestEarningsResult);
+    } else {
+      renderEarningsHeader();
+    }
+  });
+});
+
+sidebarToggleButton?.addEventListener('click', () => {
+  const collapsed = appShell?.classList.toggle('nav-collapsed') || false;
+  sidebarToggleButton.setAttribute('aria-pressed', String(collapsed));
+  sidebarToggleButton.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  sidebarToggleButton.textContent = collapsed ? '>' : '<';
 });
 
 async function refreshFactionScopedViews() {

@@ -79,6 +79,11 @@ select:focus {
   grid-template-columns: 280px minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
+  transition: grid-template-columns 160ms ease;
+}
+
+.app-shell.nav-collapsed {
+  grid-template-columns: 84px minmax(0, 1fr);
 }
 
 .left-nav {
@@ -102,6 +107,10 @@ select:focus {
   gap: 12px;
   min-width: 0;
   padding: 4px 4px 18px;
+}
+
+.brand-block > div {
+  min-width: 0;
 }
 
 .brand-mark {
@@ -135,6 +144,19 @@ select:focus {
   text-transform: uppercase;
 }
 
+.sidebar-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  width: 30px;
+  min-height: 30px;
+  margin-left: auto;
+  padding: 0;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+}
+
 .primary-tabs {
   display: grid;
   gap: 8px;
@@ -149,6 +171,65 @@ select:focus {
   min-height: 44px;
   padding: 8px 10px;
   text-align: left;
+}
+
+.nav-subsection {
+  display: grid;
+  gap: 8px;
+  margin: -2px 0 6px 38px;
+  padding: 8px 0 4px 10px;
+  border-left: 1px solid rgba(69, 214, 193, 0.24);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.nav-subsection-title {
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.nav-subsection label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.nav-subsection input[type="checkbox"] {
+  width: auto;
+  min-height: 0;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--cyan);
+}
+
+.app-shell.nav-collapsed .left-nav {
+  padding-inline: 12px;
+}
+
+.app-shell.nav-collapsed .brand-block {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.app-shell.nav-collapsed .brand-block > div,
+.app-shell.nav-collapsed .brand-mark,
+.app-shell.nav-collapsed .nav-button > span:not(.nav-icon),
+.app-shell.nav-collapsed .settings-launch > span:not(.nav-icon),
+.app-shell.nav-collapsed .nav-subsection,
+.app-shell.nav-collapsed .version-line {
+  display: none;
+}
+
+.app-shell.nav-collapsed .sidebar-toggle {
+  margin-left: 0;
+}
+
+.app-shell.nav-collapsed .nav-button,
+.app-shell.nav-collapsed .settings-launch {
+  justify-content: center;
+  padding-inline: 8px;
 }
 
 .nav-button > span:last-child {
@@ -810,7 +891,8 @@ select:focus {
 .earnings-surface {
   display: flex;
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 360px;
+  max-height: 520px;
   flex-direction: column;
   padding: 0;
   overflow: hidden;
@@ -831,6 +913,7 @@ select:focus {
   min-height: 0;
   width: 100%;
   overflow: auto;
+  scrollbar-gutter: stable both-edges;
 }
 
 .fleet-table {
@@ -841,7 +924,7 @@ select:focus {
 }
 
 .earnings-table {
-  min-width: 920px;
+  min-width: 1120px;
 }
 
 .fleet-table th,
