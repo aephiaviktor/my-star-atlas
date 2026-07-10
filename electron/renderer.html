@@ -34,12 +34,16 @@
           <div class="nav-subsection" id="earnings-column-controls" aria-label="Earnings table columns">
             <span class="nav-subsection-title">Columns</span>
             <label><input type="checkbox" data-earnings-column="rented" /> Rented</label>
+            <label><input type="checkbox" data-earnings-column="rental" checked /> Rental / Day</label>
             <label><input type="checkbox" data-earnings-column="ships" /> Ships</label>
             <label><input type="checkbox" data-earnings-column="sduMax" checked /> SDU MAX</label>
             <label><input type="checkbox" data-earnings-column="atlasPerScan" /> ATLAS / SCAN</label>
             <label><input type="checkbox" data-earnings-column="sduFound" checked /> SDU Found</label>
             <label><input type="checkbox" data-earnings-column="revenue" checked /> Revenue</label>
-            <label><input type="checkbox" data-earnings-column="rental" checked /> Rental / Day</label>
+            <label><input type="checkbox" data-earnings-column="foodCosts" checked /> Food Costs</label>
+            <label><input type="checkbox" data-earnings-column="fuelCosts" checked /> Fuel Costs</label>
+            <label><input type="checkbox" data-earnings-column="txsCosts" checked /> txs_costs</label>
+            <label><input type="checkbox" data-earnings-column="totalCosts" checked /> Total Costs</label>
             <label><input type="checkbox" data-earnings-column="account" /> Account</label>
           </div>
         </nav>
@@ -773,12 +777,16 @@
                       <th scope="col">SDU MAX</th>
                       <th scope="col">SDU Found</th>
                       <th scope="col">Revenue</th>
+                      <th scope="col">Food Costs</th>
+                      <th scope="col">Fuel Costs</th>
+                      <th scope="col">txs_costs</th>
+                      <th scope="col">Total Costs</th>
                       <th scope="col">Rental / Day</th>
                     </tr>
                   </thead>
                   <tbody id="earnings-table-body">
                     <tr class="empty-row">
-                      <td colspan="6">No earnings data loaded</td>
+                      <td colspan="10">No earnings data loaded</td>
                     </tr>
                   </tbody>
                 </table>

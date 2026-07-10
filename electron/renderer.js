@@ -258,12 +258,16 @@ const factionLabels = Object.freeze({
 
 const earningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'rented', label: 'Rented' }),
+  Object.freeze({ id: 'rental', label: 'Rental / Day' }),
   Object.freeze({ id: 'ships', label: 'Ships' }),
   Object.freeze({ id: 'sduMax', label: 'SDU MAX' }),
   Object.freeze({ id: 'atlasPerScan', label: 'ATLAS / SCAN' }),
   Object.freeze({ id: 'sduFound', label: 'SDU Found' }),
   Object.freeze({ id: 'revenue', label: 'REVENUE' }),
-  Object.freeze({ id: 'rental', label: 'Rental / Day' }),
+  Object.freeze({ id: 'foodCosts', label: 'Food Costs' }),
+  Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
+  Object.freeze({ id: 'txsCosts', label: 'txs_costs' }),
+  Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
 
@@ -3538,12 +3542,16 @@ function createCheckboxCell(checked) {
 
 function createEarningsOptionalCell(entry, columnId) {
   if (columnId === 'rented') return createCheckboxCell(entry.rented);
+  if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
   if (columnId === 'ships') return createTextCell(describeFleetShips(entry));
   if (columnId === 'sduMax') return createTextCell(entry.expectedSduPerScan == null ? '--' : formatWholeNumber(entry.expectedSduPerScan));
   if (columnId === 'atlasPerScan') return createTextCell(entry.expectedSduValueAtl == null ? '--' : formatAtlasNumber(entry.expectedSduValueAtl, 2));
   if (columnId === 'sduFound') return createTextCell(formatWholeNumber(entry.sduFound || 0));
   if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasNumber(entry.revenueAtlasPerDay, 2));
-  if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlas(entry.rentalRateAtlasPerDay, 2));
+  if (columnId === 'foodCosts') return createTextCell(entry.foodCostsAtlas == null ? '--' : formatAtlasNumber(entry.foodCostsAtlas, 2));
+  if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasNumber(entry.fuelCostsAtlas, 2));
+  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasNumber(entry.txsCostsAtlas, 2));
+  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasNumber(entry.totalCostsAtlas, 2));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
 }
@@ -3636,6 +3644,7 @@ async function refreshEarnings() {
 
 function setActiveSection(section) {
   currentSection = section;
+  appShell?.classList.toggle('earnings-active', section === 'earnings');
   document.querySelectorAll('.nav-button').forEach((button) => {
     const active = button.dataset.section === section;
     button.classList.toggle('active', active);

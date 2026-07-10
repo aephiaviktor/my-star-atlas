@@ -3103,6 +3103,33 @@ async function fetchSduPriceAtl() {
   return Number.isFinite(price) ? price : null;
 }
 
+async function fetchCurrentEarningsPrices() {
+  const resources = await fetchAephiaResourceData();
+  const findResource = (name) => resources.find((item) => normalizeShipName(item?.name) === normalizeShipName(name));
+  const getPriceAtl = (name) => {
+    const price = Number(findResource(name)?.pricingATL?.priceATL);
+    return Number.isFinite(price) ? price : null;
+  };
+  const atlasPerSolSource = resources.find((item) => {
+    const priceAtl = Number(item?.pricingATL?.priceATL);
+    const priceSol = Number(item?.pricingATL?.price);
+    return Number.isFinite(priceAtl) && priceAtl > 0 && Number.isFinite(priceSol) && priceSol > 0;
+  });
+  const atlasPerSolPriceAtl = Number(atlasPerSolSource?.pricingATL?.priceATL);
+  const atlasPerSolPriceSol = Number(atlasPerSolSource?.pricingATL?.price);
+  const atlasPerSol = Number.isFinite(atlasPerSolPriceAtl) && Number.isFinite(atlasPerSolPriceSol) && atlasPerSolPriceSol > 0
+    ? atlasPerSolPriceAtl / atlasPerSolPriceSol
+    : null;
+
+  return {
+    sduPriceAtl: getPriceAtl('Survey Data Unit'),
+    foodPriceAtl: getPriceAtl('Food'),
+    fuelPriceAtl: getPriceAtl('Fuel'),
+    atlasPerSol,
+    atlasPerSolSource: atlasPerSolSource?.name || '',
+  };
+}
+
 async function fetchShipStatsSot() {
   const now = Date.now();
   if (shipStatsCache && shipStatsCache.expiresAt > now) return shipStatsCache.data;
@@ -3309,33 +3336,48 @@ async function fetchScanningEarningsRows(settings) {
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-  |> filter(fn: (r) => r._measurement == "sdu")
-  |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
+  |> filter(fn: (r) =>
+    (r._measurement == "sdu" and (r._field == "amount" or r._field == "burnedFood" or r._field == "txCostSol")) or
+    (r._measurement == "movement" and r._field == "burnedFuel" and exists r.assignment and r.assignment == "Scan")
+  )
   |> filter(fn: (r) => exists r.fleet)
   |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["fleet", "_time"])
+  |> group(columns: ["fleet", "_measurement", "_field", "_time"])
   |> sum(column: "_value")
   |> group()
-  |> keep(columns: ["fleet", "_time", "_value"])
+  |> keep(columns: ["fleet", "_measurement", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
 
-  return parseInfluxCsv(await queryInfluxFlux(settings, flux))
-    .map((row) => {
-      const fleet = String(row.fleet || '').trim();
-      const date = new Date(row._time);
-      const value = Number(row._value || 0);
-      if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value) || value <= 0) return null;
-      const isoDate = getUtcDateKey(date);
-      if (!includedDays.has(isoDate)) return null;
-      return {
+  const rowsByDayFleet = new Map();
+  for (const row of parseInfluxCsv(await queryInfluxFlux(settings, flux))) {
+    const fleet = String(row.fleet || '').trim();
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const key = `${isoDate}\n${fleet}`;
+    if (!rowsByDayFleet.has(key)) {
+      rowsByDayFleet.set(key, {
         fleet,
         isoDate,
         label: formatShortUtcDate(date),
-        sduFound: value,
-      };
-    })
-    .filter(Boolean);
+        sduFound: 0,
+        burnedFood: 0,
+        burnedFuel: 0,
+        txCostSol: 0,
+      });
+    }
+    const entry = rowsByDayFleet.get(key);
+    if (row._measurement === 'sdu' && row._field === 'amount') entry.sduFound += value;
+    if (row._measurement === 'sdu' && row._field === 'burnedFood') entry.burnedFood += value;
+    if (row._measurement === 'sdu' && row._field === 'txCostSol') entry.txCostSol += value;
+    if (row._measurement === 'movement' && row._field === 'burnedFuel') entry.burnedFuel += value;
+  }
+
+  return Array.from(rowsByDayFleet.values())
+    .filter((row) => row.sduFound > 0 || row.burnedFood > 0 || row.burnedFuel > 0 || row.txCostSol > 0);
 }
 
 async function fetchEarningsSnapshot(payload) {
@@ -3347,10 +3389,17 @@ async function fetchEarningsSnapshot(payload) {
     disableRetryOnRateLimit: false,
   });
 
-  const [sduPriceAtl, sot] = await Promise.all([
-    fetchSduPriceAtl().catch(() => null),
+  const [prices, sot] = await Promise.all([
+    fetchCurrentEarningsPrices().catch(() => ({
+      sduPriceAtl: null,
+      foodPriceAtl: null,
+      fuelPriceAtl: null,
+      atlasPerSol: null,
+      atlasPerSolSource: '',
+    })),
     fetchShipStatsSot(),
   ]);
+  const { sduPriceAtl, foodPriceAtl, fuelPriceAtl, atlasPerSol } = prices;
 
   const fleetShipsKeys = fleets
     .map((fleet) => {
@@ -3459,6 +3508,10 @@ async function fetchEarningsSnapshot(payload) {
     activeFleetKeys.add(activeKey);
     totalSduFound += scanRow.sduFound;
     if (fleet) activeMappedFleetKeys.add(fleet.key);
+    const foodCostsAtlas = foodPriceAtl != null ? scanRow.burnedFood * foodPriceAtl : null;
+    const fuelCostsAtlas = fuelPriceAtl != null ? scanRow.burnedFuel * fuelPriceAtl : null;
+    const txsCostsAtlas = atlasPerSol != null ? scanRow.txCostSol * atlasPerSol : null;
+    const costParts = [foodCostsAtlas, fuelCostsAtlas, txsCostsAtlas].filter((value) => Number.isFinite(value));
     return {
       ...scanRow,
       fleetName: scanRow.fleet,
@@ -3472,6 +3525,10 @@ async function fetchEarningsSnapshot(payload) {
       expectedSduPerScan: fleet?.expectedSduPerScan ?? null,
       expectedSduValueAtl: fleet?.expectedSduValueAtl ?? null,
       revenueAtlasPerDay: sduPriceAtl != null ? scanRow.sduFound * sduPriceAtl : null,
+      foodCostsAtlas,
+      fuelCostsAtlas,
+      txsCostsAtlas,
+      totalCostsAtlas: costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null,
       rentalContract: fleet?.rentalContract || null,
       rentalRateAtlasPerDay: fleet?.rentalRateAtlasPerDay ?? null,
     };
@@ -3490,6 +3547,10 @@ async function fetchEarningsSnapshot(payload) {
     ok: true,
     checkedAt: new Date().toISOString(),
     sduPriceAtl,
+    foodPriceAtl,
+    fuelPriceAtl,
+    atlasPerSol,
+    atlasPerSolSource: prices.atlasPerSolSource,
     sduPriceSource: 'Aephia /gm/resource pricingATL.priceATL',
     sduPriceHistoryAvailable: false,
     shipStatsSource: sot.source,

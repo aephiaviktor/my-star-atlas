@@ -174,13 +174,17 @@ select:focus {
 }
 
 .nav-subsection {
-  display: grid;
+  display: none;
   gap: 8px;
   margin: -2px 0 6px 38px;
   padding: 8px 0 4px 10px;
   border-left: 1px solid rgba(69, 214, 193, 0.24);
   color: var(--muted);
   font-size: 12px;
+}
+
+.app-shell.earnings-active .nav-subsection {
+  display: grid;
 }
 
 .nav-subsection-title {
@@ -944,7 +948,7 @@ select:focus {
 }
 
 .earnings-table {
-  min-width: 1120px;
+  min-width: 1440px;
 }
 
 .fleet-table th,
