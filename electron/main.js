@@ -68,6 +68,9 @@ let mainWindow = null;
 const INFLUX_ORG = '67793e21353b170';
 const DEFAULT_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const AEPHIA_RESOURCE_URL = 'https://get-ship-data.aephia.workers.dev/gm/resource';
+const JUPITER_PRICE_URL = 'https://lite-api.jup.ag/price/v3?ids=So11111111111111111111111111111111111111112,ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const ATLAS_MINT = 'ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
 const SES_SHIP_STATS_URL = 'https://ses.staratlas.com/tools/ship-stats/engine/data/sot.js';
 const SAGE_PROGRAM_ID = new PublicKey('SAGE2HAwep459SNq61LHvjxPk4pLPEJLoMETef7f7EE');
 const SAGE_GAME_ID = new PublicKey('GAMEzqJehF8yAnKiTARUuhZMvLvkZVAsCVri5vSfemLr');
@@ -126,6 +129,7 @@ const shipFieldOffsets = Object.freeze({
 });
 
 let aephiaResourceCache = null;
+let tokenPriceCache = null;
 let shipStatsCache = null;
 
 function settingsPath() {
@@ -3096,6 +3100,29 @@ async function fetchAephiaResourceData() {
   return aephiaResourceCache.data;
 }
 
+async function fetchAtlasPerSol() {
+  const now = Date.now();
+  if (tokenPriceCache && tokenPriceCache.expiresAt > now) return tokenPriceCache.data;
+  const response = await fetch(JUPITER_PRICE_URL);
+  if (!response.ok) throw new Error(`jupiter_price_${response.status}`);
+  const data = await response.json();
+  const solUsd = Number(data?.[SOL_MINT]?.usdPrice);
+  const atlasUsd = Number(data?.[ATLAS_MINT]?.usdPrice);
+  const atlasPerSol = Number.isFinite(solUsd) && Number.isFinite(atlasUsd) && atlasUsd > 0
+    ? solUsd / atlasUsd
+    : null;
+  const result = {
+    atlasPerSol,
+    solPriceAtl: atlasPerSol,
+    atlasPriceAtl: Number.isFinite(atlasUsd) ? 1 : null,
+    solUsdPrice: Number.isFinite(solUsd) ? solUsd : null,
+    atlasUsdPrice: Number.isFinite(atlasUsd) ? atlasUsd : null,
+    source: 'Jupiter price v3',
+  };
+  tokenPriceCache = { data: result, expiresAt: now + 2 * 60 * 1000 };
+  return result;
+}
+
 async function fetchSduPriceAtl() {
   const resources = await fetchAephiaResourceData();
   const sdu = resources.find((item) => normalizeShipName(item?.name) === 'survey data unit');
@@ -3105,28 +3132,30 @@ async function fetchSduPriceAtl() {
 
 async function fetchCurrentEarningsPrices() {
   const resources = await fetchAephiaResourceData();
+  const tokenPrices = await fetchAtlasPerSol().catch(() => ({
+    atlasPerSol: null,
+    solPriceAtl: null,
+    atlasPriceAtl: null,
+    solUsdPrice: null,
+    atlasUsdPrice: null,
+    source: '',
+  }));
   const findResource = (name) => resources.find((item) => normalizeShipName(item?.name) === normalizeShipName(name));
   const getPriceAtl = (name) => {
     const price = Number(findResource(name)?.pricingATL?.priceATL);
     return Number.isFinite(price) ? price : null;
   };
-  const atlasPerSolSource = resources.find((item) => {
-    const priceAtl = Number(item?.pricingATL?.priceATL);
-    const priceSol = Number(item?.pricingATL?.price);
-    return Number.isFinite(priceAtl) && priceAtl > 0 && Number.isFinite(priceSol) && priceSol > 0;
-  });
-  const atlasPerSolPriceAtl = Number(atlasPerSolSource?.pricingATL?.priceATL);
-  const atlasPerSolPriceSol = Number(atlasPerSolSource?.pricingATL?.price);
-  const atlasPerSol = Number.isFinite(atlasPerSolPriceAtl) && Number.isFinite(atlasPerSolPriceSol) && atlasPerSolPriceSol > 0
-    ? atlasPerSolPriceAtl / atlasPerSolPriceSol
-    : null;
 
   return {
     sduPriceAtl: getPriceAtl('Survey Data Unit'),
     foodPriceAtl: getPriceAtl('Food'),
     fuelPriceAtl: getPriceAtl('Fuel'),
-    atlasPerSol,
-    atlasPerSolSource: atlasPerSolSource?.name || '',
+    atlasPerSol: tokenPrices.atlasPerSol,
+    solPriceAtl: tokenPrices.solPriceAtl,
+    atlasPriceAtl: tokenPrices.atlasPriceAtl,
+    solUsdPrice: tokenPrices.solUsdPrice,
+    atlasUsdPrice: tokenPrices.atlasUsdPrice,
+    atlasPerSolSource: tokenPrices.source,
   };
 }
 
@@ -3395,6 +3424,8 @@ async function fetchEarningsSnapshot(payload) {
       foodPriceAtl: null,
       fuelPriceAtl: null,
       atlasPerSol: null,
+      solPriceAtl: null,
+      atlasPriceAtl: null,
       atlasPerSolSource: '',
     })),
     fetchShipStatsSot(),
@@ -3511,7 +3542,8 @@ async function fetchEarningsSnapshot(payload) {
     const foodCostsAtlas = foodPriceAtl != null ? scanRow.burnedFood * foodPriceAtl : null;
     const fuelCostsAtlas = fuelPriceAtl != null ? scanRow.burnedFuel * fuelPriceAtl : null;
     const txsCostsAtlas = atlasPerSol != null ? scanRow.txCostSol * atlasPerSol : null;
-    const costParts = [foodCostsAtlas, fuelCostsAtlas, txsCostsAtlas].filter((value) => Number.isFinite(value));
+    const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
+    const costParts = [foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     return {
       ...scanRow,
       fleetName: scanRow.fleet,
@@ -3530,7 +3562,7 @@ async function fetchEarningsSnapshot(payload) {
       txsCostsAtlas,
       totalCostsAtlas: costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null,
       rentalContract: fleet?.rentalContract || null,
-      rentalRateAtlasPerDay: fleet?.rentalRateAtlasPerDay ?? null,
+      rentalRateAtlasPerDay,
     };
   });
 
@@ -3542,6 +3574,30 @@ async function fetchEarningsSnapshot(payload) {
   const activeFleetRows = fleetRows.filter((fleet) => activeMappedFleetKeys.has(fleet.key));
   const totalExpectedSduPerScan = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.expectedSduPerScan) || 0), 0);
   const rentalAtlasPerDay = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.rentalRateAtlasPerDay) || 0), 0);
+  const todayIsoDate = getUtcDateKey(new Date());
+  const totalsByDay = new Map();
+  for (const row of rows) {
+    const day = row.isoDate;
+    if (!day) continue;
+    if (!totalsByDay.has(day)) {
+      totalsByDay.set(day, { sduFound: 0, revenueAtlas: 0, revenueCount: 0 });
+    }
+    const total = totalsByDay.get(day);
+    total.sduFound += Number(row.sduFound) || 0;
+    if (Number.isFinite(Number(row.revenueAtlasPerDay))) {
+      total.revenueAtlas += Number(row.revenueAtlasPerDay);
+      total.revenueCount += 1;
+    }
+  }
+  const dayTotals = Array.from(totalsByDay.values());
+  const todayTotals = totalsByDay.get(todayIsoDate) || { sduFound: 0, revenueAtlas: 0, revenueCount: 0 };
+  const averageSduFoundPerDay = dayTotals.length
+    ? dayTotals.reduce((sum, day) => sum + day.sduFound, 0) / dayTotals.length
+    : 0;
+  const revenueDayTotals = dayTotals.filter((day) => day.revenueCount > 0);
+  const averageRevenueAtlasPerDay = revenueDayTotals.length
+    ? revenueDayTotals.reduce((sum, day) => sum + day.revenueAtlas, 0) / revenueDayTotals.length
+    : null;
 
   return {
     ok: true,
@@ -3550,6 +3606,10 @@ async function fetchEarningsSnapshot(payload) {
     foodPriceAtl,
     fuelPriceAtl,
     atlasPerSol,
+    solPriceAtl: prices.solPriceAtl,
+    atlasPriceAtl: prices.atlasPriceAtl,
+    solUsdPrice: prices.solUsdPrice,
+    atlasUsdPrice: prices.atlasUsdPrice,
     atlasPerSolSource: prices.atlasPerSolSource,
     sduPriceSource: 'Aephia /gm/resource pricingATL.priceATL',
     sduPriceHistoryAvailable: false,
@@ -3559,6 +3619,10 @@ async function fetchEarningsSnapshot(payload) {
     activeMappedFleetCount: activeMappedFleetKeys.size,
     scanRowCount: rows.length,
     totalSduFound,
+    todaySduFound: todayTotals.sduFound,
+    averageSduFoundPerDay,
+    todayRevenueAtlas: todayTotals.revenueCount > 0 ? todayTotals.revenueAtlas : null,
+    averageRevenueAtlasPerDay,
     mappedShipTypeCount,
     unmappedShipTypeCount,
     totalExpectedSduPerScan,

@@ -257,8 +257,7 @@ const factionLabels = Object.freeze({
 });
 
 const earningsOptionalColumns = Object.freeze([
-  Object.freeze({ id: 'rented', label: 'Rented' }),
-  Object.freeze({ id: 'rental', label: 'Rental / Day' }),
+  Object.freeze({ id: 'ownership', label: 'Ownership' }),
   Object.freeze({ id: 'ships', label: 'Ships' }),
   Object.freeze({ id: 'sduMax', label: 'SDU MAX' }),
   Object.freeze({ id: 'atlasPerScan', label: 'ATLAS / SCAN' }),
@@ -266,6 +265,7 @@ const earningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'revenue', label: 'REVENUE' }),
   Object.freeze({ id: 'foodCosts', label: 'Food Costs' }),
   Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
+  Object.freeze({ id: 'rental', label: 'RENTAL COSTS' }),
   Object.freeze({ id: 'txsCosts', label: 'TXS COSTS' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'account', label: 'Account' }),
@@ -3528,20 +3528,17 @@ function createEarningsFleetCell(entry) {
   return cell;
 }
 
-function createCheckboxCell(checked) {
+function createOwnershipCell(entry) {
   const cell = document.createElement('td');
-  const input = document.createElement('input');
-  input.className = 'table-checkbox';
-  input.type = 'checkbox';
-  input.checked = Boolean(checked);
-  input.disabled = true;
-  input.setAttribute('aria-label', checked ? 'Rented fleet' : 'Not rented');
-  cell.appendChild(input);
+  const ownership = document.createElement('span');
+  ownership.className = entry.relationship === 'managed' ? 'state-pill warning' : 'state-pill ready';
+  ownership.textContent = entry.ownership || 'Owned';
+  cell.appendChild(ownership);
   return cell;
 }
 
 function createEarningsOptionalCell(entry, columnId) {
-  if (columnId === 'rented') return createCheckboxCell(entry.rented);
+  if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
   if (columnId === 'ships') return createTextCell(describeFleetShips(entry));
   if (columnId === 'sduMax') return createTextCell(entry.expectedSduPerScan == null ? '--' : formatWholeNumber(entry.expectedSduPerScan));
@@ -3567,21 +3564,21 @@ function renderEarnings(result) {
   renderEarningsHeader();
 
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
-  setText(
-    earningsSduPriceNote,
-    result.sduPriceHistoryAvailable === false
-      ? `${result.sduPriceSource || 'Aephia priceATL'} · current price only`
-      : result.sduPriceSource || 'Aephia priceATL'
-  );
-  setText(earningsSduScanValue, formatWholeNumber(result.totalExpectedSduPerScan || 0));
+  setText(earningsSduPriceNote, '');
+  setText(earningsSduScanValue, `${formatWholeNumber(result.todaySduFound || 0)} | ${formatWholeNumber(result.averageSduFoundPerDay || 0)}`);
   setText(
     earningsSduScanNote,
-    `${formatWholeNumber(result.activeMappedFleetCount || 0)} mapped of ${formatWholeNumber(result.activeScanningFleetCount || 0)} active fleets`
+    'Today vs Average'
   );
-  setText(earningsSduValueValue, result.totalExpectedSduValueAtl == null ? '--' : formatAtlas(result.totalExpectedSduValueAtl, 2));
-  setText(earningsSduValueNote, result.shipStatsSource || 'SES SoT');
-  setText(earningsRentalValue, formatAtlas(result.rentalAtlasPerDay || 0, 2));
-  setText(earningsRentalNote, 'Current SRSLY contractState.rate');
+  setText(
+    earningsSduValueValue,
+    `${result.todayRevenueAtlas == null ? '--' : formatAtlasNumber(result.todayRevenueAtlas, 2)} | ${
+      result.averageRevenueAtlasPerDay == null ? '--' : formatAtlasNumber(result.averageRevenueAtlasPerDay, 2)
+    }`
+  );
+  setText(earningsSduValueNote, 'Today vs Average');
+  setText(earningsRentalValue, formatAtlasNumber(result.rentalAtlasPerDay || 0, 2));
+  setText(earningsRentalNote, '');
   setEarningsStatus(
     `${formatWholeNumber(result.scanRowCount || 0)} scan rows from ${formatWholeNumber(result.activeScanningFleetCount || 0)} active fleets at ${formatCheckedAt(result.checkedAt)}${
       result.scanningError ? ' · Influx scan rows unavailable' : ''
