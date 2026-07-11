@@ -326,11 +326,11 @@ const cargoEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'ships', label: 'Ships' }),
   Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
   Object.freeze({ id: 'assignment', label: 'Assignment' }),
-  Object.freeze({ id: 'starbases', label: 'Starbases' }),
+  Object.freeze({ id: 'preferredCargoType', label: 'Preferred Cargo Type' }),
+  Object.freeze({ id: 'starbases', label: 'Starbase' }),
   Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
   Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
-  Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
   Object.freeze({ id: 'txsCostsPct', label: 'Txs Costs Pct' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
@@ -344,7 +344,7 @@ const earningsColumnsBySubtab = Object.freeze({
 const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
-  cargo: new Set(['txsDaily', 'assignment', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'netProfit', 'txsCostsPct']),
+  cargo: new Set(['txsDaily', 'assignment', 'preferredCargoType', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct']),
 };
 
 const earningsFleetPalette = Object.freeze([
@@ -3614,7 +3614,12 @@ function renderEarningsMiningEmpty(message) {
 
 function renderEarningsCargoEmpty(message) {
   renderEarningsHeader('cargo');
-  renderEarningsNetProfitChart(null, new Map(), { target: earningsCargoNetProfitChart, label: 'Cargo fleet net profit in ATLAS by day' });
+  renderEarningsNetProfitChart(null, new Map(), {
+    target: earningsCargoNetProfitChart,
+    label: 'Cargo fleet total costs in ATLAS by day',
+    emptyLabel: 'No cargo cost data loaded',
+    emptyValueLabel: 'No cargo cost values available',
+  });
   renderEarningsCargoCostBreakdownChart({ rows: [] });
   if (!earningsCargoTableBody) return;
   earningsCargoTableBody.textContent = '';
@@ -3730,12 +3735,16 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
   if (!target) return;
   target.textContent = '';
   const getSegmentLabel = options.getSegmentLabel || getEarningsFleetLabel;
+  const valueKey = options.valueKey || 'netProfitAtlas';
+  const valueLabel = options.valueLabel || 'Net Profit';
+  const emptyLabel = options.emptyLabel || 'No net profit data loaded';
+  const emptyValueLabel = options.emptyValueLabel || 'No net profit values available';
 
   const rows = Array.isArray(result?.rows) ? result.rows : [];
   if (!rows.length) {
     const empty = document.createElement('div');
     empty.className = 'earnings-chart-empty';
-    empty.textContent = 'No net profit data loaded';
+    empty.textContent = emptyLabel;
     target.appendChild(empty);
     return;
   }
@@ -3744,7 +3753,7 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
   const dayByIso = new Map(days.map((day) => [day.isoDate, day]));
   for (const row of rows) {
     const day = dayByIso.get(row.isoDate);
-    const value = Number(row.netProfitAtlas);
+    const value = Number(row[valueKey]);
     if (!day || !Number.isFinite(value) || value === 0) continue;
     const label = getSegmentLabel(row);
     let segment = day.segments.find((item) => item.fleet === label);
@@ -3772,7 +3781,7 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
   if (maxPositive === 0 && maxNegative === 0) {
     const empty = document.createElement('div');
     empty.className = 'earnings-chart-empty';
-    empty.textContent = 'No net profit values available';
+    empty.textContent = emptyValueLabel;
     target.appendChild(empty);
     return;
   }
@@ -3853,9 +3862,10 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
         class: 'earnings-chart-segment',
         'data-fleet': segment.fleet,
         'data-net-profit': formatAtlasNumber(value, 0),
+        'data-value-label': valueLabel,
       });
       const title = createSvgElement('title');
-      title.textContent = `${segment.fleet}\nNet Profit: ${formatAtlasNumber(value, 0)}`;
+      title.textContent = `${segment.fleet}\n${valueLabel}: ${formatAtlasNumber(value, 0)}`;
       rect.appendChild(title);
       svg.appendChild(rect);
       if (value >= 0) positiveStack = yEnd;
@@ -3894,7 +3904,7 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
       tooltip.style.display = 'none';
       return;
     }
-    tooltip.textContent = `${target.dataset.fleet || 'Fleet'}\nNet Profit: ${target.dataset.netProfit || '--'}`;
+    tooltip.textContent = `${target.dataset.fleet || 'Fleet'}\n${target.dataset.valueLabel || valueLabel}: ${target.dataset.netProfit || '--'}`;
     tooltip.style.display = 'block';
     tooltip.style.left = `${event.clientX + 14}px`;
     tooltip.style.top = `${event.clientY + 14}px`;
@@ -4230,11 +4240,11 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'ships') return createShipsCell(entry);
   if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
   if (columnId === 'assignment') return createTextCell(entry.assignment || '--');
+  if (columnId === 'preferredCargoType') return createTextCell(entry.preferredCargoType || '--');
   if (columnId === 'starbases') return createTextCell(entry.starbaseLabel || '--');
   if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas));
   if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
-  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
   if (columnId === 'txsCostsPct') return createTextCell(formatPercentNumber(entry.txsCostsPercent, 0));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
@@ -4411,7 +4421,14 @@ function renderEarningsCargo(result) {
   renderEarningsNetProfitChart(
     { ...result, rows },
     colorMap,
-    { target: earningsCargoNetProfitChart, label: 'Cargo fleet net profit in ATLAS by day' }
+    {
+      target: earningsCargoNetProfitChart,
+      label: 'Cargo fleet total costs in ATLAS by day',
+      valueKey: 'totalCostsAtlas',
+      valueLabel: 'Total Costs',
+      emptyLabel: 'No cargo cost data loaded',
+      emptyValueLabel: 'No cargo cost values available',
+    }
   );
   renderEarningsCargoCostBreakdownChart({ ...result, rows });
   setEarningsCargoStatus(

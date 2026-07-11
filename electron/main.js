@@ -3584,6 +3584,15 @@ ${scopeFilterFlux}
   |> group()
   |> keep(columns: ["fleet", "assignment", "starbase", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "assignment", "starbase"])`;
+  const typeFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "movement")
+  |> filter(fn: (r) => r._field == "type")
+  |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
+  |> filter(fn: (r) => exists r.fleet)
+  |> keep(columns: ["fleet", "assignment", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet", "assignment"])`;
   const txDailyFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
 ${scopeFilterFlux}
@@ -3603,6 +3612,7 @@ ${scopeFilterFlux}
         isoDate,
         label: formatShortUtcDate(date),
         starbases: new Set(),
+        cargoTypes: new Map(),
         burnedFuel: 0,
         txCostSol: 0,
         txsDaily: 0,
@@ -3611,8 +3621,9 @@ ${scopeFilterFlux}
     return rowsByKey.get(key);
   };
 
-  const [cargoCsv, txDailyCsv] = await Promise.all([
+  const [cargoCsv, typeCsv, txDailyCsv] = await Promise.all([
     queryInfluxFlux(settings, cargoFlux),
+    queryInfluxFlux(settings, typeFlux),
     queryInfluxFlux(settings, txDailyFlux),
   ]);
 
@@ -3643,6 +3654,18 @@ ${scopeFilterFlux}
     entry.starbases.add(starbase);
   }
 
+  for (const row of parseInfluxCsv(typeCsv)) {
+    const fleet = String(row.fleet || '').trim();
+    const assignment = String(row.assignment || '').trim();
+    const cargoType = String(row._value || '').trim();
+    const date = new Date(row._time);
+    if (!fleet || !assignment || !cargoType || Number.isNaN(date.getTime())) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, fleet, assignment, date);
+    entry.cargoTypes.set(cargoType, (entry.cargoTypes.get(cargoType) || 0) + 1);
+  }
+
   for (const row of rowsByKey.values()) {
     const txDaily = txDailyByDayFleet.get(`${row.isoDate}\n${row.fleet}`) || { txCostSol: 0 };
     row.txCostSol = txDaily.txCostSol;
@@ -3652,6 +3675,8 @@ ${scopeFilterFlux}
     .map((row) => ({
       ...row,
       starbases: Array.from(row.starbases).sort((a, b) => a.localeCompare(b)),
+      preferredCargoType: Array.from(row.cargoTypes.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || '',
     }))
     .filter((row) => row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0);
 }
