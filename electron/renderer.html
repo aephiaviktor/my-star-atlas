@@ -773,11 +773,14 @@
               </section>
             </div>
 
-            <section class="work-surface earnings-chart-surface">
-              <div class="earnings-chart-header">
-                <h3>Scanning Fleets Net Profit</h3>
+            <section class="work-surface earnings-chart-surface" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Scanning: Net Profit by Fleet</span>
+              </button>
+              <div class="earnings-chart-body">
+                <div id="earnings-net-profit-chart" class="earnings-net-profit-chart" aria-label="Scanning net profit by fleet over the last 14 days"></div>
               </div>
-              <div id="earnings-net-profit-chart" class="earnings-net-profit-chart" aria-label="Scanning fleets net profit over the last 14 days"></div>
             </section>
 
             <section class="work-surface earnings-surface">
@@ -834,11 +837,34 @@
               </section>
             </div>
 
-            <section class="work-surface earnings-chart-surface">
-              <div class="earnings-chart-header">
-                <h3>Mining Fleets Net Profit</h3>
+            <section class="work-surface earnings-chart-surface" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Mining: Net Profit by Fleet</span>
+              </button>
+              <div class="earnings-chart-body">
+                <div id="earnings-mining-net-profit-chart" class="earnings-net-profit-chart" aria-label="Mining net profit by fleet over the last 14 days"></div>
               </div>
-              <div id="earnings-mining-net-profit-chart" class="earnings-net-profit-chart" aria-label="Mining fleets net profit over the last 14 days"></div>
+            </section>
+
+            <section class="work-surface earnings-chart-surface" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Mining: Net Profit by Raw Material</span>
+              </button>
+              <div class="earnings-chart-body">
+                <div id="earnings-mining-material-net-profit-chart" class="earnings-net-profit-chart" aria-label="Mining net profit by raw material over the last 14 days"></div>
+              </div>
+            </section>
+
+            <section class="work-surface earnings-chart-surface" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Mining: Net Profit by Starbase</span>
+              </button>
+              <div class="earnings-chart-body">
+                <div id="earnings-mining-starbase-net-profit-chart" class="earnings-net-profit-chart" aria-label="Mining net profit by starbase over the last 14 days"></div>
+              </div>
             </section>
 
             <section class="work-surface earnings-surface">
@@ -858,6 +884,7 @@
                       <th scope="col">Food Costs</th>
                       <th scope="col">Fuel Costs</th>
                       <th scope="col">Rental Costs</th>
+                      <th scope="col">Txs Costs</th>
                       <th scope="col">Total Costs</th>
                       <th scope="col">Net Profit</th>
                       <th scope="col">Profit Margin</th>
@@ -865,7 +892,7 @@
                   </thead>
                   <tbody id="earnings-mining-table-body">
                     <tr class="empty-row">
-                      <td colspan="14">No mining earnings data loaded</td>
+                      <td colspan="15">No mining earnings data loaded</td>
                     </tr>
                   </tbody>
                 </table>

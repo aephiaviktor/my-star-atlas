@@ -3487,17 +3487,16 @@ ${scopeFilterFlux}
   |> group()
   |> keep(columns: ["fleet", "starbase", "rss", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "starbase", "rss"])`;
-  const txCountFlux = `from(bucket: "${bucket}")
+  const txDailyFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
 ${scopeFilterFlux}
-  |> filter(fn: (r) => r._measurement == "mining")
-  |> filter(fn: (r) => r._field == "amount")
+  |> filter(fn: (r) => r._field == "txCostSol")
   |> filter(fn: (r) => exists r.fleet)
   |> keep(columns: ["fleet", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
 
   const rowsByKey = new Map();
-  const txCountByDayFleet = new Map();
+  const txDailyByDayFleet = new Map();
   const ensureRow = (isoDate, fleet, starbase, rawMaterial, date) => {
     const key = `${isoDate}\n${fleet}\n${starbase}\n${rawMaterial}`;
     if (!rowsByKey.has(key)) {
@@ -3518,19 +3517,23 @@ ${scopeFilterFlux}
     return rowsByKey.get(key);
   };
 
-  const [totalsCsv, txCountCsv] = await Promise.all([
+  const [totalsCsv, txDailyCsv] = await Promise.all([
     queryInfluxFlux(settings, totalsFlux),
-    queryInfluxFlux(settings, txCountFlux),
+    queryInfluxFlux(settings, txDailyFlux),
   ]);
 
-  for (const row of parseInfluxCsv(txCountCsv)) {
+  for (const row of parseInfluxCsv(txDailyCsv)) {
     const fleet = String(row.fleet || '').trim();
     const date = new Date(row._time);
-    if (!fleet || Number.isNaN(date.getTime())) continue;
+    const value = Number(row._value || 0);
+    if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const key = `${isoDate}\n${fleet}`;
-    txCountByDayFleet.set(key, (txCountByDayFleet.get(key) || 0) + 1);
+    const current = txDailyByDayFleet.get(key) || { count: 0, txCostSol: 0 };
+    current.count += 1;
+    current.txCostSol += value;
+    txDailyByDayFleet.set(key, current);
   }
 
   for (const row of parseInfluxCsv(totalsCsv)) {
@@ -3551,7 +3554,9 @@ ${scopeFilterFlux}
   }
 
   for (const row of rowsByKey.values()) {
-    row.txsDaily = txCountByDayFleet.get(`${row.isoDate}\n${row.fleet}`) || 0;
+    const txDaily = txDailyByDayFleet.get(`${row.isoDate}\n${row.fleet}`) || { count: 0, txCostSol: 0 };
+    row.txsDaily = txDaily.count;
+    row.txCostSol = txDaily.txCostSol;
   }
 
   return Array.from(rowsByKey.values())
@@ -3749,8 +3754,9 @@ async function fetchEarningsSnapshot(payload) {
     const ammoCostsAtlas = ammunitionPriceAtl != null ? miningRow.burnedAmmo * ammunitionPriceAtl : null;
     const foodCostsAtlas = foodPriceAtl != null ? miningRow.burnedFood * foodPriceAtl : null;
     const fuelCostsAtlas = fuelPriceAtl != null ? miningRow.burnedFuel * fuelPriceAtl : null;
+    const txsCostsAtlas = atlasPerSol != null ? miningRow.txCostSol * atlasPerSol : null;
     const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
-    const costParts = [ammoCostsAtlas, foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay].filter((value) => Number.isFinite(value));
+    const costParts = [ammoCostsAtlas, foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
       ? revenueAtlasPerDay - totalCostsAtlas
@@ -3774,6 +3780,7 @@ async function fetchEarningsSnapshot(payload) {
       ammoCostsAtlas,
       foodCostsAtlas,
       fuelCostsAtlas,
+      txsCostsAtlas,
       totalCostsAtlas,
       netProfitAtlas,
       profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0

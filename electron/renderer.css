@@ -925,23 +925,56 @@ select:focus {
 
 .earnings-chart-surface {
   flex: 0 0 auto;
-  min-height: 340px;
   margin-bottom: 14px;
   padding: 14px 16px 10px;
 }
 
-.earnings-chart-header {
+.earnings-chart-toggle {
   display: flex;
-  align-items: baseline;
-  justify-content: center;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
   margin-bottom: 8px;
-  text-align: center;
+  padding: 0;
 }
 
-.earnings-chart-header h3 {
-  margin: 0;
+.chart-toggle-arrow {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.earnings-chart-toggle span:last-child {
   font-size: 18px;
+  font-weight: 800;
   letter-spacing: 0;
+}
+
+.earnings-chart-surface.collapsed .chart-toggle-arrow {
+  transform: rotate(-90deg);
+}
+
+.earnings-chart-body {
+  min-height: 286px;
+}
+
+.earnings-chart-surface.collapsed .earnings-chart-body {
+  display: none;
+}
+
+.earnings-chart-surface.collapsed {
+  padding-bottom: 14px;
 }
 
 .earnings-net-profit-chart {
@@ -1020,6 +1053,39 @@ select:focus {
   border: 1px solid rgba(244, 247, 248, 0.42);
   border-radius: 4px;
   box-shadow: 0 0 0 2px rgba(2, 7, 10, 0.32);
+}
+
+.ships-summary-cell {
+  position: relative;
+  max-width: 180px;
+}
+
+.ships-summary {
+  display: block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ships-hover-tooltip {
+  position: fixed;
+  z-index: 100;
+  display: none;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: rgba(2, 7, 10, 0.96);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.38);
+  color: var(--text);
+  padding: 9px 11px;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+  pointer-events: none;
+  white-space: pre-line;
 }
 
 .fleet-sync-status {

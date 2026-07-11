@@ -61,6 +61,8 @@ const earningsMiningSyncStatus = document.querySelector('#earnings-mining-sync-s
 const earningsMiningTableHead = document.querySelector('#earnings-mining-table-head');
 const earningsMiningTableBody = document.querySelector('#earnings-mining-table-body');
 const earningsMiningNetProfitChart = document.querySelector('#earnings-mining-net-profit-chart');
+const earningsMiningMaterialNetProfitChart = document.querySelector('#earnings-mining-material-net-profit-chart');
+const earningsMiningStarbaseNetProfitChart = document.querySelector('#earnings-mining-starbase-net-profit-chart');
 const earningsMiningAmmoPriceValue = document.querySelector('#earnings-mining-ammo-price-value');
 const earningsMiningAmmoPriceNote = document.querySelector('#earnings-mining-ammo-price-note');
 const earningsMiningMinedValue = document.querySelector('#earnings-mining-mined-value');
@@ -305,6 +307,7 @@ const miningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'foodCosts', label: 'Food Costs' }),
   Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
   Object.freeze({ id: 'rental', label: 'Rental Costs' }),
+  Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
@@ -318,7 +321,7 @@ const earningsColumnsBySubtab = Object.freeze({
 
 const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
-  mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'totalCosts', 'netProfit', 'profitMargin']),
+  mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
 };
 
 const earningsFleetPalette = Object.freeze([
@@ -3538,7 +3541,7 @@ function setEarningsMiningStatus(message) {
 function renderEarningsEmpty(message) {
   latestEarningsResult = null;
   renderEarningsHeader('scanning');
-  renderEarningsNetProfitChart(null, new Map(), { target: earningsNetProfitChart, label: 'Scanning fleets net profit in ATLAS by day' });
+  renderEarningsNetProfitChart(null, new Map(), { target: earningsNetProfitChart, label: 'Scanning net profit by fleet in ATLAS by day' });
   setText(earningsSduPriceValue, '--');
   setText(earningsSduPriceNote, message);
   setText(earningsSduScanValue, '--');
@@ -3560,7 +3563,9 @@ function renderEarningsEmpty(message) {
 
 function renderEarningsMiningEmpty(message) {
   renderEarningsHeader('mining');
-  renderEarningsNetProfitChart(null, new Map(), { target: earningsMiningNetProfitChart, label: 'Mining fleets net profit in ATLAS by day' });
+  renderEarningsNetProfitChart(null, new Map(), { target: earningsMiningNetProfitChart, label: 'Mining fleet net profit in ATLAS by day' });
+  renderEarningsNetProfitChart(null, new Map(), { target: earningsMiningMaterialNetProfitChart, label: 'Mining raw material net profit in ATLAS by day' });
+  renderEarningsNetProfitChart(null, new Map(), { target: earningsMiningStarbaseNetProfitChart, label: 'Mining starbase net profit in ATLAS by day' });
   setText(earningsMiningAmmoPriceValue, '--');
   setText(earningsMiningAmmoPriceNote, message);
   setText(earningsMiningMinedValue, '--');
@@ -3590,6 +3595,10 @@ function formatAtlasNumber(value, digits = 2) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '--';
   return formatDecimal(number, digits);
+}
+
+function formatAtlasWhole(value) {
+  return formatAtlasNumber(value, 0);
 }
 
 function formatPercentNumber(value, digits = 1) {
@@ -3628,8 +3637,8 @@ function getGeneratedFleetColor(index) {
   return `hsl(${hue.toFixed(0)} 82% 58%)`;
 }
 
-function buildEarningsFleetColorMap(rows, offset = 0) {
-  const names = Array.from(new Set((Array.isArray(rows) ? rows : []).map(getEarningsFleetLabel).filter(Boolean))).sort((a, b) =>
+function buildEarningsFleetColorMap(rows, offset = 0, getLabel = getEarningsFleetLabel) {
+  const names = Array.from(new Set((Array.isArray(rows) ? rows : []).map(getLabel).filter(Boolean))).sort((a, b) =>
     a.localeCompare(b)
   );
   const map = new Map();
@@ -3640,8 +3649,8 @@ function buildEarningsFleetColorMap(rows, offset = 0) {
   return map;
 }
 
-function getEarningsFleetColor(entry, colorMap) {
-  const label = getEarningsFleetLabel(entry);
+function getEarningsFleetColor(entry, colorMap, getLabel = getEarningsFleetLabel) {
+  const label = getLabel(entry);
   return colorMap?.get(label) || earningsFleetPalette[0];
 }
 
@@ -3667,6 +3676,7 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
   const target = options.target || earningsNetProfitChart;
   if (!target) return;
   target.textContent = '';
+  const getSegmentLabel = options.getSegmentLabel || getEarningsFleetLabel;
 
   const rows = Array.isArray(result?.rows) ? result.rows : [];
   if (!rows.length) {
@@ -3683,9 +3693,10 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
     const day = dayByIso.get(row.isoDate);
     const value = Number(row.netProfitAtlas);
     if (!day || !Number.isFinite(value) || value === 0) continue;
+    const label = getSegmentLabel(row);
     const segment = {
-      fleet: getEarningsFleetLabel(row),
-      color: getEarningsFleetColor(row, colorMap),
+      fleet: label,
+      color: getEarningsFleetColor(row, colorMap, getSegmentLabel),
       value,
     };
     day.segments.push(segment);
@@ -3778,10 +3789,10 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
         rx: 2,
         class: 'earnings-chart-segment',
         'data-fleet': segment.fleet,
-        'data-net-profit': formatAtlasNumber(value, 2),
+        'data-net-profit': formatAtlasNumber(value, 0),
       });
       const title = createSvgElement('title');
-      title.textContent = `${segment.fleet}\nNet Profit: ${formatAtlasNumber(value, 2)}`;
+      title.textContent = `${segment.fleet}\nNet Profit: ${formatAtlasNumber(value, 0)}`;
       rect.appendChild(title);
       svg.appendChild(rect);
       if (value >= 0) positiveStack = yEnd;
@@ -3834,9 +3845,51 @@ function describeFleetShips(fleet) {
   const ships = Array.isArray(fleet.ships) ? fleet.ships : [];
   if (!ships.length) return 'No ship composition';
   return ships
-    .slice(0, 3)
+    .slice(0, 2)
     .map((ship) => `${formatWholeNumber(ship.amount)}x ${ship.name || 'Unknown ship'}`)
-    .join(', ') + (ships.length > 3 ? ` +${ships.length - 3}` : '');
+    .join(', ') + (ships.length > 2 ? ` +${ships.length - 2}` : '');
+}
+
+function getFleetShipsDetail(fleet) {
+  const ships = Array.isArray(fleet.ships) ? fleet.ships : [];
+  if (!ships.length) return 'No ship composition';
+  return ships
+    .map((ship) => `${formatWholeNumber(ship.amount)}x ${ship.name || 'Unknown ship'}`)
+    .join('\n');
+}
+
+let shipsHoverTooltip = null;
+
+function ensureShipsHoverTooltip() {
+  if (shipsHoverTooltip) return shipsHoverTooltip;
+  shipsHoverTooltip = document.createElement('div');
+  shipsHoverTooltip.className = 'ships-hover-tooltip';
+  document.body.appendChild(shipsHoverTooltip);
+  return shipsHoverTooltip;
+}
+
+function createShipsCell(entry) {
+  const cell = document.createElement('td');
+  cell.className = 'ships-summary-cell';
+  const summary = document.createElement('span');
+  summary.className = 'ships-summary';
+  summary.textContent = describeFleetShips(entry);
+  cell.appendChild(summary);
+
+  const detail = getFleetShipsDetail(entry);
+  const moveTooltip = (event) => {
+    const tooltip = ensureShipsHoverTooltip();
+    tooltip.textContent = detail;
+    tooltip.style.display = 'block';
+    tooltip.style.left = `${Math.min(event.clientX + 14, window.innerWidth - 340)}px`;
+    tooltip.style.top = `${Math.min(event.clientY + 14, window.innerHeight - 220)}px`;
+  };
+  cell.addEventListener('mouseenter', moveTooltip);
+  cell.addEventListener('mousemove', moveTooltip);
+  cell.addEventListener('mouseleave', () => {
+    if (shipsHoverTooltip) shipsHoverTooltip.style.display = 'none';
+  });
+  return cell;
 }
 
 function getEarningsColumns(subtab = currentEarningsSubtab) {
@@ -3926,7 +3979,7 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
-  if (columnId === 'ships') return createTextCell(describeFleetShips(entry));
+  if (columnId === 'ships') return createShipsCell(entry);
   if (columnId === 'sduMax') return createTextCell(entry.expectedSduPerScan == null ? '--' : formatWholeNumber(entry.expectedSduPerScan));
   if (columnId === 'atlasPerScan') return createTextCell(entry.expectedSduValueAtl == null ? '--' : formatAtlasNumber(entry.expectedSduValueAtl, 2));
   if (columnId === 'scanAttempts') return createTextCell(formatWholeNumber(entry.scanAttempts || 0));
@@ -3934,12 +3987,12 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'scanSuccessRate') return createTextCell(formatPercentNumber(entry.scanSuccessRatePercent, 1));
   if (columnId === 'averageChance') return createTextCell(formatPercentNumber(entry.averageChancePercent, 1));
   if (columnId === 'sduFound') return createTextCell(formatWholeNumber(entry.sduFound || 0));
-  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasNumber(entry.revenueAtlasPerDay, 2));
-  if (columnId === 'foodCosts') return createTextCell(entry.foodCostsAtlas == null ? '--' : formatAtlasNumber(entry.foodCostsAtlas, 2));
-  if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasNumber(entry.fuelCostsAtlas, 2));
-  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasNumber(entry.txsCostsAtlas, 2));
-  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasNumber(entry.totalCostsAtlas, 2));
-  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasNumber(entry.netProfitAtlas, 2));
+  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasWhole(entry.revenueAtlasPerDay));
+  if (columnId === 'foodCosts') return createTextCell(entry.foodCostsAtlas == null ? '--' : formatAtlasWhole(entry.foodCostsAtlas));
+  if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas));
+  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
+  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
+  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
   if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
@@ -3948,18 +4001,19 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
 function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
-  if (columnId === 'ships') return createTextCell(describeFleetShips(entry));
+  if (columnId === 'ships') return createShipsCell(entry);
   if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
   if (columnId === 'starbase') return createTextCell(entry.starbase);
   if (columnId === 'rawMaterial') return createTextCell(entry.rawMaterial);
   if (columnId === 'mined') return createTextCell(formatWholeNumber(entry.mined || 0));
-  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasNumber(entry.revenueAtlasPerDay, 2));
-  if (columnId === 'ammoCosts') return createTextCell(entry.ammoCostsAtlas == null ? '--' : formatAtlasNumber(entry.ammoCostsAtlas, 2));
-  if (columnId === 'foodCosts') return createTextCell(entry.foodCostsAtlas == null ? '--' : formatAtlasNumber(entry.foodCostsAtlas, 2));
-  if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasNumber(entry.fuelCostsAtlas, 2));
+  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasWhole(entry.revenueAtlasPerDay));
+  if (columnId === 'ammoCosts') return createTextCell(entry.ammoCostsAtlas == null ? '--' : formatAtlasWhole(entry.ammoCostsAtlas));
+  if (columnId === 'foodCosts') return createTextCell(entry.foodCostsAtlas == null ? '--' : formatAtlasWhole(entry.foodCostsAtlas));
+  if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas));
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
-  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasNumber(entry.totalCostsAtlas, 2));
-  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasNumber(entry.netProfitAtlas, 2));
+  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
+  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
+  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
   if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
@@ -3978,7 +4032,7 @@ function renderEarnings(result) {
   renderEarningsHeader('scanning');
   const rows = Array.isArray(result.rows) ? result.rows : [];
   const colorMap = buildEarningsFleetColorMap(rows, 0);
-  renderEarningsNetProfitChart(result, colorMap, { target: earningsNetProfitChart, label: 'Scanning fleets net profit in ATLAS by day' });
+  renderEarningsNetProfitChart(result, colorMap, { target: earningsNetProfitChart, label: 'Scanning net profit by fleet in ATLAS by day' });
 
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
   setText(earningsSduPriceNote, '');
@@ -3986,8 +4040,8 @@ function renderEarnings(result) {
   setText(earningsSduScanNote, 'Today vs Average');
   setText(
     earningsSduValueValue,
-    `${result.todayRevenueAtlas == null ? '--' : formatAtlasNumber(result.todayRevenueAtlas, 2)} | ${
-      result.averageRevenueAtlasPerDay == null ? '--' : formatAtlasNumber(result.averageRevenueAtlasPerDay, 2)
+    `${result.todayRevenueAtlas == null ? '--' : formatAtlasWhole(result.todayRevenueAtlas)} | ${
+      result.averageRevenueAtlasPerDay == null ? '--' : formatAtlasWhole(result.averageRevenueAtlasPerDay)
     }`
   );
   setText(earningsSduValueNote, 'Today vs Average');
@@ -4041,18 +4095,38 @@ function renderEarningsMining(result) {
   renderEarningsNetProfitChart(
     { ...result, rows },
     colorMap,
-    { target: earningsMiningNetProfitChart, label: 'Mining fleets net profit in ATLAS by day' }
+    { target: earningsMiningNetProfitChart, label: 'Mining fleet net profit in ATLAS by day' }
+  );
+  const materialColorMap = buildEarningsFleetColorMap(rows, 14, (row) => row.rawMaterial || 'Unknown material');
+  renderEarningsNetProfitChart(
+    { ...result, rows },
+    materialColorMap,
+    {
+      target: earningsMiningMaterialNetProfitChart,
+      label: 'Mining raw material net profit in ATLAS by day',
+      getSegmentLabel: (row) => row.rawMaterial || 'Unknown material',
+    }
+  );
+  const starbaseColorMap = buildEarningsFleetColorMap(rows, 21, (row) => row.starbase || 'Unknown starbase');
+  renderEarningsNetProfitChart(
+    { ...result, rows },
+    starbaseColorMap,
+    {
+      target: earningsMiningStarbaseNetProfitChart,
+      label: 'Mining starbase net profit in ATLAS by day',
+      getSegmentLabel: (row) => row.starbase || 'Unknown starbase',
+    }
   );
 
   const topFleet = result.topMiningNetProfitFleetToday;
   setText(earningsMiningAmmoPriceValue, topFleet?.fleetName || '--');
-  setText(earningsMiningAmmoPriceNote, topFleet ? `Net Profit: ${formatAtlasNumber(topFleet.netProfitAtlas, 2)}` : 'No net profit today');
+  setText(earningsMiningAmmoPriceNote, topFleet ? `Net Profit: ${formatAtlasWhole(topFleet.netProfitAtlas)}` : 'No net profit today');
   setText(earningsMiningMinedValue, `${formatWholeNumber(result.todayMined || 0)} | ${formatWholeNumber(result.averageMinedPerDay || 0)}`);
   setText(earningsMiningMinedNote, 'Today vs Average');
   setText(
     earningsMiningRevenueValue,
-    `${result.todayMiningRevenueAtlas == null ? '--' : formatAtlasNumber(result.todayMiningRevenueAtlas, 2)} | ${
-      result.averageMiningRevenueAtlasPerDay == null ? '--' : formatAtlasNumber(result.averageMiningRevenueAtlasPerDay, 2)
+    `${result.todayMiningRevenueAtlas == null ? '--' : formatAtlasWhole(result.todayMiningRevenueAtlas)} | ${
+      result.averageMiningRevenueAtlasPerDay == null ? '--' : formatAtlasWhole(result.averageMiningRevenueAtlasPerDay)
     }`
   );
   setText(earningsMiningRevenueNote, 'Today vs Average');
@@ -4272,6 +4346,14 @@ document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
 });
 
 renderEarningsColumnControls();
+
+document.querySelectorAll('[data-chart-toggle]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const panel = button.closest('[data-chart-panel]');
+    const collapsed = panel?.classList.toggle('collapsed') || false;
+    button.setAttribute('aria-expanded', String(!collapsed));
+  });
+});
 
 sidebarToggleButton?.addEventListener('click', () => {
   const collapsed = appShell?.classList.toggle('nav-collapsed') || false;
