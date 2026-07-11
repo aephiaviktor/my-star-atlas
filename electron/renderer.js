@@ -46,7 +46,8 @@ const fleetTableBody = document.querySelector('#fleet-table-body');
 const earningsSyncStatus = document.querySelector('#earnings-sync-status');
 const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
-const earningsColumnControls = Array.from(document.querySelectorAll('[data-earnings-column]'));
+const earningsColumnControlsContainer = document.querySelector('#earnings-column-controls');
+let earningsColumnControls = Array.from(document.querySelectorAll('[data-earnings-column]'));
 const earningsSduPriceValue = document.querySelector('#earnings-sdu-price-value');
 const earningsSduPriceNote = document.querySelector('#earnings-sdu-price-note');
 const earningsSduScanValue = document.querySelector('#earnings-sdu-scan-value');
@@ -56,6 +57,18 @@ const earningsSduValueNote = document.querySelector('#earnings-sdu-value-note');
 const earningsRentalValue = document.querySelector('#earnings-rental-value');
 const earningsRentalNote = document.querySelector('#earnings-rental-note');
 const earningsNetProfitChart = document.querySelector('#earnings-net-profit-chart');
+const earningsMiningSyncStatus = document.querySelector('#earnings-mining-sync-status');
+const earningsMiningTableHead = document.querySelector('#earnings-mining-table-head');
+const earningsMiningTableBody = document.querySelector('#earnings-mining-table-body');
+const earningsMiningNetProfitChart = document.querySelector('#earnings-mining-net-profit-chart');
+const earningsMiningAmmoPriceValue = document.querySelector('#earnings-mining-ammo-price-value');
+const earningsMiningAmmoPriceNote = document.querySelector('#earnings-mining-ammo-price-note');
+const earningsMiningMinedValue = document.querySelector('#earnings-mining-mined-value');
+const earningsMiningMinedNote = document.querySelector('#earnings-mining-mined-note');
+const earningsMiningRevenueValue = document.querySelector('#earnings-mining-revenue-value');
+const earningsMiningRevenueNote = document.querySelector('#earnings-mining-revenue-note');
+const earningsMiningRentalValue = document.querySelector('#earnings-mining-rental-value');
+const earningsMiningRentalNote = document.querySelector('#earnings-mining-rental-note');
 const sduTotalValue = document.querySelector('#sdu-total-value');
 const sduTotalNote = document.querySelector('#sdu-total-note');
 const sduAvgValue = document.querySelector('#sdu-avg-value');
@@ -257,7 +270,7 @@ const factionLabels = Object.freeze({
   USTUR: 'USTUR',
 });
 
-const earningsOptionalColumns = Object.freeze([
+const scanningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'color', label: 'Color' }),
   Object.freeze({ id: 'ownership', label: 'Ownership' }),
   Object.freeze({ id: 'ships', label: 'Ships' }),
@@ -278,6 +291,33 @@ const earningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
+
+const miningEarningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'color', label: 'Color' }),
+  Object.freeze({ id: 'ownership', label: 'Ownership' }),
+  Object.freeze({ id: 'ships', label: 'Ships' }),
+  Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
+  Object.freeze({ id: 'starbase', label: 'Starbase' }),
+  Object.freeze({ id: 'rawMaterial', label: 'Raw Material' }),
+  Object.freeze({ id: 'mined', label: 'Mined' }),
+  Object.freeze({ id: 'revenue', label: 'REVENUE' }),
+  Object.freeze({ id: 'ammoCosts', label: 'Ammo Costs' }),
+  Object.freeze({ id: 'rental', label: 'RENTAL COSTS' }),
+  Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
+  Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
+  Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
+  Object.freeze({ id: 'account', label: 'Account' }),
+]);
+
+const earningsColumnsBySubtab = Object.freeze({
+  scanning: scanningEarningsOptionalColumns,
+  mining: miningEarningsOptionalColumns,
+});
+
+const earningsColumnState = {
+  scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
+  mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'rental', 'totalCosts', 'netProfit', 'profitMargin']),
+};
 
 const earningsFleetPalette = Object.freeze([
   '#f43f5e',
@@ -3489,10 +3529,14 @@ function setEarningsStatus(message) {
   setText(earningsSyncStatus, message);
 }
 
+function setEarningsMiningStatus(message) {
+  setText(earningsMiningSyncStatus, message);
+}
+
 function renderEarningsEmpty(message) {
   latestEarningsResult = null;
-  renderEarningsHeader();
-  renderEarningsNetProfitChart(null, new Map());
+  renderEarningsHeader('scanning');
+  renderEarningsNetProfitChart(null, new Map(), { target: earningsNetProfitChart, label: 'Scanning fleets net profit in ATLAS by day' });
   setText(earningsSduPriceValue, '--');
   setText(earningsSduPriceNote, message);
   setText(earningsSduScanValue, '--');
@@ -3506,10 +3550,32 @@ function renderEarningsEmpty(message) {
   const row = document.createElement('tr');
   row.className = 'empty-row';
   const cell = document.createElement('td');
-  cell.colSpan = 2 + getVisibleEarningsColumns().length;
+  cell.colSpan = getEarningsTableColSpan('scanning');
   cell.textContent = message;
   row.appendChild(cell);
   earningsTableBody.appendChild(row);
+}
+
+function renderEarningsMiningEmpty(message) {
+  renderEarningsHeader('mining');
+  renderEarningsNetProfitChart(null, new Map(), { target: earningsMiningNetProfitChart, label: 'Mining fleets net profit in ATLAS by day' });
+  setText(earningsMiningAmmoPriceValue, '--');
+  setText(earningsMiningAmmoPriceNote, message);
+  setText(earningsMiningMinedValue, '--');
+  setText(earningsMiningMinedNote, message);
+  setText(earningsMiningRevenueValue, '--');
+  setText(earningsMiningRevenueNote, message);
+  setText(earningsMiningRentalValue, '--');
+  setText(earningsMiningRentalNote, message);
+  if (!earningsMiningTableBody) return;
+  earningsMiningTableBody.textContent = '';
+  const row = document.createElement('tr');
+  row.className = 'empty-row';
+  const cell = document.createElement('td');
+  cell.colSpan = getEarningsTableColSpan('mining');
+  cell.textContent = message;
+  row.appendChild(cell);
+  earningsMiningTableBody.appendChild(row);
 }
 
 function formatAtlas(value, digits = 2) {
@@ -3560,13 +3626,14 @@ function getGeneratedFleetColor(index) {
   return `hsl(${hue.toFixed(0)} 82% 58%)`;
 }
 
-function buildEarningsFleetColorMap(rows) {
+function buildEarningsFleetColorMap(rows, offset = 0) {
   const names = Array.from(new Set((Array.isArray(rows) ? rows : []).map(getEarningsFleetLabel).filter(Boolean))).sort((a, b) =>
     a.localeCompare(b)
   );
   const map = new Map();
   names.forEach((name, index) => {
-    map.set(name, earningsFleetPalette[index] || getGeneratedFleetColor(index));
+    const paletteIndex = index + offset;
+    map.set(name, earningsFleetPalette[paletteIndex] || getGeneratedFleetColor(paletteIndex));
   });
   return map;
 }
@@ -3594,16 +3661,17 @@ function createColorCell(entry, colorMap) {
   return cell;
 }
 
-function renderEarningsNetProfitChart(result, colorMap) {
-  if (!earningsNetProfitChart) return;
-  earningsNetProfitChart.textContent = '';
+function renderEarningsNetProfitChart(result, colorMap, options = {}) {
+  const target = options.target || earningsNetProfitChart;
+  if (!target) return;
+  target.textContent = '';
 
   const rows = Array.isArray(result?.rows) ? result.rows : [];
   if (!rows.length) {
     const empty = document.createElement('div');
     empty.className = 'earnings-chart-empty';
     empty.textContent = 'No net profit data loaded';
-    earningsNetProfitChart.appendChild(empty);
+    target.appendChild(empty);
     return;
   }
 
@@ -3629,7 +3697,7 @@ function renderEarningsNetProfitChart(result, colorMap) {
     const empty = document.createElement('div');
     empty.className = 'earnings-chart-empty';
     empty.textContent = 'No net profit values available';
-    earningsNetProfitChart.appendChild(empty);
+    target.appendChild(empty);
     return;
   }
 
@@ -3656,7 +3724,7 @@ function renderEarningsNetProfitChart(result, colorMap) {
   const svg = createSvgElement('svg', {
     viewBox: `0 0 ${width} ${height}`,
     role: 'img',
-    'aria-label': 'Scanning fleets net profit in ATLAS by day',
+    'aria-label': options.label || 'Fleets net profit in ATLAS by day',
   });
 
   const tickValues = Array.from({ length: 5 }, (_value, index) => yMin + (index * yRange) / 4);
@@ -3738,11 +3806,11 @@ function renderEarningsNetProfitChart(result, colorMap) {
   yAxisLabel.textContent = 'ATLAS';
   svg.appendChild(yAxisLabel);
 
-  earningsNetProfitChart.appendChild(svg);
+  target.appendChild(svg);
 
   const tooltip = document.createElement('div');
   tooltip.className = 'earnings-chart-tooltip';
-  earningsNetProfitChart.appendChild(tooltip);
+  target.appendChild(tooltip);
 
   svg.addEventListener('mousemove', (event) => {
     const target = event.target?.closest?.('.earnings-chart-segment');
@@ -3769,19 +3837,54 @@ function describeFleetShips(fleet) {
     .join(', ') + (ships.length > 3 ? ` +${ships.length - 3}` : '');
 }
 
-function getVisibleEarningsColumns() {
-  const visible = new Set(
-    earningsColumnControls
-      .filter((input) => input.checked)
-      .map((input) => input.dataset.earningsColumn)
-  );
-  return earningsOptionalColumns.filter((column) => visible.has(column.id));
+function getEarningsColumns(subtab = currentEarningsSubtab) {
+  return earningsColumnsBySubtab[subtab] || scanningEarningsOptionalColumns;
 }
 
-function renderEarningsHeader() {
-  if (!earningsTableHead) return;
+function getVisibleEarningsColumns(subtab = currentEarningsSubtab) {
+  const selected = earningsColumnState[subtab] || earningsColumnState.scanning;
+  return getEarningsColumns(subtab).filter((column) => selected.has(column.id));
+}
+
+function getEarningsTableColSpan(subtab = currentEarningsSubtab) {
+  const visibleColumns = getVisibleEarningsColumns(subtab);
+  return 2 + visibleColumns.filter((column) => column.id !== 'color').length + (visibleColumns.some((column) => column.id === 'color') ? 1 : 0);
+}
+
+function renderEarningsColumnControls() {
+  if (!earningsColumnControlsContainer) return;
+  const subtab = currentEarningsSubtab === 'mining' ? 'mining' : 'scanning';
+  const selected = earningsColumnState[subtab] || earningsColumnState.scanning;
+  earningsColumnControlsContainer.textContent = '';
+  for (const column of getEarningsColumns(subtab)) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.earningsColumn = column.id;
+    input.checked = selected.has(column.id);
+    input.addEventListener('change', () => {
+      if (input.checked) selected.add(column.id);
+      else selected.delete(column.id);
+      if (subtab === 'mining') {
+        renderEarningsMining(latestEarningsResult);
+      } else if (latestEarningsResult) {
+        renderEarnings(latestEarningsResult);
+      } else {
+        renderEarningsHeader('scanning');
+      }
+    });
+    label.appendChild(input);
+    label.append(` ${column.label}`);
+    earningsColumnControlsContainer.appendChild(label);
+  }
+  earningsColumnControls = Array.from(earningsColumnControlsContainer.querySelectorAll('[data-earnings-column]'));
+}
+
+function renderEarningsHeader(subtab = 'scanning') {
+  const tableHead = subtab === 'mining' ? earningsMiningTableHead : earningsTableHead;
+  if (!tableHead) return;
   const row = document.createElement('tr');
-  const visibleColumns = getVisibleEarningsColumns();
+  const visibleColumns = getVisibleEarningsColumns(subtab);
   const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
   const labels = colorColumnVisible ? ['Date', 'Color', 'Fleet'] : ['Date', 'Fleet'];
   for (const label of labels) {
@@ -3796,8 +3899,8 @@ function renderEarningsHeader() {
     th.textContent = column.label;
     row.appendChild(th);
   }
-  earningsTableHead.textContent = '';
-  earningsTableHead.appendChild(row);
+  tableHead.textContent = '';
+  tableHead.appendChild(row);
 }
 
 function createEarningsFleetCell(entry) {
@@ -3840,18 +3943,38 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
   return createTextCell('--');
 }
 
+function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
+  if (columnId === 'color') return createColorCell(entry, colorMap);
+  if (columnId === 'ownership') return createOwnershipCell(entry);
+  if (columnId === 'ships') return createTextCell(describeFleetShips(entry));
+  if (columnId === 'txsDaily') return createTextCell(entry.txsDailyAtlas == null ? '--' : formatAtlasNumber(entry.txsDailyAtlas, 2));
+  if (columnId === 'starbase') return createTextCell(entry.starbase);
+  if (columnId === 'rawMaterial') return createTextCell(entry.rawMaterial);
+  if (columnId === 'mined') return createTextCell(formatWholeNumber(entry.mined || 0));
+  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasNumber(entry.revenueAtlasPerDay, 2));
+  if (columnId === 'ammoCosts') return createTextCell(entry.ammoCostsAtlas == null ? '--' : formatAtlasNumber(entry.ammoCostsAtlas, 2));
+  if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
+  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasNumber(entry.totalCostsAtlas, 2));
+  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasNumber(entry.netProfitAtlas, 2));
+  if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
+  if (columnId === 'account') return createAccountCell(entry.fleetAccount);
+  return createTextCell('--');
+}
+
 function renderEarnings(result) {
   latestEarningsResult = result;
   if (!result?.ok) {
     renderEarningsEmpty(result?.error || 'Earnings sync failed');
+    renderEarningsMiningEmpty(result?.error || 'Earnings sync failed');
     setEarningsStatus('Earnings sync failed');
+    setEarningsMiningStatus('Earnings sync failed');
     return;
   }
   setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'earnings', result);
-  renderEarningsHeader();
+  renderEarningsHeader('scanning');
   const rows = Array.isArray(result.rows) ? result.rows : [];
-  const colorMap = buildEarningsFleetColorMap(rows);
-  renderEarningsNetProfitChart(result, colorMap);
+  const colorMap = buildEarningsFleetColorMap(rows, 0);
+  renderEarningsNetProfitChart(result, colorMap, { target: earningsNetProfitChart, label: 'Scanning fleets net profit in ATLAS by day' });
 
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
   setText(earningsSduPriceNote, '');
@@ -3878,13 +4001,14 @@ function renderEarnings(result) {
     const row = document.createElement('tr');
     row.className = 'empty-row';
     const cell = document.createElement('td');
-    cell.colSpan = 2 + getVisibleEarningsColumns().length;
+    cell.colSpan = getEarningsTableColSpan('scanning');
     cell.textContent = `No ${normalizeFaction(latestSettings?.faction)} fleets scanned in the last 14 days`;
     row.appendChild(cell);
     earningsTableBody.appendChild(row);
+    renderEarningsMining(result);
     return;
   }
-  const visibleColumns = getVisibleEarningsColumns();
+  const visibleColumns = getVisibleEarningsColumns('scanning');
   const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
   const remainingColumns = visibleColumns.filter((column) => column.id !== 'color');
   for (const entry of rows) {
@@ -3897,13 +4021,81 @@ function renderEarnings(result) {
     }
     earningsTableBody.appendChild(row);
   }
+  renderEarningsMining(result);
+}
+
+function renderEarningsMining(result) {
+  if (!result?.ok) {
+    renderEarningsMiningEmpty(result?.error || 'Mining earnings sync failed');
+    setEarningsMiningStatus('Mining earnings sync failed');
+    return;
+  }
+
+  const rows = Array.isArray(result.miningRows) ? result.miningRows : [];
+  const colorMap = buildEarningsFleetColorMap(rows, 7);
+  renderEarningsHeader('mining');
+  renderEarningsNetProfitChart(
+    { ...result, rows },
+    colorMap,
+    { target: earningsMiningNetProfitChart, label: 'Mining fleets net profit in ATLAS by day' }
+  );
+
+  setText(earningsMiningAmmoPriceValue, result.ammunitionPriceAtl == null ? '--' : formatAtlas(result.ammunitionPriceAtl, 6));
+  setText(earningsMiningAmmoPriceNote, '');
+  setText(earningsMiningMinedValue, formatWholeNumber(result.totalMined || 0));
+  setText(earningsMiningMinedNote, '');
+  setText(earningsMiningRevenueValue, result.totalMiningRevenueAtlas == null ? '--' : formatAtlasNumber(result.totalMiningRevenueAtlas, 2));
+  setText(earningsMiningRevenueNote, '');
+  const rentalByFleet = new Map();
+  for (const row of rows) {
+    const fleetKey = row.fleetAccount || row.fleetName || row.fleet;
+    const rentalRate = Number(row.rentalRateAtlasPerDay);
+    if (fleetKey && Number.isFinite(rentalRate)) rentalByFleet.set(fleetKey, rentalRate);
+  }
+  const rentalAtlasPerDay = Array.from(rentalByFleet.values()).reduce((sum, value) => sum + value, 0);
+  setText(earningsMiningRentalValue, formatAtlasNumber(rentalAtlasPerDay, 2));
+  setText(earningsMiningRentalNote, '');
+  setEarningsMiningStatus(
+    `${formatWholeNumber(result.miningRowCount || 0)} mining rows from ${formatWholeNumber(result.activeMiningFleetCount || 0)} active fleets at ${formatCheckedAt(result.checkedAt)}${
+      result.miningError ? ' · Influx mining rows unavailable' : ''
+    }`
+  );
+
+  if (!earningsMiningTableBody) return;
+  earningsMiningTableBody.textContent = '';
+  if (!rows.length) {
+    const row = document.createElement('tr');
+    row.className = 'empty-row';
+    const cell = document.createElement('td');
+    cell.colSpan = getEarningsTableColSpan('mining');
+    cell.textContent = `No ${normalizeFaction(latestSettings?.faction)} fleets mined in the last 14 days`;
+    row.appendChild(cell);
+    earningsMiningTableBody.appendChild(row);
+    return;
+  }
+
+  const visibleColumns = getVisibleEarningsColumns('mining');
+  const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
+  const remainingColumns = visibleColumns.filter((column) => column.id !== 'color');
+  for (const entry of rows) {
+    const row = document.createElement('tr');
+    row.appendChild(createTextCell(entry.label || entry.isoDate));
+    if (colorColumnVisible) row.appendChild(createColorCell(entry, colorMap));
+    row.appendChild(createEarningsFleetCell(entry));
+    for (const column of remainingColumns) {
+      row.appendChild(createMiningEarningsOptionalCell(entry, column.id, colorMap));
+    }
+    earningsMiningTableBody.appendChild(row);
+  }
 }
 
 async function refreshEarnings() {
   const settings = latestSettings || getFormPayload();
   if (!getActivePlayerProfile(settings)) {
     renderEarningsEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
+    renderEarningsMiningEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
     setEarningsStatus('Awaiting player profile');
+    setEarningsMiningStatus('Awaiting player profile');
     return;
   }
 
@@ -3913,7 +4105,9 @@ async function refreshEarnings() {
     renderEarnings(cached);
   } else {
     renderEarningsEmpty('Loading earnings data...');
+    renderEarningsMiningEmpty('Loading mining earnings data...');
     setEarningsStatus('Loading earnings data...');
+    setEarningsMiningStatus('Loading mining earnings data...');
   }
 
   try {
@@ -3923,7 +4117,9 @@ async function refreshEarnings() {
     console.error(error);
     if (!cached) {
       renderEarningsEmpty('Earnings data unavailable');
+      renderEarningsMiningEmpty('Mining earnings data unavailable');
       setEarningsStatus('Earnings sync failed');
+      setEarningsMiningStatus('Earnings sync failed');
     }
   }
 }
@@ -4011,9 +4207,13 @@ function setActiveEarningsSubtab(subtab) {
   document.querySelectorAll('[data-earnings-panel]').forEach((panel) => {
     panel.classList.toggle('active', panel.dataset.earningsPanel === subtab);
   });
+  renderEarningsColumnControls();
   updateTitle();
   if (subtab === 'scanning' && !latestEarningsResult) {
     refreshEarnings();
+  }
+  if (subtab === 'mining' && latestEarningsResult) {
+    renderEarningsMining(latestEarningsResult);
   }
 }
 
@@ -4061,15 +4261,7 @@ document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
   button.addEventListener('click', () => setActiveEarningsSubtab(button.dataset.earningsSubtab));
 });
 
-earningsColumnControls.forEach((input) => {
-  input.addEventListener('change', () => {
-    if (latestEarningsResult) {
-      renderEarnings(latestEarningsResult);
-    } else {
-      renderEarningsHeader();
-    }
-  });
-});
+renderEarningsColumnControls();
 
 sidebarToggleButton?.addEventListener('click', () => {
   const collapsed = appShell?.classList.toggle('nav-collapsed') || false;

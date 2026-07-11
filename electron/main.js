@@ -3145,11 +3145,19 @@ async function fetchCurrentEarningsPrices() {
     const price = Number(findResource(name)?.pricingATL?.priceATL);
     return Number.isFinite(price) ? price : null;
   };
+  const resourcePricesAtlByName = {};
+  for (const resource of resources) {
+    const name = String(resource?.name || '').trim();
+    const price = Number(resource?.pricingATL?.priceATL);
+    if (name && Number.isFinite(price)) resourcePricesAtlByName[normalizeShipName(name)] = price;
+  }
 
   return {
     sduPriceAtl: getPriceAtl('Survey Data Unit'),
+    ammunitionPriceAtl: getPriceAtl('Ammunition'),
     foodPriceAtl: getPriceAtl('Food'),
     fuelPriceAtl: getPriceAtl('Fuel'),
+    resourcePricesAtlByName,
     atlasPerSol: tokenPrices.atlasPerSol,
     solPriceAtl: tokenPrices.solPriceAtl,
     atlasPriceAtl: tokenPrices.atlasPriceAtl,
@@ -3157,6 +3165,12 @@ async function fetchCurrentEarningsPrices() {
     atlasUsdPrice: tokenPrices.atlasUsdPrice,
     atlasPerSolSource: tokenPrices.source,
   };
+}
+
+function getCurrentResourcePriceAtl(prices, resourceName) {
+  const key = normalizeShipName(resourceName);
+  const price = Number(prices?.resourcePricesAtlByName?.[key]);
+  return Number.isFinite(price) ? price : null;
 }
 
 async function fetchShipStatsSot() {
@@ -3450,6 +3464,68 @@ ${scopeFilterFlux}
     }));
 }
 
+async function fetchMiningEarningsRows(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
+    return [];
+  }
+
+  const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
+  const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "mining")
+  |> filter(fn: (r) => r._field == "amount" or r._field == "burnedAmmo" or r._field == "txCostSol")
+  |> filter(fn: (r) => exists r.fleet)
+  |> filter(fn: (r) => exists r.rss)
+  |> filter(fn: (r) => exists r.starbase)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["fleet", "starbase", "rss", "_field", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["fleet", "starbase", "rss", "_field", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet", "starbase", "rss"])`;
+
+  const rowsByKey = new Map();
+  const ensureRow = (isoDate, fleet, starbase, rawMaterial, date) => {
+    const key = `${isoDate}\n${fleet}\n${starbase}\n${rawMaterial}`;
+    if (!rowsByKey.has(key)) {
+      rowsByKey.set(key, {
+        fleet,
+        starbase,
+        rawMaterial,
+        isoDate,
+        label: formatShortUtcDate(date),
+        mined: 0,
+        burnedAmmo: 0,
+        txCostSol: 0,
+      });
+    }
+    return rowsByKey.get(key);
+  };
+
+  const csv = await queryInfluxFlux(settings, flux);
+  for (const row of parseInfluxCsv(csv)) {
+    const fleet = String(row.fleet || '').trim();
+    const rawMaterial = String(row.rss || '').trim();
+    const starbase = resolveStarbaseName(row, coordinateMap);
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!fleet || !rawMaterial || !starbase || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, fleet, starbase, rawMaterial, date);
+    if (row._field === 'amount') entry.mined += value;
+    if (row._field === 'burnedAmmo') entry.burnedAmmo += value;
+    if (row._field === 'txCostSol') entry.txCostSol += value;
+  }
+
+  return Array.from(rowsByKey.values())
+    .filter((row) => row.mined > 0 || row.burnedAmmo > 0 || row.txCostSol > 0);
+}
+
 async function fetchEarningsSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const fleetResult = await fetchProfileFleets(settings);
@@ -3462,8 +3538,10 @@ async function fetchEarningsSnapshot(payload) {
   const [prices, sot] = await Promise.all([
     fetchCurrentEarningsPrices().catch(() => ({
       sduPriceAtl: null,
+      ammunitionPriceAtl: null,
       foodPriceAtl: null,
       fuelPriceAtl: null,
+      resourcePricesAtlByName: {},
       atlasPerSol: null,
       solPriceAtl: null,
       atlasPriceAtl: null,
@@ -3471,7 +3549,7 @@ async function fetchEarningsSnapshot(payload) {
     })),
     fetchShipStatsSot(),
   ]);
-  const { sduPriceAtl, foodPriceAtl, fuelPriceAtl, atlasPerSol } = prices;
+  const { sduPriceAtl, ammunitionPriceAtl, foodPriceAtl, fuelPriceAtl, atlasPerSol } = prices;
 
   const fleetShipsKeys = fleets
     .map((fleet) => {
@@ -3565,10 +3643,17 @@ async function fetchEarningsSnapshot(payload) {
 
   let scanningRows = [];
   let scanningError = '';
+  let miningRows = [];
+  let miningError = '';
   try {
     scanningRows = await fetchScanningEarningsRows(settings);
   } catch (error) {
     scanningError = String(error?.message || error || 'scan_rows_unavailable');
+  }
+  try {
+    miningRows = await fetchMiningEarningsRows(settings);
+  } catch (error) {
+    miningError = String(error?.message || error || 'mining_rows_unavailable');
   }
 
   const activeFleetKeys = new Set();
@@ -3616,9 +3701,66 @@ async function fetchEarningsSnapshot(payload) {
     };
   });
 
+  const activeMiningFleetKeys = new Set();
+  const activeMappedMiningFleetKeys = new Set();
+  let totalMined = 0;
+  let totalMiningRevenueAtlas = 0;
+  let totalMiningRevenueCount = 0;
+  const mining = miningRows.map((miningRow) => {
+    const fleet = fleetByLabel.get(normalizeFleetLabel(miningRow.fleet));
+    const activeKey = fleet?.key || normalizeFleetLabel(miningRow.fleet);
+    activeMiningFleetKeys.add(activeKey);
+    if (fleet) activeMappedMiningFleetKeys.add(fleet.key);
+    totalMined += miningRow.mined;
+    const rawMaterialPriceAtl = getCurrentResourcePriceAtl(prices, miningRow.rawMaterial);
+    const revenueAtlasPerDay = rawMaterialPriceAtl != null ? miningRow.mined * rawMaterialPriceAtl : null;
+    const ammoCostsAtlas = ammunitionPriceAtl != null ? miningRow.burnedAmmo * ammunitionPriceAtl : null;
+    const txsDailyAtlas = atlasPerSol != null ? miningRow.txCostSol * atlasPerSol : null;
+    const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
+    const costParts = [ammoCostsAtlas, rentalRateAtlasPerDay, txsDailyAtlas].filter((value) => Number.isFinite(value));
+    const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
+    const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
+      ? revenueAtlasPerDay - totalCostsAtlas
+      : null;
+    if (Number.isFinite(revenueAtlasPerDay)) {
+      totalMiningRevenueAtlas += revenueAtlasPerDay;
+      totalMiningRevenueCount += 1;
+    }
+    return {
+      ...miningRow,
+      fleetName: miningRow.fleet,
+      fleetAccount: fleet?.key || '',
+      rented: fleet?.relationship === 'managed' || fleet?.relationship === 'owned-managed',
+      ownership: fleet?.ownership || '',
+      relationship: fleet?.relationship || '',
+      activity: fleet?.activity || '',
+      ships: fleet?.ships || [],
+      shipTypes: fleet?.shipTypes || 0,
+      rawMaterialPriceAtl,
+      revenueAtlasPerDay,
+      ammoCostsAtlas,
+      txsDailyAtlas,
+      totalCostsAtlas,
+      netProfitAtlas,
+      profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
+        ? (netProfitAtlas / revenueAtlasPerDay) * 100
+        : null,
+      rentalContract: fleet?.rentalContract || null,
+      rentalRateAtlasPerDay,
+    };
+  });
+
   rows.sort((a, b) => {
     const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));
     return dateSort || String(a.fleetName || '').localeCompare(String(b.fleetName || ''));
+  });
+  mining.sort((a, b) => {
+    const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));
+    if (dateSort) return dateSort;
+    const fleetSort = String(a.fleetName || '').localeCompare(String(b.fleetName || ''));
+    if (fleetSort) return fleetSort;
+    const starbaseSort = String(a.starbase || '').localeCompare(String(b.starbase || ''));
+    return starbaseSort || String(a.rawMaterial || '').localeCompare(String(b.rawMaterial || ''));
   });
 
   const activeFleetRows = fleetRows.filter((fleet) => activeMappedFleetKeys.has(fleet.key));
@@ -3653,6 +3795,7 @@ async function fetchEarningsSnapshot(payload) {
     ok: true,
     checkedAt: new Date().toISOString(),
     sduPriceAtl,
+    ammunitionPriceAtl,
     foodPriceAtl,
     fuelPriceAtl,
     atlasPerSol,
@@ -3662,6 +3805,7 @@ async function fetchEarningsSnapshot(payload) {
     atlasUsdPrice: prices.atlasUsdPrice,
     atlasPerSolSource: prices.atlasPerSolSource,
     sduPriceSource: 'Aephia /gm/resource pricingATL.priceATL',
+    miningPriceSource: 'Aephia /gm/resource pricingATL.priceATL',
     sduPriceHistoryAvailable: false,
     shipStatsSource: sot.source,
     fleetCount: fleetRows.length,
@@ -3679,8 +3823,15 @@ async function fetchEarningsSnapshot(payload) {
     totalExpectedSduValueAtl: sduPriceAtl != null ? totalExpectedSduPerScan * sduPriceAtl : null,
     rentalAtlasPerDay,
     scanningError,
+    miningError,
+    activeMiningFleetCount: activeMiningFleetKeys.size,
+    activeMappedMiningFleetCount: activeMappedMiningFleetKeys.size,
+    miningRowCount: mining.length,
+    totalMined,
+    totalMiningRevenueAtlas: totalMiningRevenueCount > 0 ? totalMiningRevenueAtlas : null,
     fleets: fleetRows,
     rows,
+    miningRows: mining,
   };
 }
 

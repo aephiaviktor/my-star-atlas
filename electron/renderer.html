@@ -811,8 +811,63 @@
           </div>
 
           <div class="earnings-panel" data-earnings-panel="mining">
-            <section class="work-surface quiet-panel">
-              <h2>Mining</h2>
+            <div class="dashboard-grid earnings-metrics-grid">
+              <section class="metric-card">
+                <span class="metric-label">Ammo Price</span>
+                <strong id="earnings-mining-ammo-price-value">--</strong>
+                <small id="earnings-mining-ammo-price-note">Awaiting Aephia data</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Mined</span>
+                <strong id="earnings-mining-mined-value">--</strong>
+                <small id="earnings-mining-mined-note">Awaiting Influx data</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Revenue</span>
+                <strong id="earnings-mining-revenue-value">--</strong>
+                <small id="earnings-mining-revenue-note">Awaiting price data</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Rental Cost / Day in ATLAS</span>
+                <strong id="earnings-mining-rental-value">--</strong>
+                <small id="earnings-mining-rental-note">Awaiting rental decode</small>
+              </section>
+            </div>
+
+            <section class="work-surface earnings-chart-surface">
+              <div class="earnings-chart-header">
+                <h3>Mining Fleets Net Profit</h3>
+              </div>
+              <div id="earnings-mining-net-profit-chart" class="earnings-net-profit-chart" aria-label="Mining fleets net profit over the last 14 days"></div>
+            </section>
+
+            <section class="work-surface earnings-surface">
+              <div id="earnings-mining-sync-status" class="fleet-sync-status" role="status">Awaiting mining earnings data</div>
+              <div class="fleet-table-wrap">
+                <table class="fleet-table earnings-table">
+                  <thead id="earnings-mining-table-head">
+                    <tr>
+                      <th scope="col">Date</th>
+                      <th scope="col">Fleet</th>
+                      <th scope="col">Txs Daily</th>
+                      <th scope="col">Starbase</th>
+                      <th scope="col">Raw Material</th>
+                      <th scope="col">Mined</th>
+                      <th scope="col">Revenue</th>
+                      <th scope="col">Ammo Costs</th>
+                      <th scope="col">RENTAL COSTS</th>
+                      <th scope="col">Total Costs</th>
+                      <th scope="col">Net Profit</th>
+                      <th scope="col">Profit Margin</th>
+                    </tr>
+                  </thead>
+                  <tbody id="earnings-mining-table-body">
+                    <tr class="empty-row">
+                      <td colspan="12">No mining earnings data loaded</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </section>
           </div>
           <div class="earnings-panel" data-earnings-panel="cargo">
