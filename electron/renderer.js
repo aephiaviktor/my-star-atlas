@@ -3694,14 +3694,24 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
     const value = Number(row.netProfitAtlas);
     if (!day || !Number.isFinite(value) || value === 0) continue;
     const label = getSegmentLabel(row);
-    const segment = {
-      fleet: label,
-      color: getEarningsFleetColor(row, colorMap, getSegmentLabel),
-      value,
-    };
-    day.segments.push(segment);
-    if (value > 0) day.positiveTotal += value;
-    else day.negativeTotal += value;
+    let segment = day.segments.find((item) => item.fleet === label);
+    if (!segment) {
+      segment = {
+        fleet: label,
+        color: getEarningsFleetColor(row, colorMap, getSegmentLabel),
+        value: 0,
+      };
+      day.segments.push(segment);
+    }
+    segment.value += value;
+  }
+  for (const day of days) {
+    day.positiveTotal = 0;
+    day.negativeTotal = 0;
+    for (const segment of day.segments) {
+      if (segment.value > 0) day.positiveTotal += segment.value;
+      else day.negativeTotal += segment.value;
+    }
   }
 
   const maxPositive = Math.max(0, ...days.map((day) => day.positiveTotal));

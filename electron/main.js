@@ -3530,8 +3530,7 @@ ${scopeFilterFlux}
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const key = `${isoDate}\n${fleet}`;
-    const current = txDailyByDayFleet.get(key) || { count: 0, txCostSol: 0 };
-    current.count += 1;
+    const current = txDailyByDayFleet.get(key) || { txCostSol: 0 };
     current.txCostSol += value;
     txDailyByDayFleet.set(key, current);
   }
@@ -3554,13 +3553,57 @@ ${scopeFilterFlux}
   }
 
   for (const row of rowsByKey.values()) {
-    const txDaily = txDailyByDayFleet.get(`${row.isoDate}\n${row.fleet}`) || { count: 0, txCostSol: 0 };
-    row.txsDaily = txDaily.count;
+    const txDaily = txDailyByDayFleet.get(`${row.isoDate}\n${row.fleet}`) || { txCostSol: 0 };
     row.txCostSol = txDaily.txCostSol;
   }
 
   return Array.from(rowsByKey.values())
     .filter((row) => row.mined > 0 || row.burnedAmmo > 0 || row.burnedFood > 0 || row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0);
+}
+
+async function fetchFleetSignatureDailyCounts(connection, fleetKeys, includedDays) {
+  const uniqueFleetKeys = Array.from(new Set(fleetKeys.filter(Boolean)));
+  if (!uniqueFleetKeys.length) return new Map();
+
+  const oldestIsoDate = Array.from(includedDays).sort()[0];
+  const oldestStartMs = Date.parse(`${oldestIsoDate}T00:00:00.000Z`);
+  const counts = new Map();
+
+  for (const fleetKey of uniqueFleetKeys) {
+    let publicKey;
+    try {
+      publicKey = new PublicKey(fleetKey);
+    } catch (_error) {
+      continue;
+    }
+
+    let before;
+    for (let page = 0; page < 6; page += 1) {
+      const options = before ? { limit: 1000, before } : { limit: 1000 };
+      const signatures = await connection.getSignaturesForAddress(publicKey, options, 'confirmed');
+      if (!signatures.length) break;
+
+      let reachedOlderThanWindow = false;
+      for (const signature of signatures) {
+        if (!signature.blockTime) continue;
+        const blockMs = signature.blockTime * 1000;
+        if (blockMs < oldestStartMs) {
+          reachedOlderThanWindow = true;
+          continue;
+        }
+        const isoDate = getUtcDateKey(new Date(blockMs));
+        if (!includedDays.has(isoDate)) continue;
+        const key = `${isoDate}\n${fleetKey}`;
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+
+      if (reachedOlderThanWindow || signatures.length < 1000) break;
+      before = signatures[signatures.length - 1]?.signature;
+      if (!before) break;
+    }
+  }
+
+  return counts;
 }
 
 async function fetchEarningsSnapshot(payload) {
@@ -3790,6 +3833,15 @@ async function fetchEarningsSnapshot(payload) {
       rentalRateAtlasPerDay,
     };
   });
+  const miningSignatureCounts = await fetchFleetSignatureDailyCounts(
+    connection,
+    mining.map((row) => row.fleetAccount).filter(Boolean),
+    new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)))
+  );
+  for (const row of mining) {
+    if (!row.fleetAccount || !row.isoDate) continue;
+    row.txsDaily = miningSignatureCounts.get(`${row.isoDate}\n${row.fleetAccount}`) || 0;
+  }
 
   rows.sort((a, b) => {
     const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));
