@@ -3561,6 +3561,101 @@ ${scopeFilterFlux}
     .filter((row) => row.mined > 0 || row.burnedAmmo > 0 || row.burnedFood > 0 || row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0);
 }
 
+async function fetchCargoEarningsRows(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
+    return [];
+  }
+
+  const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
+  const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
+  const cargoFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "movement")
+  |> filter(fn: (r) => r._field == "burnedFuel")
+  |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
+  |> filter(fn: (r) => exists r.fleet)
+  |> filter(fn: (r) => exists r.starbase)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["fleet", "assignment", "starbase", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["fleet", "assignment", "starbase", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet", "assignment", "starbase"])`;
+  const txDailyFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._field == "txCostSol")
+  |> filter(fn: (r) => exists r.fleet)
+  |> keep(columns: ["fleet", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet"])`;
+
+  const rowsByKey = new Map();
+  const txDailyByDayFleet = new Map();
+  const ensureRow = (isoDate, fleet, assignment, date) => {
+    const key = `${isoDate}\n${fleet}\n${assignment}`;
+    if (!rowsByKey.has(key)) {
+      rowsByKey.set(key, {
+        fleet,
+        assignment,
+        isoDate,
+        label: formatShortUtcDate(date),
+        starbases: new Set(),
+        burnedFuel: 0,
+        txCostSol: 0,
+        txsDaily: 0,
+      });
+    }
+    return rowsByKey.get(key);
+  };
+
+  const [cargoCsv, txDailyCsv] = await Promise.all([
+    queryInfluxFlux(settings, cargoFlux),
+    queryInfluxFlux(settings, txDailyFlux),
+  ]);
+
+  for (const row of parseInfluxCsv(txDailyCsv)) {
+    const fleet = String(row.fleet || '').trim();
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const key = `${isoDate}\n${fleet}`;
+    const current = txDailyByDayFleet.get(key) || { txCostSol: 0 };
+    current.txCostSol += value;
+    txDailyByDayFleet.set(key, current);
+  }
+
+  for (const row of parseInfluxCsv(cargoCsv)) {
+    const fleet = String(row.fleet || '').trim();
+    const assignment = String(row.assignment || '').trim();
+    const starbase = resolveStarbaseName(row, coordinateMap);
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!fleet || !assignment || !starbase || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, fleet, assignment, date);
+    entry.burnedFuel += value;
+    entry.starbases.add(starbase);
+  }
+
+  for (const row of rowsByKey.values()) {
+    const txDaily = txDailyByDayFleet.get(`${row.isoDate}\n${row.fleet}`) || { txCostSol: 0 };
+    row.txCostSol = txDaily.txCostSol;
+  }
+
+  return Array.from(rowsByKey.values())
+    .map((row) => ({
+      ...row,
+      starbases: Array.from(row.starbases).sort((a, b) => a.localeCompare(b)),
+    }))
+    .filter((row) => row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0);
+}
+
 async function fetchFleetSignatureDailyCounts(connection, fleetKeys, includedDays) {
   const uniqueFleetKeys = Array.from(new Set(fleetKeys.filter(Boolean)));
   if (!uniqueFleetKeys.length) return new Map();
@@ -3725,6 +3820,8 @@ async function fetchEarningsSnapshot(payload) {
   let scanningError = '';
   let miningRows = [];
   let miningError = '';
+  let cargoRows = [];
+  let cargoError = '';
   try {
     scanningRows = await fetchScanningEarningsRows(settings);
   } catch (error) {
@@ -3734,6 +3831,11 @@ async function fetchEarningsSnapshot(payload) {
     miningRows = await fetchMiningEarningsRows(settings);
   } catch (error) {
     miningError = String(error?.message || error || 'mining_rows_unavailable');
+  }
+  try {
+    cargoRows = await fetchCargoEarningsRows(settings);
+  } catch (error) {
+    cargoError = String(error?.message || error || 'cargo_rows_unavailable');
   }
 
   const activeFleetKeys = new Set();
@@ -3843,6 +3945,48 @@ async function fetchEarningsSnapshot(payload) {
     row.txsDaily = miningSignatureCounts.get(`${row.isoDate}\n${row.fleetAccount}`) || 0;
   }
 
+  const activeCargoFleetKeys = new Set();
+  const activeMappedCargoFleetKeys = new Set();
+  const cargo = cargoRows.map((cargoRow) => {
+    const fleet = fleetByLabel.get(normalizeFleetLabel(cargoRow.fleet));
+    const activeKey = fleet?.key || normalizeFleetLabel(cargoRow.fleet);
+    activeCargoFleetKeys.add(activeKey);
+    if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
+    const fuelCostsAtlas = fuelPriceAtl != null ? cargoRow.burnedFuel * fuelPriceAtl : null;
+    const txsCostsAtlas = atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null;
+    const costParts = [fuelCostsAtlas, txsCostsAtlas].filter((value) => Number.isFinite(value));
+    const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
+    const netProfitAtlas = Number.isFinite(totalCostsAtlas) ? -totalCostsAtlas : null;
+    return {
+      ...cargoRow,
+      fleetName: cargoRow.fleet,
+      fleetAccount: fleet?.key || '',
+      rented: fleet?.relationship === 'managed' || fleet?.relationship === 'owned-managed',
+      ownership: fleet?.ownership || '',
+      relationship: fleet?.relationship || '',
+      activity: fleet?.activity || '',
+      ships: fleet?.ships || [],
+      shipTypes: fleet?.shipTypes || 0,
+      starbaseLabel: Array.isArray(cargoRow.starbases) && cargoRow.starbases.length ? cargoRow.starbases.join(', ') : '--',
+      fuelCostsAtlas,
+      txsCostsAtlas,
+      totalCostsAtlas,
+      netProfitAtlas,
+      txsCostsPercent: Number.isFinite(txsCostsAtlas) && Number.isFinite(totalCostsAtlas) && totalCostsAtlas > 0
+        ? (txsCostsAtlas / totalCostsAtlas) * 100
+        : null,
+    };
+  });
+  const cargoSignatureCounts = await fetchFleetSignatureDailyCounts(
+    connection,
+    cargo.map((row) => row.fleetAccount).filter(Boolean),
+    new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)))
+  );
+  for (const row of cargo) {
+    if (!row.fleetAccount || !row.isoDate) continue;
+    row.txsDaily = cargoSignatureCounts.get(`${row.isoDate}\n${row.fleetAccount}`) || 0;
+  }
+
   rows.sort((a, b) => {
     const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));
     return dateSort || String(a.fleetName || '').localeCompare(String(b.fleetName || ''));
@@ -3854,6 +3998,12 @@ async function fetchEarningsSnapshot(payload) {
     if (fleetSort) return fleetSort;
     const starbaseSort = String(a.starbase || '').localeCompare(String(b.starbase || ''));
     return starbaseSort || String(a.rawMaterial || '').localeCompare(String(b.rawMaterial || ''));
+  });
+  cargo.sort((a, b) => {
+    const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));
+    if (dateSort) return dateSort;
+    const fleetSort = String(a.fleetName || '').localeCompare(String(b.fleetName || ''));
+    return fleetSort || String(a.assignment || '').localeCompare(String(b.assignment || ''));
   });
 
   const activeFleetRows = fleetRows.filter((fleet) => activeMappedFleetKeys.has(fleet.key));
@@ -3948,9 +4098,13 @@ async function fetchEarningsSnapshot(payload) {
     rentalAtlasPerDay,
     scanningError,
     miningError,
+    cargoError,
     activeMiningFleetCount: activeMiningFleetKeys.size,
     activeMappedMiningFleetCount: activeMappedMiningFleetKeys.size,
     miningRowCount: mining.length,
+    activeCargoFleetCount: activeCargoFleetKeys.size,
+    activeMappedCargoFleetCount: activeMappedCargoFleetKeys.size,
+    cargoRowCount: cargo.length,
     totalMined,
     totalMiningRevenueAtlas: totalMiningRevenueCount > 0 ? totalMiningRevenueAtlas : null,
     todayMined: todayMiningTotals.mined,
@@ -3961,6 +4115,7 @@ async function fetchEarningsSnapshot(payload) {
     fleets: fleetRows,
     rows,
     miningRows: mining,
+    cargoRows: cargo,
   };
 }
 

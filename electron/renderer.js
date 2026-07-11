@@ -4,6 +4,7 @@ const sectionLabels = {
   production: 'Production/Consumption',
   fleet: 'My Fleet',
   earnings: 'Earnings',
+  optimization: 'Optimization',
 };
 
 const subtabLabels = {
@@ -71,6 +72,11 @@ const earningsMiningRevenueValue = document.querySelector('#earnings-mining-reve
 const earningsMiningRevenueNote = document.querySelector('#earnings-mining-revenue-note');
 const earningsMiningRentalValue = document.querySelector('#earnings-mining-rental-value');
 const earningsMiningRentalNote = document.querySelector('#earnings-mining-rental-note');
+const earningsCargoSyncStatus = document.querySelector('#earnings-cargo-sync-status');
+const earningsCargoTableHead = document.querySelector('#earnings-cargo-table-head');
+const earningsCargoTableBody = document.querySelector('#earnings-cargo-table-body');
+const earningsCargoNetProfitChart = document.querySelector('#earnings-cargo-net-profit-chart');
+const earningsCargoCostBreakdownChart = document.querySelector('#earnings-cargo-cost-breakdown-chart');
 const sduTotalValue = document.querySelector('#sdu-total-value');
 const sduTotalNote = document.querySelector('#sdu-total-note');
 const sduAvgValue = document.querySelector('#sdu-avg-value');
@@ -314,14 +320,31 @@ const miningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
 
+const cargoEarningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'color', label: 'Color' }),
+  Object.freeze({ id: 'ownership', label: 'Ownership' }),
+  Object.freeze({ id: 'ships', label: 'Ships' }),
+  Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
+  Object.freeze({ id: 'assignment', label: 'Assignment' }),
+  Object.freeze({ id: 'starbases', label: 'Starbases' }),
+  Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
+  Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
+  Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
+  Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
+  Object.freeze({ id: 'txsCostsPct', label: 'Txs Costs Pct' }),
+  Object.freeze({ id: 'account', label: 'Account' }),
+]);
+
 const earningsColumnsBySubtab = Object.freeze({
   scanning: scanningEarningsOptionalColumns,
   mining: miningEarningsOptionalColumns,
+  cargo: cargoEarningsOptionalColumns,
 });
 
 const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
+  cargo: new Set(['txsDaily', 'assignment', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'netProfit', 'txsCostsPct']),
 };
 
 const earningsFleetPalette = Object.freeze([
@@ -3538,6 +3561,10 @@ function setEarningsMiningStatus(message) {
   setText(earningsMiningSyncStatus, message);
 }
 
+function setEarningsCargoStatus(message) {
+  setText(earningsCargoSyncStatus, message);
+}
+
 function renderEarningsEmpty(message) {
   latestEarningsResult = null;
   renderEarningsHeader('scanning');
@@ -3583,6 +3610,21 @@ function renderEarningsMiningEmpty(message) {
   cell.textContent = message;
   row.appendChild(cell);
   earningsMiningTableBody.appendChild(row);
+}
+
+function renderEarningsCargoEmpty(message) {
+  renderEarningsHeader('cargo');
+  renderEarningsNetProfitChart(null, new Map(), { target: earningsCargoNetProfitChart, label: 'Cargo fleet net profit in ATLAS by day' });
+  renderEarningsCargoCostBreakdownChart({ rows: [] });
+  if (!earningsCargoTableBody) return;
+  earningsCargoTableBody.textContent = '';
+  const row = document.createElement('tr');
+  row.className = 'empty-row';
+  const cell = document.createElement('td');
+  cell.colSpan = getEarningsTableColSpan('cargo');
+  cell.textContent = message;
+  row.appendChild(cell);
+  earningsCargoTableBody.appendChild(row);
 }
 
 function formatAtlas(value, digits = 2) {
@@ -3645,6 +3687,17 @@ function buildEarningsFleetColorMap(rows, offset = 0, getLabel = getEarningsFlee
   names.forEach((name, index) => {
     const paletteIndex = index + offset;
     map.set(name, earningsFleetPalette[paletteIndex] || getGeneratedFleetColor(paletteIndex));
+  });
+  return map;
+}
+
+function buildEarningsAssetColorMap(rows, getLabel) {
+  const names = Array.from(new Set((Array.isArray(rows) ? rows : []).map(getLabel).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b)
+  );
+  const map = new Map();
+  names.forEach((name, index) => {
+    map.set(name, getAssetChartColor(name, index + 8));
   });
   return map;
 }
@@ -3851,6 +3904,142 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
   });
 }
 
+function renderEarningsCargoCostBreakdownChart(result) {
+  const target = earningsCargoCostBreakdownChart;
+  if (!target) return;
+  target.textContent = '';
+  const rows = Array.isArray(result?.rows) ? result.rows : [];
+  const days = getLastUtcDayLabels(14).map((day) => ({ ...day, txsCostsAtlas: 0, fuelCostsAtlas: 0 }));
+  const dayByIso = new Map(days.map((day) => [day.isoDate, day]));
+  for (const row of rows) {
+    const day = dayByIso.get(row.isoDate);
+    if (!day) continue;
+    day.txsCostsAtlas += Number(row.txsCostsAtlas) || 0;
+    day.fuelCostsAtlas += Number(row.fuelCostsAtlas) || 0;
+  }
+  const maxTotal = Math.max(0, ...days.map((day) => day.txsCostsAtlas + day.fuelCostsAtlas));
+  if (maxTotal <= 0) {
+    const empty = document.createElement('div');
+    empty.className = 'earnings-chart-empty';
+    empty.textContent = 'No cargo costs available';
+    target.appendChild(empty);
+    return;
+  }
+
+  const niceCeil = (value) => {
+    if (!Number.isFinite(value) || value <= 0) return 1;
+    const power = 10 ** Math.floor(Math.log10(value));
+    const scaled = value / power;
+    const nice = scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10;
+    return nice * power;
+  };
+
+  const width = 1040;
+  const height = 320;
+  const margin = { top: 18, right: 18, bottom: 42, left: 96 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const yMax = niceCeil(maxTotal);
+  const yScale = (value) => margin.top + ((yMax - value) / yMax) * plotHeight;
+  const slotWidth = plotWidth / days.length;
+  const barWidth = Math.min(40, slotWidth * 0.58);
+  const svg = createSvgElement('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': 'Cargo total costs in ATLAS by day',
+  });
+
+  const tickValues = Array.from({ length: 5 }, (_value, index) => (index * yMax) / 4);
+  for (const tickValue of tickValues) {
+    const y = yScale(tickValue);
+    svg.appendChild(createSvgElement('line', {
+      x1: margin.left,
+      x2: width - margin.right,
+      y1: y,
+      y2: y,
+      class: 'earnings-chart-gridline',
+    }));
+    const label = createSvgElement('text', {
+      x: margin.left - 12,
+      y: y + 4,
+      class: 'earnings-chart-y-label',
+      'text-anchor': 'end',
+    });
+    label.textContent = formatCompactNumber(tickValue);
+    svg.appendChild(label);
+  }
+
+  const segments = [
+    { key: 'txsCostsAtlas', label: 'Txs Costs', color: '#22d3ee' },
+    { key: 'fuelCostsAtlas', label: 'Fuel Costs', color: getAssetChartColor('Fuel', 3) },
+  ];
+
+  days.forEach((day, index) => {
+    const x = margin.left + index * slotWidth + (slotWidth - barWidth) / 2;
+    let stack = 0;
+    for (const segment of segments) {
+      const value = Number(day[segment.key]) || 0;
+      if (value <= 0) continue;
+      const yStart = yScale(stack);
+      const yEnd = yScale(stack + value);
+      const rect = createSvgElement('rect', {
+        x,
+        y: yEnd,
+        width: barWidth,
+        height: Math.max(1, yStart - yEnd),
+        fill: segment.color,
+        rx: 2,
+        class: 'earnings-chart-segment',
+        'data-fleet': segment.label,
+        'data-net-profit': formatAtlasNumber(value, 0),
+      });
+      const title = createSvgElement('title');
+      title.textContent = `${day.label}\n${segment.label}: ${formatAtlasNumber(value, 0)}`;
+      rect.appendChild(title);
+      svg.appendChild(rect);
+      stack += value;
+    }
+
+    const label = createSvgElement('text', {
+      x: x + barWidth / 2,
+      y: height - 14,
+      class: 'earnings-chart-x-label',
+      'text-anchor': 'middle',
+    });
+    label.textContent = day.label;
+    svg.appendChild(label);
+  });
+
+  const yAxisLabel = createSvgElement('text', {
+    x: 26,
+    y: margin.top + plotHeight / 2,
+    class: 'earnings-chart-axis-label',
+    transform: `rotate(-90 26 ${margin.top + plotHeight / 2})`,
+    'text-anchor': 'middle',
+  });
+  yAxisLabel.textContent = 'ATLAS';
+  svg.appendChild(yAxisLabel);
+  target.appendChild(svg);
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'earnings-chart-tooltip';
+  target.appendChild(tooltip);
+  svg.addEventListener('mousemove', (event) => {
+    const hovered = event.target?.closest?.('.earnings-chart-segment');
+    if (!hovered) {
+      tooltip.style.display = 'none';
+      return;
+    }
+    tooltip.textContent = `${hovered.dataset.fleet || 'Cost'}\nATLAS: ${hovered.dataset.netProfit || '--'}`;
+    tooltip.style.display = 'block';
+    tooltip.style.left = `${event.clientX + 14}px`;
+    tooltip.style.top = `${event.clientY + 14}px`;
+  });
+  svg.addEventListener('mouseleave', () => {
+    tooltip.style.display = 'none';
+  });
+}
+
 function describeFleetShips(fleet) {
   const ships = Array.isArray(fleet.ships) ? fleet.ships : [];
   if (!ships.length) return 'No ship composition';
@@ -3918,7 +4107,7 @@ function getEarningsTableColSpan(subtab = currentEarningsSubtab) {
 
 function renderEarningsColumnControls() {
   if (!earningsColumnControlsContainer) return;
-  const subtab = currentEarningsSubtab === 'mining' ? 'mining' : 'scanning';
+  const subtab = earningsColumnsBySubtab[currentEarningsSubtab] ? currentEarningsSubtab : 'scanning';
   const selected = earningsColumnState[subtab] || earningsColumnState.scanning;
   earningsColumnControlsContainer.textContent = '';
   for (const column of getEarningsColumns(subtab)) {
@@ -3932,6 +4121,8 @@ function renderEarningsColumnControls() {
       else selected.delete(column.id);
       if (subtab === 'mining') {
         renderEarningsMining(latestEarningsResult);
+      } else if (subtab === 'cargo') {
+        renderEarningsCargo(latestEarningsResult);
       } else if (latestEarningsResult) {
         renderEarnings(latestEarningsResult);
       } else {
@@ -3946,7 +4137,11 @@ function renderEarningsColumnControls() {
 }
 
 function renderEarningsHeader(subtab = 'scanning') {
-  const tableHead = subtab === 'mining' ? earningsMiningTableHead : earningsTableHead;
+  const tableHead = subtab === 'mining'
+    ? earningsMiningTableHead
+    : subtab === 'cargo'
+      ? earningsCargoTableHead
+      : earningsTableHead;
   if (!tableHead) return;
   const row = document.createElement('tr');
   const visibleColumns = getVisibleEarningsColumns(subtab);
@@ -4029,13 +4224,31 @@ function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
   return createTextCell('--');
 }
 
+function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
+  if (columnId === 'color') return createColorCell(entry, colorMap);
+  if (columnId === 'ownership') return createOwnershipCell(entry);
+  if (columnId === 'ships') return createShipsCell(entry);
+  if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
+  if (columnId === 'assignment') return createTextCell(entry.assignment || '--');
+  if (columnId === 'starbases') return createTextCell(entry.starbaseLabel || '--');
+  if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas));
+  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
+  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
+  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
+  if (columnId === 'txsCostsPct') return createTextCell(formatPercentNumber(entry.txsCostsPercent, 0));
+  if (columnId === 'account') return createAccountCell(entry.fleetAccount);
+  return createTextCell('--');
+}
+
 function renderEarnings(result) {
   latestEarningsResult = result;
   if (!result?.ok) {
     renderEarningsEmpty(result?.error || 'Earnings sync failed');
     renderEarningsMiningEmpty(result?.error || 'Earnings sync failed');
+    renderEarningsCargoEmpty(result?.error || 'Earnings sync failed');
     setEarningsStatus('Earnings sync failed');
     setEarningsMiningStatus('Earnings sync failed');
+    setEarningsCargoStatus('Earnings sync failed');
     return;
   }
   setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'earnings', result);
@@ -4074,6 +4287,7 @@ function renderEarnings(result) {
     row.appendChild(cell);
     earningsTableBody.appendChild(row);
     renderEarningsMining(result);
+    renderEarningsCargo(result);
     return;
   }
   const visibleColumns = getVisibleEarningsColumns('scanning');
@@ -4090,6 +4304,7 @@ function renderEarnings(result) {
     earningsTableBody.appendChild(row);
   }
   renderEarningsMining(result);
+  renderEarningsCargo(result);
 }
 
 function renderEarningsMining(result) {
@@ -4107,7 +4322,7 @@ function renderEarningsMining(result) {
     colorMap,
     { target: earningsMiningNetProfitChart, label: 'Mining fleet net profit in ATLAS by day' }
   );
-  const materialColorMap = buildEarningsFleetColorMap(rows, 14, (row) => row.rawMaterial || 'Unknown material');
+  const materialColorMap = buildEarningsAssetColorMap(rows, (row) => row.rawMaterial || 'Unknown material');
   renderEarningsNetProfitChart(
     { ...result, rows },
     materialColorMap,
@@ -4183,13 +4398,65 @@ function renderEarningsMining(result) {
   }
 }
 
+function renderEarningsCargo(result) {
+  if (!result?.ok) {
+    renderEarningsCargoEmpty(result?.error || 'Cargo earnings sync failed');
+    setEarningsCargoStatus('Cargo earnings sync failed');
+    return;
+  }
+
+  const rows = Array.isArray(result.cargoRows) ? result.cargoRows : [];
+  const colorMap = buildEarningsFleetColorMap(rows, 11);
+  renderEarningsHeader('cargo');
+  renderEarningsNetProfitChart(
+    { ...result, rows },
+    colorMap,
+    { target: earningsCargoNetProfitChart, label: 'Cargo fleet net profit in ATLAS by day' }
+  );
+  renderEarningsCargoCostBreakdownChart({ ...result, rows });
+  setEarningsCargoStatus(
+    `${formatWholeNumber(result.cargoRowCount || 0)} cargo rows from ${formatWholeNumber(result.activeCargoFleetCount || 0)} active fleets at ${formatCheckedAt(result.checkedAt)}${
+      result.cargoError ? ' · Influx cargo rows unavailable' : ''
+    }`
+  );
+
+  if (!earningsCargoTableBody) return;
+  earningsCargoTableBody.textContent = '';
+  if (!rows.length) {
+    const row = document.createElement('tr');
+    row.className = 'empty-row';
+    const cell = document.createElement('td');
+    cell.colSpan = getEarningsTableColSpan('cargo');
+    cell.textContent = `No ${normalizeFaction(latestSettings?.faction)} cargo fleets moved in the last 14 days`;
+    row.appendChild(cell);
+    earningsCargoTableBody.appendChild(row);
+    return;
+  }
+
+  const visibleColumns = getVisibleEarningsColumns('cargo');
+  const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
+  const remainingColumns = visibleColumns.filter((column) => column.id !== 'color');
+  for (const entry of rows) {
+    const row = document.createElement('tr');
+    row.appendChild(createTextCell(entry.label || entry.isoDate));
+    if (colorColumnVisible) row.appendChild(createColorCell(entry, colorMap));
+    row.appendChild(createEarningsFleetCell(entry));
+    for (const column of remainingColumns) {
+      row.appendChild(createCargoEarningsOptionalCell(entry, column.id, colorMap));
+    }
+    earningsCargoTableBody.appendChild(row);
+  }
+}
+
 async function refreshEarnings() {
   const settings = latestSettings || getFormPayload();
   if (!getActivePlayerProfile(settings)) {
     renderEarningsEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
     renderEarningsMiningEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
+    renderEarningsCargoEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
     setEarningsStatus('Awaiting player profile');
     setEarningsMiningStatus('Awaiting player profile');
+    setEarningsCargoStatus('Awaiting player profile');
     return;
   }
 
@@ -4200,8 +4467,10 @@ async function refreshEarnings() {
   } else {
     renderEarningsEmpty('Loading earnings data...');
     renderEarningsMiningEmpty('Loading mining earnings data...');
+    renderEarningsCargoEmpty('Loading cargo earnings data...');
     setEarningsStatus('Loading earnings data...');
     setEarningsMiningStatus('Loading mining earnings data...');
+    setEarningsCargoStatus('Loading cargo earnings data...');
   }
 
   try {
@@ -4212,8 +4481,10 @@ async function refreshEarnings() {
     if (!cached) {
       renderEarningsEmpty('Earnings data unavailable');
       renderEarningsMiningEmpty('Mining earnings data unavailable');
+      renderEarningsCargoEmpty('Cargo earnings data unavailable');
       setEarningsStatus('Earnings sync failed');
       setEarningsMiningStatus('Earnings sync failed');
+      setEarningsCargoStatus('Earnings sync failed');
     }
   }
 }
@@ -4303,11 +4574,13 @@ function setActiveEarningsSubtab(subtab) {
   });
   renderEarningsColumnControls();
   updateTitle();
-  if (subtab === 'scanning' && !latestEarningsResult) {
+  if ((subtab === 'scanning' || subtab === 'mining' || subtab === 'cargo') && !latestEarningsResult) {
     refreshEarnings();
   }
   if (subtab === 'mining' && latestEarningsResult) {
     renderEarningsMining(latestEarningsResult);
+  } else if (subtab === 'cargo' && latestEarningsResult) {
+    renderEarningsCargo(latestEarningsResult);
   }
 }
 

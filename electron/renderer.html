@@ -31,6 +31,10 @@
             <span class="nav-icon">EA</span>
             <span>Earnings</span>
           </button>
+          <button class="nav-button nav-purple" type="button" data-section="optimization" aria-pressed="false">
+            <span class="nav-icon">OP</span>
+            <span>Optimization</span>
+          </button>
           <div class="nav-subsection" id="earnings-column-controls" aria-label="Earnings table columns">
             <span class="nav-subsection-title">Columns</span>
             <label><input type="checkbox" data-earnings-column="color" /> Color</label>
@@ -740,6 +744,12 @@
           </section>
         </section>
 
+        <section class="section-view" data-section-panel="optimization">
+          <section class="work-surface quiet-panel">
+            <h2>Optimization</h2>
+          </section>
+        </section>
+
         <section class="section-view" data-section-panel="earnings">
           <div class="subtab-bar" role="tablist" aria-label="Earnings views">
             <button class="earnings-subtab-button subtab-button active" type="button" data-earnings-subtab="scanning" aria-selected="true">Scanning</button>
@@ -900,8 +910,51 @@
             </section>
           </div>
           <div class="earnings-panel" data-earnings-panel="cargo">
-            <section class="work-surface quiet-panel">
-              <h2>Cargo</h2>
+            <section class="work-surface earnings-chart-surface" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Cargo: Net Profit by Fleet</span>
+              </button>
+              <div class="earnings-chart-body">
+                <div id="earnings-cargo-net-profit-chart" class="earnings-net-profit-chart" aria-label="Cargo net profit by fleet over the last 14 days"></div>
+              </div>
+            </section>
+
+            <section class="work-surface earnings-chart-surface" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Cargo: Total Costs Breakdown</span>
+              </button>
+              <div class="earnings-chart-body">
+                <div id="earnings-cargo-cost-breakdown-chart" class="earnings-net-profit-chart" aria-label="Cargo total costs by day"></div>
+              </div>
+            </section>
+
+            <section class="work-surface earnings-surface">
+              <div id="earnings-cargo-sync-status" class="fleet-sync-status" role="status">Awaiting cargo earnings data</div>
+              <div class="fleet-table-wrap">
+                <table class="fleet-table earnings-table">
+                  <thead id="earnings-cargo-table-head">
+                    <tr>
+                      <th scope="col">Date</th>
+                      <th scope="col">Fleet</th>
+                      <th scope="col">Txs Daily</th>
+                      <th scope="col">Assignment</th>
+                      <th scope="col">Starbases</th>
+                      <th scope="col">Fuel Costs</th>
+                      <th scope="col">Txs Costs</th>
+                      <th scope="col">Total Costs</th>
+                      <th scope="col">Net Profit</th>
+                      <th scope="col">Txs Costs Pct</th>
+                    </tr>
+                  </thead>
+                  <tbody id="earnings-cargo-table-body">
+                    <tr class="empty-row">
+                      <td colspan="10">No cargo earnings data loaded</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </section>
           </div>
           <div class="earnings-panel" data-earnings-panel="crafting">
