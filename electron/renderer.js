@@ -274,18 +274,18 @@ const scanningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'color', label: 'Color' }),
   Object.freeze({ id: 'ownership', label: 'Ownership' }),
   Object.freeze({ id: 'ships', label: 'Ships' }),
-  Object.freeze({ id: 'sduMax', label: 'SDU MAX' }),
-  Object.freeze({ id: 'atlasPerScan', label: 'ATLAS / SCAN' }),
+  Object.freeze({ id: 'sduMax', label: 'SDU Max' }),
+  Object.freeze({ id: 'atlasPerScan', label: 'Atlas / Scan' }),
   Object.freeze({ id: 'scanAttempts', label: 'Scan Attempts' }),
   Object.freeze({ id: 'successfulScans', label: 'Successful Scans' }),
-  Object.freeze({ id: 'scanSuccessRate', label: 'SCAN SUCCESS RATE' }),
-  Object.freeze({ id: 'averageChance', label: 'AVG CHANCE' }),
+  Object.freeze({ id: 'scanSuccessRate', label: 'Scan Success Rate' }),
+  Object.freeze({ id: 'averageChance', label: 'Avg Chance' }),
   Object.freeze({ id: 'sduFound', label: 'SDU Found' }),
-  Object.freeze({ id: 'revenue', label: 'REVENUE' }),
+  Object.freeze({ id: 'revenue', label: 'Revenue' }),
   Object.freeze({ id: 'foodCosts', label: 'Food Costs' }),
   Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
-  Object.freeze({ id: 'rental', label: 'RENTAL COSTS' }),
-  Object.freeze({ id: 'txsCosts', label: 'TXS COSTS' }),
+  Object.freeze({ id: 'rental', label: 'Rental Costs' }),
+  Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
@@ -300,9 +300,11 @@ const miningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'rawMaterial', label: 'Raw Material' }),
   Object.freeze({ id: 'mined', label: 'Mined' }),
-  Object.freeze({ id: 'revenue', label: 'REVENUE' }),
+  Object.freeze({ id: 'revenue', label: 'Revenue' }),
   Object.freeze({ id: 'ammoCosts', label: 'Ammo Costs' }),
-  Object.freeze({ id: 'rental', label: 'RENTAL COSTS' }),
+  Object.freeze({ id: 'foodCosts', label: 'Food Costs' }),
+  Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
+  Object.freeze({ id: 'rental', label: 'Rental Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
@@ -316,7 +318,7 @@ const earningsColumnsBySubtab = Object.freeze({
 
 const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
-  mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'rental', 'totalCosts', 'netProfit', 'profitMargin']),
+  mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'totalCosts', 'netProfit', 'profitMargin']),
 };
 
 const earningsFleetPalette = Object.freeze([
@@ -3947,12 +3949,14 @@ function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'ships') return createTextCell(describeFleetShips(entry));
-  if (columnId === 'txsDaily') return createTextCell(entry.txsDailyAtlas == null ? '--' : formatAtlasNumber(entry.txsDailyAtlas, 2));
+  if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
   if (columnId === 'starbase') return createTextCell(entry.starbase);
   if (columnId === 'rawMaterial') return createTextCell(entry.rawMaterial);
   if (columnId === 'mined') return createTextCell(formatWholeNumber(entry.mined || 0));
   if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasNumber(entry.revenueAtlasPerDay, 2));
   if (columnId === 'ammoCosts') return createTextCell(entry.ammoCostsAtlas == null ? '--' : formatAtlasNumber(entry.ammoCostsAtlas, 2));
+  if (columnId === 'foodCosts') return createTextCell(entry.foodCostsAtlas == null ? '--' : formatAtlasNumber(entry.foodCostsAtlas, 2));
+  if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasNumber(entry.fuelCostsAtlas, 2));
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasNumber(entry.totalCostsAtlas, 2));
   if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasNumber(entry.netProfitAtlas, 2));
@@ -3979,14 +3983,14 @@ function renderEarnings(result) {
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
   setText(earningsSduPriceNote, '');
   setText(earningsSduScanValue, `${formatWholeNumber(result.todaySduFound || 0)} | ${formatWholeNumber(result.averageSduFoundPerDay || 0)}`);
-  setText(earningsSduScanNote, '');
+  setText(earningsSduScanNote, 'Today vs Average');
   setText(
     earningsSduValueValue,
     `${result.todayRevenueAtlas == null ? '--' : formatAtlasNumber(result.todayRevenueAtlas, 2)} | ${
       result.averageRevenueAtlasPerDay == null ? '--' : formatAtlasNumber(result.averageRevenueAtlasPerDay, 2)
     }`
   );
-  setText(earningsSduValueNote, '');
+  setText(earningsSduValueNote, 'Today vs Average');
   setText(earningsRentalValue, formatAtlasNumber(result.rentalAtlasPerDay || 0, 2));
   setText(earningsRentalNote, '');
   setEarningsStatus(
@@ -4040,12 +4044,18 @@ function renderEarningsMining(result) {
     { target: earningsMiningNetProfitChart, label: 'Mining fleets net profit in ATLAS by day' }
   );
 
-  setText(earningsMiningAmmoPriceValue, result.ammunitionPriceAtl == null ? '--' : formatAtlas(result.ammunitionPriceAtl, 6));
-  setText(earningsMiningAmmoPriceNote, '');
-  setText(earningsMiningMinedValue, formatWholeNumber(result.totalMined || 0));
-  setText(earningsMiningMinedNote, '');
-  setText(earningsMiningRevenueValue, result.totalMiningRevenueAtlas == null ? '--' : formatAtlasNumber(result.totalMiningRevenueAtlas, 2));
-  setText(earningsMiningRevenueNote, '');
+  const topFleet = result.topMiningNetProfitFleetToday;
+  setText(earningsMiningAmmoPriceValue, topFleet?.fleetName || '--');
+  setText(earningsMiningAmmoPriceNote, topFleet ? `Net Profit: ${formatAtlasNumber(topFleet.netProfitAtlas, 2)}` : 'No net profit today');
+  setText(earningsMiningMinedValue, `${formatWholeNumber(result.todayMined || 0)} | ${formatWholeNumber(result.averageMinedPerDay || 0)}`);
+  setText(earningsMiningMinedNote, 'Today vs Average');
+  setText(
+    earningsMiningRevenueValue,
+    `${result.todayMiningRevenueAtlas == null ? '--' : formatAtlasNumber(result.todayMiningRevenueAtlas, 2)} | ${
+      result.averageMiningRevenueAtlasPerDay == null ? '--' : formatAtlasNumber(result.averageMiningRevenueAtlasPerDay, 2)
+    }`
+  );
+  setText(earningsMiningRevenueNote, 'Today vs Average');
   const rentalByFleet = new Map();
   for (const row of rows) {
     const fleetKey = row.fleetAccount || row.fleetName || row.fleet;

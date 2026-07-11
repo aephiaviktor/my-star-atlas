@@ -36,18 +36,18 @@
             <label><input type="checkbox" data-earnings-column="color" /> Color</label>
             <label><input type="checkbox" data-earnings-column="ownership" /> Ownership</label>
             <label><input type="checkbox" data-earnings-column="ships" /> Ships</label>
-            <label><input type="checkbox" data-earnings-column="sduMax" checked /> SDU MAX</label>
-            <label><input type="checkbox" data-earnings-column="atlasPerScan" /> ATLAS / SCAN</label>
+            <label><input type="checkbox" data-earnings-column="sduMax" checked /> SDU Max</label>
+            <label><input type="checkbox" data-earnings-column="atlasPerScan" /> Atlas / Scan</label>
             <label><input type="checkbox" data-earnings-column="scanAttempts" /> Scan Attempts</label>
             <label><input type="checkbox" data-earnings-column="successfulScans" /> Successful Scans</label>
-            <label><input type="checkbox" data-earnings-column="scanSuccessRate" /> SCAN SUCCESS RATE</label>
-            <label><input type="checkbox" data-earnings-column="averageChance" /> AVG CHANCE</label>
+            <label><input type="checkbox" data-earnings-column="scanSuccessRate" /> Scan Success Rate</label>
+            <label><input type="checkbox" data-earnings-column="averageChance" /> Avg Chance</label>
             <label><input type="checkbox" data-earnings-column="sduFound" checked /> SDU Found</label>
             <label><input type="checkbox" data-earnings-column="revenue" checked /> Revenue</label>
             <label><input type="checkbox" data-earnings-column="foodCosts" checked /> Food Costs</label>
             <label><input type="checkbox" data-earnings-column="fuelCosts" checked /> Fuel Costs</label>
             <label><input type="checkbox" data-earnings-column="rental" checked /> Rental Costs</label>
-            <label><input type="checkbox" data-earnings-column="txsCosts" checked /> TXS COSTS</label>
+            <label><input type="checkbox" data-earnings-column="txsCosts" checked /> Txs Costs</label>
             <label><input type="checkbox" data-earnings-column="totalCosts" checked /> Total Costs</label>
             <label><input type="checkbox" data-earnings-column="netProfit" checked /> Net Profit</label>
             <label><input type="checkbox" data-earnings-column="profitMargin" checked /> Profit Margin</label>
@@ -788,13 +788,13 @@
                     <tr>
                       <th scope="col">Date</th>
                       <th scope="col">Fleet</th>
-                      <th scope="col">SDU MAX</th>
+                      <th scope="col">SDU Max</th>
                       <th scope="col">SDU Found</th>
                       <th scope="col">Revenue</th>
                       <th scope="col">Food Costs</th>
                       <th scope="col">Fuel Costs</th>
-                      <th scope="col">RENTAL COSTS</th>
-                      <th scope="col">TXS COSTS</th>
+                      <th scope="col">Rental Costs</th>
+                      <th scope="col">Txs Costs</th>
                       <th scope="col">Total Costs</th>
                       <th scope="col">Net Profit</th>
                       <th scope="col">Profit Margin</th>
@@ -813,9 +813,9 @@
           <div class="earnings-panel" data-earnings-panel="mining">
             <div class="dashboard-grid earnings-metrics-grid">
               <section class="metric-card">
-                <span class="metric-label">Ammo Price</span>
+                <span class="metric-label">Highest Net Profit Fleet</span>
                 <strong id="earnings-mining-ammo-price-value">--</strong>
-                <small id="earnings-mining-ammo-price-note">Awaiting Aephia data</small>
+                <small id="earnings-mining-ammo-price-note">Awaiting mining data</small>
               </section>
               <section class="metric-card">
                 <span class="metric-label">Mined</span>
@@ -855,7 +855,9 @@
                       <th scope="col">Mined</th>
                       <th scope="col">Revenue</th>
                       <th scope="col">Ammo Costs</th>
-                      <th scope="col">RENTAL COSTS</th>
+                      <th scope="col">Food Costs</th>
+                      <th scope="col">Fuel Costs</th>
+                      <th scope="col">Rental Costs</th>
                       <th scope="col">Total Costs</th>
                       <th scope="col">Net Profit</th>
                       <th scope="col">Profit Margin</th>
@@ -863,7 +865,7 @@
                   </thead>
                   <tbody id="earnings-mining-table-body">
                     <tr class="empty-row">
-                      <td colspan="12">No mining earnings data loaded</td>
+                      <td colspan="14">No mining earnings data loaded</td>
                     </tr>
                   </tbody>
                 </table>

@@ -3473,11 +3473,11 @@ async function fetchMiningEarningsRows(settings) {
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
-  const flux = `from(bucket: "${bucket}")
+  const totalsFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
 ${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "mining")
-  |> filter(fn: (r) => r._field == "amount" or r._field == "burnedAmmo" or r._field == "txCostSol")
+  |> filter(fn: (r) => r._field == "amount" or r._field == "burnedAmmo" or r._field == "burnedFood" or r._field == "burnedFuel" or r._field == "txCostSol")
   |> filter(fn: (r) => exists r.fleet)
   |> filter(fn: (r) => exists r.rss)
   |> filter(fn: (r) => exists r.starbase)
@@ -3487,8 +3487,17 @@ ${scopeFilterFlux}
   |> group()
   |> keep(columns: ["fleet", "starbase", "rss", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "starbase", "rss"])`;
+  const txCountFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "mining")
+  |> filter(fn: (r) => r._field == "amount")
+  |> filter(fn: (r) => exists r.fleet)
+  |> keep(columns: ["fleet", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet"])`;
 
   const rowsByKey = new Map();
+  const txCountByDayFleet = new Map();
   const ensureRow = (isoDate, fleet, starbase, rawMaterial, date) => {
     const key = `${isoDate}\n${fleet}\n${starbase}\n${rawMaterial}`;
     if (!rowsByKey.has(key)) {
@@ -3500,14 +3509,31 @@ ${scopeFilterFlux}
         label: formatShortUtcDate(date),
         mined: 0,
         burnedAmmo: 0,
+        burnedFood: 0,
+        burnedFuel: 0,
         txCostSol: 0,
+        txsDaily: 0,
       });
     }
     return rowsByKey.get(key);
   };
 
-  const csv = await queryInfluxFlux(settings, flux);
-  for (const row of parseInfluxCsv(csv)) {
+  const [totalsCsv, txCountCsv] = await Promise.all([
+    queryInfluxFlux(settings, totalsFlux),
+    queryInfluxFlux(settings, txCountFlux),
+  ]);
+
+  for (const row of parseInfluxCsv(txCountCsv)) {
+    const fleet = String(row.fleet || '').trim();
+    const date = new Date(row._time);
+    if (!fleet || Number.isNaN(date.getTime())) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const key = `${isoDate}\n${fleet}`;
+    txCountByDayFleet.set(key, (txCountByDayFleet.get(key) || 0) + 1);
+  }
+
+  for (const row of parseInfluxCsv(totalsCsv)) {
     const fleet = String(row.fleet || '').trim();
     const rawMaterial = String(row.rss || '').trim();
     const starbase = resolveStarbaseName(row, coordinateMap);
@@ -3519,11 +3545,17 @@ ${scopeFilterFlux}
     const entry = ensureRow(isoDate, fleet, starbase, rawMaterial, date);
     if (row._field === 'amount') entry.mined += value;
     if (row._field === 'burnedAmmo') entry.burnedAmmo += value;
+    if (row._field === 'burnedFood') entry.burnedFood += value;
+    if (row._field === 'burnedFuel') entry.burnedFuel += value;
     if (row._field === 'txCostSol') entry.txCostSol += value;
   }
 
+  for (const row of rowsByKey.values()) {
+    row.txsDaily = txCountByDayFleet.get(`${row.isoDate}\n${row.fleet}`) || 0;
+  }
+
   return Array.from(rowsByKey.values())
-    .filter((row) => row.mined > 0 || row.burnedAmmo > 0 || row.txCostSol > 0);
+    .filter((row) => row.mined > 0 || row.burnedAmmo > 0 || row.burnedFood > 0 || row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0);
 }
 
 async function fetchEarningsSnapshot(payload) {
@@ -3715,9 +3747,10 @@ async function fetchEarningsSnapshot(payload) {
     const rawMaterialPriceAtl = getCurrentResourcePriceAtl(prices, miningRow.rawMaterial);
     const revenueAtlasPerDay = rawMaterialPriceAtl != null ? miningRow.mined * rawMaterialPriceAtl : null;
     const ammoCostsAtlas = ammunitionPriceAtl != null ? miningRow.burnedAmmo * ammunitionPriceAtl : null;
-    const txsDailyAtlas = atlasPerSol != null ? miningRow.txCostSol * atlasPerSol : null;
+    const foodCostsAtlas = foodPriceAtl != null ? miningRow.burnedFood * foodPriceAtl : null;
+    const fuelCostsAtlas = fuelPriceAtl != null ? miningRow.burnedFuel * fuelPriceAtl : null;
     const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
-    const costParts = [ammoCostsAtlas, rentalRateAtlasPerDay, txsDailyAtlas].filter((value) => Number.isFinite(value));
+    const costParts = [ammoCostsAtlas, foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
       ? revenueAtlasPerDay - totalCostsAtlas
@@ -3739,7 +3772,8 @@ async function fetchEarningsSnapshot(payload) {
       rawMaterialPriceAtl,
       revenueAtlasPerDay,
       ammoCostsAtlas,
-      txsDailyAtlas,
+      foodCostsAtlas,
+      fuelCostsAtlas,
       totalCostsAtlas,
       netProfitAtlas,
       profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
@@ -3790,6 +3824,37 @@ async function fetchEarningsSnapshot(payload) {
   const averageRevenueAtlasPerDay = revenueDayTotals.length
     ? revenueDayTotals.reduce((sum, day) => sum + day.revenueAtlas, 0) / revenueDayTotals.length
     : null;
+  const miningTotalsByDay = new Map();
+  const todayMiningNetProfitByFleet = new Map();
+  for (const row of mining) {
+    const day = row.isoDate;
+    if (!day) continue;
+    if (!miningTotalsByDay.has(day)) {
+      miningTotalsByDay.set(day, { mined: 0, revenueAtlas: 0, revenueCount: 0 });
+    }
+    const total = miningTotalsByDay.get(day);
+    total.mined += Number(row.mined) || 0;
+    if (Number.isFinite(Number(row.revenueAtlasPerDay))) {
+      total.revenueAtlas += Number(row.revenueAtlasPerDay);
+      total.revenueCount += 1;
+    }
+    if (day === todayIsoDate && Number.isFinite(Number(row.netProfitAtlas))) {
+      const fleetName = row.fleetName || row.fleet || 'Unnamed fleet';
+      todayMiningNetProfitByFleet.set(fleetName, (todayMiningNetProfitByFleet.get(fleetName) || 0) + Number(row.netProfitAtlas));
+    }
+  }
+  const miningDayTotals = Array.from(miningTotalsByDay.values());
+  const todayMiningTotals = miningTotalsByDay.get(todayIsoDate) || { mined: 0, revenueAtlas: 0, revenueCount: 0 };
+  const averageMinedPerDay = miningDayTotals.length
+    ? miningDayTotals.reduce((sum, day) => sum + day.mined, 0) / miningDayTotals.length
+    : 0;
+  const miningRevenueDayTotals = miningDayTotals.filter((day) => day.revenueCount > 0);
+  const averageMiningRevenueAtlasPerDay = miningRevenueDayTotals.length
+    ? miningRevenueDayTotals.reduce((sum, day) => sum + day.revenueAtlas, 0) / miningRevenueDayTotals.length
+    : null;
+  const topMiningNetProfitFleetToday = Array.from(todayMiningNetProfitByFleet.entries())
+    .map(([fleetName, netProfitAtlas]) => ({ fleetName, netProfitAtlas }))
+    .sort((a, b) => b.netProfitAtlas - a.netProfitAtlas || a.fleetName.localeCompare(b.fleetName))[0] || null;
 
   return {
     ok: true,
@@ -3829,6 +3894,11 @@ async function fetchEarningsSnapshot(payload) {
     miningRowCount: mining.length,
     totalMined,
     totalMiningRevenueAtlas: totalMiningRevenueCount > 0 ? totalMiningRevenueAtlas : null,
+    todayMined: todayMiningTotals.mined,
+    averageMinedPerDay,
+    todayMiningRevenueAtlas: todayMiningTotals.revenueCount > 0 ? todayMiningTotals.revenueAtlas : null,
+    averageMiningRevenueAtlasPerDay,
+    topMiningNetProfitFleetToday,
     fleets: fleetRows,
     rows,
     miningRows: mining,
