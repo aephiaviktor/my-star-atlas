@@ -768,6 +768,17 @@ function resetFactionScopedState() {
   latestConsCargoResult = null;
   latestConsTotalResult = null;
   latestPcrResult = null;
+  // Earnings table filter+sort state is data-value keyed (fleet name,
+  // raw material, date string), so it must reset on faction switch
+  // or the previous faction's filter would still be active against
+  // the new faction's data and silently filter everything out (or,
+  // when a fleet label collides across factions, show the wrong rows).
+  earningsFilters.scanning = { date: '', fleet: '' };
+  earningsFilters.mining = { date: '', fleet: '', rawMaterial: '' };
+  earningsFilters.cargo = { date: '', fleet: '' };
+  earningsSort.scanning = { column: null, direction: null };
+  earningsSort.mining = { column: null, direction: null };
+  earningsSort.cargo = { column: null, direction: null };
   // Inventory is also faction-scoped: the starbase dropdown and the
   // per-asset visibility are keyed by faction, so wipe the cached
   // result and force a fresh fetch on the next render.
