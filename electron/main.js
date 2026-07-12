@@ -3573,79 +3573,67 @@ async function fetchCraftingEarningsRows(settings) {
 
   // Output rows: type=Output, field=amount -> crafted amount per
   // (starbase, output, date). One row per crafting event's output.
+  // We keep craftingID in the raw output so the per-row builder can
+  // join ingredient rows by craftingID and dedup fee/tx per event.
   const outputFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
 ${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Output")
-  |> filter(fn: (r) => exists r.starbase and exists r.output)
-  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["starbase", "output", "_time"])
-  |> sum(column: "_value")
-  |> group()
-  |> keep(columns: ["starbase", "output", "_time", "_value"])
-  |> sort(columns: ["starbase", "output", "_time"])`;
+  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
+  |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
+  |> sort(columns: ["_time"])`;
 
   // Input rows: type=Input, field=amount -> ingredient amount per
-  // (starbase, output, input, date). Input rows share the `output`
-  // tag with the output row they belong to (the SLYA bot tags every
-  // input/output row of a single crafting event with the same
-  // output asset name), so we can join them on (starbase, output)
-  // without needing craftingId.
+  // (starbase, output, input, date). Per-event ingredient cost is
+  // computed by joining to the event's Output row via craftingID:
+  // for each event, sum(ingAmount * ingPrice) across all of the
+  // event's ingredients, then aggregate per (starbase, output, date).
   const inputFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
 ${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Input")
-  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.input)
-  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["starbase", "output", "input", "_time"])
-  |> sum(column: "_value")
-  |> group()
-  |> keep(columns: ["starbase", "output", "input", "_time", "_value"])
-  |> sort(columns: ["starbase", "output", "input", "_time"])`;
+  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.input and exists r.craftingID)
+  |> keep(columns: ["craftingID", "starbase", "output", "input", "_time", "_value"])
+  |> sort(columns: ["_time"])`;
 
-  // Crafting fee: field=fee -> fee amount per (starbase, output,
-  // date). Assumed to be in ATLAS (no unit conversion needed).
+  // Crafting fee: field=fee -> fee amount per crafting event.
+  // Assumed to be in ATLAS (no unit conversion needed).
+  // NOTE: the bot writes the fee on BOTH the Output row and every
+  // Input row of the same craftingID, so we filter to type=Output
+  // to avoid counting the fee (1 + N_ingredients) times.
   const feeFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
 ${scopeFilterFlux}
-  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "fee")
-  |> filter(fn: (r) => exists r.starbase and exists r.output)
-  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["starbase", "output", "_time"])
-  |> sum(column: "_value")
-  |> group()
-  |> keep(columns: ["starbase", "output", "_time", "_value"])
-  |> sort(columns: ["starbase", "output", "_time"])`;
+  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "fee" and r.type == "Output")
+  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
+  |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
+  |> sort(columns: ["_time"])`;
 
-  // Txs cost: field=txcostsol -> SOL tx fees per (starbase, output,
-  // date). Converted to ATLAS via atlasPerSol in the per-row step.
+  // Txs cost: field=txCostSol -> SOL tx fees per crafting event.
+  // Converted to ATLAS via atlasPerSol in the per-row step.
+  // Filtered to type=Output for the same reason as fee: the bot
+  // duplicates txCostSol onto every input row of the event too.
+  // (Field name is camelCase "txCostSol", not "txcostsol" - the
+  // earlier lowercase spelling silently returned 0 rows.)
   const txsFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
 ${scopeFilterFlux}
-  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "txcostsol")
-  |> filter(fn: (r) => exists r.starbase and exists r.output)
-  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["starbase", "output", "_time"])
-  |> sum(column: "_value")
-  |> group()
-  |> keep(columns: ["starbase", "output", "_time", "_value"])
-  |> sort(columns: ["starbase", "output", "_time"])`;
+  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "txCostSol" and r.type == "Output")
+  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
+  |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
+  |> sort(columns: ["_time"])`;
 
   // Count of crafting events per (starbase, output, date) for the
-  // TXS_DAILY column. Counts the number of type=Output rows, which
-  // is one per crafting event. Uses a pre-aggregateWindow count so
-  // we get the row count, not the summed amount.
+  // TXS_DAILY column. One row per craftingID per (starbase, output)
+  // bucket; we dedup-by-craftingID and sum in the per-row builder.
   const countFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
 ${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Output")
-  |> filter(fn: (r) => exists r.starbase and exists r.output)
-  |> aggregateWindow(every: 1d, fn: count, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["starbase", "output", "_time"])
-  |> sum(column: "_value")
+  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
+  |> keep(columns: ["craftingID", "starbase", "output", "_time"])
   |> group()
-  |> keep(columns: ["starbase", "output", "_time", "_value"])
-  |> sort(columns: ["starbase", "output", "_time"])`;
+  |> sort(columns: ["_time"])`;
 
   const [outputCsv, inputCsv, feeCsv, txsCsv, countCsv] = await Promise.all([
     queryInfluxFlux(settings, outputFlux),
@@ -3673,6 +3661,14 @@ ${scopeFilterFlux}
     }
     return rowsByKey.get(key);
   };
+
+  // Defense-in-depth: even though the fee and txs flux queries already
+  // filter r.type == "Output" so we get one row per crafting event,
+  // track event ids we've already credited so we never double-count
+  // if a future query change accidentally returns more than one row
+  // per event.
+  const seenFeeEvents = new Set();
+  const seenTxsEvents = new Set();
 
   for (const row of parseInfluxCsv(outputCsv)) {
     const starbase = resolveStarbaseName(row, coordinateMap);
@@ -3704,9 +3700,14 @@ ${scopeFilterFlux}
     const output = String(row.output || '').trim();
     const date = new Date(row._time);
     const value = Number(row._value || 0);
+    const craftingID = String(row.craftingID || '').trim();
     if (!starbase || !output || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
+    if (craftingID) {
+      if (seenFeeEvents.has(craftingID)) continue;
+      seenFeeEvents.add(craftingID);
+    }
     const entry = ensureRow(isoDate, starbase, output, date);
     entry.feeAmount += value;
   }
@@ -3716,23 +3717,29 @@ ${scopeFilterFlux}
     const output = String(row.output || '').trim();
     const date = new Date(row._time);
     const value = Number(row._value || 0);
+    const craftingID = String(row.craftingID || '').trim();
     if (!starbase || !output || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
+    if (craftingID) {
+      if (seenTxsEvents.has(craftingID)) continue;
+      seenTxsEvents.add(craftingID);
+    }
     const entry = ensureRow(isoDate, starbase, output, date);
     entry.txCostSol += value;
   }
 
+  // countCsv is one row per crafting event; txsDaily is the count of
+  // accepted event rows, not the sum of a value column.
   for (const row of parseInfluxCsv(countCsv)) {
     const starbase = resolveStarbaseName(row, coordinateMap);
     const output = String(row.output || '').trim();
     const date = new Date(row._time);
-    const value = Number(row._value || 0);
-    if (!starbase || !output || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    if (!starbase || !output || Number.isNaN(date.getTime())) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, starbase, output, date);
-    entry.txsDaily += value;
+    entry.txsDaily += 1;
   }
 
   return Array.from(rowsByKey.values())
