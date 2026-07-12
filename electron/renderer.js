@@ -4519,9 +4519,19 @@ function renderEarnings(result) {
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
   setText(earningsSduPriceNote, '');
   setText(earningsSduScanValue, result.topScanNetProfitFleetYesterday?.fleetName || '--');
-  setText(earningsSduScanNote, result.topScanNetProfitFleetYesterday ? 'Yesterday' : 'No data yesterday');
+  setText(
+    earningsSduScanNote,
+    result.topScanNetProfitFleetYesterday
+      ? `${formatAtlasWhole(result.topScanNetProfitFleetYesterday.netProfitAtlas)} Yesterday`
+      : 'No data yesterday'
+  );
   setText(earningsSduValueValue, result.topScanNetProfitPerCrewFleetYesterday?.fleetName || '--');
-  setText(earningsSduValueNote, result.topScanNetProfitPerCrewFleetYesterday ? 'Yesterday' : 'No data yesterday');
+  setText(
+    earningsSduValueNote,
+    result.topScanNetProfitPerCrewFleetYesterday
+      ? `${formatAtlasNumber(result.topScanNetProfitPerCrewFleetYesterday.netProfitPerCrew, 2)} / crew Yesterday`
+      : 'No data yesterday'
+  );
   setText(earningsRentalValue, result.topScanSuccessRateFleetYesterday?.fleetName || '--');
   setText(
     earningsRentalNote,
@@ -4622,9 +4632,19 @@ function renderEarningsMining(result) {
   setText(earningsMiningAmmoPriceValue, topFleet?.fleetName || '--');
   setText(earningsMiningAmmoPriceNote, topFleet ? `Net Profit: ${formatAtlasWhole(topFleet.netProfitAtlas)}` : 'No net profit today');
   setText(earningsMiningMinedValue, result.topMiningNetProfitFleetYesterday?.fleetName || '--');
-  setText(earningsMiningMinedNote, result.topMiningNetProfitFleetYesterday ? 'Yesterday' : 'No data yesterday');
+  setText(
+    earningsMiningMinedNote,
+    result.topMiningNetProfitFleetYesterday
+      ? `${formatAtlasWhole(result.topMiningNetProfitFleetYesterday.netProfitAtlas)} Yesterday`
+      : 'No data yesterday'
+  );
   setText(earningsMiningRevenueValue, result.topMiningNetProfitPerCrewFleetYesterday?.fleetName || '--');
-  setText(earningsMiningRevenueNote, result.topMiningNetProfitPerCrewFleetYesterday ? 'Yesterday' : 'No data yesterday');
+  setText(
+    earningsMiningRevenueNote,
+    result.topMiningNetProfitPerCrewFleetYesterday
+      ? `${formatAtlasNumber(result.topMiningNetProfitPerCrewFleetYesterday.netProfitPerCrew, 2)} / crew Yesterday`
+      : 'No data yesterday'
+  );
   setText(earningsMiningRentalValue, result.topMiningRawMaterialYesterday?.rawMaterial || '--');
   setText(
     earningsMiningRentalNote,
