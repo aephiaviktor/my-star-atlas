@@ -77,6 +77,13 @@ const earningsMiningRentalNote = document.querySelector('#earnings-mining-rental
 const earningsCargoSyncStatus = document.querySelector('#earnings-cargo-sync-status');
 const earningsCargoTableHead = document.querySelector('#earnings-cargo-table-head');
 const earningsCargoTableBody = document.querySelector('#earnings-cargo-table-body');
+const earningsScanningDateFilter = document.querySelector('#earnings-scanning-date-filter');
+const earningsScanningFleetFilter = document.querySelector('#earnings-scanning-fleet-filter');
+const earningsMiningDateFilter = document.querySelector('#earnings-mining-date-filter');
+const earningsMiningFleetFilter = document.querySelector('#earnings-mining-fleet-filter');
+const earningsMiningMaterialFilter = document.querySelector('#earnings-mining-material-filter');
+const earningsCargoDateFilter = document.querySelector('#earnings-cargo-date-filter');
+const earningsCargoFleetFilter = document.querySelector('#earnings-cargo-fleet-filter');
 const earningsCargoNetProfitChart = document.querySelector('#earnings-cargo-net-profit-chart');
 const earningsCargoCostBreakdownChart = document.querySelector('#earnings-cargo-cost-breakdown-chart');
 const sduTotalValue = document.querySelector('#sdu-total-value');
@@ -353,6 +360,71 @@ const earningsColumnState = {
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   cargo: new Set(['txsDaily', 'assignment', 'preferredCargoType', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct']),
 };
+
+const earningsFilters = {
+  scanning: { date: '', fleet: '' },
+  mining: { date: '', fleet: '', rawMaterial: '' },
+  cargo: { date: '', fleet: '' },
+};
+
+const earningsSort = {
+  scanning: { column: null, direction: null },
+  mining: { column: null, direction: null },
+  cargo: { column: null, direction: null },
+};
+
+const earningsSortKeyByColumnId = Object.freeze({
+  date: 'isoDate',
+  fleet: 'fleetName',
+  color: 'fleetName',
+  ownership: 'ownership',
+  ships: 'shipTypes',
+  requiredCrew: 'totalRequiredCrew',
+  sduMax: 'expectedSduPerScan',
+  atlasPerScan: 'expectedSduValueAtl',
+  scanAttempts: 'scanAttempts',
+  successfulScans: 'successfulScans',
+  scanSuccessRate: 'scanSuccessRate',
+  averageChance: 'averageChancePercent',
+  sduFound: 'sduFound',
+  revenue: 'revenueAtlasPerDay',
+  foodCosts: 'foodCostsAtlas',
+  fuelCosts: 'fuelCostsAtlas',
+  ammoCosts: 'ammoCostsAtlas',
+  rental: 'rentalRateAtlasPerDay',
+  txsCosts: 'txsCostsAtlas',
+  totalCosts: 'totalCostsAtlas',
+  netProfit: 'netProfitAtlas',
+  npPerCrew: 'netProfitPerCrew',
+  profitMargin: 'profitMarginPercent',
+  txsDaily: 'txsDaily',
+  starbase: 'starbase',
+  rawMaterial: 'rawMaterial',
+  mined: 'mined',
+  assignment: 'assignment',
+  preferredCargoType: 'preferredCargoType',
+  starbases: 'starbaseLabel',
+  txsCostsPct: 'txsCostsPercent',
+  account: 'fleetAccount',
+});
+
+const earningsFilterBarBySubtab = Object.freeze({
+  scanning: () => ({ date: earningsScanningDateFilter, fleet: earningsScanningFleetFilter }),
+  mining: () => ({ date: earningsMiningDateFilter, fleet: earningsMiningFleetFilter, rawMaterial: earningsMiningMaterialFilter }),
+  cargo: () => ({ date: earningsCargoDateFilter, fleet: earningsCargoFleetFilter }),
+});
+
+const earningsTableHeadBySubtab = Object.freeze({
+  scanning: () => earningsTableHead,
+  mining: () => earningsMiningTableHead,
+  cargo: () => earningsCargoTableHead,
+});
+
+const earningsRowsKeyBySubtab = Object.freeze({
+  scanning: 'rows',
+  mining: 'miningRows',
+  cargo: 'cargoRows',
+});
 
 const earningsFleetPalette = Object.freeze([
   '#f43f5e',
@@ -4167,6 +4239,146 @@ function renderEarningsColumnControls() {
   earningsColumnControls = Array.from(earningsColumnControlsContainer.querySelectorAll('[data-earnings-column]'));
 }
 
+function compareEarningsValues(a, b, direction) {
+  const aNull = a == null || a === '';
+  const bNull = b == null || b === '';
+  if (aNull && bNull) return 0;
+  if (aNull) return 1;
+  if (bNull) return -1;
+  let result;
+  if (typeof a === 'number' && typeof b === 'number') result = a - b;
+  else result = String(a).localeCompare(String(b));
+  return direction === 'desc' ? -result : result;
+}
+
+function getEarningsRowsForSubtab(subtab) {
+  if (!latestEarningsResult?.ok) return [];
+  const key = earningsRowsKeyBySubtab[subtab];
+  return Array.isArray(latestEarningsResult[key]) ? latestEarningsResult[key] : [];
+}
+
+function populateEarningsFilterOptions(subtab, rows) {
+  const filters = earningsFilterBarBySubtab[subtab]?.();
+  if (!filters) return;
+  const dates = new Set();
+  const fleets = new Set();
+  const materials = new Set();
+  for (const row of rows) {
+    if (row.isoDate) dates.add(row.isoDate);
+    const fleet = row.fleetName || row.fleet;
+    if (fleet) fleets.add(fleet);
+    if (row.rawMaterial) materials.add(row.rawMaterial);
+  }
+  const sortedDates = Array.from(dates).sort((a, b) => b.localeCompare(a));
+  const sortedFleets = Array.from(fleets).sort((a, b) => String(a).localeCompare(String(b)));
+  const sortedMaterials = Array.from(materials).sort((a, b) => String(a).localeCompare(String(b)));
+  const fillSelect = (select, values, defaultLabel) => {
+    if (!select) return;
+    const current = earningsFilters[subtab] && select.dataset.filterKey ? earningsFilters[subtab][select.dataset.filterKey] : '';
+    select.textContent = '';
+    const allOption = document.createElement('option');
+    allOption.value = '';
+    allOption.textContent = defaultLabel;
+    select.appendChild(allOption);
+    for (const value of values) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    }
+    if (current && values.includes(current)) select.value = current;
+  };
+  fillSelect(filters.date, sortedDates, 'All Dates');
+  fillSelect(filters.fleet, sortedFleets, 'All Fleets');
+  fillSelect(filters.rawMaterial, sortedMaterials, 'All Materials');
+}
+
+function getFilteredEarningsRows(subtab, rows) {
+  const filterState = earningsFilters[subtab] || {};
+  return rows.filter((row) => {
+    if (filterState.date && row.isoDate !== filterState.date) return false;
+    const fleet = row.fleetName || row.fleet;
+    if (filterState.fleet && fleet !== filterState.fleet) return false;
+    if (filterState.rawMaterial && row.rawMaterial !== filterState.rawMaterial) return false;
+    return true;
+  });
+}
+
+function sortEarningsRows(subtab, rows) {
+  const sortState = earningsSort[subtab];
+  if (!sortState || !sortState.column || !sortState.direction) return rows;
+  const sortKey = earningsSortKeyByColumnId[sortState.column] || sortState.column;
+  return rows.slice().sort((a, b) => compareEarningsValues(a?.[sortKey], b?.[sortKey], sortState.direction));
+}
+
+function setupEarningsFilterHandlers() {
+  const wire = (subtab, select, key) => {
+    if (!select) return;
+    select.dataset.filterKey = key;
+    select.addEventListener('change', () => {
+      earningsFilters[subtab][key] = select.value;
+      if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
+      else if (subtab === 'cargo') renderEarningsCargo(latestEarningsResult);
+      else if (latestEarningsResult) renderEarnings(latestEarningsResult);
+    });
+  };
+  wire('scanning', earningsScanningDateFilter, 'date');
+  wire('scanning', earningsScanningFleetFilter, 'fleet');
+  wire('mining', earningsMiningDateFilter, 'date');
+  wire('mining', earningsMiningFleetFilter, 'fleet');
+  wire('mining', earningsMiningMaterialFilter, 'rawMaterial');
+  wire('cargo', earningsCargoDateFilter, 'date');
+  wire('cargo', earningsCargoFleetFilter, 'fleet');
+}
+
+function setupEarningsHeaderSortHandlers() {
+  const handle = (head, subtab) => {
+    if (!head) return;
+    head.addEventListener('click', (event) => {
+      const th = event.target.closest('th[data-sort-id]');
+      if (!th) return;
+      const columnId = th.dataset.sortId;
+      const current = earningsSort[subtab];
+      if (current.column !== columnId) {
+        current.column = columnId;
+        current.direction = 'desc';
+      } else if (current.direction === 'desc') {
+        current.direction = 'asc';
+      } else {
+        current.column = null;
+        current.direction = null;
+      }
+      if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
+      else if (subtab === 'cargo') renderEarningsCargo(latestEarningsResult);
+      else if (latestEarningsResult) renderEarnings(latestEarningsResult);
+      else renderEarningsHeader(subtab);
+    });
+  };
+  handle(earningsTableHead, 'scanning');
+  handle(earningsMiningTableHead, 'mining');
+  handle(earningsCargoTableHead, 'cargo');
+}
+
+function appendEarningsHeaderCell(row, columnId, label, sortState) {
+  const th = document.createElement('th');
+  th.scope = 'col';
+  th.dataset.sortId = columnId;
+  th.classList.add('earnings-sortable-th');
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'earnings-header-label';
+  labelSpan.textContent = label;
+  th.appendChild(labelSpan);
+  const arrow = document.createElement('span');
+  arrow.className = 'earnings-sort-arrow';
+  if (sortState && sortState.column === columnId && sortState.direction) {
+    arrow.textContent = sortState.direction === 'desc' ? ' \u25BC' : ' \u25B2';
+  } else {
+    arrow.textContent = '';
+  }
+  th.appendChild(arrow);
+  row.appendChild(th);
+}
+
 function renderEarningsHeader(subtab = 'scanning') {
   const tableHead = subtab === 'mining'
     ? earningsMiningTableHead
@@ -4177,18 +4389,12 @@ function renderEarningsHeader(subtab = 'scanning') {
   const row = document.createElement('tr');
   const visibleColumns = getVisibleEarningsColumns(subtab);
   const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
-  const labels = colorColumnVisible ? ['Date', 'Color', 'Fleet'] : ['Date', 'Fleet'];
-  for (const label of labels) {
-    const th = document.createElement('th');
-    th.scope = 'col';
-    th.textContent = label;
-    row.appendChild(th);
-  }
+  const sortState = earningsSort[subtab] || { column: null, direction: null };
+  appendEarningsHeaderCell(row, 'date', 'Date', sortState);
+  if (colorColumnVisible) appendEarningsHeaderCell(row, 'color', 'Color', sortState);
+  appendEarningsHeaderCell(row, 'fleet', 'Fleet', sortState);
   for (const column of visibleColumns.filter((column) => column.id !== 'color')) {
-    const th = document.createElement('th');
-    th.scope = 'col';
-    th.textContent = column.label;
-    row.appendChild(th);
+    appendEarningsHeaderCell(row, column.id, column.label, sortState);
   }
   tableHead.textContent = '';
   tableHead.appendChild(row);
@@ -4288,8 +4494,9 @@ function renderEarnings(result) {
     return;
   }
   setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'earnings', result);
-  renderEarningsHeader('scanning');
   const rows = Array.isArray(result.rows) ? result.rows : [];
+  populateEarningsFilterOptions('scanning', rows);
+  renderEarningsHeader('scanning');
   const colorMap = buildEarningsFleetColorMap(rows, 0);
   renderEarningsNetProfitChart(result, colorMap, { target: earningsNetProfitChart, label: 'Scanning net profit by fleet in ATLAS by day' });
   renderEarningsNetProfitChart(result, colorMap, {
@@ -4320,13 +4527,17 @@ function renderEarnings(result) {
   );
 
   if (!earningsTableBody) return;
+  const filteredRows = getFilteredEarningsRows('scanning', rows);
+  const sortedRows = sortEarningsRows('scanning', filteredRows);
   earningsTableBody.textContent = '';
-  if (!rows.length) {
+  if (!sortedRows.length) {
     const row = document.createElement('tr');
     row.className = 'empty-row';
     const cell = document.createElement('td');
     cell.colSpan = getEarningsTableColSpan('scanning');
-    cell.textContent = `No ${normalizeFaction(latestSettings?.faction)} fleets scanned in the last 14 days`;
+    cell.textContent = rows.length
+      ? `No ${normalizeFaction(latestSettings?.faction)} rows match the current filters`
+      : `No ${normalizeFaction(latestSettings?.faction)} fleets scanned in the last 14 days`;
     row.appendChild(cell);
     earningsTableBody.appendChild(row);
     renderEarningsMining(result);
@@ -4336,7 +4547,7 @@ function renderEarnings(result) {
   const visibleColumns = getVisibleEarningsColumns('scanning');
   const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
   const remainingColumns = visibleColumns.filter((column) => column.id !== 'color');
-  for (const entry of rows) {
+  for (const entry of sortedRows) {
     const row = document.createElement('tr');
     row.appendChild(createTextCell(entry.label || entry.isoDate));
     if (colorColumnVisible) row.appendChild(createColorCell(entry, colorMap));
@@ -4359,6 +4570,7 @@ function renderEarningsMining(result) {
 
   const rows = Array.isArray(result.miningRows) ? result.miningRows : [];
   const colorMap = buildEarningsFleetColorMap(rows, 7);
+  populateEarningsFilterOptions('mining', rows);
   renderEarningsHeader('mining');
   renderEarningsNetProfitChart(
     { ...result, rows },
@@ -4425,13 +4637,17 @@ function renderEarningsMining(result) {
   );
 
   if (!earningsMiningTableBody) return;
+  const filteredRows = getFilteredEarningsRows('mining', rows);
+  const sortedRows = sortEarningsRows('mining', filteredRows);
   earningsMiningTableBody.textContent = '';
-  if (!rows.length) {
+  if (!sortedRows.length) {
     const row = document.createElement('tr');
     row.className = 'empty-row';
     const cell = document.createElement('td');
     cell.colSpan = getEarningsTableColSpan('mining');
-    cell.textContent = `No ${normalizeFaction(latestSettings?.faction)} fleets mined in the last 14 days`;
+    cell.textContent = rows.length
+      ? `No ${normalizeFaction(latestSettings?.faction)} rows match the current filters`
+      : `No ${normalizeFaction(latestSettings?.faction)} fleets mined in the last 14 days`;
     row.appendChild(cell);
     earningsMiningTableBody.appendChild(row);
     return;
@@ -4440,7 +4656,7 @@ function renderEarningsMining(result) {
   const visibleColumns = getVisibleEarningsColumns('mining');
   const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
   const remainingColumns = visibleColumns.filter((column) => column.id !== 'color');
-  for (const entry of rows) {
+  for (const entry of sortedRows) {
     const row = document.createElement('tr');
     row.appendChild(createTextCell(entry.label || entry.isoDate));
     if (colorColumnVisible) row.appendChild(createColorCell(entry, colorMap));
@@ -4461,6 +4677,7 @@ function renderEarningsCargo(result) {
 
   const rows = Array.isArray(result.cargoRows) ? result.cargoRows : [];
   const colorMap = buildEarningsFleetColorMap(rows, 11);
+  populateEarningsFilterOptions('cargo', rows);
   renderEarningsHeader('cargo');
   renderEarningsNetProfitChart(
     { ...result, rows },
@@ -4482,13 +4699,17 @@ function renderEarningsCargo(result) {
   );
 
   if (!earningsCargoTableBody) return;
+  const filteredRows = getFilteredEarningsRows('cargo', rows);
+  const sortedRows = sortEarningsRows('cargo', filteredRows);
   earningsCargoTableBody.textContent = '';
-  if (!rows.length) {
+  if (!sortedRows.length) {
     const row = document.createElement('tr');
     row.className = 'empty-row';
     const cell = document.createElement('td');
     cell.colSpan = getEarningsTableColSpan('cargo');
-    cell.textContent = `No ${normalizeFaction(latestSettings?.faction)} cargo fleets moved in the last 14 days`;
+    cell.textContent = rows.length
+      ? `No ${normalizeFaction(latestSettings?.faction)} rows match the current filters`
+      : `No ${normalizeFaction(latestSettings?.faction)} cargo fleets moved in the last 14 days`;
     row.appendChild(cell);
     earningsCargoTableBody.appendChild(row);
     return;
@@ -4497,7 +4718,7 @@ function renderEarningsCargo(result) {
   const visibleColumns = getVisibleEarningsColumns('cargo');
   const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
   const remainingColumns = visibleColumns.filter((column) => column.id !== 'color');
-  for (const entry of rows) {
+  for (const entry of sortedRows) {
     const row = document.createElement('tr');
     row.appendChild(createTextCell(entry.label || entry.isoDate));
     if (colorColumnVisible) row.appendChild(createColorCell(entry, colorMap));
@@ -4690,6 +4911,8 @@ document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
 });
 
 renderEarningsColumnControls();
+setupEarningsFilterHandlers();
+setupEarningsHeaderSortHandlers();
 
 document.querySelectorAll('[data-chart-toggle]').forEach((button) => {
   button.addEventListener('click', () => {

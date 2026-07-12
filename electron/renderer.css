@@ -1152,6 +1152,26 @@ select:focus {
   text-transform: uppercase;
 }
 
+.fleet-table th.earnings-sortable-th {
+  cursor: pointer;
+  user-select: none;
+}
+
+.fleet-table th.earnings-sortable-th:hover {
+  color: #f4f7fa;
+}
+
+.fleet-table th .earnings-sort-arrow {
+  display: inline-block;
+  width: 0.9em;
+  font-size: 10px;
+  color: var(--accent, #22d3ee);
+}
+
+.earnings-filter-bar {
+  margin: 0 0 10px;
+}
+
 .fleet-table tbody tr {
   background: rgba(11, 27, 36, 0.72);
 }
