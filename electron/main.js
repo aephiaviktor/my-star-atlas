@@ -3844,7 +3844,24 @@ async function fetchEarningsSnapshot(payload) {
   fleetRows.sort((a, b) => (Number(b.expectedSduPerScan) || 0) - (Number(a.expectedSduPerScan) || 0));
 
   const fleetByLabel = new Map();
+  // Cross-faction leak fix: the wallet's `fetchProfileFleets` is
+  // filtered by `ownerProfile` / `subProfile` but NOT by faction, so a
+  // single profile can own fleets in multiple factions (MUD/USTUR/ONI)
+  // with overlapping labels like "MF-01". The Influx query is faction-
+  // tagged correctly, but the join here is by label only, so the first
+  // wallet fleet with a given label wins — which might be from another
+  // faction. Filter the Map by the wallet's `faction` field (Starbase
+  // enum: 1=MUD, 2=ONI, 3=USTUR) so only the selected faction's fleets
+  // are eligible. Unaligned fleets (faction=0 / undefined) are kept so
+  // we don't drop old data that predates the faction byte.
+  const settingsFaction = normalizeFaction(settings.faction);
+  const walletFactionMatches = (fleet) => {
+    if (!Number.isFinite(Number(fleet.faction)) || Number(fleet.faction) === 0) return true;
+    const mapped = { 1: 'MUD', 2: 'ONI', 3: 'USTUR' }[Number(fleet.faction)];
+    return mapped === settingsFaction;
+  };
   for (const fleet of fleetRows) {
+    if (!walletFactionMatches(fleet)) continue;
     const key = normalizeFleetLabel(fleet.label);
     if (key && !fleetByLabel.has(key)) fleetByLabel.set(key, fleet);
   }
@@ -4048,10 +4065,83 @@ async function fetchEarningsSnapshot(payload) {
     return fleetSort || String(a.assignment || '').localeCompare(String(b.assignment || ''));
   });
 
+  // "Best of yesterday" metric cards: top fleet by net profit, top fleet
+  // by net profit per crew, and top fleet by scan success rate for
+  // scanning; top fleet by net profit, top fleet by net profit per crew,
+  // and top raw material by total mined for mining. The scanning rows
+  // are already per (fleet, day) so the best-of just filters by day and
+  // picks the row with the max value. Mining rows are per
+  // (fleet, starbase, raw material, day) so net profit and mined need
+  // to be summed per fleet / per raw material across starbases+materials.
+  const yesterdayScanRows = rows.filter((row) => row.isoDate === yesterdayIsoDate);
+  const netProfitByFleetScanYesterday = new Map();
+  const totalCrewByFleetScanYesterday = new Map();
+  for (const row of yesterdayScanRows) {
+    if (!Number.isFinite(Number(row.netProfitAtlas))) continue;
+    const key = row.fleetName || row.fleet || 'Unnamed fleet';
+    netProfitByFleetScanYesterday.set(key, (netProfitByFleetScanYesterday.get(key) || 0) + Number(row.netProfitAtlas));
+  }
+  for (const row of yesterdayScanRows) {
+    if (!Number.isFinite(Number(row.totalRequiredCrew)) || Number(row.totalRequiredCrew) <= 0) continue;
+    const key = row.fleetName || row.fleet || 'Unnamed fleet';
+    if (!totalCrewByFleetScanYesterday.has(key)) totalCrewByFleetScanYesterday.set(key, Number(row.totalRequiredCrew));
+  }
+  const topScanNetProfitFleetYesterday = Array.from(netProfitByFleetScanYesterday.entries())
+    .map(([fleetName, netProfitAtlas]) => ({ fleetName, netProfitAtlas }))
+    .sort((a, b) => b.netProfitAtlas - a.netProfitAtlas || a.fleetName.localeCompare(b.fleetName))[0] || null;
+  const topScanNetProfitPerCrewFleetYesterday = Array.from(netProfitByFleetScanYesterday.entries())
+    .map(([fleetName, netProfitAtlas]) => ({
+      fleetName,
+      netProfitPerCrew: netProfitAtlas / (totalCrewByFleetScanYesterday.get(fleetName) || NaN),
+    }))
+    .filter((entry) => Number.isFinite(entry.netProfitPerCrew))
+    .sort((a, b) => b.netProfitPerCrew - a.netProfitPerCrew || a.fleetName.localeCompare(b.fleetName))[0] || null;
+  const topScanSuccessRateFleetYesterday = yesterdayScanRows
+    .filter((row) => Number.isFinite(Number(row.scanSuccessRatePercent)))
+    .map((row) => ({
+      fleetName: row.fleetName || row.fleet || 'Unnamed fleet',
+      scanSuccessRatePercent: Number(row.scanSuccessRatePercent),
+    }))
+    .sort((a, b) => b.scanSuccessRatePercent - a.scanSuccessRatePercent || a.fleetName.localeCompare(b.fleetName))[0] || null;
+
+  const yesterdayMiningRows = mining.filter((row) => row.isoDate === yesterdayIsoDate);
+  const netProfitByFleetMiningYesterday = new Map();
+  const totalCrewByFleetMiningYesterday = new Map();
+  const minedByRawMaterialYesterday = new Map();
+  for (const row of yesterdayMiningRows) {
+    if (!Number.isFinite(Number(row.netProfitAtlas))) continue;
+    const key = row.fleetName || row.fleet || 'Unnamed fleet';
+    netProfitByFleetMiningYesterday.set(key, (netProfitByFleetMiningYesterday.get(key) || 0) + Number(row.netProfitAtlas));
+  }
+  for (const row of yesterdayMiningRows) {
+    if (!Number.isFinite(Number(row.totalRequiredCrew)) || Number(row.totalRequiredCrew) <= 0) continue;
+    const key = row.fleetName || row.fleet || 'Unnamed fleet';
+    if (!totalCrewByFleetMiningYesterday.has(key)) totalCrewByFleetMiningYesterday.set(key, Number(row.totalRequiredCrew));
+  }
+  for (const row of yesterdayMiningRows) {
+    if (!Number.isFinite(Number(row.mined))) continue;
+    const material = row.rawMaterial || 'Unknown';
+    minedByRawMaterialYesterday.set(material, (minedByRawMaterialYesterday.get(material) || 0) + Number(row.mined));
+  }
+  const topMiningNetProfitFleetYesterday = Array.from(netProfitByFleetMiningYesterday.entries())
+    .map(([fleetName, netProfitAtlas]) => ({ fleetName, netProfitAtlas }))
+    .sort((a, b) => b.netProfitAtlas - a.netProfitAtlas || a.fleetName.localeCompare(b.fleetName))[0] || null;
+  const topMiningNetProfitPerCrewFleetYesterday = Array.from(netProfitByFleetMiningYesterday.entries())
+    .map(([fleetName, netProfitAtlas]) => ({
+      fleetName,
+      netProfitPerCrew: netProfitAtlas / (totalCrewByFleetMiningYesterday.get(fleetName) || NaN),
+    }))
+    .filter((entry) => Number.isFinite(entry.netProfitPerCrew))
+    .sort((a, b) => b.netProfitPerCrew - a.netProfitPerCrew || a.fleetName.localeCompare(b.fleetName))[0] || null;
+  const topMiningRawMaterialYesterday = Array.from(minedByRawMaterialYesterday.entries())
+    .map(([rawMaterial, mined]) => ({ rawMaterial, mined }))
+    .sort((a, b) => b.mined - a.mined || a.rawMaterial.localeCompare(b.rawMaterial))[0] || null;
+
   const activeFleetRows = fleetRows.filter((fleet) => activeMappedFleetKeys.has(fleet.key));
   const totalExpectedSduPerScan = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.expectedSduPerScan) || 0), 0);
   const rentalAtlasPerDay = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.rentalRateAtlasPerDay) || 0), 0);
   const todayIsoDate = getUtcDateKey(new Date());
+  const yesterdayIsoDate = getUtcDateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
   const totalsByDay = new Map();
   for (const row of rows) {
     const day = row.isoDate;
@@ -4154,6 +4244,12 @@ async function fetchEarningsSnapshot(payload) {
     todayMiningRevenueAtlas: todayMiningTotals.revenueCount > 0 ? todayMiningTotals.revenueAtlas : null,
     averageMiningRevenueAtlasPerDay,
     topMiningNetProfitFleetToday,
+    topScanNetProfitFleetYesterday,
+    topScanNetProfitPerCrewFleetYesterday,
+    topScanSuccessRateFleetYesterday,
+    topMiningNetProfitFleetYesterday,
+    topMiningNetProfitPerCrewFleetYesterday,
+    topMiningRawMaterialYesterday,
     fleets: fleetRows,
     rows,
     miningRows: mining,

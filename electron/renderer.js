@@ -4375,17 +4375,15 @@ function appendEarningsHeaderCell(row, columnId, label, sortState) {
   th.scope = 'col';
   th.dataset.sortId = columnId;
   th.classList.add('earnings-sortable-th');
+  const isActive = sortState && sortState.column === columnId && sortState.direction;
+  if (isActive) th.classList.add('earnings-sort-active');
   const labelSpan = document.createElement('span');
   labelSpan.className = 'earnings-header-label';
   labelSpan.textContent = label;
   th.appendChild(labelSpan);
   const arrow = document.createElement('span');
   arrow.className = 'earnings-sort-arrow';
-  if (sortState && sortState.column === columnId && sortState.direction) {
-    arrow.textContent = sortState.direction === 'desc' ? ' \u25BC' : ' \u25B2';
-  } else {
-    arrow.textContent = '';
-  }
+  arrow.textContent = isActive ? (sortState.direction === 'desc' ? '\u25BC' : '\u25B2') : '';
   th.appendChild(arrow);
   row.appendChild(th);
 }
@@ -4520,17 +4518,17 @@ function renderEarnings(result) {
 
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
   setText(earningsSduPriceNote, '');
-  setText(earningsSduScanValue, `${formatWholeNumber(result.todaySduFound || 0)} | ${formatWholeNumber(result.averageSduFoundPerDay || 0)}`);
-  setText(earningsSduScanNote, 'Today vs Average');
+  setText(earningsSduScanValue, result.topScanNetProfitFleetYesterday?.fleetName || '--');
+  setText(earningsSduScanNote, result.topScanNetProfitFleetYesterday ? 'Yesterday' : 'No data yesterday');
+  setText(earningsSduValueValue, result.topScanNetProfitPerCrewFleetYesterday?.fleetName || '--');
+  setText(earningsSduValueNote, result.topScanNetProfitPerCrewFleetYesterday ? 'Yesterday' : 'No data yesterday');
+  setText(earningsRentalValue, result.topScanSuccessRateFleetYesterday?.fleetName || '--');
   setText(
-    earningsSduValueValue,
-    `${result.todayRevenueAtlas == null ? '--' : formatAtlasWhole(result.todayRevenueAtlas)} | ${
-      result.averageRevenueAtlasPerDay == null ? '--' : formatAtlasWhole(result.averageRevenueAtlasPerDay)
-    }`
+    earningsRentalNote,
+    result.topScanSuccessRateFleetYesterday
+      ? `${formatPercentNumber(result.topScanSuccessRateFleetYesterday.scanSuccessRatePercent, 1)} yesterday`
+      : 'No data yesterday'
   );
-  setText(earningsSduValueNote, 'Today vs Average');
-  setText(earningsRentalValue, formatAtlasNumber(result.rentalAtlasPerDay || 0, 2));
-  setText(earningsRentalNote, '');
   setEarningsStatus(
     `${formatWholeNumber(result.scanRowCount || 0)} scan rows from ${formatWholeNumber(result.activeScanningFleetCount || 0)} active fleets at ${formatCheckedAt(result.checkedAt)}${
       result.scanningError ? ' · Influx scan rows unavailable' : ''
@@ -4623,24 +4621,17 @@ function renderEarningsMining(result) {
   const topFleet = result.topMiningNetProfitFleetToday;
   setText(earningsMiningAmmoPriceValue, topFleet?.fleetName || '--');
   setText(earningsMiningAmmoPriceNote, topFleet ? `Net Profit: ${formatAtlasWhole(topFleet.netProfitAtlas)}` : 'No net profit today');
-  setText(earningsMiningMinedValue, `${formatWholeNumber(result.todayMined || 0)} | ${formatWholeNumber(result.averageMinedPerDay || 0)}`);
-  setText(earningsMiningMinedNote, 'Today vs Average');
+  setText(earningsMiningMinedValue, result.topMiningNetProfitFleetYesterday?.fleetName || '--');
+  setText(earningsMiningMinedNote, result.topMiningNetProfitFleetYesterday ? 'Yesterday' : 'No data yesterday');
+  setText(earningsMiningRevenueValue, result.topMiningNetProfitPerCrewFleetYesterday?.fleetName || '--');
+  setText(earningsMiningRevenueNote, result.topMiningNetProfitPerCrewFleetYesterday ? 'Yesterday' : 'No data yesterday');
+  setText(earningsMiningRentalValue, result.topMiningRawMaterialYesterday?.rawMaterial || '--');
   setText(
-    earningsMiningRevenueValue,
-    `${result.todayMiningRevenueAtlas == null ? '--' : formatAtlasWhole(result.todayMiningRevenueAtlas)} | ${
-      result.averageMiningRevenueAtlasPerDay == null ? '--' : formatAtlasWhole(result.averageMiningRevenueAtlasPerDay)
-    }`
+    earningsMiningRentalNote,
+    result.topMiningRawMaterialYesterday
+      ? `${formatWholeNumber(Math.round(result.topMiningRawMaterialYesterday.mined))} yesterday`
+      : 'No data yesterday'
   );
-  setText(earningsMiningRevenueNote, 'Today vs Average');
-  const rentalByFleet = new Map();
-  for (const row of rows) {
-    const fleetKey = row.fleetAccount || row.fleetName || row.fleet;
-    const rentalRate = Number(row.rentalRateAtlasPerDay);
-    if (fleetKey && Number.isFinite(rentalRate)) rentalByFleet.set(fleetKey, rentalRate);
-  }
-  const rentalAtlasPerDay = Array.from(rentalByFleet.values()).reduce((sum, value) => sum + value, 0);
-  setText(earningsMiningRentalValue, formatAtlasNumber(rentalAtlasPerDay, 2));
-  setText(earningsMiningRentalNote, '');
   setEarningsMiningStatus(
     `${formatWholeNumber(result.miningRowCount || 0)} mining rows from ${formatWholeNumber(result.activeMiningFleetCount || 0)} active fleets at ${formatCheckedAt(result.checkedAt)}${
       result.miningError ? ' · Influx mining rows unavailable' : ''
