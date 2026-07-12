@@ -3561,6 +3561,184 @@ ${scopeFilterFlux}
     .filter((row) => row.mined > 0 || row.burnedAmmo > 0 || row.burnedFood > 0 || row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0);
 }
 
+async function fetchCraftingEarningsRows(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
+    return [];
+  }
+
+  const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
+  const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
+
+  // Output rows: type=Output, field=amount -> crafted amount per
+  // (starbase, output, date). One row per crafting event's output.
+  const outputFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Output")
+  |> filter(fn: (r) => exists r.starbase and exists r.output)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["starbase", "output", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["starbase", "output", "_time", "_value"])
+  |> sort(columns: ["starbase", "output", "_time"])`;
+
+  // Input rows: type=Input, field=amount -> ingredient amount per
+  // (starbase, output, input, date). Input rows share the `output`
+  // tag with the output row they belong to (the SLYA bot tags every
+  // input/output row of a single crafting event with the same
+  // output asset name), so we can join them on (starbase, output)
+  // without needing craftingId.
+  const inputFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Input")
+  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.input)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["starbase", "output", "input", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["starbase", "output", "input", "_time", "_value"])
+  |> sort(columns: ["starbase", "output", "input", "_time"])`;
+
+  // Crafting fee: field=fee -> fee amount per (starbase, output,
+  // date). Assumed to be in ATLAS (no unit conversion needed).
+  const feeFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "fee")
+  |> filter(fn: (r) => exists r.starbase and exists r.output)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["starbase", "output", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["starbase", "output", "_time", "_value"])
+  |> sort(columns: ["starbase", "output", "_time"])`;
+
+  // Txs cost: field=txcostsol -> SOL tx fees per (starbase, output,
+  // date). Converted to ATLAS via atlasPerSol in the per-row step.
+  const txsFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "txcostsol")
+  |> filter(fn: (r) => exists r.starbase and exists r.output)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["starbase", "output", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["starbase", "output", "_time", "_value"])
+  |> sort(columns: ["starbase", "output", "_time"])`;
+
+  // Count of crafting events per (starbase, output, date) for the
+  // TXS_DAILY column. Counts the number of type=Output rows, which
+  // is one per crafting event. Uses a pre-aggregateWindow count so
+  // we get the row count, not the summed amount.
+  const countFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Output")
+  |> filter(fn: (r) => exists r.starbase and exists r.output)
+  |> aggregateWindow(every: 1d, fn: count, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["starbase", "output", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["starbase", "output", "_time", "_value"])
+  |> sort(columns: ["starbase", "output", "_time"])`;
+
+  const [outputCsv, inputCsv, feeCsv, txsCsv, countCsv] = await Promise.all([
+    queryInfluxFlux(settings, outputFlux),
+    queryInfluxFlux(settings, inputFlux),
+    queryInfluxFlux(settings, feeFlux),
+    queryInfluxFlux(settings, txsFlux),
+    queryInfluxFlux(settings, countFlux),
+  ]);
+
+  const rowsByKey = new Map();
+  const ensureRow = (isoDate, starbase, output, date) => {
+    const key = `${isoDate}\n${starbase}\n${output}`;
+    if (!rowsByKey.has(key)) {
+      rowsByKey.set(key, {
+        starbase,
+        output,
+        isoDate,
+        label: formatShortUtcDate(date),
+        crafted: 0,
+        txsDaily: 0,
+        feeAmount: 0,
+        txCostSol: 0,
+        ingredients: [],
+      });
+    }
+    return rowsByKey.get(key);
+  };
+
+  for (const row of parseInfluxCsv(outputCsv)) {
+    const starbase = resolveStarbaseName(row, coordinateMap);
+    const output = String(row.output || '').trim();
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!starbase || !output || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, starbase, output, date);
+    entry.crafted += value;
+  }
+
+  for (const row of parseInfluxCsv(inputCsv)) {
+    const starbase = resolveStarbaseName(row, coordinateMap);
+    const output = String(row.output || '').trim();
+    const input = String(row.input || '').trim();
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!starbase || !output || !input || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, starbase, output, date);
+    entry.ingredients.push({ input, amount: value });
+  }
+
+  for (const row of parseInfluxCsv(feeCsv)) {
+    const starbase = resolveStarbaseName(row, coordinateMap);
+    const output = String(row.output || '').trim();
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!starbase || !output || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, starbase, output, date);
+    entry.feeAmount += value;
+  }
+
+  for (const row of parseInfluxCsv(txsCsv)) {
+    const starbase = resolveStarbaseName(row, coordinateMap);
+    const output = String(row.output || '').trim();
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!starbase || !output || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, starbase, output, date);
+    entry.txCostSol += value;
+  }
+
+  for (const row of parseInfluxCsv(countCsv)) {
+    const starbase = resolveStarbaseName(row, coordinateMap);
+    const output = String(row.output || '').trim();
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    if (!starbase || !output || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, starbase, output, date);
+    entry.txsDaily += value;
+  }
+
+  return Array.from(rowsByKey.values())
+    .filter((row) => row.crafted > 0 || row.feeAmount > 0 || row.txCostSol > 0 || row.ingredients.length > 0);
+}
+
 async function fetchCargoEarningsRows(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
     return [];
@@ -3872,6 +4050,8 @@ async function fetchEarningsSnapshot(payload) {
   let miningError = '';
   let cargoRows = [];
   let cargoError = '';
+  let craftingRows = [];
+  let craftingError = '';
   try {
     scanningRows = await fetchScanningEarningsRows(settings);
   } catch (error) {
@@ -3886,6 +4066,11 @@ async function fetchEarningsSnapshot(payload) {
     cargoRows = await fetchCargoEarningsRows(settings);
   } catch (error) {
     cargoError = String(error?.message || error || 'cargo_rows_unavailable');
+  }
+  try {
+    craftingRows = await fetchCraftingEarningsRows(settings);
+  } catch (error) {
+    craftingError = String(error?.message || error || 'crafting_rows_unavailable');
   }
 
   const activeFleetKeys = new Set();
@@ -4065,6 +4250,56 @@ async function fetchEarningsSnapshot(payload) {
     return fleetSort || String(a.assignment || '').localeCompare(String(b.assignment || ''));
   });
 
+  // Crafting per-row enrichment: each row is per (starbase, output, date).
+  // Revenue = crafted * outputPriceAtl. IngCosts = sum over all
+  // ingredients of (ingredientAmount * ingredientPriceAtl). FeeCosts is
+  // the crafting fee in ATLAS (no unit conversion). TxsCosts is
+  // txCostSol converted to ATLAS via atlasPerSol. TotalCosts is the sum;
+  // NetProfit is Revenue - TotalCosts; ProfitMargin is NetProfit/Revenue
+  // * 100. txsDaily is the count of crafting events for this
+  // (starbase, output, date), already aggregated by the fetch.
+  const crafting = craftingRows.map((craftingRow) => {
+    const outputPriceAtl = getCurrentResourcePriceAtl(prices, craftingRow.output);
+    const revenueAtlasPerDay = outputPriceAtl != null ? craftingRow.crafted * outputPriceAtl : null;
+    let ingCostsAtlas = 0;
+    let ingCostsMissing = false;
+    for (const ingredient of craftingRow.ingredients) {
+      const ingredientPriceAtl = getCurrentResourcePriceAtl(prices, ingredient.input);
+      if (ingredientPriceAtl == null) { ingCostsMissing = true; continue; }
+      ingCostsAtlas += ingredient.amount * ingredientPriceAtl;
+    }
+    if (ingCostsMissing && ingCostsAtlas === 0) ingCostsAtlas = null;
+    const feeCostsAtlas = Number.isFinite(Number(craftingRow.feeAmount)) ? Number(craftingRow.feeAmount) : 0;
+    const txsCostsAtlas = atlasPerSol != null ? craftingRow.txCostSol * atlasPerSol : null;
+    const costParts = [ingCostsAtlas, feeCostsAtlas, txsCostsAtlas].filter((value) => Number.isFinite(value));
+    const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
+    const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
+      ? revenueAtlasPerDay - totalCostsAtlas
+      : null;
+    return {
+      ...craftingRow,
+      assetName: craftingRow.output,
+      outputPriceAtl,
+      revenueAtlasPerDay,
+      ingCostsAtlas: Number.isFinite(ingCostsAtlas) ? ingCostsAtlas : null,
+      feeCostsAtlas,
+      txsCostsAtlas,
+      totalCostsAtlas,
+      netProfitAtlas,
+      profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
+        ? (netProfitAtlas / revenueAtlasPerDay) * 100
+        : null,
+    };
+  });
+
+  crafting.sort((a, b) => {
+    const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));
+    if (dateSort) return dateSort;
+    const starbaseSort = String(a.starbase || '').localeCompare(String(b.starbase || ''));
+    if (starbaseSort) return starbaseSort;
+    return String(a.output || '').localeCompare(String(b.output || ''));
+  });
+
   // "Best of yesterday" metric cards: top fleet by net profit, top fleet
   // by net profit per crew, and top fleet by scan success rate for
   // scanning; top fleet by net profit, top fleet by net profit per crew,
@@ -4144,6 +4379,61 @@ async function fetchEarningsSnapshot(payload) {
   const topMiningRawMaterialYesterday = Array.from(minedByRawMaterialYesterday.entries())
     .map(([rawMaterial, mined]) => ({ rawMaterial, mined }))
     .sort((a, b) => b.mined - a.mined || a.rawMaterial.localeCompare(b.rawMaterial))[0] || null;
+
+  // Crafting today + yesterday metric cards. Same 4-box layout as
+  // mining but with crafting's natural unit being the output asset
+  // (not a fleet), and profit margin / revenue as the secondary
+  // metrics (no per-crew concept in crafting).
+  const yesterdayCraftingRows = crafting.filter((row) => row.isoDate === yesterdayIsoDate);
+  const todayCraftingRows = crafting.filter((row) => row.isoDate === todayIsoDate);
+  const netProfitByCraftingAssetYesterday = new Map();
+  const netProfitByCraftingAssetToday = new Map();
+  const profitMarginByCraftingAssetYesterday = new Map();
+  const revenueByCraftingAssetYesterday = new Map();
+  for (const row of yesterdayCraftingRows) {
+    if (!Number.isFinite(Number(row.netProfitAtlas))) continue;
+    const key = row.output || 'Unknown';
+    netProfitByCraftingAssetYesterday.set(key, (netProfitByCraftingAssetYesterday.get(key) || 0) + Number(row.netProfitAtlas));
+  }
+  for (const row of todayCraftingRows) {
+    if (!Number.isFinite(Number(row.netProfitAtlas))) continue;
+    const key = row.output || 'Unknown';
+    netProfitByCraftingAssetToday.set(key, (netProfitByCraftingAssetToday.get(key) || 0) + Number(row.netProfitAtlas));
+  }
+  for (const row of yesterdayCraftingRows) {
+    if (!Number.isFinite(Number(row.profitMarginPercent))) continue;
+    const key = row.output || 'Unknown';
+    // Average margin across all (starbase, date) rows for the asset,
+    // weighted by revenue: only one date (yesterday), so simple
+    // revenue-weighted average. (Same approach as scanning/mining
+    // per-crew: numerator is the day's summed NP, denominator is the
+    // day's summed revenue.)
+    const current = profitMarginByCraftingAssetYesterday.get(key) || { netProfit: 0, revenue: 0 };
+    current.netProfit += Number(row.netProfitAtlas) || 0;
+    current.revenue += Number(row.revenueAtlasPerDay) || 0;
+    profitMarginByCraftingAssetYesterday.set(key, current);
+  }
+  for (const row of yesterdayCraftingRows) {
+    if (!Number.isFinite(Number(row.revenueAtlasPerDay))) continue;
+    const key = row.output || 'Unknown';
+    revenueByCraftingAssetYesterday.set(key, (revenueByCraftingAssetYesterday.get(key) || 0) + Number(row.revenueAtlasPerDay));
+  }
+  const topCraftingNetProfitAssetToday = Array.from(netProfitByCraftingAssetToday.entries())
+    .map(([asset, netProfitAtlas]) => ({ asset, netProfitAtlas }))
+    .sort((a, b) => b.netProfitAtlas - a.netProfitAtlas || a.asset.localeCompare(b.asset))[0] || null;
+  const topCraftingNetProfitAssetYesterday = Array.from(netProfitByCraftingAssetYesterday.entries())
+    .map(([asset, netProfitAtlas]) => ({ asset, netProfitAtlas }))
+    .sort((a, b) => b.netProfitAtlas - a.netProfitAtlas || a.asset.localeCompare(b.asset))[0] || null;
+  const topCraftingProfitMarginAssetYesterday = Array.from(profitMarginByCraftingAssetYesterday.entries())
+    .map(([asset, sums]) => ({
+      asset,
+      profitMarginPercent: sums.revenue > 0 ? (sums.netProfit / sums.revenue) * 100 : null,
+    }))
+    .filter((entry) => Number.isFinite(entry.profitMarginPercent))
+    .sort((a, b) => b.profitMarginPercent - a.profitMarginPercent || a.asset.localeCompare(b.asset))[0] || null;
+  const topCraftingRevenueAssetYesterday = Array.from(revenueByCraftingAssetYesterday.entries())
+    .map(([asset, revenue]) => ({ asset, revenue }))
+    .sort((a, b) => b.revenue - a.revenue || a.asset.localeCompare(b.asset))[0] || null;
 
   const activeFleetRows = fleetRows.filter((fleet) => activeMappedFleetKeys.has(fleet.key));
   const totalExpectedSduPerScan = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.expectedSduPerScan) || 0), 0);
@@ -4257,10 +4547,17 @@ async function fetchEarningsSnapshot(payload) {
     topMiningNetProfitFleetYesterday,
     topMiningNetProfitPerCrewFleetYesterday,
     topMiningRawMaterialYesterday,
+    topCraftingNetProfitAssetToday,
+    topCraftingNetProfitAssetYesterday,
+    topCraftingProfitMarginAssetYesterday,
+    topCraftingRevenueAssetYesterday,
+    craftingError,
+    craftingRowCount: crafting.length,
     fleets: fleetRows,
     rows,
     miningRows: mining,
     cargoRows: cargo,
+    craftingRows: crafting,
   };
 }
 

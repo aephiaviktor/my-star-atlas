@@ -1031,8 +1031,97 @@
             </section>
           </div>
           <div class="earnings-panel" data-earnings-panel="crafting">
-            <section class="work-surface quiet-panel">
-              <h2>Crafting</h2>
+            <div class="dashboard-grid earnings-metrics-grid">
+              <section class="metric-card">
+                <span class="metric-label">Highest Net Profit Asset</span>
+                <strong id="earnings-crafting-top-asset-value">--</strong>
+                <small id="earnings-crafting-top-asset-note">Today</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Best Net Profit</span>
+                <strong id="earnings-crafting-best-np-value">--</strong>
+                <small id="earnings-crafting-best-np-note">Yesterday</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Best Profit Margin</span>
+                <strong id="earnings-crafting-best-margin-value">--</strong>
+                <small id="earnings-crafting-best-margin-note">Yesterday</small>
+              </section>
+              <section class="metric-card">
+                <span class="metric-label">Highest Revenue</span>
+                <strong id="earnings-crafting-best-revenue-value">--</strong>
+                <small id="earnings-crafting-best-revenue-note">Yesterday</small>
+              </section>
+            </div>
+
+            <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Crafting: Net Profit by Asset</span>
+              </button>
+              <div class="earnings-chart-body">
+                <div id="earnings-crafting-asset-net-profit-chart" class="earnings-net-profit-chart" aria-label="Crafting net profit by asset over the last 14 days"></div>
+              </div>
+            </section>
+
+            <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Crafting: Net Profit by Starbase</span>
+              </button>
+              <div class="earnings-chart-body">
+                <div id="earnings-crafting-starbase-net-profit-chart" class="earnings-net-profit-chart" aria-label="Crafting net profit by starbase over the last 14 days"></div>
+              </div>
+            </section>
+
+            <section class="work-surface earnings-surface">
+              <div class="activity-filter-bar earnings-filter-bar">
+                <label class="activity-filter">
+                  <span>Date</span>
+                  <select id="earnings-crafting-date-filter" aria-label="Filter crafting earnings by date">
+                    <option value="">All Dates</option>
+                  </select>
+                </label>
+                <label class="activity-filter">
+                  <span>Starbase</span>
+                  <select id="earnings-crafting-starbase-filter" aria-label="Filter crafting earnings by starbase">
+                    <option value="">All Starbases</option>
+                  </select>
+                </label>
+                <label class="activity-filter">
+                  <span>Asset</span>
+                  <select id="earnings-crafting-asset-filter" aria-label="Filter crafting earnings by asset">
+                    <option value="">All Assets</option>
+                  </select>
+                </label>
+                <span class="activity-filter-note">Filters combine with AND</span>
+              </div>
+              <div id="earnings-crafting-sync-status" class="fleet-sync-status" role="status">Awaiting crafting data</div>
+              <div class="fleet-table-wrap">
+                <table class="fleet-table earnings-table">
+                  <thead id="earnings-crafting-table-head">
+                    <tr>
+                      <th scope="col">Date</th>
+                      <th scope="col">Starbase</th>
+                      <th scope="col">Asset</th>
+                      <th scope="col">Txs Daily</th>
+                      <th scope="col">Crafted</th>
+                      <th scope="col">Revenue</th>
+                      <th scope="col">Ing Costs</th>
+                      <th scope="col">Crafting Fee Costs</th>
+                      <th scope="col">Txs Costs</th>
+                      <th scope="col">Total Costs</th>
+                      <th scope="col">Net Profit</th>
+                      <th scope="col">Profit Margin</th>
+                    </tr>
+                  </thead>
+                  <tbody id="earnings-crafting-table-body">
+                    <tr class="empty-row">
+                      <td colspan="12">No crafting data loaded</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </section>
           </div>
           <div class="earnings-panel" data-earnings-panel="upgrading">

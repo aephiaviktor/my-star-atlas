@@ -77,6 +77,22 @@ const earningsMiningRentalNote = document.querySelector('#earnings-mining-rental
 const earningsCargoSyncStatus = document.querySelector('#earnings-cargo-sync-status');
 const earningsCargoTableHead = document.querySelector('#earnings-cargo-table-head');
 const earningsCargoTableBody = document.querySelector('#earnings-cargo-table-body');
+const earningsCraftingSyncStatus = document.querySelector('#earnings-crafting-sync-status');
+const earningsCraftingTableHead = document.querySelector('#earnings-crafting-table-head');
+const earningsCraftingTableBody = document.querySelector('#earnings-crafting-table-body');
+const earningsCraftingAssetNetProfitChart = document.querySelector('#earnings-crafting-asset-net-profit-chart');
+const earningsCraftingStarbaseNetProfitChart = document.querySelector('#earnings-crafting-starbase-net-profit-chart');
+const earningsCraftingTopAssetValue = document.querySelector('#earnings-crafting-top-asset-value');
+const earningsCraftingTopAssetNote = document.querySelector('#earnings-crafting-top-asset-note');
+const earningsCraftingBestNpValue = document.querySelector('#earnings-crafting-best-np-value');
+const earningsCraftingBestNpNote = document.querySelector('#earnings-crafting-best-np-note');
+const earningsCraftingBestMarginValue = document.querySelector('#earnings-crafting-best-margin-value');
+const earningsCraftingBestMarginNote = document.querySelector('#earnings-crafting-best-margin-note');
+const earningsCraftingBestRevenueValue = document.querySelector('#earnings-crafting-best-revenue-value');
+const earningsCraftingBestRevenueNote = document.querySelector('#earnings-crafting-best-revenue-note');
+const earningsCraftingDateFilter = document.querySelector('#earnings-crafting-date-filter');
+const earningsCraftingStarbaseFilter = document.querySelector('#earnings-crafting-starbase-filter');
+const earningsCraftingAssetFilter = document.querySelector('#earnings-crafting-asset-filter');
 const earningsScanningDateFilter = document.querySelector('#earnings-scanning-date-filter');
 const earningsScanningFleetFilter = document.querySelector('#earnings-scanning-fleet-filter');
 const earningsMiningDateFilter = document.querySelector('#earnings-mining-date-filter');
@@ -349,28 +365,44 @@ const cargoEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
 
+const craftingEarningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
+  Object.freeze({ id: 'crafted', label: 'Crafted' }),
+  Object.freeze({ id: 'revenue', label: 'Revenue' }),
+  Object.freeze({ id: 'ingCosts', label: 'Ing Costs' }),
+  Object.freeze({ id: 'feeCosts', label: 'Crafting Fee Costs' }),
+  Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
+  Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
+  Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
+  Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
+]);
+
 const earningsColumnsBySubtab = Object.freeze({
   scanning: scanningEarningsOptionalColumns,
   mining: miningEarningsOptionalColumns,
   cargo: cargoEarningsOptionalColumns,
+  crafting: craftingEarningsOptionalColumns,
 });
 
 const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   cargo: new Set(['txsDaily', 'assignment', 'preferredCargoType', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct']),
+  crafting: new Set(['txsDaily', 'crafted', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
 };
 
 const earningsFilters = {
   scanning: { date: '', fleet: '' },
   mining: { date: '', fleet: '', rawMaterial: '' },
   cargo: { date: '', fleet: '' },
+  crafting: { date: '', starbase: '', asset: '' },
 };
 
 const earningsSort = {
   scanning: { column: null, direction: null },
   mining: { column: null, direction: null },
   cargo: { column: null, direction: null },
+  crafting: { column: null, direction: null },
 };
 
 const earningsSortKeyByColumnId = Object.freeze({
@@ -402,6 +434,10 @@ const earningsSortKeyByColumnId = Object.freeze({
   rawMaterial: 'rawMaterial',
   mined: 'mined',
   assignment: 'assignment',
+  asset: 'output',
+  crafted: 'crafted',
+  ingCosts: 'ingCostsAtlas',
+  feeCosts: 'feeCostsAtlas',
   preferredCargoType: 'preferredCargoType',
   starbases: 'starbaseLabel',
   txsCostsPct: 'txsCostsPercent',
@@ -412,12 +448,14 @@ const earningsFilterBarBySubtab = Object.freeze({
   scanning: () => ({ date: earningsScanningDateFilter, fleet: earningsScanningFleetFilter }),
   mining: () => ({ date: earningsMiningDateFilter, fleet: earningsMiningFleetFilter, rawMaterial: earningsMiningMaterialFilter }),
   cargo: () => ({ date: earningsCargoDateFilter, fleet: earningsCargoFleetFilter }),
+  crafting: () => ({ date: earningsCraftingDateFilter, starbase: earningsCraftingStarbaseFilter, asset: earningsCraftingAssetFilter }),
 });
 
 const earningsTableHeadBySubtab = Object.freeze({
   scanning: () => earningsTableHead,
   mining: () => earningsMiningTableHead,
   cargo: () => earningsCargoTableHead,
+  crafting: () => earningsCraftingTableHead,
 });
 
 const earningsRowsKeyBySubtab = Object.freeze({
@@ -776,9 +814,11 @@ function resetFactionScopedState() {
   earningsFilters.scanning = { date: '', fleet: '' };
   earningsFilters.mining = { date: '', fleet: '', rawMaterial: '' };
   earningsFilters.cargo = { date: '', fleet: '' };
+  earningsFilters.crafting = { date: '', starbase: '', asset: '' };
   earningsSort.scanning = { column: null, direction: null };
   earningsSort.mining = { column: null, direction: null };
   earningsSort.cargo = { column: null, direction: null };
+  earningsSort.crafting = { column: null, direction: null };
   // Inventory is also faction-scoped: the starbase dropdown and the
   // per-asset visibility are keyed by faction, so wipe the cached
   // result and force a fresh fetch on the next render.
@@ -3655,6 +3695,10 @@ function setEarningsCargoStatus(message) {
   setText(earningsCargoSyncStatus, message);
 }
 
+function setEarningsCraftingStatus(message) {
+  setText(earningsCraftingSyncStatus, message);
+}
+
 function renderEarningsEmpty(message) {
   latestEarningsResult = null;
   renderEarningsHeader('scanning');
@@ -3700,6 +3744,29 @@ function renderEarningsMiningEmpty(message) {
   cell.textContent = message;
   row.appendChild(cell);
   earningsMiningTableBody.appendChild(row);
+}
+
+function renderEarningsCraftingEmpty(message) {
+  renderEarningsHeader('crafting');
+  renderEarningsNetProfitChart(null, new Map(), { target: earningsCraftingAssetNetProfitChart, label: 'Crafting net profit by asset in ATLAS by day' });
+  renderEarningsNetProfitChart(null, new Map(), { target: earningsCraftingStarbaseNetProfitChart, label: 'Crafting net profit by starbase in ATLAS by day' });
+  setText(earningsCraftingTopAssetValue, '--');
+  setText(earningsCraftingTopAssetNote, message);
+  setText(earningsCraftingBestNpValue, '--');
+  setText(earningsCraftingBestNpNote, message);
+  setText(earningsCraftingBestMarginValue, '--');
+  setText(earningsCraftingBestMarginNote, message);
+  setText(earningsCraftingBestRevenueValue, '--');
+  setText(earningsCraftingBestRevenueNote, message);
+  if (!earningsCraftingTableBody) return;
+  earningsCraftingTableBody.textContent = '';
+  const row = document.createElement('tr');
+  row.className = 'empty-row';
+  const cell = document.createElement('td');
+  cell.colSpan = getEarningsTableColSpan('crafting');
+  cell.textContent = message;
+  row.appendChild(cell);
+  earningsCraftingTableBody.appendChild(row);
 }
 
 function renderEarningsCargoEmpty(message) {
@@ -4216,7 +4283,11 @@ function getVisibleEarningsColumns(subtab = currentEarningsSubtab) {
 
 function getEarningsTableColSpan(subtab = currentEarningsSubtab) {
   const visibleColumns = getVisibleEarningsColumns(subtab);
-  return 2 + visibleColumns.filter((column) => column.id !== 'color').length + (visibleColumns.some((column) => column.id === 'color') ? 1 : 0);
+  // Scanning/mining/cargo have 2 base columns (date + fleet);
+  // crafting has 3 (date + starbase + asset). Color counts separately
+  // when visible (mining only).
+  const baseCount = subtab === 'crafting' ? 3 : 2;
+  return baseCount + visibleColumns.filter((column) => column.id !== 'color').length + (visibleColumns.some((column) => column.id === 'color') ? 1 : 0);
 }
 
 function renderEarningsColumnControls() {
@@ -4237,6 +4308,8 @@ function renderEarningsColumnControls() {
         renderEarningsMining(latestEarningsResult);
       } else if (subtab === 'cargo') {
         renderEarningsCargo(latestEarningsResult);
+      } else if (subtab === 'crafting') {
+        renderEarningsCrafting(latestEarningsResult);
       } else if (latestEarningsResult) {
         renderEarnings(latestEarningsResult);
       } else {
@@ -4274,15 +4347,21 @@ function populateEarningsFilterOptions(subtab, rows) {
   const dates = new Set();
   const fleets = new Set();
   const materials = new Set();
+  const starbases = new Set();
+  const assets = new Set();
   for (const row of rows) {
     if (row.isoDate) dates.add(row.isoDate);
     const fleet = row.fleetName || row.fleet;
     if (fleet) fleets.add(fleet);
     if (row.rawMaterial) materials.add(row.rawMaterial);
+    if (row.starbase) starbases.add(row.starbase);
+    if (row.output) assets.add(row.output);
   }
   const sortedDates = Array.from(dates).sort((a, b) => b.localeCompare(a));
   const sortedFleets = Array.from(fleets).sort((a, b) => String(a).localeCompare(String(b)));
   const sortedMaterials = Array.from(materials).sort((a, b) => String(a).localeCompare(String(b)));
+  const sortedStarbases = Array.from(starbases).sort((a, b) => String(a).localeCompare(String(b)));
+  const sortedAssets = Array.from(assets).sort((a, b) => String(a).localeCompare(String(b)));
   const fillSelect = (select, values, defaultLabel) => {
     if (!select) return;
     const current = earningsFilters[subtab] && select.dataset.filterKey ? earningsFilters[subtab][select.dataset.filterKey] : '';
@@ -4302,6 +4381,8 @@ function populateEarningsFilterOptions(subtab, rows) {
   fillSelect(filters.date, sortedDates, 'All Dates');
   fillSelect(filters.fleet, sortedFleets, 'All Fleets');
   fillSelect(filters.rawMaterial, sortedMaterials, 'All Materials');
+  fillSelect(filters.starbase, sortedStarbases, 'All Starbases');
+  fillSelect(filters.asset, sortedAssets, 'All Assets');
 }
 
 function getFilteredEarningsRows(subtab, rows) {
@@ -4311,6 +4392,8 @@ function getFilteredEarningsRows(subtab, rows) {
     const fleet = row.fleetName || row.fleet;
     if (filterState.fleet && fleet !== filterState.fleet) return false;
     if (filterState.rawMaterial && row.rawMaterial !== filterState.rawMaterial) return false;
+    if (filterState.starbase && row.starbase !== filterState.starbase) return false;
+    if (filterState.asset && row.output !== filterState.asset) return false;
     return true;
   });
 }
@@ -4330,6 +4413,7 @@ function setupEarningsFilterHandlers() {
       earningsFilters[subtab][key] = select.value;
       if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
       else if (subtab === 'cargo') renderEarningsCargo(latestEarningsResult);
+      else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
       else if (latestEarningsResult) renderEarnings(latestEarningsResult);
     });
   };
@@ -4340,6 +4424,9 @@ function setupEarningsFilterHandlers() {
   wire('mining', earningsMiningMaterialFilter, 'rawMaterial');
   wire('cargo', earningsCargoDateFilter, 'date');
   wire('cargo', earningsCargoFleetFilter, 'fleet');
+  wire('crafting', earningsCraftingDateFilter, 'date');
+  wire('crafting', earningsCraftingStarbaseFilter, 'starbase');
+  wire('crafting', earningsCraftingAssetFilter, 'asset');
 }
 
 function setupEarningsHeaderSortHandlers() {
@@ -4361,6 +4448,7 @@ function setupEarningsHeaderSortHandlers() {
       }
       if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
       else if (subtab === 'cargo') renderEarningsCargo(latestEarningsResult);
+      else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
       else if (latestEarningsResult) renderEarnings(latestEarningsResult);
       else renderEarningsHeader(subtab);
     });
@@ -4368,6 +4456,7 @@ function setupEarningsHeaderSortHandlers() {
   handle(earningsTableHead, 'scanning');
   handle(earningsMiningTableHead, 'mining');
   handle(earningsCargoTableHead, 'cargo');
+  handle(earningsCraftingTableHead, 'crafting');
 }
 
 function appendEarningsHeaderCell(row, columnId, label, sortState) {
@@ -4474,6 +4563,19 @@ function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
   return createTextCell('--');
 }
 
+function createCraftingEarningsOptionalCell(entry, columnId, colorMap) {
+  if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
+  if (columnId === 'crafted') return createTextCell(formatWholeNumber(entry.crafted || 0));
+  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasWhole(entry.revenueAtlasPerDay));
+  if (columnId === 'ingCosts') return createTextCell(entry.ingCostsAtlas == null ? '--' : formatAtlasWhole(entry.ingCostsAtlas));
+  if (columnId === 'feeCosts') return createTextCell(entry.feeCostsAtlas == null ? '--' : formatAtlasWhole(entry.feeCostsAtlas));
+  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
+  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
+  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
+  if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
+  return createTextCell('--');
+}
+
 function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
@@ -4497,9 +4599,11 @@ function renderEarnings(result) {
     renderEarningsEmpty(result?.error || 'Earnings sync failed');
     renderEarningsMiningEmpty(result?.error || 'Earnings sync failed');
     renderEarningsCargoEmpty(result?.error || 'Earnings sync failed');
+    renderEarningsCraftingEmpty(result?.error || 'Earnings sync failed');
     setEarningsStatus('Earnings sync failed');
     setEarningsMiningStatus('Earnings sync failed');
     setEarningsCargoStatus('Earnings sync failed');
+    setEarningsCraftingStatus('Earnings sync failed');
     return;
   }
   setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'earnings', result);
@@ -4578,6 +4682,7 @@ function renderEarnings(result) {
   }
   renderEarningsMining(result);
   renderEarningsCargo(result);
+  renderEarningsCrafting(result);
 }
 
 function renderEarningsMining(result) {
@@ -4687,6 +4792,100 @@ function renderEarningsMining(result) {
       row.appendChild(createMiningEarningsOptionalCell(entry, column.id, colorMap));
     }
     earningsMiningTableBody.appendChild(row);
+  }
+}
+
+function renderEarningsCrafting(result) {
+  if (!result?.ok) {
+    renderEarningsCraftingEmpty(result?.error || 'Crafting earnings sync failed');
+    setEarningsCraftingStatus('Crafting earnings sync failed');
+    return;
+  }
+
+  const rows = Array.isArray(result.craftingRows) ? result.craftingRows : [];
+  populateEarningsFilterOptions('crafting', rows);
+  renderEarningsHeader('crafting');
+  const assetColorMap = buildEarningsAssetColorMap(rows, (row) => row.output || 'Unknown asset');
+  renderEarningsNetProfitChart(
+    { ...result, rows },
+    assetColorMap,
+    {
+      target: earningsCraftingAssetNetProfitChart,
+      label: 'Crafting net profit by asset in ATLAS by day',
+      getSegmentLabel: (row) => row.output || 'Unknown asset',
+    }
+  );
+  const starbaseColorMap = buildEarningsAssetColorMap(rows, (row) => row.starbase || 'Unknown starbase');
+  renderEarningsNetProfitChart(
+    { ...result, rows },
+    starbaseColorMap,
+    {
+      target: earningsCraftingStarbaseNetProfitChart,
+      label: 'Crafting net profit by starbase in ATLAS by day',
+      getSegmentLabel: (row) => row.starbase || 'Unknown starbase',
+    }
+  );
+
+  const topAssetToday = result.topCraftingNetProfitAssetToday;
+  setText(earningsCraftingTopAssetValue, topAssetToday?.asset || '--');
+  setText(
+    earningsCraftingTopAssetNote,
+    topAssetToday ? `Net Profit: ${formatAtlasWhole(topAssetToday.netProfitAtlas)}` : 'No net profit today'
+  );
+  setText(earningsCraftingBestNpValue, result.topCraftingNetProfitAssetYesterday?.asset || '--');
+  setText(
+    earningsCraftingBestNpNote,
+    result.topCraftingNetProfitAssetYesterday
+      ? `${formatAtlasWhole(result.topCraftingNetProfitAssetYesterday.netProfitAtlas)} Yesterday`
+      : 'No data yesterday'
+  );
+  setText(earningsCraftingBestMarginValue, result.topCraftingProfitMarginAssetYesterday?.asset || '--');
+  setText(
+    earningsCraftingBestMarginNote,
+    result.topCraftingProfitMarginAssetYesterday
+      ? `${formatPercentNumber(result.topCraftingProfitMarginAssetYesterday.profitMarginPercent, 1)} margin Yesterday`
+      : 'No data yesterday'
+  );
+  setText(earningsCraftingBestRevenueValue, result.topCraftingRevenueAssetYesterday?.asset || '--');
+  setText(
+    earningsCraftingBestRevenueNote,
+    result.topCraftingRevenueAssetYesterday
+      ? `${formatAtlasWhole(result.topCraftingRevenueAssetYesterday.revenue)} Yesterday`
+      : 'No data yesterday'
+  );
+  setEarningsCraftingStatus(
+    `${formatWholeNumber(result.craftingRowCount || 0)} crafting rows at ${formatCheckedAt(result.checkedAt)}${
+      result.craftingError ? ' · Influx crafting rows unavailable' : ''
+    }`
+  );
+
+  if (!earningsCraftingTableBody) return;
+  const filteredRows = getFilteredEarningsRows('crafting', rows);
+  const sortedRows = sortEarningsRows('crafting', filteredRows);
+  earningsCraftingTableBody.textContent = '';
+  if (!sortedRows.length) {
+    const row = document.createElement('tr');
+    row.className = 'empty-row';
+    const cell = document.createElement('td');
+    cell.colSpan = getEarningsTableColSpan('crafting');
+    cell.textContent = rows.length
+      ? `No ${normalizeFaction(latestSettings?.faction)} rows match the current filters`
+      : `No ${normalizeFaction(latestSettings?.faction)} crafting data in the last 14 days`;
+    row.appendChild(cell);
+    earningsCraftingTableBody.appendChild(row);
+    return;
+  }
+
+  const visibleColumns = getVisibleEarningsColumns('crafting');
+  for (const entry of sortedRows) {
+    const row = document.createElement('tr');
+    row.appendChild(createTextCell(entry.label || entry.isoDate));
+    row.appendChild(createTextCell(entry.starbase || '--'));
+    row.appendChild(createTextCell(entry.output || '--'));
+    for (const column of visibleColumns) {
+      row.appendChild(createCraftingEarningsOptionalCell(entry, column.id, null));
+    }
+    earningsCraftingTableBody.appendChild(row);
   }
 }
 
@@ -4878,7 +5077,7 @@ function setActiveEarningsSubtab(subtab) {
   });
   renderEarningsColumnControls();
   updateTitle();
-  if ((subtab === 'scanning' || subtab === 'mining' || subtab === 'cargo') && !latestEarningsResult) {
+  if ((subtab === 'scanning' || subtab === 'mining' || subtab === 'cargo' || subtab === 'crafting') && !latestEarningsResult) {
     refreshEarnings();
   }
   if (subtab === 'mining' && latestEarningsResult) {
