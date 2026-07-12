@@ -282,6 +282,7 @@ const scanningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'color', label: 'Color' }),
   Object.freeze({ id: 'ownership', label: 'Ownership' }),
   Object.freeze({ id: 'ships', label: 'Ships' }),
+  Object.freeze({ id: 'requiredCrew', label: 'Required Crew' }),
   Object.freeze({ id: 'sduMax', label: 'SDU Max' }),
   Object.freeze({ id: 'atlasPerScan', label: 'Atlas / Scan' }),
   Object.freeze({ id: 'scanAttempts', label: 'Scan Attempts' }),
@@ -304,6 +305,7 @@ const miningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'color', label: 'Color' }),
   Object.freeze({ id: 'ownership', label: 'Ownership' }),
   Object.freeze({ id: 'ships', label: 'Ships' }),
+  Object.freeze({ id: 'requiredCrew', label: 'Required Crew' }),
   Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
   Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'rawMaterial', label: 'Raw Material' }),
@@ -324,6 +326,7 @@ const cargoEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'color', label: 'Color' }),
   Object.freeze({ id: 'ownership', label: 'Ownership' }),
   Object.freeze({ id: 'ships', label: 'Ships' }),
+  Object.freeze({ id: 'requiredCrew', label: 'Required Crew' }),
   Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
   Object.freeze({ id: 'assignment', label: 'Assignment' }),
   Object.freeze({ id: 'preferredCargoType', label: 'Preferred Cargo Type' }),
@@ -4195,6 +4198,7 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
   if (columnId === 'ships') return createShipsCell(entry);
+  if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
   if (columnId === 'sduMax') return createTextCell(entry.expectedSduPerScan == null ? '--' : formatWholeNumber(entry.expectedSduPerScan));
   if (columnId === 'atlasPerScan') return createTextCell(entry.expectedSduValueAtl == null ? '--' : formatAtlasNumber(entry.expectedSduValueAtl, 2));
   if (columnId === 'scanAttempts') return createTextCell(formatWholeNumber(entry.scanAttempts || 0));
@@ -4217,6 +4221,7 @@ function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'ships') return createShipsCell(entry);
+  if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
   if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
   if (columnId === 'starbase') return createTextCell(entry.starbase);
   if (columnId === 'rawMaterial') return createTextCell(entry.rawMaterial);
@@ -4238,6 +4243,7 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'ships') return createShipsCell(entry);
+  if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
   if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
   if (columnId === 'assignment') return createTextCell(entry.assignment || '--');
   if (columnId === 'preferredCargoType') return createTextCell(entry.preferredCargoType || '--');

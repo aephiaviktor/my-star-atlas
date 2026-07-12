@@ -3799,16 +3799,22 @@ async function fetchEarningsSnapshot(payload) {
   const fleetRows = fleets.map((fleet) => {
     const composition = compositionByFleet.get(fleet.key) || [];
     let expectedSduPerScan = 0;
+    let totalRequiredCrew = 0;
     const ships = composition.map((entry) => {
       const ship = shipByAccount.get(entry.shipAccount) || { key: entry.shipAccount, name: entry.shipAccount };
       const sotRow = sot.byName.get(normalizeShipName(ship.name));
       const sduPerScan = Number(sotRow?.sduPerScan);
       const mapped = Number.isFinite(sduPerScan);
+      const requiredCrewRaw = Number(sotRow?.requiredCrew);
+      const crewMapped = Number.isFinite(requiredCrewRaw);
       if (mapped) {
         mappedShipTypeCount += 1;
         expectedSduPerScan += entry.amount * sduPerScan;
       } else {
         unmappedShipTypeCount += 1;
+      }
+      if (crewMapped) {
+        totalRequiredCrew += entry.amount * requiredCrewRaw;
       }
       return {
         shipAccount: entry.shipAccount,
@@ -3817,6 +3823,7 @@ async function fetchEarningsSnapshot(payload) {
         amount: entry.amount,
         sduPerScan: mapped ? sduPerScan : null,
         expectedSduPerScan: mapped ? entry.amount * sduPerScan : null,
+        requiredCrew: crewMapped ? requiredCrewRaw : null,
         mapped,
       };
     });
@@ -3828,6 +3835,7 @@ async function fetchEarningsSnapshot(payload) {
       rentalRateAtlasPerDay: Number.isFinite(rentalRate) ? rentalRate : null,
       expectedSduPerScan,
       expectedSduValueAtl: sduPriceAtl != null ? expectedSduPerScan * sduPriceAtl : null,
+      totalRequiredCrew: totalRequiredCrew > 0 ? totalRequiredCrew : null,
       shipTypes: ships.length,
       ships,
     };
@@ -3894,6 +3902,7 @@ async function fetchEarningsSnapshot(payload) {
       shipTypes: fleet?.shipTypes || 0,
       expectedSduPerScan: fleet?.expectedSduPerScan ?? null,
       expectedSduValueAtl: fleet?.expectedSduValueAtl ?? null,
+      totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
       revenueAtlasPerDay,
       foodCostsAtlas,
       fuelCostsAtlas,
@@ -3945,6 +3954,7 @@ async function fetchEarningsSnapshot(payload) {
       activity: fleet?.activity || '',
       ships: fleet?.ships || [],
       shipTypes: fleet?.shipTypes || 0,
+      totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
       rawMaterialPriceAtl,
       revenueAtlasPerDay,
       ammoCostsAtlas,
@@ -3992,6 +4002,7 @@ async function fetchEarningsSnapshot(payload) {
       activity: fleet?.activity || '',
       ships: fleet?.ships || [],
       shipTypes: fleet?.shipTypes || 0,
+      totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
       starbaseLabel: Array.isArray(cargoRow.starbases) && cargoRow.starbases.length ? cargoRow.starbases.join(', ') : '--',
       fuelCostsAtlas,
       txsCostsAtlas,
