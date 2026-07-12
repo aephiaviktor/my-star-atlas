@@ -4057,20 +4057,34 @@ function renderEarningsCargoCostBreakdownChart(result) {
   });
 }
 
-function describeFleetShips(fleet) {
+function aggregateShipsByName(fleet) {
   const ships = Array.isArray(fleet.ships) ? fleet.ships : [];
+  if (!ships.length) return [];
+  const byName = new Map();
+  for (const ship of ships) {
+    const name = ship.name || 'Unknown ship';
+    const amount = Number(ship.amount) || 0;
+    const existing = byName.get(name);
+    if (existing) existing.amount += amount;
+    else byName.set(name, { name, amount });
+  }
+  return Array.from(byName.values());
+}
+
+function describeFleetShips(fleet) {
+  const ships = aggregateShipsByName(fleet);
   if (!ships.length) return 'No ship composition';
   return ships
     .slice(0, 2)
-    .map((ship) => `${formatWholeNumber(ship.amount)}x ${ship.name || 'Unknown ship'}`)
+    .map((ship) => `${formatWholeNumber(ship.amount)}x ${ship.name}`)
     .join(', ') + (ships.length > 2 ? ` +${ships.length - 2}` : '');
 }
 
 function getFleetShipsDetail(fleet) {
-  const ships = Array.isArray(fleet.ships) ? fleet.ships : [];
+  const ships = aggregateShipsByName(fleet);
   if (!ships.length) return 'No ship composition';
   return ships
-    .map((ship) => `${formatWholeNumber(ship.amount)}x ${ship.name || 'Unknown ship'}`)
+    .map((ship) => `${formatWholeNumber(ship.amount)}x ${ship.name}`)
     .join('\n');
 }
 
