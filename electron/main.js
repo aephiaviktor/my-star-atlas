@@ -502,34 +502,6 @@ function getUtcDateKey(date) {
   ].join('-');
 }
 
-// Format a Date as YYYY-MM-DD in a specific IANA timezone. Used for
-// the "best of yesterday" metric cards so "yesterday" matches the
-// user's local calendar day, not "now - 24h" (which can land in the
-// day-before-yesterday during the early hours of the user's day).
-function getLocalDateKey(date, timeZone) {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  return formatter.format(date);
-}
-
-function getYesterdayLocalDateKey(timeZone) {
-  const now = new Date();
-  // Compute yesterday in the user's local timezone: build a date that
-  // is unambiguously "today" in that timezone, then subtract 1 day.
-  // Doing the subtraction on the local calendar date (via the
-  // formatter) avoids DST edge cases where `setUTCDate(-1)` could
-  // skip a day in spring-forward / fall-back transitions.
-  const todayLocal = getLocalDateKey(now, timeZone);
-  const [year, month, day] = todayLocal.split('-').map(Number);
-  const todayLocalDate = new Date(Date.UTC(year, month - 1, day));
-  todayLocalDate.setUTCDate(todayLocalDate.getUTCDate() - 1);
-  return getLocalDateKey(todayLocalDate, timeZone);
-}
-
 function formatShortUtcDate(date) {
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   const day = String(date.getUTCDate()).padStart(2, '0');
@@ -4101,15 +4073,14 @@ async function fetchEarningsSnapshot(payload) {
   // picks the row with the max value. Mining rows are per
   // (fleet, starbase, raw material, day) so net profit and mined need
   // to be summed per fleet / per raw material across starbases+materials.
-  // "Yesterday" is the user's local calendar day (system timezone),
-  // not "now - 24h" in UTC — the data is daily-aggregated, so a rolling
-  // 24h window can land in the wrong UTC day during the early hours
-  // of the user's day (e.g. 02:00 local in Europe/Berlin is 00:00 UTC
-  // and "now - 24h" is 02:00 yesterday-local = 00:00 the day before
-  // yesterday-UTC). Using the local calendar date gives the user the
-  // day they actually think of as "yesterday".
-  const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const yesterdayIsoDate = getYesterdayLocalDateKey(userTimeZone);
+  // "Yesterday" is the UTC calendar day before today (NOT a rolling
+  // 24h window, NOT the local calendar date). The data is already
+  // daily-aggregated by UTC day so this matches the Influx data 1:1
+  // with no timezone boundary fuzz.
+  const now = new Date();
+  const yesterdayIsoDate = getUtcDateKey(
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1))
+  );
   const yesterdayScanRows = rows.filter((row) => row.isoDate === yesterdayIsoDate);
   const netProfitByFleetScanYesterday = new Map();
   const totalCrewByFleetScanYesterday = new Map();
