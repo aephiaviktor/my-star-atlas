@@ -4323,6 +4323,7 @@ async function fetchEarningsSnapshot(payload) {
   const yesterdayIsoDate = getUtcDateKey(
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1))
   );
+  const todayIsoDate = getUtcDateKey(new Date());
   const yesterdayScanRows = rows.filter((row) => row.isoDate === yesterdayIsoDate);
   const netProfitByFleetScanYesterday = new Map();
   const totalCrewByFleetScanYesterday = new Map();
@@ -4445,7 +4446,6 @@ async function fetchEarningsSnapshot(payload) {
   const activeFleetRows = fleetRows.filter((fleet) => activeMappedFleetKeys.has(fleet.key));
   const totalExpectedSduPerScan = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.expectedSduPerScan) || 0), 0);
   const rentalAtlasPerDay = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.rentalRateAtlasPerDay) || 0), 0);
-  const todayIsoDate = getUtcDateKey(new Date());
   const totalsByDay = new Map();
   for (const row of rows) {
     const day = row.isoDate;
