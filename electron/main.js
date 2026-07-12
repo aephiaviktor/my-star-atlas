@@ -3909,6 +3909,9 @@ async function fetchEarningsSnapshot(payload) {
       txsCostsAtlas,
       totalCostsAtlas,
       netProfitAtlas,
+      netProfitPerCrew: Number.isFinite(netProfitAtlas) && Number.isFinite(fleet?.totalRequiredCrew) && fleet.totalRequiredCrew > 0
+        ? netProfitAtlas / fleet.totalRequiredCrew
+        : null,
       profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
         ? (netProfitAtlas / revenueAtlasPerDay) * 100
         : null,
@@ -3963,6 +3966,9 @@ async function fetchEarningsSnapshot(payload) {
       txsCostsAtlas,
       totalCostsAtlas,
       netProfitAtlas,
+      netProfitPerCrew: Number.isFinite(netProfitAtlas) && Number.isFinite(fleet?.totalRequiredCrew) && fleet.totalRequiredCrew > 0
+        ? netProfitAtlas / fleet.totalRequiredCrew
+        : null,
       profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
         ? (netProfitAtlas / revenueAtlasPerDay) * 100
         : null,

@@ -55,6 +55,7 @@
             <label><input type="checkbox" data-earnings-column="txsCosts" checked /> Txs Costs</label>
             <label><input type="checkbox" data-earnings-column="totalCosts" checked /> Total Costs</label>
             <label><input type="checkbox" data-earnings-column="netProfit" checked /> Net Profit</label>
+            <label><input type="checkbox" data-earnings-column="npPerCrew" /> NP per crew</label>
             <label><input type="checkbox" data-earnings-column="profitMargin" checked /> Profit Margin</label>
             <label><input type="checkbox" data-earnings-column="account" /> Account</label>
           </div>
@@ -784,13 +785,23 @@
               </section>
             </div>
 
-            <section class="work-surface earnings-chart-surface" data-chart-panel>
-              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+            <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                 <span class="chart-toggle-arrow" aria-hidden="true">v</span>
                 <span>Scanning: Net Profit by Fleet</span>
               </button>
               <div class="earnings-chart-body">
                 <div id="earnings-net-profit-chart" class="earnings-net-profit-chart" aria-label="Scanning net profit by fleet over the last 14 days"></div>
+              </div>
+            </section>
+
+            <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Scanning: Net Profit per Crew by Fleet</span>
+              </button>
+              <div class="earnings-chart-body">
+                <div id="earnings-net-profit-per-crew-chart" class="earnings-net-profit-chart" aria-label="Scanning net profit per crew by fleet over the last 14 days"></div>
               </div>
             </section>
 
@@ -848,8 +859,8 @@
               </section>
             </div>
 
-            <section class="work-surface earnings-chart-surface" data-chart-panel>
-              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+            <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                 <span class="chart-toggle-arrow" aria-hidden="true">v</span>
                 <span>Mining: Net Profit by Fleet</span>
               </button>
@@ -858,8 +869,8 @@
               </div>
             </section>
 
-            <section class="work-surface earnings-chart-surface" data-chart-panel>
-              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+            <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                 <span class="chart-toggle-arrow" aria-hidden="true">v</span>
                 <span>Mining: Net Profit by Raw Material</span>
               </button>
@@ -868,13 +879,23 @@
               </div>
             </section>
 
-            <section class="work-surface earnings-chart-surface" data-chart-panel>
-              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+            <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                 <span class="chart-toggle-arrow" aria-hidden="true">v</span>
                 <span>Mining: Net Profit by Starbase</span>
               </button>
               <div class="earnings-chart-body">
                 <div id="earnings-mining-starbase-net-profit-chart" class="earnings-net-profit-chart" aria-label="Mining net profit by starbase over the last 14 days"></div>
+              </div>
+            </section>
+
+            <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Mining: Net Profit per Crew by Fleet</span>
+              </button>
+              <div class="earnings-chart-body">
+                <div id="earnings-mining-net-profit-per-crew-chart" class="earnings-net-profit-chart" aria-label="Mining net profit per crew by fleet over the last 14 days"></div>
               </div>
             </section>
 
@@ -911,8 +932,8 @@
             </section>
           </div>
           <div class="earnings-panel" data-earnings-panel="cargo">
-            <section class="work-surface earnings-chart-surface" data-chart-panel>
-              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+            <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                 <span class="chart-toggle-arrow" aria-hidden="true">v</span>
                 <span>Cargo: Total Costs by Fleet</span>
               </button>
@@ -921,8 +942,8 @@
               </div>
             </section>
 
-            <section class="work-surface earnings-chart-surface" data-chart-panel>
-              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="true">
+            <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
+              <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                 <span class="chart-toggle-arrow" aria-hidden="true">v</span>
                 <span>Cargo: Total Costs Breakdown</span>
               </button>

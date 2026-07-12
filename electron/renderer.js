@@ -64,6 +64,8 @@ const earningsMiningTableBody = document.querySelector('#earnings-mining-table-b
 const earningsMiningNetProfitChart = document.querySelector('#earnings-mining-net-profit-chart');
 const earningsMiningMaterialNetProfitChart = document.querySelector('#earnings-mining-material-net-profit-chart');
 const earningsMiningStarbaseNetProfitChart = document.querySelector('#earnings-mining-starbase-net-profit-chart');
+const earningsNetProfitPerCrewChart = document.querySelector('#earnings-net-profit-per-crew-chart');
+const earningsMiningNetProfitPerCrewChart = document.querySelector('#earnings-mining-net-profit-per-crew-chart');
 const earningsMiningAmmoPriceValue = document.querySelector('#earnings-mining-ammo-price-value');
 const earningsMiningAmmoPriceNote = document.querySelector('#earnings-mining-ammo-price-note');
 const earningsMiningMinedValue = document.querySelector('#earnings-mining-mined-value');
@@ -297,6 +299,7 @@ const scanningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
+  Object.freeze({ id: 'npPerCrew', label: 'NP per crew' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
@@ -318,6 +321,7 @@ const miningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
+  Object.freeze({ id: 'npPerCrew', label: 'NP per crew' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
@@ -3892,7 +3896,7 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
     transform: `rotate(-90 26 ${margin.top + plotHeight / 2})`,
     'text-anchor': 'middle',
   });
-  yAxisLabel.textContent = 'ATLAS';
+  yAxisLabel.textContent = options.yAxisLabel || 'ATLAS';
   svg.appendChild(yAxisLabel);
 
   target.appendChild(svg);
@@ -4212,6 +4216,7 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
   if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
+  if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
   if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
@@ -4234,6 +4239,7 @@ function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
   if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
+  if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
   if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
@@ -4272,6 +4278,13 @@ function renderEarnings(result) {
   const rows = Array.isArray(result.rows) ? result.rows : [];
   const colorMap = buildEarningsFleetColorMap(rows, 0);
   renderEarningsNetProfitChart(result, colorMap, { target: earningsNetProfitChart, label: 'Scanning net profit by fleet in ATLAS by day' });
+  renderEarningsNetProfitChart(result, colorMap, {
+    target: earningsNetProfitPerCrewChart,
+    label: 'Scanning net profit per crew by fleet in ATLAS by day',
+    valueKey: 'netProfitPerCrew',
+    valueLabel: 'NP / Crew',
+    yAxisLabel: 'ATLAS / Crew',
+  });
 
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
   setText(earningsSduPriceNote, '');
@@ -4356,6 +4369,17 @@ function renderEarningsMining(result) {
       target: earningsMiningStarbaseNetProfitChart,
       label: 'Mining starbase net profit in ATLAS by day',
       getSegmentLabel: (row) => row.starbase || 'Unknown starbase',
+    }
+  );
+  renderEarningsNetProfitChart(
+    { ...result, rows },
+    colorMap,
+    {
+      target: earningsMiningNetProfitPerCrewChart,
+      label: 'Mining net profit per crew by fleet in ATLAS by day',
+      valueKey: 'netProfitPerCrew',
+      valueLabel: 'NP / Crew',
+      yAxisLabel: 'ATLAS / Crew',
     }
   );
 
