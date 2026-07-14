@@ -64,8 +64,6 @@ const earningsMiningTableBody = document.querySelector('#earnings-mining-table-b
 const earningsMiningNetProfitChart = document.querySelector('#earnings-mining-net-profit-chart');
 const earningsMiningMaterialNetProfitChart = document.querySelector('#earnings-mining-material-net-profit-chart');
 const earningsMiningStarbaseNetProfitChart = document.querySelector('#earnings-mining-starbase-net-profit-chart');
-const earningsNetProfitPerCrewChart = document.querySelector('#earnings-net-profit-per-crew-chart');
-const earningsMiningNetProfitPerCrewChart = document.querySelector('#earnings-mining-net-profit-per-crew-chart');
 const earningsMiningAmmoPriceValue = document.querySelector('#earnings-mining-ammo-price-value');
 const earningsMiningAmmoPriceNote = document.querySelector('#earnings-mining-ammo-price-note');
 const earningsMiningMinedValue = document.querySelector('#earnings-mining-mined-value');
@@ -368,12 +366,14 @@ const cargoEarningsOptionalColumns = Object.freeze([
 const craftingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
   Object.freeze({ id: 'crafted', label: 'Crafted' }),
+  Object.freeze({ id: 'crew', label: 'Crew' }),
   Object.freeze({ id: 'revenue', label: 'Revenue' }),
   Object.freeze({ id: 'ingCosts', label: 'Ing Costs' }),
   Object.freeze({ id: 'feeCosts', label: 'Crafting Fee Costs' }),
   Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
+  Object.freeze({ id: 'npPerCrew', label: 'NP per crew' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
 ]);
 
@@ -388,7 +388,7 @@ const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   cargo: new Set(['txsDaily', 'assignment', 'preferredCargoType', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct']),
-  crafting: new Set(['txsDaily', 'crafted', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
+  crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
 };
 
 const earningsFilters = {
@@ -403,6 +403,16 @@ const earningsSort = {
   mining: { column: null, direction: null },
   cargo: { column: null, direction: null },
   crafting: { column: null, direction: null },
+};
+
+// Chart mode state: 'total' (NP in ATLAS) or 'perCrew' (NP / crew). One
+// shared value per earnings subtab, so all Net Profit chart panels in
+// the same subtab switch together. Mining/Crafting each have multiple
+// NP chart panels and they all read from this state on render.
+const earningsChartMode = {
+  scanning: 'total',
+  mining: 'total',
+  crafting: 'total',
 };
 
 const earningsSortKeyByColumnId = Object.freeze({
@@ -436,6 +446,7 @@ const earningsSortKeyByColumnId = Object.freeze({
   assignment: 'assignment',
   asset: 'output',
   crafted: 'crafted',
+  crew: 'crew',
   ingCosts: 'ingCostsAtlas',
   feeCosts: 'feeCostsAtlas',
   preferredCargoType: 'preferredCargoType',
@@ -3896,6 +3907,17 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
   const valueLabel = options.valueLabel || 'Net Profit';
   const emptyLabel = options.emptyLabel || 'No net profit data loaded';
   const emptyValueLabel = options.emptyValueLabel || 'No net profit values available';
+  const mode = options.mode === 'perCrew' ? 'perCrew' : 'total';
+  const getCrew = typeof options.getCrew === 'function' ? options.getCrew : null;
+  const getCrewIdentity = typeof options.getCrewIdentity === 'function' ? options.getCrewIdentity : null;
+  const isPerCrew = mode === 'perCrew' && !!getCrew;
+  const effectiveValueLabel = isPerCrew ? (options.perCrewValueLabel || 'NP / Crew') : valueLabel;
+  const effectiveYAxisLabel = isPerCrew
+    ? (options.perCrewYAxisLabel || 'ATLAS / Crew')
+    : (options.yAxisLabel || 'ATLAS');
+  const effectiveEmptyValueLabel = isPerCrew
+    ? (options.perCrewEmptyValueLabel || 'No per-crew values available')
+    : emptyValueLabel;
 
   const rows = Array.isArray(result?.rows) ? result.rows : [];
   if (!rows.length) {
@@ -3906,30 +3928,68 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
     return;
   }
 
+  // Build per-(day, segment) buckets. In total mode, segment.value
+  // accumulates the row's numerator (e.g. netProfitAtlas) directly. In
+  // per-crew mode, segment.numerator accumulates the sum and
+  // segment.crew accumulates the deduplicated crew denominator; we
+  // divide once after aggregation. Dedup key is getCrewIdentity(row)
+  // (e.g. fleetName for Mining by Raw Material / Starbase) — so a
+  // fleet that contributes to N material rows at one starbase counts
+  // its crew once, not N times. When getCrewIdentity is null, crew
+  // is summed across all rows (used when the per-row crew is already
+  // pre-aggregated, e.g. Crafting where (date, starbase, output) is
+  // a unique row).
   const days = getLastUtcDayLabels(14).map((day) => ({ ...day, positiveTotal: 0, negativeTotal: 0, segments: [] }));
   const dayByIso = new Map(days.map((day) => [day.isoDate, day]));
   for (const row of rows) {
     const day = dayByIso.get(row.isoDate);
-    const value = Number(row[valueKey]);
-    if (!day || !Number.isFinite(value) || value === 0) continue;
+    const numerator = Number(row[valueKey]);
+    if (!day || !Number.isFinite(numerator) || numerator === 0) continue;
     const label = getSegmentLabel(row);
+    if (!label) continue;
     let segment = day.segments.find((item) => item.fleet === label);
     if (!segment) {
       segment = {
         fleet: label,
         color: getEarningsFleetColor(row, colorMap, getSegmentLabel),
-        value: 0,
+        numerator: 0,
+        crew: 0,
+        crewByIdentity: isPerCrew && getCrewIdentity ? new Map() : null,
       };
       day.segments.push(segment);
     }
-    segment.value += value;
+    segment.numerator += numerator;
+    if (isPerCrew) {
+      const crew = Number(getCrew(row));
+      if (Number.isFinite(crew) && crew > 0) {
+        if (getCrewIdentity) {
+          const identity = String(getCrewIdentity(row) || '');
+          if (identity && !segment.crewByIdentity.has(identity)) {
+            segment.crewByIdentity.set(identity, crew);
+            segment.crew += crew;
+          }
+        } else {
+          segment.crew += crew;
+        }
+      }
+    }
   }
   for (const day of days) {
+    for (const segment of day.segments) {
+      segment.value = isPerCrew
+        ? (segment.crew > 0 ? segment.numerator / segment.crew : 0)
+        : segment.numerator;
+    }
+    if (isPerCrew) {
+      // Drop segments that had no crew info — they would be misleading
+      // in per-crew mode (division by zero / missing denominator).
+      day.segments = day.segments.filter((segment) => segment.crew > 0);
+    }
     day.positiveTotal = 0;
     day.negativeTotal = 0;
     for (const segment of day.segments) {
       if (segment.value > 0) day.positiveTotal += segment.value;
-      else day.negativeTotal += segment.value;
+      else if (segment.value < 0) day.negativeTotal += segment.value;
     }
   }
 
@@ -3938,7 +3998,7 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
   if (maxPositive === 0 && maxNegative === 0) {
     const empty = document.createElement('div');
     empty.className = 'earnings-chart-empty';
-    empty.textContent = emptyValueLabel;
+    empty.textContent = effectiveEmptyValueLabel;
     target.appendChild(empty);
     return;
   }
@@ -4019,10 +4079,10 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
         class: 'earnings-chart-segment',
         'data-fleet': segment.fleet,
         'data-net-profit': formatAtlasNumber(value, 0),
-        'data-value-label': valueLabel,
+        'data-value-label': effectiveValueLabel,
       });
       const title = createSvgElement('title');
-      title.textContent = `${segment.fleet}\n${valueLabel}: ${formatAtlasNumber(value, 0)}`;
+      title.textContent = `${segment.fleet}\n${effectiveValueLabel}: ${formatAtlasNumber(value, 0)}`;
       rect.appendChild(title);
       svg.appendChild(rect);
       if (value >= 0) positiveStack = yEnd;
@@ -4046,7 +4106,7 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
     transform: `rotate(-90 26 ${margin.top + plotHeight / 2})`,
     'text-anchor': 'middle',
   });
-  yAxisLabel.textContent = options.yAxisLabel || 'ATLAS';
+  yAxisLabel.textContent = effectiveYAxisLabel;
   svg.appendChild(yAxisLabel);
 
   target.appendChild(svg);
@@ -4061,7 +4121,7 @@ function renderEarningsNetProfitChart(result, colorMap, options = {}) {
       tooltip.style.display = 'none';
       return;
     }
-    tooltip.textContent = `${target.dataset.fleet || 'Fleet'}\n${target.dataset.valueLabel || valueLabel}: ${target.dataset.netProfit || '--'}`;
+    tooltip.textContent = `${target.dataset.fleet || 'Fleet'}\n${target.dataset.valueLabel || effectiveValueLabel}: ${target.dataset.netProfit || '--'}`;
     tooltip.style.display = 'block';
     tooltip.style.left = `${event.clientX + 14}px`;
     tooltip.style.top = `${event.clientY + 14}px`;
@@ -4429,6 +4489,31 @@ function setupEarningsFilterHandlers() {
   wire('crafting', earningsCraftingAssetFilter, 'asset');
 }
 
+// Apply the active state on every Total / Per Crew button inside
+// the given earnings subtab so the segmented switch visually matches
+// earningsChartMode[subtab].
+function applyEarningsChartModeState(subtab) {
+  const mode = earningsChartMode[subtab] || 'total';
+  const panel = document.querySelector(`.earnings-panel[data-earnings-panel="${subtab}"]`);
+  if (!panel) return;
+  panel.querySelectorAll('[data-earnings-chart-mode]').forEach((button) => {
+    if (button.dataset.earningsChartMode === mode) button.classList.add('active');
+    else button.classList.remove('active');
+  });
+}
+
+// Switch the chart mode for a whole earnings subtab and re-render its
+// NP chart panels. Used by the Total / Per Crew click handler.
+function setEarningsChartMode(subtab, mode) {
+  if (mode !== 'total' && mode !== 'perCrew') return;
+  earningsChartMode[subtab] = mode;
+  applyEarningsChartModeState(subtab);
+  if (!latestEarningsResult) return;
+  if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
+  else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
+  else renderEarnings(latestEarningsResult);
+}
+
 function setupEarningsHeaderSortHandlers() {
   const handle = (head, subtab) => {
     if (!head) return;
@@ -4566,12 +4651,14 @@ function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
 function createCraftingEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
   if (columnId === 'crafted') return createTextCell(formatWholeNumber(entry.crafted || 0));
+  if (columnId === 'crew') return createTextCell(entry.crew == null ? '--' : formatWholeNumber(entry.crew));
   if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasWhole(entry.revenueAtlasPerDay));
   if (columnId === 'ingCosts') return createTextCell(entry.ingCostsAtlas == null ? '--' : formatAtlasWhole(entry.ingCostsAtlas));
   if (columnId === 'feeCosts') return createTextCell(entry.feeCostsAtlas == null ? '--' : formatAtlasWhole(entry.feeCostsAtlas));
   if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
   if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
+  if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
   if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
   return createTextCell('--');
 }
@@ -4611,13 +4698,12 @@ function renderEarnings(result) {
   populateEarningsFilterOptions('scanning', rows);
   renderEarningsHeader('scanning');
   const colorMap = buildEarningsFleetColorMap(rows, 0);
-  renderEarningsNetProfitChart(result, colorMap, { target: earningsNetProfitChart, label: 'Scanning net profit by fleet in ATLAS by day' });
   renderEarningsNetProfitChart(result, colorMap, {
-    target: earningsNetProfitPerCrewChart,
-    label: 'Scanning net profit per crew by fleet in ATLAS by day',
-    valueKey: 'netProfitPerCrew',
-    valueLabel: 'NP / Crew',
-    yAxisLabel: 'ATLAS / Crew',
+    target: earningsNetProfitChart,
+    label: 'Scanning net profit by fleet in ATLAS by day',
+    mode: earningsChartMode.scanning,
+    getCrew: (row) => row.totalRequiredCrew,
+    getCrewIdentity: (row) => row.fleetName || row.fleet,
   });
 
   setText(earningsSduPriceValue, result.sduPriceAtl == null ? '--' : formatAtlas(result.sduPriceAtl, 6));
@@ -4696,10 +4782,19 @@ function renderEarningsMining(result) {
   const colorMap = buildEarningsFleetColorMap(rows, 7);
   populateEarningsFilterOptions('mining', rows);
   renderEarningsHeader('mining');
+  const miningMode = earningsChartMode.mining;
+  const miningGetCrew = (row) => row.totalRequiredCrew;
+  const miningGetCrewIdentity = (row) => row.fleetName || row.fleet;
   renderEarningsNetProfitChart(
     { ...result, rows },
     colorMap,
-    { target: earningsMiningNetProfitChart, label: 'Mining fleet net profit in ATLAS by day' }
+    {
+      target: earningsMiningNetProfitChart,
+      label: 'Mining fleet net profit in ATLAS by day',
+      mode: miningMode,
+      getCrew: miningGetCrew,
+      getCrewIdentity: miningGetCrewIdentity,
+    }
   );
   const materialColorMap = buildEarningsAssetColorMap(rows, (row) => row.rawMaterial || 'Unknown material');
   renderEarningsNetProfitChart(
@@ -4709,6 +4804,9 @@ function renderEarningsMining(result) {
       target: earningsMiningMaterialNetProfitChart,
       label: 'Mining raw material net profit in ATLAS by day',
       getSegmentLabel: (row) => row.rawMaterial || 'Unknown material',
+      mode: miningMode,
+      getCrew: miningGetCrew,
+      getCrewIdentity: miningGetCrewIdentity,
     }
   );
   const starbaseColorMap = buildEarningsFleetColorMap(rows, 21, (row) => row.starbase || 'Unknown starbase');
@@ -4719,17 +4817,9 @@ function renderEarningsMining(result) {
       target: earningsMiningStarbaseNetProfitChart,
       label: 'Mining starbase net profit in ATLAS by day',
       getSegmentLabel: (row) => row.starbase || 'Unknown starbase',
-    }
-  );
-  renderEarningsNetProfitChart(
-    { ...result, rows },
-    colorMap,
-    {
-      target: earningsMiningNetProfitPerCrewChart,
-      label: 'Mining net profit per crew by fleet in ATLAS by day',
-      valueKey: 'netProfitPerCrew',
-      valueLabel: 'NP / Crew',
-      yAxisLabel: 'ATLAS / Crew',
+      mode: miningMode,
+      getCrew: miningGetCrew,
+      getCrewIdentity: miningGetCrewIdentity,
     }
   );
 
@@ -4805,6 +4895,16 @@ function renderEarningsCrafting(result) {
   const rows = Array.isArray(result.craftingRows) ? result.craftingRows : [];
   populateEarningsFilterOptions('crafting', rows);
   renderEarningsHeader('crafting');
+  const craftingMode = earningsChartMode.crafting;
+  // Each Crafting per-row is already unique on (date, starbase, output),
+  // so the per-row crew is pre-aggregated across all events for that
+  // (date, starbase, output). In a chart, the segment is either output
+  // (by Asset) or starbase (by Starbase). For per-crew mode, dedup the
+  // crew by the OTHER axis: starbase for by-Asset (one row per
+  // starbase), output for by-Starbase (one row per output). The dedup
+  // is a safety net — it produces the same sum either way because each
+  // (date, segment, otherAxis) tuple is already a unique row.
+  const craftingGetCrew = (row) => row.crew;
   const assetColorMap = buildEarningsAssetColorMap(rows, (row) => row.output || 'Unknown asset');
   renderEarningsNetProfitChart(
     { ...result, rows },
@@ -4813,6 +4913,9 @@ function renderEarningsCrafting(result) {
       target: earningsCraftingAssetNetProfitChart,
       label: 'Crafting net profit by asset in ATLAS by day',
       getSegmentLabel: (row) => row.output || 'Unknown asset',
+      mode: craftingMode,
+      getCrew: craftingGetCrew,
+      getCrewIdentity: (row) => row.starbase,
     }
   );
   const starbaseColorMap = buildEarningsAssetColorMap(rows, (row) => row.starbase || 'Unknown starbase');
@@ -4823,6 +4926,9 @@ function renderEarningsCrafting(result) {
       target: earningsCraftingStarbaseNetProfitChart,
       label: 'Crafting net profit by starbase in ATLAS by day',
       getSegmentLabel: (row) => row.starbase || 'Unknown starbase',
+      mode: craftingMode,
+      getCrew: craftingGetCrew,
+      getCrewIdentity: (row) => row.output,
     }
   );
 
@@ -5134,6 +5240,27 @@ document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
 renderEarningsColumnControls();
 setupEarningsFilterHandlers();
 setupEarningsHeaderSortHandlers();
+
+// Apply chart mode visual state for every earnings subtab at startup
+// so the segmented Total / Per Crew buttons reflect the persisted
+// earningsChartMode (always 'total' on first load).
+for (const subtab of ['scanning', 'mining', 'crafting']) {
+  applyEarningsChartModeState(subtab);
+}
+
+// Wire up the Total / Per Crew mode switches. The click handler
+// resolves the owning earnings subtab by walking up to the nearest
+// .earnings-panel, then re-renders the relevant renderer. Visual
+// state is synced by applyEarningsChartModeState after the state
+// update.
+document.querySelectorAll('[data-earnings-chart-mode]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const panel = button.closest('.earnings-panel');
+    const subtab = panel?.dataset?.earningsPanel;
+    if (!subtab || !button.dataset.earningsChartMode) return;
+    setEarningsChartMode(subtab, button.dataset.earningsChartMode);
+  });
+});
 
 document.querySelectorAll('[data-chart-toggle]').forEach((button) => {
   button.addEventListener('click', () => {

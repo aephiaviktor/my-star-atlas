@@ -992,6 +992,55 @@ select:focus {
   padding-bottom: 14px;
 }
 
+.earnings-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.earnings-chart-header .earnings-chart-toggle {
+  flex: 1 1 auto;
+  width: auto;
+  margin-bottom: 0;
+}
+
+.earnings-chart-mode-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(11, 27, 36, 0.6);
+  overflow: hidden;
+}
+
+.earnings-chart-mode-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.earnings-chart-mode-btn + .earnings-chart-mode-btn {
+  border-left: 1px solid var(--border);
+}
+
+.earnings-chart-mode-btn:hover {
+  color: #f4f7fa;
+}
+
+.earnings-chart-mode-btn.active {
+  color: #07151d;
+  background: var(--cyan, #22d3ee);
+}
+
 .earnings-net-profit-chart {
   position: relative;
   max-width: 1120px;
@@ -1161,11 +1210,18 @@ select:focus {
   color: #f4f7fa;
 }
 
+.fleet-table th.earnings-sort-active {
+  color: #22d3ee;
+}
+
 .fleet-table th .earnings-sort-arrow {
   display: inline-block;
-  width: 0.9em;
-  font-size: 10px;
-  color: var(--accent, #22d3ee);
+  margin-left: 6px;
+  min-width: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #22d3ee;
+  text-align: center;
 }
 
 .earnings-filter-bar {

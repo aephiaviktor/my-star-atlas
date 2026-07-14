@@ -3635,12 +3635,26 @@ ${scopeFilterFlux}
   |> group()
   |> sort(columns: ["_time"])`;
 
-  const [outputCsv, inputCsv, feeCsv, txsCsv, countCsv] = await Promise.all([
+  // Crew required per crafting event. Bot writes crew ONLY on the
+  // Output row (verified: sampling slya/crafting/crew field shows
+  // type=Output for every event, no Input duplication). We still
+  // dedup-by-craftingID as defense in depth in case a future bot
+  // change writes crew on Input rows too.
+  const crewFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "crew" and r.type == "Output")
+  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
+  |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
+  |> sort(columns: ["_time"])`;
+
+  const [outputCsv, inputCsv, feeCsv, txsCsv, countCsv, crewCsv] = await Promise.all([
     queryInfluxFlux(settings, outputFlux),
     queryInfluxFlux(settings, inputFlux),
     queryInfluxFlux(settings, feeFlux),
     queryInfluxFlux(settings, txsFlux),
     queryInfluxFlux(settings, countFlux),
+    queryInfluxFlux(settings, crewFlux),
   ]);
 
   const rowsByKey = new Map();
@@ -3656,6 +3670,7 @@ ${scopeFilterFlux}
         txsDaily: 0,
         feeAmount: 0,
         txCostSol: 0,
+        crew: 0,
         ingredients: [],
       });
     }
@@ -3669,6 +3684,7 @@ ${scopeFilterFlux}
   // per event.
   const seenFeeEvents = new Set();
   const seenTxsEvents = new Set();
+  const seenCrewEvents = new Set();
 
   for (const row of parseInfluxCsv(outputCsv)) {
     const starbase = resolveStarbaseName(row, coordinateMap);
@@ -3742,8 +3758,27 @@ ${scopeFilterFlux}
     entry.txsDaily += 1;
   }
 
+  // crewCsv: crew required per crafting event, summed across all
+  // events for the (date, starbase, output) row.
+  for (const row of parseInfluxCsv(crewCsv)) {
+    const starbase = resolveStarbaseName(row, coordinateMap);
+    const output = String(row.output || '').trim();
+    const date = new Date(row._time);
+    const value = Number(row._value || 0);
+    const craftingID = String(row.craftingID || '').trim();
+    if (!starbase || !output || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    if (craftingID) {
+      if (seenCrewEvents.has(craftingID)) continue;
+      seenCrewEvents.add(craftingID);
+    }
+    const entry = ensureRow(isoDate, starbase, output, date);
+    entry.crew += value;
+  }
+
   return Array.from(rowsByKey.values())
-    .filter((row) => row.crafted > 0 || row.feeAmount > 0 || row.txCostSol > 0 || row.ingredients.length > 0);
+    .filter((row) => row.crafted > 0 || row.feeAmount > 0 || row.txCostSol > 0 || row.crew > 0 || row.ingredients.length > 0);
 }
 
 async function fetchCargoEarningsRows(settings) {
@@ -4283,6 +4318,10 @@ async function fetchEarningsSnapshot(payload) {
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
       ? revenueAtlasPerDay - totalCostsAtlas
       : null;
+    const crew = Number.isFinite(Number(craftingRow.crew)) ? Number(craftingRow.crew) : 0;
+    const netProfitPerCrew = Number.isFinite(netProfitAtlas) && crew > 0
+      ? netProfitAtlas / crew
+      : null;
     return {
       ...craftingRow,
       assetName: craftingRow.output,
@@ -4293,6 +4332,8 @@ async function fetchEarningsSnapshot(payload) {
       txsCostsAtlas,
       totalCostsAtlas,
       netProfitAtlas,
+      crew,
+      netProfitPerCrew,
       profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
         ? (netProfitAtlas / revenueAtlasPerDay) * 100
         : null,
