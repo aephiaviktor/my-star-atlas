@@ -91,6 +91,13 @@ const earningsCraftingBestRevenueNote = document.querySelector('#earnings-crafti
 const earningsCraftingDateFilter = document.querySelector('#earnings-crafting-date-filter');
 const earningsCraftingStarbaseFilter = document.querySelector('#earnings-crafting-starbase-filter');
 const earningsCraftingAssetFilter = document.querySelector('#earnings-crafting-asset-filter');
+const earningsUpgradingSyncStatus = document.querySelector('#earnings-upgrading-sync-status');
+const earningsUpgradingTableHead = document.querySelector('#earnings-upgrading-table-head');
+const earningsUpgradingTableBody = document.querySelector('#earnings-upgrading-table-body');
+const earningsUpgradingAssetNetProfitChart = document.querySelector('#earnings-upgrading-asset-net-profit-chart');
+const earningsUpgradingDateFilter = document.querySelector('#earnings-upgrading-date-filter');
+const earningsUpgradingStarbaseFilter = document.querySelector('#earnings-upgrading-starbase-filter');
+const earningsUpgradingAssetFilter = document.querySelector('#earnings-upgrading-asset-filter');
 const earningsScanningDateFilter = document.querySelector('#earnings-scanning-date-filter');
 const earningsScanningFleetFilter = document.querySelector('#earnings-scanning-fleet-filter');
 const earningsMiningDateFilter = document.querySelector('#earnings-mining-date-filter');
@@ -377,11 +384,24 @@ const craftingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
 ]);
 
+const upgradingEarningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'installed', label: 'Installed' }),
+  Object.freeze({ id: 'crew', label: 'Crew' }),
+  Object.freeze({ id: 'revenue', label: 'Revenue' }),
+  Object.freeze({ id: 'upgCosts', label: 'UPG Costs' }),
+  Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
+  Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
+  Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
+  Object.freeze({ id: 'npPerCrew', label: 'Net Profit per Crew' }),
+  Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
+]);
+
 const earningsColumnsBySubtab = Object.freeze({
   scanning: scanningEarningsOptionalColumns,
   mining: miningEarningsOptionalColumns,
   cargo: cargoEarningsOptionalColumns,
   crafting: craftingEarningsOptionalColumns,
+  upgrading: upgradingEarningsOptionalColumns,
 });
 
 const earningsColumnState = {
@@ -389,6 +409,7 @@ const earningsColumnState = {
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   cargo: new Set(['txsDaily', 'assignment', 'preferredCargoType', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
+  upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
 };
 
 const earningsFilters = {
@@ -396,6 +417,7 @@ const earningsFilters = {
   mining: { date: '', fleet: '', rawMaterial: '' },
   cargo: { date: '', fleet: '' },
   crafting: { date: '', starbase: '', asset: '' },
+  upgrading: { date: '', starbase: '', asset: '' },
 };
 
 const earningsSort = {
@@ -403,6 +425,7 @@ const earningsSort = {
   mining: { column: null, direction: null },
   cargo: { column: null, direction: null },
   crafting: { column: null, direction: null },
+  upgrading: { column: null, direction: null },
 };
 
 // Chart mode state: 'total' (NP in ATLAS) or 'perCrew' (NP / crew). One
@@ -413,6 +436,7 @@ const earningsChartMode = {
   scanning: 'total',
   mining: 'total',
   crafting: 'total',
+  upgrading: 'total',
 };
 
 const earningsSortKeyByColumnId = Object.freeze({
@@ -449,6 +473,8 @@ const earningsSortKeyByColumnId = Object.freeze({
   crew: 'crew',
   ingCosts: 'ingCostsAtlas',
   feeCosts: 'feeCostsAtlas',
+  installed: 'installed',
+  upgCosts: 'upgradingCostsAtlas',
   preferredCargoType: 'preferredCargoType',
   starbases: 'starbaseLabel',
   txsCostsPct: 'txsCostsPercent',
@@ -460,6 +486,7 @@ const earningsFilterBarBySubtab = Object.freeze({
   mining: () => ({ date: earningsMiningDateFilter, fleet: earningsMiningFleetFilter, rawMaterial: earningsMiningMaterialFilter }),
   cargo: () => ({ date: earningsCargoDateFilter, fleet: earningsCargoFleetFilter }),
   crafting: () => ({ date: earningsCraftingDateFilter, starbase: earningsCraftingStarbaseFilter, asset: earningsCraftingAssetFilter }),
+  upgrading: () => ({ date: earningsUpgradingDateFilter, starbase: earningsUpgradingStarbaseFilter, asset: earningsUpgradingAssetFilter }),
 });
 
 const earningsTableHeadBySubtab = Object.freeze({
@@ -467,12 +494,15 @@ const earningsTableHeadBySubtab = Object.freeze({
   mining: () => earningsMiningTableHead,
   cargo: () => earningsCargoTableHead,
   crafting: () => earningsCraftingTableHead,
+  upgrading: () => earningsUpgradingTableHead,
 });
 
 const earningsRowsKeyBySubtab = Object.freeze({
   scanning: 'rows',
   mining: 'miningRows',
   cargo: 'cargoRows',
+  crafting: 'craftingRows',
+  upgrading: 'upgradingRows',
 });
 
 const earningsFleetPalette = Object.freeze([
@@ -4344,9 +4374,9 @@ function getVisibleEarningsColumns(subtab = currentEarningsSubtab) {
 function getEarningsTableColSpan(subtab = currentEarningsSubtab) {
   const visibleColumns = getVisibleEarningsColumns(subtab);
   // Scanning/mining/cargo have 2 base columns (date + fleet);
-  // crafting has 3 (date + starbase + asset). Color counts separately
-  // when visible (mining only).
-  const baseCount = subtab === 'crafting' ? 3 : 2;
+  // crafting/upgrading have 3 (date + starbase + asset). Color counts
+  // separately when visible (mining only).
+  const baseCount = subtab === 'crafting' || subtab === 'upgrading' ? 3 : 2;
   return baseCount + visibleColumns.filter((column) => column.id !== 'color').length + (visibleColumns.some((column) => column.id === 'color') ? 1 : 0);
 }
 
@@ -4487,6 +4517,9 @@ function setupEarningsFilterHandlers() {
   wire('crafting', earningsCraftingDateFilter, 'date');
   wire('crafting', earningsCraftingStarbaseFilter, 'starbase');
   wire('crafting', earningsCraftingAssetFilter, 'asset');
+  wire('upgrading', earningsUpgradingDateFilter, 'date');
+  wire('upgrading', earningsUpgradingStarbaseFilter, 'starbase');
+  wire('upgrading', earningsUpgradingAssetFilter, 'asset');
 }
 
 // Apply the active state on every Total / Per Crew button inside
@@ -4511,6 +4544,7 @@ function setEarningsChartMode(subtab, mode) {
   if (!latestEarningsResult) return;
   if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
   else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
+  else if (subtab === 'upgrading') renderEarningsUpgrading(latestEarningsResult);
   else renderEarnings(latestEarningsResult);
 }
 
@@ -4542,6 +4576,7 @@ function setupEarningsHeaderSortHandlers() {
   handle(earningsMiningTableHead, 'mining');
   handle(earningsCargoTableHead, 'cargo');
   handle(earningsCraftingTableHead, 'crafting');
+  handle(earningsUpgradingTableHead, 'upgrading');
 }
 
 function appendEarningsHeaderCell(row, columnId, label, sortState) {
@@ -4567,15 +4602,28 @@ function renderEarningsHeader(subtab = 'scanning') {
     ? earningsMiningTableHead
     : subtab === 'cargo'
       ? earningsCargoTableHead
-      : earningsTableHead;
+      : subtab === 'crafting'
+        ? earningsCraftingTableHead
+        : subtab === 'upgrading'
+          ? earningsUpgradingTableHead
+          : earningsTableHead;
   if (!tableHead) return;
   const row = document.createElement('tr');
   const visibleColumns = getVisibleEarningsColumns(subtab);
   const colorColumnVisible = visibleColumns.some((column) => column.id === 'color');
   const sortState = earningsSort[subtab] || { column: null, direction: null };
   appendEarningsHeaderCell(row, 'date', 'Date', sortState);
-  if (colorColumnVisible) appendEarningsHeaderCell(row, 'color', 'Color', sortState);
-  appendEarningsHeaderCell(row, 'fleet', 'Fleet', sortState);
+  // Crafting has no fleet — its base columns are Starbase and Output
+  // (matches renderEarningsCrafting's body, which appends starbase +
+  // output as the 2nd and 3rd cells). Other subtabs use Fleet (and
+  // optional Color for scanning/mining).
+  if (subtab === 'crafting' || subtab === 'upgrading') {
+    appendEarningsHeaderCell(row, 'starbase', 'Starbase', sortState);
+    appendEarningsHeaderCell(row, 'output', 'Asset', sortState);
+  } else {
+    if (colorColumnVisible) appendEarningsHeaderCell(row, 'color', 'Color', sortState);
+    appendEarningsHeaderCell(row, 'fleet', 'Fleet', sortState);
+  }
   for (const column of visibleColumns.filter((column) => column.id !== 'color')) {
     appendEarningsHeaderCell(row, column.id, column.label, sortState);
   }
@@ -4663,6 +4711,19 @@ function createCraftingEarningsOptionalCell(entry, columnId, colorMap) {
   return createTextCell('--');
 }
 
+function createUpgradingEarningsOptionalCell(entry, columnId) {
+  if (columnId === 'installed') return createTextCell(formatWholeNumber(entry.installed || 0));
+  if (columnId === 'crew') return createTextCell(entry.crew > 0 ? formatWholeNumber(entry.crew) : '--');
+  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasWhole(entry.revenueAtlasPerDay));
+  if (columnId === 'upgCosts') return createTextCell(entry.upgradingCostsAtlas == null ? '--' : formatAtlasWhole(entry.upgradingCostsAtlas));
+  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
+  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
+  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
+  if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
+  if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
+  return createTextCell('--');
+}
+
 function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
@@ -4687,6 +4748,7 @@ function renderEarnings(result) {
     renderEarningsMiningEmpty(result?.error || 'Earnings sync failed');
     renderEarningsCargoEmpty(result?.error || 'Earnings sync failed');
     renderEarningsCraftingEmpty(result?.error || 'Earnings sync failed');
+    renderEarningsUpgradingEmpty(result?.error || 'Earnings sync failed');
     setEarningsStatus('Earnings sync failed');
     setEarningsMiningStatus('Earnings sync failed');
     setEarningsCargoStatus('Earnings sync failed');
@@ -4769,6 +4831,7 @@ function renderEarnings(result) {
   renderEarningsMining(result);
   renderEarningsCargo(result);
   renderEarningsCrafting(result);
+  renderEarningsUpgrading(result);
 }
 
 function renderEarningsMining(result) {
@@ -4992,6 +5055,34 @@ function renderEarningsCrafting(result) {
       row.appendChild(createCraftingEarningsOptionalCell(entry, column.id, null));
     }
     earningsCraftingTableBody.appendChild(row);
+  }
+}
+
+function renderEarningsUpgradingEmpty(message) {
+  renderEarningsHeader('upgrading');
+  renderEarningsNetProfitChart(null, new Map(), { target: earningsUpgradingAssetNetProfitChart, label: 'Upgrading net profit by asset in ATLAS by day' });
+  setText(earningsUpgradingSyncStatus, message);
+  if (!earningsUpgradingTableBody) return;
+  earningsUpgradingTableBody.innerHTML = `<tr class="empty-row"><td colspan="${getEarningsTableColSpan('upgrading')}">${message}</td></tr>`;
+}
+
+function renderEarningsUpgrading(result) {
+  const rows = Array.isArray(result?.upgradingRows) ? result.upgradingRows : [];
+  populateEarningsFilterOptions('upgrading', rows);
+  renderEarningsHeader('upgrading');
+  const colorMap = buildEarningsAssetColorMap(rows, (row) => row.asset || 'Unknown asset');
+  renderEarningsNetProfitChart({ ...result, rows }, colorMap, { target: earningsUpgradingAssetNetProfitChart, label: 'Upgrading net profit by asset in ATLAS by day', getSegmentLabel: (row) => row.asset || 'Unknown asset', mode: earningsChartMode.upgrading, getCrew: (row) => row.crew, getCrewIdentity: (row) => row.starbase });
+  setText(earningsUpgradingSyncStatus, `${formatWholeNumber(rows.length)} upgrading rows at ${formatCheckedAt(result?.checkedAt)}${result?.upgradingError ? ' · ' + result.upgradingError : ''}`);
+  if (!earningsUpgradingTableBody) return;
+  const sortedRows = sortEarningsRows('upgrading', getFilteredEarningsRows('upgrading', rows));
+  earningsUpgradingTableBody.textContent = '';
+  if (!sortedRows.length) return renderEarningsUpgradingEmpty(rows.length ? 'No rows match the current filters' : 'No upgrading data in the last 14 completed days');
+  const columns = getVisibleEarningsColumns('upgrading');
+  for (const entry of sortedRows) {
+    const tr = document.createElement('tr');
+    tr.appendChild(createTextCell(entry.label || entry.isoDate)); tr.appendChild(createTextCell(entry.starbase || '--')); tr.appendChild(createTextCell(entry.asset || '--'));
+    for (const column of columns) tr.appendChild(createUpgradingEarningsOptionalCell(entry, column.id));
+    earningsUpgradingTableBody.appendChild(tr);
   }
 }
 

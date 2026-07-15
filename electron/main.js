@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
 const { Connection, PublicKey } = require('@solana/web3.js');
@@ -47,6 +47,13 @@ if (typeof app.setDesktopName === 'function') {
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
 
+// Disable Chromium background throttling. My Star Atlas is a 24/7
+// automation process and must remain responsive even when its window
+// is covered, minimized, or otherwise inactive on Windows.
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
+app.commandLine.appendSwitch('disable-background-timer-throttling')
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
+
 const defaultSettings = Object.freeze({
   aephiaApiKey: '',
   playerProfile: '',
@@ -68,6 +75,9 @@ let mainWindow = null;
 const INFLUX_ORG = '67793e21353b170';
 const DEFAULT_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const AEPHIA_RESOURCE_URL = 'https://get-ship-data.aephia.workers.dev/gm/resource';
+const AEPHIA_LP_SUMMARY_URL = 'https://store-sage-lp.aephia.workers.dev/summary';
+const UPGRADE_ATLAS_POOLS = Object.freeze({ MUD: 1983250, ONI: 2000000, USTUR: 2000000 });
+const UPGRADE_LP_BY_COMPONENT = Object.freeze({ framework: 68, electronics: 92, 'power source': 98, electromagnet: 133, 'field stabilizer': 222, 'particle accelerator': 498, 'radiation absorber': 331, 'survey data unit': 1325, sdu: 1325, ink: 100000 });
 const JUPITER_PRICE_URL = 'https://lite-api.jup.ag/price/v3?ids=So11111111111111111111111111111111111111112,ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const ATLAS_MINT = 'ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
@@ -129,6 +139,7 @@ const shipFieldOffsets = Object.freeze({
 });
 
 let aephiaResourceCache = null;
+let aephiaLpSummaryCache = null;
 let tokenPriceCache = null;
 let shipStatsCache = null;
 
@@ -3090,6 +3101,26 @@ function extractExportedJsonObject(source, exportName) {
   return null;
 }
 
+async function fetchYesterdayFactionRedeemedLp(settings) {
+  const now = Date.now();
+  if (aephiaLpSummaryCache && aephiaLpSummaryCache.expiresAt > now) return aephiaLpSummaryCache.data;
+  const apiKey = String(settings?.aephiaApiKey || '').trim();
+  if (!apiKey) throw new Error('aephia_api_key_missing');
+  const response = await fetch(AEPHIA_LP_SUMMARY_URL, { headers: { Authorization: `Bearer ${apiKey}` } });
+  if (!response.ok) throw new Error(`aephia_lp_summary_${response.status}`);
+  const payload = await response.json();
+  const factions = payload?.dailyFinal?.factions || {};
+  const result = {};
+  for (const [name, rows] of Object.entries(factions)) {
+    const faction = normalizeFaction(name === 'Ustur' ? 'USTUR' : name);
+    const latest = Array.isArray(rows) ? rows.at(-1) : null;
+    const redeemedLp = Number(latest?.redeemedLp);
+    if (Number.isFinite(redeemedLp) && redeemedLp > 0) result[faction] = redeemedLp;
+  }
+  aephiaLpSummaryCache = { data: result, expiresAt: now + 5 * 60 * 1000 };
+  return result;
+}
+
 async function fetchAephiaResourceData() {
   const now = Date.now();
   if (aephiaResourceCache && aephiaResourceCache.expiresAt > now) return aephiaResourceCache.data;
@@ -3781,6 +3812,42 @@ ${scopeFilterFlux}
     .filter((row) => row.crafted > 0 || row.feeAmount > 0 || row.txCostSol > 0 || row.crew > 0 || row.ingredients.length > 0);
 }
 
+async function fetchUpgradingEarningsRows(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
+  const today = getUtcDateKey(new Date());
+  const includedDays = new Set(getLastUtcDays(15).map(getUtcDateKey).filter((day) => day !== today));
+  const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._measurement == "upgrade")
+  |> filter(fn: (r) => r._field == "amount" or r._field == "crew" or r._field == "txCostSol")
+  |> filter(fn: (r) => exists r.starbase and exists r.input)
+  |> keep(columns: ["starbase", "input", "_field", "_time", "_value"])
+  |> sort(columns: ["_time"])`;
+  const rows = new Map();
+  for (const raw of parseInfluxCsv(await queryInfluxFlux(settings, flux))) {
+    const starbase = resolveStarbaseName(raw, coordinateMap);
+    const asset = String(raw.input || '').trim();
+    const date = new Date(raw._time);
+    const value = Number(raw._value);
+    if (!starbase || !asset || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const key = `${isoDate}
+${starbase}
+${asset}`;
+    if (!rows.has(key)) rows.set(key, { isoDate, label: formatShortUtcDate(date), starbase, asset, installed: 0, crew: 0, txCostSol: 0 });
+    const row = rows.get(key);
+    if (raw._field === 'amount') row.installed += value;
+    if (raw._field === 'crew') row.crew += value;
+    if (raw._field === 'txCostSol') row.txCostSol += value;
+  }
+  return Array.from(rows.values()).filter((row) => row.installed > 0 || row.crew > 0 || row.txCostSol > 0);
+}
+
 async function fetchCargoEarningsRows(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
     return [];
@@ -4094,6 +4161,8 @@ async function fetchEarningsSnapshot(payload) {
   let cargoError = '';
   let craftingRows = [];
   let craftingError = '';
+  let upgradingRows = [];
+  let upgradingError = '';
   try {
     scanningRows = await fetchScanningEarningsRows(settings);
   } catch (error) {
@@ -4113,6 +4182,11 @@ async function fetchEarningsSnapshot(payload) {
     craftingRows = await fetchCraftingEarningsRows(settings);
   } catch (error) {
     craftingError = String(error?.message || error || 'crafting_rows_unavailable');
+  }
+  try {
+    upgradingRows = await fetchUpgradingEarningsRows(settings);
+  } catch (error) {
+    upgradingError = String(error?.message || error || 'upgrading_rows_unavailable');
   }
 
   const activeFleetKeys = new Set();
@@ -4339,6 +4413,26 @@ async function fetchEarningsSnapshot(payload) {
         : null,
     };
   });
+
+  let redeemedLpByFaction = {};
+  try { redeemedLpByFaction = await fetchYesterdayFactionRedeemedLp(settings); }
+  catch (error) { upgradingError = upgradingError || String(error?.message || error || 'lp_summary_unavailable'); }
+  const faction = normalizeFaction(settings.faction);
+  const factionRedeemedLp = Number(redeemedLpByFaction[faction]);
+  const atlasPool = UPGRADE_ATLAS_POOLS[faction];
+  const atlasPerLp = Number.isFinite(factionRedeemedLp) && factionRedeemedLp > 0 ? atlasPool / factionRedeemedLp : null;
+  const upgrading = upgradingRows.map((row) => {
+    const componentKey = normalizeShipName(row.asset);
+    const lpPerComponent = UPGRADE_LP_BY_COMPONENT[componentKey] ?? null;
+    const lpValuePerComponentAtl = atlasPerLp != null && lpPerComponent != null ? atlasPerLp * lpPerComponent : null;
+    const componentPriceAtl = getCurrentResourcePriceAtl(prices, row.asset);
+    const revenueAtlasPerDay = lpValuePerComponentAtl != null ? row.installed * lpValuePerComponentAtl : null;
+    const upgradingCostsAtlas = componentPriceAtl != null ? row.installed * componentPriceAtl : null;
+    const txsCostsAtlas = atlasPerSol != null ? row.txCostSol * atlasPerSol : null;
+    const totalCostsAtlas = Number.isFinite(upgradingCostsAtlas) && Number.isFinite(txsCostsAtlas) ? upgradingCostsAtlas + txsCostsAtlas : null;
+    const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas) ? revenueAtlasPerDay - totalCostsAtlas : null;
+    return { ...row, output: row.asset, assetName: row.asset, lpPerComponent, lpValuePerComponentAtl, componentPriceAtl, revenueAtlasPerDay, upgradingCostsAtlas, txsCostsAtlas, totalCostsAtlas, netProfitAtlas, netProfitPerCrew: Number.isFinite(netProfitAtlas) && row.crew > 0 ? netProfitAtlas / row.crew : null, profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (netProfitAtlas / revenueAtlasPerDay) * 100 : null };
+  }).sort((a,b) => String(b.isoDate).localeCompare(String(a.isoDate)) || a.starbase.localeCompare(b.starbase) || a.asset.localeCompare(b.asset));
 
   crafting.sort((a, b) => {
     const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));
@@ -4601,11 +4695,15 @@ async function fetchEarningsSnapshot(payload) {
     topCraftingRevenueAssetYesterday,
     craftingError,
     craftingRowCount: crafting.length,
+    upgradingError,
+    upgradingRowCount: upgrading.length,
+    upgradingAtlasPerLp: atlasPerLp,
     fleets: fleetRows,
     rows,
     miningRows: mining,
     cargoRows: cargo,
     craftingRows: crafting,
+    upgradingRows: upgrading,
   };
 }
 
@@ -4623,6 +4721,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -4802,6 +4901,9 @@ ipcMain.handle('inventory:daily', async (_event, payload) => {
 });
 
 app.whenReady().then(async () => {
+  const powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension')
+  console.log(`[MSA] prevent-app-suspension blocker=${powerSaveBlockerId} active=${powerSaveBlocker.isStarted(powerSaveBlockerId)}`)
+
   createWindow();
 });
 
