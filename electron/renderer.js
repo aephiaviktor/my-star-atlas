@@ -5201,9 +5201,37 @@ function setActiveSection(section) {
     panel.classList.toggle('active', panel.dataset.sectionPanel === section);
   });
   updateTitle();
-  if (section === 'earnings' && !latestEarningsResult) {
-    refreshEarnings();
+  if (section === 'fleet' && !latestFleetResult) refreshFleets();
+  if (section === 'earnings' && !latestEarningsResult) refreshEarnings();
+  if (section === 'production') refreshVisibleProductionSubtab();
+}
+
+function refreshVisibleProductionSubtab() {
+  if (!hasInfluxSettings(latestSettings || getFormPayload())) return Promise.resolve();
+  if (currentSubtab === 'scanning') return latestSduResult ? Promise.resolve() : refreshDailySdu();
+  if (currentSubtab === 'mining') return latestMiningResult ? Promise.resolve() : refreshDailyMining();
+  if (currentSubtab === 'crafting') return latestCraftingResult ? Promise.resolve() : refreshDailyCrafting();
+  if (currentSubtab === 'production') return latestProductionResult ? Promise.resolve() : refreshDailyProduction();
+  if (currentSubtab === 'consumption') {
+    return Promise.all([
+      latestConsScanningResult ? Promise.resolve() : refreshConsScanning(),
+      latestConsMiningResult ? Promise.resolve() : refreshConsMining(),
+      latestConsCargoResult ? Promise.resolve() : refreshConsCargo(),
+      latestConsCraftingResult ? Promise.resolve() : refreshConsCrafting(),
+      latestConsUpgradingResult ? Promise.resolve() : refreshConsUpgrading(),
+      latestConsTotalResult ? Promise.resolve() : refreshConsTotal(),
+    ]);
   }
+  if (currentSubtab === 'pct-charts') return latestPcrResult ? Promise.resolve() : refreshPcrCharts();
+  if (currentSubtab === 'inventory') return latestInventoryResult ? Promise.resolve() : refreshInventory();
+  return Promise.resolve();
+}
+
+function refreshVisibleFactionViews() {
+  if (currentSection === 'fleet') return refreshFleets();
+  if (currentSection === 'earnings') return refreshEarnings();
+  if (currentSection === 'production') return refreshVisibleProductionSubtab();
+  return Promise.resolve();
 }
 
 function setActiveSubtab(subtab) {
@@ -5297,23 +5325,8 @@ async function loadInitialState() {
   setFormValues(settings);
   updateFactionButtons(settings);
   updateSettingsStatus(settings);
-  const initialLoads = [];
-  if (getActivePlayerProfile(settings)) initialLoads.push(refreshFleets());
-  if (getActivePlayerProfile(settings)) initialLoads.push(refreshEarnings());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshDailySdu());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshDailyMining());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshDailyCrafting());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshDailyProduction());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsScanning());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsMining());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsCargo());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsCrafting());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsUpgrading());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshConsTotal());
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshPcrCharts());
   initInventory();
-  if (hasInfluxSettings(settings)) initialLoads.push(refreshInventory());
-  await Promise.all(initialLoads);
+  await refreshVisibleFactionViews();
 }
 
 document.querySelectorAll('.nav-button').forEach((button) => {
@@ -5385,22 +5398,7 @@ async function refreshFactionScopedViews() {
   pcrRenderEmpty(hasInfluxSettings(latestSettings) ? 'Loading PCR data...' : 'Awaiting Influx connection');
   invRenderEmpty(hasInfluxSettings(latestSettings) ? 'Loading inventory data...' : 'Awaiting Influx connection');
   renderEarningsEmpty(getActivePlayerProfile(latestSettings) ? 'Loading earnings data...' : 'Awaiting player profile');
-  await Promise.all([
-    refreshFleets(),
-    refreshEarnings(),
-    hasInfluxSettings(latestSettings) ? refreshDailySdu() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshDailyMining() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshDailyCrafting() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshDailyProduction() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshConsScanning() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshConsMining() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshConsCargo() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshConsCrafting() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshConsUpgrading() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshConsTotal() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshPcrCharts() : Promise.resolve(),
-    hasInfluxSettings(latestSettings) ? refreshInventory() : Promise.resolve(),
-  ]);
+  await refreshVisibleFactionViews();
 }
 
 factionButtons.forEach((button) => {
@@ -5452,25 +5450,7 @@ factionButtons.forEach((button) => {
       const saved = await api.saveSettings(nextSettings);
       latestSettings = saved;
       setFormValues(saved);
-      await Promise.all([
-        refreshFleets(),
-        refreshEarnings(),
-        hasInfluxSettings(latestSettings) ? refreshDailySdu() : Promise.resolve(),
-        hasInfluxSettings(latestSettings) ? refreshDailyMining() : Promise.resolve(),
-        hasInfluxSettings(latestSettings) ? refreshDailyCrafting() : Promise.resolve(),
-        hasInfluxSettings(latestSettings) ? refreshDailyProduction() : Promise.resolve(),
-        hasInfluxSettings(latestSettings) ? refreshConsScanning() : Promise.resolve(),
-        hasInfluxSettings(latestSettings) ? refreshConsMining() : Promise.resolve(),
-        hasInfluxSettings(latestSettings) ? refreshConsCargo() : Promise.resolve(),
-        hasInfluxSettings(latestSettings) ? refreshConsCrafting() : Promise.resolve(),
-        hasInfluxSettings(latestSettings) ? refreshConsUpgrading() : Promise.resolve(),
-        hasInfluxSettings(latestSettings) ? refreshConsTotal() : Promise.resolve(),
-        hasInfluxSettings(latestSettings) ? refreshPcrCharts() : Promise.resolve(),
-        // Inventory re-fetches on faction switch so the starbase
-        // dropdown always reflects the new faction's starbases and
-        // the per-asset visibility is loaded from the right slot.
-        hasInfluxSettings(latestSettings) ? refreshInventory() : Promise.resolve(),
-      ]);
+      await refreshVisibleFactionViews();
       saveStatus.textContent = `${clickedFaction} selected`;
       setTimeout(() => {
         if (saveStatus.textContent === `${clickedFaction} selected`) {

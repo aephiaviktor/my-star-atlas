@@ -3106,7 +3106,10 @@ async function fetchYesterdayFactionRedeemedLp(settings) {
   if (aephiaLpSummaryCache && aephiaLpSummaryCache.expiresAt > now) return aephiaLpSummaryCache.data;
   const apiKey = String(settings?.aephiaApiKey || '').trim();
   if (!apiKey) throw new Error('aephia_api_key_missing');
-  const response = await fetch(AEPHIA_LP_SUMMARY_URL, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const response = await fetch(AEPHIA_LP_SUMMARY_URL, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(8000),
+  });
   if (!response.ok) throw new Error(`aephia_lp_summary_${response.status}`);
   const payload = await response.json();
   const factions = payload?.dailyFinal?.factions || {};
@@ -3300,7 +3303,7 @@ function decodeFleetAccount(account) {
   };
 }
 
-async function fetchProfileFleets(payload) {
+async function fetchProfileFleetsUncached(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const profile = getSelectedPlayerProfile(settings);
   if (!profile) {
@@ -3400,6 +3403,32 @@ async function fetchProfileFleets(payload) {
   };
 }
 
+// Fleet and Earnings refresh together on the same profile. Share the RPC work
+// (including an in-flight request) instead of asking Solana for the same fleet
+// accounts twice. A short TTL keeps explicit refreshes reasonably fresh.
+const profileFleetCache = new Map();
+const PROFILE_FLEET_CACHE_TTL_MS = 30 * 1000;
+
+async function fetchProfileFleets(payload) {
+  const settings = normalizeSettings(payload || (await readSettings()));
+  const key = `${getSelectedPlayerProfile(settings)}\n${getRpcUrl(settings)}`;
+  const now = Date.now();
+  const cached = profileFleetCache.get(key);
+  if (cached?.data && cached.expiresAt > now) return cached.data;
+  if (cached?.pending) return cached.pending;
+  const pending = fetchProfileFleetsUncached(settings)
+    .then((data) => {
+      profileFleetCache.set(key, { data, expiresAt: Date.now() + PROFILE_FLEET_CACHE_TTL_MS, pending: null });
+      return data;
+    })
+    .catch((error) => {
+      profileFleetCache.delete(key);
+      throw error;
+    });
+  profileFleetCache.set(key, { data: cached?.data || null, expiresAt: cached?.expiresAt || 0, pending });
+  return pending;
+}
+
 async function fetchScanningEarningsRows(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
     return [];
@@ -3408,13 +3437,11 @@ async function fetchScanningEarningsRows(settings) {
   const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
-  const costsFlux = `from(bucket: "${bucket}")
+  const sduCostsFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "sdu")
+  |> filter(fn: (r) => r._field == "amount" or r._field == "burnedFood" or r._field == "txCostSol")
 ${scopeFilterFlux}
-  |> filter(fn: (r) =>
-    (r._measurement == "sdu" and (r._field == "amount" or r._field == "burnedFood" or r._field == "txCostSol")) or
-    (r._measurement == "movement" and r._field == "burnedFuel" and exists r.assignment and r.assignment == "Scan")
-  )
   |> filter(fn: (r) => exists r.fleet)
   |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
   |> group(columns: ["fleet", "_measurement", "_field", "_time"])
@@ -3423,12 +3450,54 @@ ${scopeFilterFlux}
   |> keep(columns: ["fleet", "_measurement", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
 
-  const scanStatsFlux = `from(bucket: "${bucket}")
+  const movementCostsFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "movement" and r._field == "burnedFuel")
+  |> filter(fn: (r) => exists r.assignment and r.assignment == "Scan")
 ${scopeFilterFlux}
-  |> filter(fn: (r) => r._measurement == "sdu" and (r._field == "amount" or r._field == "chance"))
   |> filter(fn: (r) => exists r.fleet)
-  |> keep(columns: ["fleet", "_field", "_time", "_value"])
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["fleet", "_measurement", "_field", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["fleet", "_measurement", "_field", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet"])`;
+
+  const chanceSumFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "sdu" and r._field == "chance")
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.fleet)
+  |> map(fn: (r) => ({r with _value: if float(v: r._value) <= 1.0 then float(v: r._value) * 100.0 else float(v: r._value)}))
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["fleet", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["fleet", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet"])`;
+
+  const chanceCountFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "sdu" and r._field == "chance")
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.fleet)
+  |> aggregateWindow(every: 1d, fn: count, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["fleet", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["fleet", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet"])`;
+
+  const successfulCountFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "sdu" and r._field == "amount" and float(v: r._value) > 0.0)
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.fleet)
+  |> aggregateWindow(every: 1d, fn: count, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["fleet", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["fleet", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
 
   const rowsByDayFleet = new Map();
@@ -3451,12 +3520,15 @@ ${scopeFilterFlux}
     return rowsByDayFleet.get(key);
   };
 
-  const [costsCsv, scanStatsCsv] = await Promise.all([
-    queryInfluxFlux(settings, costsFlux),
-    queryInfluxFlux(settings, scanStatsFlux),
+  const [sduCostsCsv, movementCostsCsv, chanceSumCsv, chanceCountCsv, successfulCountCsv] = await Promise.all([
+    queryInfluxFlux(settings, sduCostsFlux),
+    queryInfluxFlux(settings, movementCostsFlux),
+    queryInfluxFlux(settings, chanceSumFlux),
+    queryInfluxFlux(settings, chanceCountFlux),
+    queryInfluxFlux(settings, successfulCountFlux),
   ]);
 
-  for (const row of parseInfluxCsv(costsCsv)) {
+  for (const row of [...parseInfluxCsv(sduCostsCsv), ...parseInfluxCsv(movementCostsCsv)]) {
     const fleet = String(row.fleet || '').trim();
     const date = new Date(row._time);
     const value = Number(row._value || 0);
@@ -3470,7 +3542,8 @@ ${scopeFilterFlux}
     if (row._measurement === 'movement' && row._field === 'burnedFuel') entry.burnedFuel += value;
   }
 
-  for (const row of parseInfluxCsv(scanStatsCsv)) {
+  const applyDailyScanStat = (csv, field) => {
+    for (const row of parseInfluxCsv(csv)) {
     const fleet = String(row.fleet || '').trim();
     const date = new Date(row._time);
     const value = Number(row._value || 0);
@@ -3478,13 +3551,12 @@ ${scopeFilterFlux}
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, fleet, date);
-    if (row._field === 'chance') {
-      entry.scanAttempts += 1;
-      entry.chanceSumPercent += value <= 1 ? value * 100 : value;
-    } else if (row._field === 'amount' && value > 0) {
-      entry.successfulScans += 1;
+      entry[field] += value;
     }
-  }
+  };
+  applyDailyScanStat(chanceSumCsv, 'chanceSumPercent');
+  applyDailyScanStat(chanceCountCsv, 'scanAttempts');
+  applyDailyScanStat(successfulCountCsv, 'successfulScans');
 
   return Array.from(rowsByDayFleet.values())
     .filter((row) => row.scanAttempts > 0 || row.sduFound > 0 || row.burnedFood > 0 || row.burnedFuel > 0 || row.txCostSol > 0)
@@ -3506,9 +3578,9 @@ async function fetchMiningEarningsRows(settings) {
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
   const totalsFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "mining")
   |> filter(fn: (r) => r._field == "amount" or r._field == "burnedAmmo" or r._field == "burnedFood" or r._field == "burnedFuel" or r._field == "txCostSol")
+${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
   |> filter(fn: (r) => exists r.rss)
   |> filter(fn: (r) => exists r.starbase)
@@ -3520,9 +3592,13 @@ ${scopeFilterFlux}
   |> sort(columns: ["_time", "fleet", "starbase", "rss"])`;
   const txDailyFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "mining" and r._field == "txCostSol")
 ${scopeFilterFlux}
-  |> filter(fn: (r) => r._field == "txCostSol")
   |> filter(fn: (r) => exists r.fleet)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["fleet", "_time"])
+  |> sum(column: "_value")
+  |> group()
   |> keep(columns: ["fleet", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
 
@@ -3608,8 +3684,8 @@ async function fetchCraftingEarningsRows(settings) {
   // join ingredient rows by craftingID and dedup fee/tx per event.
   const outputFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Output")
+${scopeFilterFlux}
   |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
   |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
   |> sort(columns: ["_time"])`;
@@ -3621,8 +3697,8 @@ ${scopeFilterFlux}
   // event's ingredients, then aggregate per (starbase, output, date).
   const inputFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Input")
+${scopeFilterFlux}
   |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.input and exists r.craftingID)
   |> keep(columns: ["craftingID", "starbase", "output", "input", "_time", "_value"])
   |> sort(columns: ["_time"])`;
@@ -3634,8 +3710,8 @@ ${scopeFilterFlux}
   // to avoid counting the fee (1 + N_ingredients) times.
   const feeFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "crafting" and r._field == "fee" and r.type == "Output")
+${scopeFilterFlux}
   |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
   |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
   |> sort(columns: ["_time"])`;
@@ -3648,8 +3724,8 @@ ${scopeFilterFlux}
   // earlier lowercase spelling silently returned 0 rows.)
   const txsFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "crafting" and r._field == "txCostSol" and r.type == "Output")
+${scopeFilterFlux}
   |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
   |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
   |> sort(columns: ["_time"])`;
@@ -3659,8 +3735,8 @@ ${scopeFilterFlux}
   // bucket; we dedup-by-craftingID and sum in the per-row builder.
   const countFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Output")
+${scopeFilterFlux}
   |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
   |> keep(columns: ["craftingID", "starbase", "output", "_time"])
   |> group()
@@ -3673,8 +3749,8 @@ ${scopeFilterFlux}
   // change writes crew on Input rows too.
   const crewFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "crafting" and r._field == "crew" and r.type == "Output")
+${scopeFilterFlux}
   |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
   |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
   |> sort(columns: ["_time"])`;
@@ -3811,7 +3887,6 @@ ${scopeFilterFlux}
   return Array.from(rowsByKey.values())
     .filter((row) => row.crafted > 0 || row.feeAmount > 0 || row.txCostSol > 0 || row.crew > 0 || row.ingredients.length > 0);
 }
-
 async function fetchUpgradingEarningsRows(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
   const today = getUtcDateKey(new Date());
@@ -3821,8 +3896,8 @@ async function fetchUpgradingEarningsRows(settings) {
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
   const flux = `from(bucket: "${bucket}")
   |> range(start: -30d)
-${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "upgrade")
+${scopeFilterFlux}
   |> filter(fn: (r) => r._field == "amount" or r._field == "crew" or r._field == "txCostSol")
   |> filter(fn: (r) => exists r.starbase and exists r.input)
   |> keep(columns: ["starbase", "input", "_field", "_time", "_value"])
@@ -3889,9 +3964,9 @@ async function fetchCargoEarningsRows(settings) {
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
   const cargoFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "movement")
   |> filter(fn: (r) => r._field == "burnedFuel")
+${scopeFilterFlux}
   |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
   |> filter(fn: (r) => exists r.fleet)
   |> filter(fn: (r) => exists r.starbase)
@@ -3903,18 +3978,23 @@ ${scopeFilterFlux}
   |> sort(columns: ["_time", "fleet", "assignment", "starbase"])`;
   const typeFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "movement")
   |> filter(fn: (r) => r._field == "type")
+${scopeFilterFlux}
   |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
   |> filter(fn: (r) => exists r.fleet)
   |> keep(columns: ["fleet", "assignment", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "assignment"])`;
   const txDailyFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "movement" and r._field == "txCostSol")
+  |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
 ${scopeFilterFlux}
-  |> filter(fn: (r) => r._field == "txCostSol")
   |> filter(fn: (r) => exists r.fleet)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["fleet", "_time"])
+  |> sum(column: "_value")
+  |> group()
   |> keep(columns: ["fleet", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
 
@@ -4103,13 +4183,25 @@ async function fetchEarningsSnapshot(payload) {
     .filter((fleet) => fleet.relationship === 'managed' || fleet.relationship === 'owned-managed')
     .map((fleet) => fleet.key);
   const rentalRates = new Map();
-  await Promise.all(rentalFleetKeys.map(async (fleetKey) => {
-    try {
-      rentalRates.set(fleetKey, await readRentalRate(connection, fleetKey));
-    } catch (_error) {
-      rentalRates.set(fleetKey, { contract: deriveRentalContract(new PublicKey(fleetKey)).toBase58(), rateAtlasPerDay: null });
-    }
-  }));
+  // One batched RPC call is substantially faster and gentler on rate limits
+  // than one getAccountInfo request per managed fleet.
+  const rentalContracts = rentalFleetKeys.map((fleetKey) => {
+    const contract = deriveRentalContract(new PublicKey(fleetKey));
+    return { fleetKey, contract, contractKey: contract.toBase58() };
+  });
+  const rentalInfos = rentalContracts.length
+    ? await connection.getMultipleAccountsInfo(rentalContracts.map((entry) => entry.contract), 'confirmed')
+    : [];
+  rentalContracts.forEach((entry, index) => {
+    const info = rentalInfos[index];
+    const rawRate = info?.data?.length >= srslyFieldOffsets.contractRate + 8
+      ? Number(info.data.readBigUInt64LE(srslyFieldOffsets.contractRate))
+      : NaN;
+    rentalRates.set(entry.fleetKey, {
+      contract: entry.contractKey,
+      rateAtlasPerDay: Number.isFinite(rawRate) ? normalizeAtlasRate(rawRate) : null,
+    });
+  });
 
   let mappedShipTypeCount = 0;
   let unmappedShipTypeCount = 0;
@@ -4193,31 +4285,39 @@ async function fetchEarningsSnapshot(payload) {
   let craftingError = '';
   let upgradingRows = [];
   let upgradingError = '';
-  try {
-    scanningRows = await fetchScanningEarningsRows(settings);
-  } catch (error) {
-    scanningError = String(error?.message || error || 'scan_rows_unavailable');
-  }
-  try {
-    miningRows = await fetchMiningEarningsRows(settings);
-  } catch (error) {
-    miningError = String(error?.message || error || 'mining_rows_unavailable');
-  }
-  try {
-    cargoRows = await fetchCargoEarningsRows(settings);
-  } catch (error) {
-    cargoError = String(error?.message || error || 'cargo_rows_unavailable');
-  }
-  try {
-    craftingRows = await fetchCraftingEarningsRows(settings);
-  } catch (error) {
-    craftingError = String(error?.message || error || 'crafting_rows_unavailable');
-  }
-  try {
-    upgradingRows = await fetchUpgradingEarningsRows(settings);
-  } catch (error) {
-    upgradingError = String(error?.message || error || 'upgrading_rows_unavailable');
-  }
+  // Each category already fans out into several Flux queries. Starting all
+  // five categories at once overloads the Influx proxy (17+ concurrent
+  // queries) and causes 504s, so use bounded category concurrency instead.
+  const earningsTasks = [
+    () => fetchScanningEarningsRows(settings),
+    () => fetchMiningEarningsRows(settings),
+    () => fetchCargoEarningsRows(settings),
+    () => fetchCraftingEarningsRows(settings),
+    () => fetchUpgradingEarningsRows(settings),
+  ];
+  const earningsRowResults = new Array(earningsTasks.length);
+  let nextEarningsTask = 0;
+  await Promise.all(Array.from({ length: 2 }, async () => {
+    while (nextEarningsTask < earningsTasks.length) {
+      const index = nextEarningsTask++;
+      try {
+        earningsRowResults[index] = { status: 'fulfilled', value: await earningsTasks[index]() };
+      } catch (reason) {
+        earningsRowResults[index] = { status: 'rejected', reason };
+      }
+    }
+  }));
+  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult] = earningsRowResults;
+  if (scanningResult.status === 'fulfilled') scanningRows = scanningResult.value;
+  else scanningError = String(scanningResult.reason?.message || scanningResult.reason || 'scan_rows_unavailable');
+  if (miningResult.status === 'fulfilled') miningRows = miningResult.value;
+  else miningError = String(miningResult.reason?.message || miningResult.reason || 'mining_rows_unavailable');
+  if (cargoResult.status === 'fulfilled') cargoRows = cargoResult.value;
+  else cargoError = String(cargoResult.reason?.message || cargoResult.reason || 'cargo_rows_unavailable');
+  if (craftingResult.status === 'fulfilled') craftingRows = craftingResult.value;
+  else craftingError = String(craftingResult.reason?.message || craftingResult.reason || 'crafting_rows_unavailable');
+  if (upgradingResult.status === 'fulfilled') upgradingRows = upgradingResult.value;
+  else upgradingError = String(upgradingResult.reason?.message || upgradingResult.reason || 'upgrading_rows_unavailable');
 
   const activeFleetKeys = new Set();
   const activeMappedFleetKeys = new Set();
@@ -4324,11 +4424,14 @@ async function fetchEarningsSnapshot(payload) {
       rentalRateAtlasPerDay,
     };
   });
-  const miningSignatureCounts = await fetchFleetSignatureDailyCounts(
-    connection,
-    mining.map((row) => row.fleetAccount).filter(Boolean),
-    new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)))
-  );
+  const miningSignatureCounts = await Promise.race([
+    fetchFleetSignatureDailyCounts(
+      connection,
+      mining.map((row) => row.fleetAccount).filter(Boolean),
+      new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)))
+    ),
+    new Promise((resolve) => setTimeout(() => resolve(new Map()), 5000)),
+  ]);
   for (const row of mining) {
     if (!row.fleetAccount || !row.isoDate) continue;
     row.txsDaily = miningSignatureCounts.get(`${row.isoDate}\n${row.fleetAccount}`) || 0;
@@ -4367,11 +4470,14 @@ async function fetchEarningsSnapshot(payload) {
         : null,
     };
   });
-  const cargoSignatureCounts = await fetchFleetSignatureDailyCounts(
-    connection,
-    cargo.map((row) => row.fleetAccount).filter(Boolean),
-    new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)))
-  );
+  const cargoSignatureCounts = await Promise.race([
+    fetchFleetSignatureDailyCounts(
+      connection,
+      cargo.map((row) => row.fleetAccount).filter(Boolean),
+      new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)))
+    ),
+    new Promise((resolve) => setTimeout(() => resolve(new Map()), 5000)),
+  ]);
   for (const row of cargo) {
     if (!row.fleetAccount || !row.isoDate) continue;
     row.txsDaily = cargoSignatureCounts.get(`${row.isoDate}\n${row.fleetAccount}`) || 0;
@@ -4445,8 +4551,14 @@ async function fetchEarningsSnapshot(payload) {
   });
 
   let redeemedLpByFaction = {};
-  try { redeemedLpByFaction = await fetchYesterdayFactionRedeemedLp(settings); }
-  catch (error) { upgradingError = upgradingError || String(error?.message || error || 'lp_summary_unavailable'); }
+  try {
+    redeemedLpByFaction = await Promise.race([
+      fetchYesterdayFactionRedeemedLp(settings),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('lp_summary_timeout')), 8000)),
+    ]);
+  } catch (error) {
+    upgradingError = upgradingError || String(error?.message || error || 'lp_summary_unavailable');
+  }
   const faction = normalizeFaction(settings.faction);
   const factionRedeemedLp = Number(redeemedLpByFaction[faction]);
   const atlasPool = UPGRADE_ATLAS_POOLS[faction];
