@@ -3820,7 +3820,7 @@ async function fetchUpgradingEarningsRows(settings) {
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -30d)
 ${scopeFilterFlux}
   |> filter(fn: (r) => r._measurement == "upgrade")
   |> filter(fn: (r) => r._field == "amount" or r._field == "crew" or r._field == "txCostSol")
@@ -3828,12 +3828,18 @@ ${scopeFilterFlux}
   |> keep(columns: ["starbase", "input", "_field", "_time", "_value"])
   |> sort(columns: ["_time"])`;
   const rows = new Map();
+  const crewObservations = new Map();
   for (const raw of parseInfluxCsv(await queryInfluxFlux(settings, flux))) {
     const starbase = resolveStarbaseName(raw, coordinateMap);
     const asset = String(raw.input || '').trim();
     const date = new Date(raw._time);
     const value = Number(raw._value);
     if (!starbase || !asset || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    const groupKey = `${starbase}\n${asset}`;
+    if (raw._field === 'crew') {
+      if (!crewObservations.has(groupKey)) crewObservations.set(groupKey, []);
+      crewObservations.get(groupKey).push({ time: date.getTime(), value });
+    }
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const key = `${isoDate}
@@ -3842,8 +3848,32 @@ ${asset}`;
     if (!rows.has(key)) rows.set(key, { isoDate, label: formatShortUtcDate(date), starbase, asset, installed: 0, crew: 0, txCostSol: 0 });
     const row = rows.get(key);
     if (raw._field === 'amount') row.installed += value;
-    if (raw._field === 'crew') row.crew += value;
     if (raw._field === 'txCostSol') row.txCostSol += value;
+  }
+
+  // Crew is assigned capacity, not a consumable. Repeated upgrade records must
+  // therefore not be summed. For each UTC day, average the observed crew level
+  // by the amount of time it was in effect. Carry the latest earlier value into
+  // the day; if history starts during the day, use that day's first observation
+  // as its opening value so job duration/frequency does not depress the metric.
+  for (const row of rows.values()) {
+    const observations = crewObservations.get(`${row.starbase}\n${row.asset}`) || [];
+    const dayStart = Date.parse(`${row.isoDate}T00:00:00.000Z`);
+    const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+    const beforeOrDuring = observations.filter((item) => item.time < dayEnd);
+    const during = beforeOrDuring.filter((item) => item.time >= dayStart);
+    let current = [...beforeOrDuring].reverse().find((item) => item.time < dayStart)?.value;
+    if (!Number.isFinite(current) && during.length) current = during[0].value;
+    if (!Number.isFinite(current)) continue;
+    let cursor = dayStart;
+    let crewMilliseconds = 0;
+    for (const observation of during) {
+      crewMilliseconds += current * Math.max(0, observation.time - cursor);
+      current = observation.value;
+      cursor = observation.time;
+    }
+    crewMilliseconds += current * Math.max(0, dayEnd - cursor);
+    row.crew = crewMilliseconds / (dayEnd - dayStart);
   }
   return Array.from(rows.values()).filter((row) => row.installed > 0 || row.crew > 0 || row.txCostSol > 0);
 }

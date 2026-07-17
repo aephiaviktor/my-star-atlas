@@ -373,7 +373,7 @@ const cargoEarningsOptionalColumns = Object.freeze([
 const craftingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
   Object.freeze({ id: 'crafted', label: 'Crafted' }),
-  Object.freeze({ id: 'crew', label: 'Crew' }),
+  Object.freeze({ id: 'crew', label: 'Avg Crew' }),
   Object.freeze({ id: 'revenue', label: 'Revenue' }),
   Object.freeze({ id: 'ingCosts', label: 'Ing Costs' }),
   Object.freeze({ id: 'feeCosts', label: 'Crafting Fee Costs' }),
@@ -386,7 +386,7 @@ const craftingEarningsOptionalColumns = Object.freeze([
 
 const upgradingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'installed', label: 'Installed' }),
-  Object.freeze({ id: 'crew', label: 'Crew' }),
+  Object.freeze({ id: 'crew', label: 'Avg Crew' }),
   Object.freeze({ id: 'revenue', label: 'Revenue' }),
   Object.freeze({ id: 'upgCosts', label: 'UPG Costs' }),
   Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
