@@ -3678,91 +3678,26 @@ async function fetchCraftingEarningsRows(settings) {
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
 
-  // Output rows: type=Output, field=amount -> crafted amount per
-  // (starbase, output, date). One row per crafting event's output.
-  // We keep craftingID in the raw output so the per-row builder can
-  // join ingredient rows by craftingID and dedup fee/tx per event.
-  const outputFlux = `from(bucket: "${bucket}")
+  // Read each crafting point once, then split Output/Input/fee/tx/crew
+  // locally. The previous implementation scanned the same 15-day range six
+  // times, including a duplicate Output query used only for event counts.
+  const craftingFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
-  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Output")
+  |> filter(fn: (r) => r._measurement == "crafting")
+  |> filter(fn: (r) => r._field == "amount" or r._field == "fee" or r._field == "txCostSol" or r._field == "crew")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
-  |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
-  |> sort(columns: ["_time"])`;
-
-  // Input rows: type=Input, field=amount -> ingredient amount per
-  // (starbase, output, input, date). Per-event ingredient cost is
-  // computed by joining to the event's Output row via craftingID:
-  // for each event, sum(ingAmount * ingPrice) across all of the
-  // event's ingredients, then aggregate per (starbase, output, date).
-  const inputFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
-  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Input")
-${scopeFilterFlux}
-  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.input and exists r.craftingID)
-  |> keep(columns: ["craftingID", "starbase", "output", "input", "_time", "_value"])
-  |> sort(columns: ["_time"])`;
-
-  // Crafting fee: field=fee -> fee amount per crafting event.
-  // Assumed to be in ATLAS (no unit conversion needed).
-  // NOTE: the bot writes the fee on BOTH the Output row and every
-  // Input row of the same craftingID, so we filter to type=Output
-  // to avoid counting the fee (1 + N_ingredients) times.
-  const feeFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
-  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "fee" and r.type == "Output")
-${scopeFilterFlux}
-  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
-  |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
-  |> sort(columns: ["_time"])`;
-
-  // Txs cost: field=txCostSol -> SOL tx fees per crafting event.
-  // Converted to ATLAS via atlasPerSol in the per-row step.
-  // Filtered to type=Output for the same reason as fee: the bot
-  // duplicates txCostSol onto every input row of the event too.
-  // (Field name is camelCase "txCostSol", not "txcostsol" - the
-  // earlier lowercase spelling silently returned 0 rows.)
-  const txsFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
-  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "txCostSol" and r.type == "Output")
-${scopeFilterFlux}
-  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
-  |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
-  |> sort(columns: ["_time"])`;
-
-  // Count of crafting events per (starbase, output, date) for the
-  // TXS_DAILY column. One row per craftingID per (starbase, output)
-  // bucket; we dedup-by-craftingID and sum in the per-row builder.
-  const countFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
-  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "amount" and r.type == "Output")
-${scopeFilterFlux}
-  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
-  |> keep(columns: ["craftingID", "starbase", "output", "_time"])
+  |> map(fn: (r) => ({r with _value: float(v: r._value)}))
   |> group()
+  |> keep(columns: ["craftingID", "starbase", "output", "input", "type", "_field", "_time", "_value"])
   |> sort(columns: ["_time"])`;
 
-  // Crew required per crafting event. Bot writes crew ONLY on the
-  // Output row (verified: sampling slya/crafting/crew field shows
-  // type=Output for every event, no Input duplication). We still
-  // dedup-by-craftingID as defense in depth in case a future bot
-  // change writes crew on Input rows too.
-  const crewFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
-  |> filter(fn: (r) => r._measurement == "crafting" and r._field == "crew" and r.type == "Output")
-${scopeFilterFlux}
-  |> filter(fn: (r) => exists r.starbase and exists r.output and exists r.craftingID)
-  |> keep(columns: ["craftingID", "starbase", "output", "_time", "_value"])
-  |> sort(columns: ["_time"])`;
-
-  const [outputCsv, inputCsv, feeCsv, txsCsv, countCsv, crewCsv] = await Promise.all([
-    queryInfluxFlux(settings, outputFlux),
-    queryInfluxFlux(settings, inputFlux),
-    queryInfluxFlux(settings, feeFlux),
-    queryInfluxFlux(settings, txsFlux),
-    queryInfluxFlux(settings, countFlux),
-    queryInfluxFlux(settings, crewFlux),
-  ]);
+  const craftingRows = parseInfluxCsv(await queryInfluxFlux(settings, craftingFlux));
+  const outputRows = craftingRows.filter((row) => row._field === 'amount' && row.type === 'Output');
+  const inputRows = craftingRows.filter((row) => row._field === 'amount' && row.type === 'Input');
+  const feeRows = craftingRows.filter((row) => row._field === 'fee' && row.type === 'Output');
+  const txsRows = craftingRows.filter((row) => row._field === 'txCostSol' && row.type === 'Output');
+  const crewRows = craftingRows.filter((row) => row._field === 'crew' && row.type === 'Output');
 
   const rowsByKey = new Map();
   const ensureRow = (isoDate, starbase, output, date) => {
@@ -3793,7 +3728,7 @@ ${scopeFilterFlux}
   const seenTxsEvents = new Set();
   const seenCrewEvents = new Set();
 
-  for (const row of parseInfluxCsv(outputCsv)) {
+  for (const row of outputRows) {
     const starbase = resolveStarbaseName(row, coordinateMap);
     const output = String(row.output || '').trim();
     const date = new Date(row._time);
@@ -3805,7 +3740,7 @@ ${scopeFilterFlux}
     entry.crafted += value;
   }
 
-  for (const row of parseInfluxCsv(inputCsv)) {
+  for (const row of inputRows) {
     const starbase = resolveStarbaseName(row, coordinateMap);
     const output = String(row.output || '').trim();
     const input = String(row.input || '').trim();
@@ -3818,7 +3753,7 @@ ${scopeFilterFlux}
     entry.ingredients.push({ input, amount: value });
   }
 
-  for (const row of parseInfluxCsv(feeCsv)) {
+  for (const row of feeRows) {
     const starbase = resolveStarbaseName(row, coordinateMap);
     const output = String(row.output || '').trim();
     const date = new Date(row._time);
@@ -3835,7 +3770,7 @@ ${scopeFilterFlux}
     entry.feeAmount += value;
   }
 
-  for (const row of parseInfluxCsv(txsCsv)) {
+  for (const row of txsRows) {
     const starbase = resolveStarbaseName(row, coordinateMap);
     const output = String(row.output || '').trim();
     const date = new Date(row._time);
@@ -3852,9 +3787,9 @@ ${scopeFilterFlux}
     entry.txCostSol += value;
   }
 
-  // countCsv is one row per crafting event; txsDaily is the count of
+  // outputRows is one row per crafting event; txsDaily is the count of
   // accepted event rows, not the sum of a value column.
-  for (const row of parseInfluxCsv(countCsv)) {
+  for (const row of outputRows) {
     const starbase = resolveStarbaseName(row, coordinateMap);
     const output = String(row.output || '').trim();
     const date = new Date(row._time);
@@ -3865,9 +3800,9 @@ ${scopeFilterFlux}
     entry.txsDaily += 1;
   }
 
-  // crewCsv: crew required per crafting event, summed across all
+  // crewRows: crew required per crafting event, summed across all
   // events for the (date, starbase, output) row.
-  for (const row of parseInfluxCsv(crewCsv)) {
+  for (const row of crewRows) {
     const starbase = resolveStarbaseName(row, coordinateMap);
     const output = String(row.output || '').trim();
     const date = new Date(row._time);
