@@ -440,6 +440,8 @@ const earningsSort = {
   upgrading: { column: null, direction: null },
 };
 
+const EARNINGS_TOTAL_FLEETS_FILTER = '__total__';
+
 // Chart mode state: 'total' (NP in ATLAS) or 'perCrew' (NP / crew). One
 // shared value per earnings subtab, so all Net Profit chart panels in
 // the same subtab switch together. Mining/Crafting each have multiple
@@ -4527,6 +4529,13 @@ function populateEarningsFilterOptions(subtab, rows) {
   };
   fillSelect(filters.date, sortedDates, 'All Dates');
   fillSelect(filters.fleet, sortedFleets, 'All Fleets');
+  if ((subtab === 'scanning' || subtab === 'mining') && filters.fleet) {
+    const totalOption = document.createElement('option');
+    totalOption.value = EARNINGS_TOTAL_FLEETS_FILTER;
+    totalOption.textContent = 'Total';
+    filters.fleet.insertBefore(totalOption, filters.fleet.options[1] || null);
+    if (earningsFilters[subtab].fleet === EARNINGS_TOTAL_FLEETS_FILTER) filters.fleet.value = EARNINGS_TOTAL_FLEETS_FILTER;
+  }
   fillSelect(filters.rawMaterial, sortedMaterials, 'All Materials');
   fillSelect(filters.starbase, sortedStarbases, 'All Starbases');
   fillSelect(filters.asset, sortedAssets, 'All Assets');
@@ -4537,11 +4546,75 @@ function getFilteredEarningsRows(subtab, rows) {
   return rows.filter((row) => {
     if (filterState.date && row.isoDate !== filterState.date) return false;
     const fleet = row.fleetName || row.fleet;
-    if (filterState.fleet && fleet !== filterState.fleet) return false;
+    if (filterState.fleet && filterState.fleet !== EARNINGS_TOTAL_FLEETS_FILTER && fleet !== filterState.fleet) return false;
     if (filterState.rawMaterial && row.rawMaterial !== filterState.rawMaterial) return false;
     if (filterState.starbase && row.starbase !== filterState.starbase) return false;
     if (filterState.asset && row.output !== filterState.asset) return false;
     return true;
+  });
+}
+
+function sumFiniteEarningsFields(target, rows, fields) {
+  for (const field of fields) {
+    const values = rows
+      .map((row) => row[field])
+      .filter((value) => value != null && Number.isFinite(Number(value)))
+      .map(Number);
+    target[field] = values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+  }
+}
+
+function aggregateTotalFleetRows(subtab, rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = subtab === 'mining' ? `${row.isoDate}\n${row.rawMaterial}` : row.isoDate;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return Array.from(groups.values()).map((groupRows) => {
+    const first = groupRows[0];
+    const total = {
+      ...first,
+      isFleetTotal: true,
+      fleet: 'Total',
+      fleetName: 'Total',
+      fleetAccount: '',
+      ownership: '',
+      relationship: 'total',
+      ships: [],
+      shipTypes: 0,
+      starbase: subtab === 'mining' ? '--' : first.starbase,
+    };
+    const commonFields = [
+      'revenueAtlasPerDay', 'foodCostsAtlas', 'fuelCostsAtlas', 'rentalRateAtlasPerDay',
+      'txsCostsAtlas', 'totalCostsAtlas', 'netProfitAtlas', 'totalRequiredCrew',
+    ];
+    if (subtab === 'scanning') {
+      sumFiniteEarningsFields(total, groupRows, [
+        ...commonFields, 'expectedSduPerScan', 'expectedSduValueAtl', 'scanAttempts',
+        'successfulScans', 'sduFound',
+      ]);
+      total.scanSuccessRatePercent = total.scanAttempts > 0 ? (total.successfulScans / total.scanAttempts) * 100 : null;
+      const chanceWeight = groupRows.reduce((sum, row) => sum + (Number(row.scanAttempts) || 0), 0);
+      total.averageChancePercent = chanceWeight > 0
+        ? groupRows.reduce((sum, row) => sum + (Number(row.averageChancePercent) || 0) * (Number(row.scanAttempts) || 0), 0) / chanceWeight
+        : null;
+      total.costsPerUnitAtlas = total.sduFound > 0 && Number.isFinite(total.totalCostsAtlas)
+        ? total.totalCostsAtlas / total.sduFound
+        : null;
+    } else {
+      sumFiniteEarningsFields(total, groupRows, [...commonFields, 'txsDaily', 'mined', 'ammoCostsAtlas']);
+      total.costsPerUnitAtlas = total.mined > 0 && Number.isFinite(total.totalCostsAtlas)
+        ? total.totalCostsAtlas / total.mined
+        : null;
+    }
+    total.netProfitPerCrew = total.totalRequiredCrew > 0 && Number.isFinite(total.netProfitAtlas)
+      ? total.netProfitAtlas / total.totalRequiredCrew
+      : null;
+    total.profitMarginPercent = total.revenueAtlasPerDay !== 0 && Number.isFinite(total.revenueAtlasPerDay) && Number.isFinite(total.netProfitAtlas)
+      ? (total.netProfitAtlas / total.revenueAtlasPerDay) * 100
+      : null;
+    return total;
   });
 }
 
@@ -4697,6 +4770,7 @@ function createEarningsFleetCell(entry) {
 }
 
 function createOwnershipCell(entry) {
+  if (entry.isFleetTotal) return createTextCell('--');
   const cell = document.createElement('td');
   const ownership = document.createElement('span');
   ownership.className = entry.relationship === 'managed' ? 'state-pill warning' : 'state-pill ready';
@@ -4706,6 +4780,7 @@ function createOwnershipCell(entry) {
 }
 
 function createEarningsOptionalCell(entry, columnId, colorMap) {
+  if (entry.isFleetTotal && (columnId === 'color' || columnId === 'ships' || columnId === 'account')) return createTextCell('--');
   if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
@@ -4732,6 +4807,7 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
 }
 
 function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
+  if (entry.isFleetTotal && (columnId === 'color' || columnId === 'ships' || columnId === 'account')) return createTextCell('--');
   if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'ships') return createShipsCell(entry);
@@ -4859,7 +4935,10 @@ function renderEarnings(result) {
 
   if (!earningsTableBody) return;
   const filteredRows = getFilteredEarningsRows('scanning', rows);
-  const sortedRows = sortEarningsRows('scanning', filteredRows);
+  const displayRows = earningsFilters.scanning.fleet === EARNINGS_TOTAL_FLEETS_FILTER
+    ? aggregateTotalFleetRows('scanning', filteredRows)
+    : filteredRows;
+  const sortedRows = sortEarningsRows('scanning', displayRows);
   earningsTableBody.textContent = '';
   if (!sortedRows.length) {
     const row = document.createElement('tr');
@@ -4978,7 +5057,10 @@ function renderEarningsMining(result) {
 
   if (!earningsMiningTableBody) return;
   const filteredRows = getFilteredEarningsRows('mining', rows);
-  const sortedRows = sortEarningsRows('mining', filteredRows);
+  const displayRows = earningsFilters.mining.fleet === EARNINGS_TOTAL_FLEETS_FILTER
+    ? aggregateTotalFleetRows('mining', filteredRows)
+    : filteredRows;
+  const sortedRows = sortEarningsRows('mining', displayRows);
   earningsMiningTableBody.textContent = '';
   if (!sortedRows.length) {
     const row = document.createElement('tr');

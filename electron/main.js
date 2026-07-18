@@ -4475,20 +4475,9 @@ async function fetchEarningsSnapshot(payload) {
     };
   });
 
-  const scanningCostTotalsByDate = new Map();
   for (const row of rows) {
-    const current = scanningCostTotalsByDate.get(row.isoDate) || { sduFound: 0, totalCostsAtlas: 0, costRowCount: 0 };
-    if (Number.isFinite(Number(row.sduFound)) && Number(row.sduFound) > 0) current.sduFound += Number(row.sduFound);
-    if (Number.isFinite(Number(row.totalCostsAtlas))) {
-      current.totalCostsAtlas += Number(row.totalCostsAtlas);
-      current.costRowCount += 1;
-    }
-    scanningCostTotalsByDate.set(row.isoDate, current);
-  }
-  for (const row of rows) {
-    const totals = scanningCostTotalsByDate.get(row.isoDate);
-    row.costsPerUnitAtlas = totals?.costRowCount > 0 && totals.sduFound > 0
-      ? totals.totalCostsAtlas / totals.sduFound
+    row.costsPerUnitAtlas = Number.isFinite(Number(row.totalCostsAtlas)) && Number(row.sduFound) > 0
+      ? Number(row.totalCostsAtlas) / Number(row.sduFound)
       : null;
   }
 
@@ -4549,19 +4538,19 @@ async function fetchEarningsSnapshot(payload) {
     };
   });
 
-  const miningCostTotalsByDateAndMaterial = new Map();
+  const miningCostTotalsByFleetDateAndMaterial = new Map();
   for (const row of mining) {
-    const key = `${row.isoDate}\n${row.rawMaterial}`;
-    const current = miningCostTotalsByDateAndMaterial.get(key) || { mined: 0, totalCostsAtlas: 0, costRowCount: 0 };
+    const key = `${row.isoDate}\n${row.fleetName}\n${row.rawMaterial}`;
+    const current = miningCostTotalsByFleetDateAndMaterial.get(key) || { mined: 0, totalCostsAtlas: 0, costRowCount: 0 };
     if (Number.isFinite(Number(row.mined)) && Number(row.mined) > 0) current.mined += Number(row.mined);
     if (Number.isFinite(Number(row.totalCostsAtlas))) {
       current.totalCostsAtlas += Number(row.totalCostsAtlas);
       current.costRowCount += 1;
     }
-    miningCostTotalsByDateAndMaterial.set(key, current);
+    miningCostTotalsByFleetDateAndMaterial.set(key, current);
   }
   for (const row of mining) {
-    const totals = miningCostTotalsByDateAndMaterial.get(`${row.isoDate}\n${row.rawMaterial}`);
+    const totals = miningCostTotalsByFleetDateAndMaterial.get(`${row.isoDate}\n${row.fleetName}\n${row.rawMaterial}`);
     row.costsPerUnitAtlas = totals?.costRowCount > 0 && totals.mined > 0
       ? totals.totalCostsAtlas / totals.mined
       : null;
