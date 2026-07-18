@@ -998,12 +998,16 @@ select:focus {
 
 .earnings-surface {
   display: flex;
-  flex: 1 1 auto;
-  min-height: 660px;
-  max-height: 1080px;
+  flex: 0 0 auto;
+  min-height: 0;
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+}
+
+.earnings-surface > .fleet-table-wrap {
+  flex: 0 0 auto;
+  height: 560px;
 }
 
 .earnings-chart-surface {
@@ -1522,6 +1526,7 @@ label {
 }
 
 .earnings-metric-guide {
+  flex: 0 0 auto;
   margin-top: 14px;
   border-top: 1px solid var(--border);
   padding-top: 12px;
