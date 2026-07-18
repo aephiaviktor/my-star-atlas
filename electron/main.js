@@ -74,7 +74,7 @@ const defaultSettings = Object.freeze({
 });
 
 let mainWindow = null;
-const INFLUX_ORG = '67793e21353b170';
+const influxOrgIdCache = new Map();
 const DEFAULT_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const AEPHIA_RESOURCE_URL = 'https://get-ship-data.aephia.workers.dev/gm/resource';
 const AEPHIA_LP_SUMMARY_URL = 'https://store-sage-lp.aephia.workers.dev/summary';
@@ -378,7 +378,8 @@ async function queryInfluxFlux(settings, flux) {
     throw new Error('influx_not_configured');
   }
 
-  const url = `${getInfluxBaseUrl(influxUrl)}/api/v2/query?org=${encodeURIComponent(INFLUX_ORG)}`;
+  const orgId = await resolveInfluxOrgId(influxUrl, token, bucket);
+  const url = `${getInfluxBaseUrl(influxUrl)}/api/v2/query?org=${encodeURIComponent(orgId)}`;
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -400,6 +401,47 @@ async function queryInfluxFlux(settings, flux) {
   }
 
   return response.text();
+}
+
+async function resolveInfluxOrgId(influxUrl, token, bucket) {
+  const baseUrl = getInfluxBaseUrl(influxUrl);
+  const cacheKey = `${baseUrl}\n${token}\n${bucket}`;
+  if (influxOrgIdCache.has(cacheKey)) return influxOrgIdCache.get(cacheKey);
+
+  const lookup = (async () => {
+    const url = `${baseUrl}/api/v2/buckets?name=${encodeURIComponent(bucket)}`;
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Token ${token}`,
+      },
+    });
+    if (!response.ok) {
+      let detail = '';
+      try {
+        detail = await response.text();
+      } catch (_error) {
+        detail = '';
+      }
+      throw new Error(`influx_bucket_lookup_${response.status}${detail ? `:${detail.slice(0, 300)}` : ''}`);
+    }
+
+    const payload = await response.json();
+    const matches = (Array.isArray(payload?.buckets) ? payload.buckets : [])
+      .filter((entry) => String(entry?.name || '') === bucket && entry?.orgID);
+    if (matches.length === 0) throw new Error(`influx_bucket_not_found:${bucket}`);
+    const orgIds = Array.from(new Set(matches.map((entry) => String(entry.orgID))));
+    if (orgIds.length !== 1) throw new Error(`influx_bucket_ambiguous:${bucket}`);
+    return orgIds[0];
+  })();
+
+  influxOrgIdCache.set(cacheKey, lookup);
+  try {
+    return await lookup;
+  } catch (error) {
+    influxOrgIdCache.delete(cacheKey);
+    throw error;
+  }
 }
 
 async function testInfluxConnection(payload) {
@@ -3078,13 +3120,24 @@ function buildSharedRpcUrl(rpcBaseUrl, apiKey) {
   }
 }
 
+function isUsableSharedRpcUrl(value) {
+  try {
+    const url = new URL(value);
+    const isHelius = url.hostname.toLowerCase().endsWith('helius-rpc.com');
+    if (!isHelius) return true;
+    return Boolean(String(url.searchParams.get('api-key') || '').trim());
+  } catch (_error) {
+    return false;
+  }
+}
+
 function getRpcUrl(settings) {
   if (settings && settings.useRpcLimiter) {
     try {
       const paths = resolveRpcLimiterPaths();
       const state = readRpcLimiterState(paths.stateFile, Date.now());
       const shared = buildSharedRpcUrl(state.rpcBaseUrl, state.apiKey);
-      if (shared) return shared;
+      if (shared && isUsableSharedRpcUrl(shared)) return shared;
     } catch (_error) {
       // fall through to the configured rpcUrl
     }

@@ -12,4 +12,4 @@ If Not fileSystem.FileExists(electronPath) Then
 End If
 
 shell.CurrentDirectory = appDirectory
-shell.Run Chr(34) & electronPath & Chr(34) & " " & Chr(34) & appDirectory & Chr(34), 0, False
+shell.Run Chr(34) & electronPath & Chr(34) & " " & Chr(34) & appDirectory & Chr(34), 1, False

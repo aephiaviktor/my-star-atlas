@@ -939,7 +939,7 @@ function updateTitle() {
 
 function updateInfluxResult(result) {
   if (!result?.ok) {
-    measurementList.textContent = 'No measurements loaded';
+    measurementList.textContent = formatInfluxError(result?.error);
     return;
   }
 
@@ -953,6 +953,19 @@ function updateInfluxResult(result) {
     chip.textContent = measurement;
     measurementList.appendChild(chip);
   }
+}
+
+function formatInfluxError(value) {
+  const error = String(value || '').trim();
+  if (!error) return 'Influx test failed';
+  if (/influx_(?:bucket_lookup|flux)_401/i.test(error)) return 'Authentication failed (HTTP 401). Check the Influx token.';
+  if (/influx_(?:bucket_lookup|flux)_403/i.test(error)) return 'Access denied (HTTP 403). Check the token permissions.';
+  if (/influx_bucket_not_found:/i.test(error)) return `Bucket not found: ${error.split(':').slice(1).join(':')}`;
+  if (/influx_bucket_ambiguous:/i.test(error)) return `More than one accessible bucket has this name: ${error.split(':').slice(1).join(':')}`;
+  if (/influx_bucket_lookup_\d+/i.test(error)) return `Bucket lookup failed (${error.match(/\d+/)?.[0] || 'HTTP error'}).`;
+  if (/influx_flux_\d+/i.test(error)) return `Influx query failed (${error.match(/\d+/)?.[0] || 'HTTP error'}).`;
+  if (/fetch failed|network|timed?\s*out|abort/i.test(error)) return 'Could not reach the Influx server.';
+  return `Influx test failed: ${error.slice(0, 240)}`;
 }
 
 function formatCheckedAt(value) {
@@ -5809,11 +5822,12 @@ testInfluxButton.addEventListener('click', async () => {
   try {
     const result = await api.testInflux(getFormPayload());
     updateInfluxResult(result);
-    saveStatus.textContent = result.ok ? 'Influx connected' : 'Influx failed';
+    saveStatus.textContent = result.ok ? 'Influx connected' : formatInfluxError(result.error);
   } catch (error) {
     console.error(error);
-    updateInfluxResult({ ok: false, error: 'Test failed' });
-    saveStatus.textContent = 'Influx failed';
+    const message = formatInfluxError(error?.message);
+    updateInfluxResult({ ok: false, error: error?.message });
+    saveStatus.textContent = message;
   } finally {
     testInfluxButton.disabled = false;
   }
