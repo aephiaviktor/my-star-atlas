@@ -4884,7 +4884,6 @@ async function fetchEarningsSnapshot(payload) {
     craftingRowCount: crafting.length,
     upgradingError,
     upgradingRowCount: upgrading.length,
-    upgradingAtlasPerLp: atlasPerLp,
     fleets: fleetRows,
     rows,
     miningRows: mining,
