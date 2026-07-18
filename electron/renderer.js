@@ -424,6 +424,68 @@ const earningsColumnState = {
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
 };
 
+const earningsMetricGuideCommon = Object.freeze({
+  color: ['Fleet chart color.', 'Assigned display color for this fleet.', 'Use it to match the row to the same fleet in charts.'],
+  ownership: ['Whether the fleet is owned or managed/rented.', 'Fleet relationship from the connected profile.', 'Managed fleets can include rental cost and contract constraints.'],
+  ships: ['Aggregated ship models and quantities in the fleet.', 'Sum of each matching ship model in the fleet.', 'Use this to understand the composition behind capacity, crew, and operating costs.'],
+  requiredCrew: ['Crew required by the fleet’s ships.', 'Σ(ship quantity × required crew per ship).', 'Useful for comparing labor efficiency; unmapped ships are omitted.'],
+  txsDaily: ['Transactions attributed to the fleet or activity that UTC day.', 'Count of matching daily transactions.', 'Higher counts usually increase transaction cost and may indicate more operational cycles.'],
+  revenue: ['Estimated gross value produced during the row’s UTC day.', 'Output quantity × current output price in ATLAS.', 'This is a current-price estimate, not necessarily realized sale proceeds.'],
+  rental: ['Daily rental rate for a managed fleet.', 'Current rental contract rate in ATLAS per day.', 'Treat it as a fixed daily cost when judging whether a rented fleet is profitable.'],
+  txsCosts: ['SOL transaction fees converted to ATLAS.', 'Transaction cost in SOL × current ATLAS-per-SOL rate.', 'This varies with network fees and the current SOL/ATLAS conversion rate.'],
+  totalCosts: ['All cost components available for this row.', 'Sum of the cost columns shown for this activity.', 'Compare with Revenue; missing price inputs can make the estimate incomplete.'],
+  netProfit: ['Estimated value remaining after costs.', 'Revenue − Total Costs.', 'Higher is better for absolute earnings; compare it with margin and per-crew profit for efficiency.'],
+  npPerCrew: ['Estimated net-profit efficiency per required or average crew.', 'Net Profit ÷ Crew.', 'Higher is generally better for crew efficiency, but it does not imply higher total profit.'],
+  profitMargin: ['Share of revenue left after costs.', '(Net Profit ÷ Revenue) × 100.', 'Positive is profitable; compare it with total Net Profit because a high margin can still represent little ATLAS.'],
+  account: ['On-chain fleet account address.', 'Fleet public key.', 'Use it to verify the fleet or investigate its on-chain activity.'],
+  crew: ['Average crew assigned during the day.', 'Daily average of recorded crew usage.', 'Use it with Net Profit per Crew to compare activities of different sizes.'],
+});
+
+const earningsMetricGuideBySubtab = Object.freeze({
+  scanning: Object.freeze({
+    sduMax: ['Expected SDU capacity per successful scan.', 'Σ(ship quantity × ship SDU-per-scan capacity).', 'A capacity estimate; actual SDU Found also depends on scan success and chance.'],
+    atlasPerScan: ['Estimated ATLAS value of one full-capacity scan.', 'SDU Max × current SDU price.', 'Useful for comparing fleet potential before operating costs and failed scans.'],
+    scanAttempts: ['All recorded scan attempts during the UTC day.', 'Successful scans + unsuccessful scans.', 'Use with Successful Scans and Avg Chance to judge scanning frequency and outcomes.'],
+    successfulScans: ['Recorded scan attempts that found an SDU.', 'Count of successful scan events.', 'More successes usually increase output, but SDU quantity per success can vary.'],
+    scanSuccessRate: ['Observed success rate for the day.', '(Successful Scans ÷ Scan Attempts) × 100.', 'Compare over multiple days; a single day can differ substantially from the expected chance.'],
+    averageChance: ['Average recorded success chance across scan attempts.', 'Mean success-chance percentage of recorded attempts.', 'This is the expected probability; compare it with observed Scan Success Rate over a longer period.'],
+    sduFound: ['Total Survey Data Units found during the UTC day.', 'Σ SDU from successful scans.', 'The primary scanning output used to estimate Revenue.'],
+    foodCosts: ['ATLAS value of food consumed while scanning.', 'Food burned × current food price.', 'Lower cost improves profit, but price changes also affect historical estimates.'],
+    fuelCosts: ['ATLAS value of fuel consumed while scanning.', 'Fuel burned × current fuel price.', 'Use it to compare operating efficiency between fleets.'],
+    costsPerUnit: ['Estimated cost for each SDU found.', 'Total Costs ÷ SDU Found.', 'Lower is better; compare with the current SDU price to judge unit profitability.'],
+  }),
+  mining: Object.freeze({
+    starbase: ['Starbase associated with the mining activity.', 'Recorded mining starbase.', 'Use it to compare routes, deposits, and fleet placement.'],
+    rawMaterial: ['Resource produced by this row.', 'Recorded mined resource.', 'Prices differ by material, so equal quantities can generate different Revenue.'],
+    mined: ['Total units mined during the UTC day.', 'Σ recorded mined quantity.', 'Use with Costs per Unit and resource price to compare output efficiency.'],
+    ammoCosts: ['ATLAS value of ammunition consumed while mining.', 'Ammunition burned × current ammunition price.', 'Often a major variable cost; lower cost per mined unit improves efficiency.'],
+    foodCosts: ['ATLAS value of food consumed while mining.', 'Food burned × current food price.', 'Part of the operating cost used in Total Costs.'],
+    fuelCosts: ['ATLAS value of fuel consumed while mining.', 'Fuel burned × current fuel price.', 'Part of the operating cost used in Total Costs.'],
+    costsPerUnit: ['Estimated cost per unit of this material.', 'Total costs for fleet/date/material ÷ total units mined.', 'Lower is better; compare with the material’s current ATLAS price.'],
+  }),
+  cargo: Object.freeze({
+    assignment: ['Recorded transport or supply-chain assignment.', 'Most specific assignment recorded for the row.', 'Use it to separate different logistics duties for the same fleet.'],
+    preferredCargoType: ['Cargo type most frequently recorded for this activity.', 'Most-used cargo type across matching movement rows.', 'It describes typical usage; it is not the full list of cargo moved.'],
+    starbases: ['Starbases touched by the fleet’s cargo activity.', 'Distinct recorded starbases joined into one row.', 'More locations can indicate a broader or more complex route.'],
+    fuelCosts: ['ATLAS value of fuel consumed by cargo movement.', 'Fuel burned × current fuel price.', 'The main operating-resource cost represented in Cargo.'],
+    totalCosts: ['Estimated cargo operating cost represented by available data.', 'Fuel Costs + Txs Costs.', 'Cargo revenue is not tracked here, so this is a cost-efficiency view rather than profit.'],
+    txsCostsPct: ['Transaction fees as a share of represented cargo costs.', '(Txs Costs ÷ Total Costs) × 100.', 'A high value means fees dominate fuel; reduce unnecessary transactions where practical.'],
+  }),
+  crafting: Object.freeze({
+    crafted: ['Total output units crafted during the UTC day.', 'Σ crafted output quantity.', 'Use with unit prices and costs to understand production scale.'],
+    ingCosts: ['Current ATLAS value of ingredients consumed.', 'Σ(ingredient quantity × current ingredient price).', 'This is a current-price opportunity-cost estimate, not necessarily the price originally paid.'],
+    feeCosts: ['ATLAS crafting fees recorded for the activity.', 'Σ recorded crafting fee amount.', 'A direct crafting expense included in Total Costs.'],
+    totalCosts: ['Estimated cost of the crafted output.', 'Ingredient Costs + Crafting Fee Costs + Txs Costs.', 'Missing ingredient prices can make this estimate incomplete.'],
+  }),
+  upgrading: Object.freeze({
+    installed: ['Components installed during the completed UTC day.', 'Σ installed component quantity.', 'This is the output quantity used for both estimated reward value and component cost.'],
+    lpRedemption: ['Faction-wide LP redeemed on that date.', 'Daily redeemed LP from the faction summary.', 'Higher faction redemption lowers ATLAS value per LP because the daily ATLAS pool is shared.'],
+    revenue: ['Estimated ATLAS value of the LP generated by installed components.', 'Installed × LP per component × (Faction ATLAS pool ÷ Faction LP redeemed).', 'This is a pool-share estimate; it changes with faction-wide LP redemption.'],
+    upgCosts: ['Current ATLAS value of components installed.', 'Installed × current component price.', 'A current-price opportunity-cost estimate, not necessarily acquisition cost.'],
+    totalCosts: ['Estimated upgrading cost represented by available data.', 'UPG Costs + Txs Costs.', 'Compare with Revenue to judge whether the upgrade activity covered component and transaction costs.'],
+  }),
+});
+
 const earningsFilters = {
   scanning: { date: '', fleet: '' },
   mining: { date: '', fleet: '', rawMaterial: '' },
@@ -4443,6 +4505,44 @@ function getVisibleEarningsColumns(subtab = currentEarningsSubtab) {
   return getEarningsColumns(subtab).filter((column) => selected.has(column.id));
 }
 
+function getEarningsMetricGuideEntry(subtab, columnId) {
+  return earningsMetricGuideBySubtab[subtab]?.[columnId] || earningsMetricGuideCommon[columnId] || null;
+}
+
+function renderEarningsMetricGuide(subtab = currentEarningsSubtab) {
+  const container = document.querySelector(`#earnings-${subtab}-metric-guide`);
+  if (!container) return;
+  container.textContent = '';
+  for (const column of getVisibleEarningsColumns(subtab)) {
+    const guide = getEarningsMetricGuideEntry(subtab, column.id);
+    if (!guide) continue;
+    const item = document.createElement('article');
+    item.className = 'earnings-metric-guide-item';
+    item.dataset.metricId = column.id;
+    const title = document.createElement('h4');
+    title.textContent = column.label;
+    const description = document.createElement('p');
+    description.textContent = guide[0];
+    const formula = document.createElement('p');
+    formula.className = 'earnings-metric-guide-formula';
+    const formulaLabel = document.createElement('strong');
+    formulaLabel.textContent = 'Formula: ';
+    formula.append(formulaLabel, guide[1]);
+    const interpretation = document.createElement('p');
+    interpretation.textContent = guide[2];
+    item.append(title, description, formula, interpretation);
+    container.appendChild(item);
+  }
+}
+
+function highlightEarningsMetricGuide(subtab, columnId) {
+  const item = document.querySelector(`#earnings-${subtab}-metric-guide [data-metric-id="${columnId}"]`);
+  if (!item) return;
+  item.closest('details')?.setAttribute('open', '');
+  item.classList.add('highlighted');
+  window.setTimeout(() => item.classList.remove('highlighted'), 1800);
+}
+
 function getEarningsTableColSpan(subtab = currentEarningsSubtab) {
   const visibleColumns = getVisibleEarningsColumns(subtab);
   // Scanning/mining/cargo have 2 base columns (date + fleet);
@@ -4466,6 +4566,7 @@ function renderEarningsColumnControls() {
     input.addEventListener('change', () => {
       if (input.checked) selected.add(column.id);
       else selected.delete(column.id);
+      renderEarningsMetricGuide(subtab);
       if (subtab === 'mining') {
         renderEarningsMining(latestEarningsResult);
       } else if (subtab === 'cargo') {
@@ -4483,6 +4584,7 @@ function renderEarningsColumnControls() {
     earningsColumnControlsContainer.appendChild(label);
   }
   earningsColumnControls = Array.from(earningsColumnControlsContainer.querySelectorAll('[data-earnings-column]'));
+  renderEarningsMetricGuide(subtab);
 }
 
 function compareEarningsValues(a, b, direction) {
@@ -4713,6 +4815,7 @@ function setupEarningsHeaderSortHandlers() {
       else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
       else if (latestEarningsResult) renderEarnings(latestEarningsResult);
       else renderEarningsHeader(subtab);
+      highlightEarningsMetricGuide(subtab, columnId);
     });
   };
   handle(earningsTableHead, 'scanning');
