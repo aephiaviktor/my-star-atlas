@@ -1,6 +1,6 @@
 {
   "name": "my-star-atlas",
-  "version": "0.5.70",
+  "version": "0.5.71",
   "private": true,
   "main": "electron/main.js",
   "type": "commonjs",
@@ -16,6 +16,6 @@
     "@staratlas/sage": "^1.9.0-alpha.16",
     "bs58": "^6.0.0",
     "electron": "^42.1.0",
-    "rpc_limiter": "git+https://github.com/aephiaviktor/rpc-limiter.git#main"
+    "rpc_limiter": "https://codeload.github.com/aephiaviktor/rpc-limiter/tar.gz/ba63cdda930a6f809af2a37c2b12dfcd9562f699"
   }
 }
