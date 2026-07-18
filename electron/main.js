@@ -4469,6 +4469,24 @@ async function fetchEarningsSnapshot(payload) {
       rentalRateAtlasPerDay,
     };
   });
+
+  const miningCostTotalsByDateAndMaterial = new Map();
+  for (const row of mining) {
+    const key = `${row.isoDate}\n${row.rawMaterial}`;
+    const current = miningCostTotalsByDateAndMaterial.get(key) || { mined: 0, totalCostsAtlas: 0, costRowCount: 0 };
+    if (Number.isFinite(Number(row.mined)) && Number(row.mined) > 0) current.mined += Number(row.mined);
+    if (Number.isFinite(Number(row.totalCostsAtlas))) {
+      current.totalCostsAtlas += Number(row.totalCostsAtlas);
+      current.costRowCount += 1;
+    }
+    miningCostTotalsByDateAndMaterial.set(key, current);
+  }
+  for (const row of mining) {
+    const totals = miningCostTotalsByDateAndMaterial.get(`${row.isoDate}\n${row.rawMaterial}`);
+    row.costsPerUnitAtlas = totals?.costRowCount > 0 && totals.mined > 0
+      ? totals.totalCostsAtlas / totals.mined
+      : null;
+  }
   const miningSignatureCounts = await Promise.race([
     fetchFleetSignatureDailyCounts(
       connection,
