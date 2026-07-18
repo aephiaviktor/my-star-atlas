@@ -386,6 +386,7 @@ const craftingEarningsOptionalColumns = Object.freeze([
 
 const upgradingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'installed', label: 'Installed' }),
+  Object.freeze({ id: 'lpRedemption', label: 'LP Redemption' }),
   Object.freeze({ id: 'crew', label: 'Avg Crew' }),
   Object.freeze({ id: 'revenue', label: 'Revenue' }),
   Object.freeze({ id: 'upgCosts', label: 'UPG Costs' }),
@@ -474,6 +475,7 @@ const earningsSortKeyByColumnId = Object.freeze({
   ingCosts: 'ingCostsAtlas',
   feeCosts: 'feeCostsAtlas',
   installed: 'installed',
+  lpRedemption: 'factionRedeemedLp',
   upgCosts: 'upgradingCostsAtlas',
   preferredCargoType: 'preferredCargoType',
   starbases: 'starbaseLabel',
@@ -4713,6 +4715,7 @@ function createCraftingEarningsOptionalCell(entry, columnId, colorMap) {
 
 function createUpgradingEarningsOptionalCell(entry, columnId) {
   if (columnId === 'installed') return createTextCell(formatWholeNumber(entry.installed || 0));
+  if (columnId === 'lpRedemption') return createTextCell(entry.factionRedeemedLp == null ? '--' : formatWholeNumber(entry.factionRedeemedLp));
   if (columnId === 'crew') return createTextCell(entry.crew > 0 ? formatWholeNumber(entry.crew) : '--');
   if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasWhole(entry.revenueAtlasPerDay));
   if (columnId === 'upgCosts') return createTextCell(entry.upgradingCostsAtlas == null ? '--' : formatAtlasWhole(entry.upgradingCostsAtlas));

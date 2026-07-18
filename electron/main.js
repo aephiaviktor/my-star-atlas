@@ -3101,7 +3101,7 @@ function extractExportedJsonObject(source, exportName) {
   return null;
 }
 
-async function fetchYesterdayFactionRedeemedLp(settings) {
+async function fetchFactionRedeemedLpByDate(settings) {
   const now = Date.now();
   if (aephiaLpSummaryCache && aephiaLpSummaryCache.expiresAt > now) return aephiaLpSummaryCache.data;
   const apiKey = String(settings?.aephiaApiKey || '').trim();
@@ -3112,14 +3112,23 @@ async function fetchYesterdayFactionRedeemedLp(settings) {
   });
   if (!response.ok) throw new Error(`aephia_lp_summary_${response.status}`);
   const payload = await response.json();
-  const factions = payload?.dailyFinal?.factions || {};
   const result = {};
-  for (const [name, rows] of Object.entries(factions)) {
-    const faction = normalizeFaction(name === 'Ustur' ? 'USTUR' : name);
-    const latest = Array.isArray(rows) ? rows.at(-1) : null;
-    const redeemedLp = Number(latest?.redeemedLp);
-    if (Number.isFinite(redeemedLp) && redeemedLp > 0) result[faction] = redeemedLp;
-  }
+  const addRows = (factions, getDate) => {
+    for (const [name, rows] of Object.entries(factions || {})) {
+      const faction = normalizeFaction(name === 'Ustur' ? 'USTUR' : name);
+      if (!result[faction]) result[faction] = {};
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const date = getDate(row);
+        const redeemedLp = Number(row?.redeemedLp);
+        if (date && Number.isFinite(redeemedLp) && redeemedLp > 0) result[faction][date] = redeemedLp;
+      }
+    }
+  };
+  // Interval snapshots cover the API's rolling window. Taking the last
+  // snapshot for each UTC date gives the daily faction redemption; finalized
+  // rows are applied afterwards so they remain authoritative when available.
+  addRows(payload?.interval?.factions, (row) => String(row?.dateTime || '').slice(0, 10));
+  addRows(payload?.dailyFinal?.factions, (row) => String(row?.date || '').slice(0, 10));
   aephiaLpSummaryCache = { data: result, expiresAt: now + 5 * 60 * 1000 };
   return result;
 }
@@ -4485,20 +4494,20 @@ async function fetchEarningsSnapshot(payload) {
     };
   });
 
-  let redeemedLpByFaction = {};
+  let redeemedLpByFactionAndDate = {};
   try {
-    redeemedLpByFaction = await Promise.race([
-      fetchYesterdayFactionRedeemedLp(settings),
+    redeemedLpByFactionAndDate = await Promise.race([
+      fetchFactionRedeemedLpByDate(settings),
       new Promise((_, reject) => setTimeout(() => reject(new Error('lp_summary_timeout')), 8000)),
     ]);
   } catch (error) {
     upgradingError = upgradingError || String(error?.message || error || 'lp_summary_unavailable');
   }
   const faction = normalizeFaction(settings.faction);
-  const factionRedeemedLp = Number(redeemedLpByFaction[faction]);
   const atlasPool = UPGRADE_ATLAS_POOLS[faction];
-  const atlasPerLp = Number.isFinite(factionRedeemedLp) && factionRedeemedLp > 0 ? atlasPool / factionRedeemedLp : null;
   const upgrading = upgradingRows.map((row) => {
+    const factionRedeemedLp = Number(redeemedLpByFactionAndDate[faction]?.[row.isoDate]);
+    const atlasPerLp = Number.isFinite(factionRedeemedLp) && factionRedeemedLp > 0 ? atlasPool / factionRedeemedLp : null;
     const componentKey = normalizeShipName(row.asset);
     const lpPerComponent = UPGRADE_LP_BY_COMPONENT[componentKey] ?? null;
     const lpValuePerComponentAtl = atlasPerLp != null && lpPerComponent != null ? atlasPerLp * lpPerComponent : null;
@@ -4508,7 +4517,7 @@ async function fetchEarningsSnapshot(payload) {
     const txsCostsAtlas = atlasPerSol != null ? row.txCostSol * atlasPerSol : null;
     const totalCostsAtlas = Number.isFinite(upgradingCostsAtlas) && Number.isFinite(txsCostsAtlas) ? upgradingCostsAtlas + txsCostsAtlas : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas) ? revenueAtlasPerDay - totalCostsAtlas : null;
-    return { ...row, output: row.asset, assetName: row.asset, lpPerComponent, lpValuePerComponentAtl, componentPriceAtl, revenueAtlasPerDay, upgradingCostsAtlas, txsCostsAtlas, totalCostsAtlas, netProfitAtlas, netProfitPerCrew: Number.isFinite(netProfitAtlas) && row.crew > 0 ? netProfitAtlas / row.crew : null, profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (netProfitAtlas / revenueAtlasPerDay) * 100 : null };
+    return { ...row, output: row.asset, assetName: row.asset, factionRedeemedLp: Number.isFinite(factionRedeemedLp) ? factionRedeemedLp : null, lpPerComponent, lpValuePerComponentAtl, componentPriceAtl, revenueAtlasPerDay, upgradingCostsAtlas, txsCostsAtlas, totalCostsAtlas, netProfitAtlas, netProfitPerCrew: Number.isFinite(netProfitAtlas) && row.crew > 0 ? netProfitAtlas / row.crew : null, profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (netProfitAtlas / revenueAtlasPerDay) * 100 : null };
   }).sort((a,b) => String(b.isoDate).localeCompare(String(a.isoDate)) || a.starbase.localeCompare(b.starbase) || a.asset.localeCompare(b.asset));
 
   crafting.sort((a, b) => {
