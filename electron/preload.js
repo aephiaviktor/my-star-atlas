@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('myStarAtlas', {
   getProfileName: () => ipcRenderer.invoke('app:get-profile-name'),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  downloadUpdateAndRestart: () => ipcRenderer.invoke('updates:download-and-restart'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (payload) => ipcRenderer.invoke('settings:save', payload),
   getFleets: (payload) => ipcRenderer.invoke('fleet:list', payload),

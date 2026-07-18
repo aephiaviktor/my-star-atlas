@@ -41,6 +41,13 @@ const sectionEyebrow = document.querySelector('#section-eyebrow');
 const sectionTitle = document.querySelector('#section-title');
 const profileLabel = document.querySelector('#profile-label');
 const versionLabel = document.querySelector('#version-label');
+const updateButton = document.querySelector('#update-btn');
+const updateModal = document.querySelector('#update-modal');
+const updateCurrentVersion = document.querySelector('#update-current-version');
+const updateLatestVersion = document.querySelector('#update-latest-version');
+const updateMessage = document.querySelector('#update-message');
+const updateConfirmButton = document.querySelector('#update-confirm-btn');
+const updateCancelButton = document.querySelector('#update-cancel-btn');
 const measurementList = document.querySelector('#measurement-list');
 const fleetSyncStatus = document.querySelector('#fleet-sync-status');
 const fleetTableBody = document.querySelector('#fleet-table-body');
@@ -49,6 +56,8 @@ const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
 const earningsColumnControlsContainer = document.querySelector('#earnings-column-controls');
 let earningsColumnControls = Array.from(document.querySelectorAll('[data-earnings-column]'));
+let availableUpdate = null;
+let updateCheckInFlight = false;
 const earningsSduPriceValue = document.querySelector('#earnings-sdu-price-value');
 const earningsSduPriceNote = document.querySelector('#earnings-sdu-price-note');
 const earningsSduScanValue = document.querySelector('#earnings-sdu-scan-value');
@@ -714,6 +723,49 @@ function closeSettings() {
 function setText(element, value) {
   if (element) {
     element.textContent = value;
+  }
+}
+
+function setUpdateModalOpen(open) {
+  updateModal.hidden = !open;
+}
+
+function renderUpdateState(result, error = null) {
+  availableUpdate = result || null;
+  const updateAvailable = Boolean(result?.updateAvailable);
+  updateButton.classList.toggle('update-available', updateAvailable);
+  updateButton.title = updateAvailable
+    ? `Update available: v${result.latestVersion}`
+    : error
+      ? 'Update check failed'
+      : 'Check for updates';
+  setText(updateCurrentVersion, `v${result?.currentVersion || versionLabel.textContent || '--'}`);
+  setText(updateLatestVersion, result?.latestVersion ? `v${result.latestVersion}` : error ? 'Unavailable' : 'Checking...');
+  updateConfirmButton.disabled = !updateAvailable;
+  updateConfirmButton.textContent = updateAvailable ? `Update to v${result.latestVersion}` : 'Update';
+  setText(updateMessage, error
+    ? `Update check failed: ${error?.message || String(error)}`
+    : updateAvailable
+      ? 'A newer My Star Atlas version is available on GitHub.'
+      : 'My Star Atlas is already up to date.');
+}
+
+async function checkForUpdates({ openModal = false } = {}) {
+  if (openModal) {
+    setUpdateModalOpen(true);
+    setText(updateLatestVersion, 'Checking...');
+    setText(updateMessage, 'Checking GitHub for the latest version...');
+    updateConfirmButton.disabled = true;
+  }
+  if (updateCheckInFlight) return;
+  updateCheckInFlight = true;
+  try {
+    renderUpdateState(await api.checkForUpdates());
+  } catch (error) {
+    console.error(error);
+    renderUpdateState(null, error);
+  } finally {
+    updateCheckInFlight = false;
   }
 }
 
@@ -5330,6 +5382,7 @@ async function loadInitialState() {
   updateSettingsStatus(settings);
   initInventory();
   await refreshVisibleFactionViews();
+  void checkForUpdates();
 }
 
 document.querySelectorAll('.nav-button').forEach((button) => {
@@ -5587,6 +5640,30 @@ consTotalAssetFilter.addEventListener('change', () => {
 openSettingsButton.addEventListener('click', openSettings);
 closeSettingsButton.addEventListener('click', closeSettings);
 
+updateButton.addEventListener('click', () => {
+  void checkForUpdates({ openModal: true });
+});
+
+updateCancelButton.addEventListener('click', () => setUpdateModalOpen(false));
+updateModal.addEventListener('click', (event) => {
+  if (event.target === updateModal) setUpdateModalOpen(false);
+});
+
+updateConfirmButton.addEventListener('click', async () => {
+  if (!availableUpdate?.updateAvailable) return;
+  updateConfirmButton.disabled = true;
+  updateCancelButton.disabled = true;
+  setText(updateMessage, `Downloading My Star Atlas v${availableUpdate.latestVersion}, installing dependencies, and restarting...`);
+  try {
+    await api.downloadUpdateAndRestart();
+  } catch (error) {
+    console.error(error);
+    setText(updateMessage, `Update failed: ${error?.message || String(error)}`);
+    updateConfirmButton.disabled = false;
+    updateCancelButton.disabled = false;
+  }
+});
+
 settingsOverlay.addEventListener('click', (event) => {
   if (event.target === settingsOverlay) {
     closeSettings();
@@ -5594,8 +5671,9 @@ settingsOverlay.addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !settingsOverlay.classList.contains('hidden')) {
-    closeSettings();
+  if (event.key === 'Escape') {
+    if (!updateModal.hidden) setUpdateModalOpen(false);
+    else if (!settingsOverlay.classList.contains('hidden')) closeSettings();
   }
 });
 

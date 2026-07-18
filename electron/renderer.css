@@ -222,7 +222,7 @@ select:focus {
 .app-shell.nav-collapsed .nav-button > span:not(.nav-icon),
 .app-shell.nav-collapsed .settings-launch > span:not(.nav-icon),
 .app-shell.nav-collapsed .nav-subsection,
-.app-shell.nav-collapsed .version-line {
+.app-shell.nav-collapsed .nav-footer-status {
   display: none;
 }
 
@@ -341,6 +341,22 @@ select:focus {
   font-size: 12px;
 }
 
+.nav-footer-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-ready-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .main-area {
   display: flex;
   flex-direction: column;
@@ -432,17 +448,15 @@ select:focus {
   background: rgba(151, 112, 22, 0.6);
 }
 
-.sync-strip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.update-btn {
+  min-width: 76px;
   min-height: 34px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: rgba(11, 27, 36, 0.88);
-  padding: 7px 10px;
-  color: var(--muted);
-  font-size: 13px;
+  padding: 7px 12px;
+}
+
+.update-btn.update-available {
+  color: var(--green);
+  border-color: rgba(73, 214, 160, 0.62);
 }
 
 .sync-dot {
@@ -454,6 +468,60 @@ select:focus {
 
 .sync-dot.ready {
   background: var(--green);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(2, 8, 18, 0.76);
+}
+
+.modal-backdrop[hidden] { display: none; }
+
+.update-dialog {
+  width: min(460px, 100%);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #102837 0%, #091923 100%);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.52);
+  padding: 20px;
+}
+
+.update-dialog h2 { margin-bottom: 14px; }
+
+.update-version-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 9px 18px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(4, 16, 24, 0.64);
+  font-size: 13px;
+}
+
+.update-version-grid span { color: var(--muted); }
+.update-version-grid strong { color: var(--text); }
+
+.update-message {
+  min-height: 38px;
+  margin: 14px 0 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.update-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .section-view {

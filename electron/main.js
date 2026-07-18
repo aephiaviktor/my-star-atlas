@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
+const os = require('os');
+const { spawn } = require('child_process');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { BorshAccountsCoder } = require('@staratlas/anchor');
 const bs58Module = require('bs58');
@@ -76,6 +78,10 @@ const INFLUX_ORG = '67793e21353b170';
 const DEFAULT_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const AEPHIA_RESOURCE_URL = 'https://get-ship-data.aephia.workers.dev/gm/resource';
 const AEPHIA_LP_SUMMARY_URL = 'https://store-sage-lp.aephia.workers.dev/summary';
+const GITHUB_REPO = 'aephiaviktor/my-star-atlas';
+const GITHUB_BRANCH = 'master';
+const GITHUB_PACKAGE_URL = `https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/package.json`;
+const GITHUB_ARCHIVE_URL = `https://github.com/${GITHUB_REPO}/archive/refs/heads/${GITHUB_BRANCH}.tar.gz`;
 const UPGRADE_ATLAS_POOLS = Object.freeze({ MUD: 1983250, ONI: 2000000, USTUR: 2000000 });
 const UPGRADE_LP_BY_COMPONENT = Object.freeze({ framework: 68, electronics: 92, 'power source': 98, electromagnet: 133, 'field stabilizer': 222, 'particle accelerator': 498, 'radiation absorber': 331, 'survey data unit': 1325, sdu: 1325, ink: 100000 });
 const JUPITER_PRICE_URL = 'https://lite-api.jup.ag/price/v3?ids=So11111111111111111111111111111111111111112,ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
@@ -153,6 +159,101 @@ function normalizeFaction(value) {
     return normalized;
   }
   return 'USTUR';
+}
+
+function getAppRoot() {
+  return path.resolve(__dirname, '..');
+}
+
+function normalizeVersion(value) {
+  return String(value || '').trim().replace(/^v/i, '');
+}
+
+function compareVersions(a, b) {
+  const left = normalizeVersion(a).split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const right = normalizeVersion(b).split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    if ((left[index] || 0) > (right[index] || 0)) return 1;
+    if ((left[index] || 0) < (right[index] || 0)) return -1;
+  }
+  return 0;
+}
+
+async function getLatestGithubVersion() {
+  const response = await fetch(GITHUB_PACKAGE_URL, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'my-star-atlas-updater' },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!response.ok) throw new Error(`GitHub request failed: HTTP ${response.status}`);
+  const remotePackage = await response.json();
+  const version = normalizeVersion(remotePackage?.version);
+  if (!version) throw new Error(`No package version found on GitHub ${GITHUB_BRANCH}.`);
+  return { version, branch: GITHUB_BRANCH, tarballUrl: GITHUB_ARCHIVE_URL };
+}
+
+async function checkForUpdates() {
+  const currentVersion = normalizeVersion(packageJson.version);
+  const latest = await getLatestGithubVersion();
+  return {
+    currentVersion,
+    latestVersion: latest.version,
+    updateAvailable: compareVersions(latest.version, currentVersion) > 0,
+  };
+}
+
+function runCommand(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd || getAppRoot(),
+      shell: process.platform === 'win32',
+      windowsHide: true,
+    });
+    let output = '';
+    child.stdout.on('data', (chunk) => { output += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { output += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve(output);
+      else reject(new Error(`${command} ${args.join(' ')} failed with exit code ${code}: ${output.slice(-2000)}`));
+    });
+  });
+}
+
+async function downloadUpdateAndRestart() {
+  const latest = await getLatestGithubVersion();
+  const currentVersion = normalizeVersion(packageJson.version);
+  if (compareVersions(latest.version, currentVersion) <= 0) {
+    return { updated: false, currentVersion, latestVersion: latest.version };
+  }
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'my-star-atlas-update-'));
+  const archivePath = path.join(tempDir, `${latest.branch}.tar.gz`);
+  const response = await fetch(latest.tarballUrl, {
+    headers: { 'User-Agent': 'my-star-atlas-updater' },
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!response.ok) throw new Error(`Update download failed: HTTP ${response.status}`);
+  await fs.writeFile(archivePath, Buffer.from(await response.arrayBuffer()));
+  await runCommand('tar', ['-xzf', archivePath, '-C', tempDir], { cwd: tempDir });
+
+  const entries = await fs.readdir(tempDir, { withFileTypes: true });
+  const extracted = entries.find((entry) => entry.isDirectory() && entry.name.startsWith('my-star-atlas-'));
+  if (!extracted) throw new Error('Downloaded update archive did not contain the expected project folder.');
+  const extractedRoot = path.join(tempDir, extracted.name);
+  await fs.cp(extractedRoot, getAppRoot(), {
+    recursive: true,
+    force: true,
+    filter: (source) => {
+      const relative = path.relative(extractedRoot, source);
+      return !relative.startsWith('.git') && !relative.startsWith('node_modules') && !relative.startsWith('analysis');
+    },
+  });
+  await runCommand('npm', ['install'], { cwd: getAppRoot() });
+
+  app.relaunch();
+  app.exit(0);
+  return { updated: true, currentVersion, latestVersion: latest.version };
 }
 
 function normalizePlayerProfiles(payload = {}, faction = 'USTUR') {
@@ -4817,6 +4918,8 @@ function createWindow() {
 
 ipcMain.handle('app:get-profile-name', () => profileName);
 ipcMain.handle('app:get-version', () => packageJson.version);
+ipcMain.handle('updates:check', () => checkForUpdates());
+ipcMain.handle('updates:download-and-restart', () => downloadUpdateAndRestart());
 ipcMain.handle('settings:get', () => readSettings());
 ipcMain.handle('settings:save', (_event, payload) => writeSettings(payload));
 ipcMain.handle('fleet:list', async (_event, payload) => {
