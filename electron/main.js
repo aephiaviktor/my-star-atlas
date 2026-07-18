@@ -181,8 +181,12 @@ function compareVersions(a, b) {
 }
 
 async function getLatestGithubVersion() {
-  const response = await fetch(GITHUB_PACKAGE_URL, {
-    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'my-star-atlas-updater' },
+  const response = await fetch(`${GITHUB_PACKAGE_URL}?t=${Date.now()}`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'Cache-Control': 'no-cache',
+      'User-Agent': 'my-star-atlas-updater',
+    },
     signal: AbortSignal.timeout(10000),
   });
   if (!response.ok) throw new Error(`GitHub request failed: HTTP ${response.status}`);
@@ -3413,6 +3417,63 @@ function decodeFleetAccount(account) {
   };
 }
 
+async function getProgramAccountsV2(rpcUrl, programId, config) {
+  const accounts = [];
+  let paginationKey = null;
+  do {
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: `my-star-atlas-${Date.now()}`,
+        method: 'getProgramAccountsV2',
+        params: [
+          programId.toBase58(),
+          {
+            ...config,
+            encoding: 'base64',
+            limit: 1000,
+            ...(paginationKey ? { paginationKey } : {}),
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!response.ok) throw new Error(`getProgramAccountsV2 HTTP ${response.status}`);
+    const payload = await response.json();
+    if (payload?.error) {
+      const error = new Error(payload.error.message || 'getProgramAccountsV2 failed');
+      error.code = payload.error.code;
+      throw error;
+    }
+    const page = payload?.result?.value || payload?.result || {};
+    for (const entry of Array.isArray(page.accounts) ? page.accounts : []) {
+      const encodedData = Array.isArray(entry?.account?.data) ? entry.account.data[0] : entry?.account?.data;
+      accounts.push({
+        pubkey: new PublicKey(entry.pubkey),
+        account: {
+          ...entry.account,
+          data: Buffer.from(String(encodedData || ''), 'base64'),
+        },
+      });
+    }
+    paginationKey = page.paginationKey || null;
+  } while (paginationKey);
+  return accounts;
+}
+
+async function getFilteredProgramAccounts(connection, rpcUrl, programId, config) {
+  try {
+    return await getProgramAccountsV2(rpcUrl, programId, config);
+  } catch (error) {
+    const message = String(error?.message || '').toLowerCase();
+    const unsupported = error?.code === -32601 || message.includes('method not found') || message.includes('not supported');
+    if (!unsupported) throw error;
+    return connection.getProgramAccounts(programId, config);
+  }
+}
+
 async function fetchProfileFleetsUncached(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const profile = getSelectedPlayerProfile(settings);
@@ -3427,7 +3488,8 @@ async function fetchProfileFleetsUncached(payload) {
     throw new Error('invalid_player_profile');
   }
 
-  const connection = new Connection(getRpcUrl(settings), {
+  const rpcUrl = getRpcUrl(settings);
+  const connection = new Connection(rpcUrl, {
     commitment: 'confirmed',
     disableRetryOnRateLimit: false,
   });
@@ -3448,7 +3510,7 @@ async function fetchProfileFleetsUncached(payload) {
   ];
 
   const [ownedAccounts, managedAccounts] = await Promise.all([
-    connection.getProgramAccounts(SAGE_PROGRAM_ID, {
+    getFilteredProgramAccounts(connection, rpcUrl, SAGE_PROGRAM_ID, {
       commitment: 'confirmed',
       filters: [
         ...baseFilters,
@@ -3460,7 +3522,7 @@ async function fetchProfileFleetsUncached(payload) {
         },
       ],
     }),
-    connection.getProgramAccounts(SAGE_PROGRAM_ID, {
+    getFilteredProgramAccounts(connection, rpcUrl, SAGE_PROGRAM_ID, {
       commitment: 'confirmed',
       filters: [
         ...baseFilters,
@@ -4412,6 +4474,23 @@ async function fetchEarningsSnapshot(payload) {
       rentalRateAtlasPerDay,
     };
   });
+
+  const scanningCostTotalsByDate = new Map();
+  for (const row of rows) {
+    const current = scanningCostTotalsByDate.get(row.isoDate) || { sduFound: 0, totalCostsAtlas: 0, costRowCount: 0 };
+    if (Number.isFinite(Number(row.sduFound)) && Number(row.sduFound) > 0) current.sduFound += Number(row.sduFound);
+    if (Number.isFinite(Number(row.totalCostsAtlas))) {
+      current.totalCostsAtlas += Number(row.totalCostsAtlas);
+      current.costRowCount += 1;
+    }
+    scanningCostTotalsByDate.set(row.isoDate, current);
+  }
+  for (const row of rows) {
+    const totals = scanningCostTotalsByDate.get(row.isoDate);
+    row.costsPerUnitAtlas = totals?.costRowCount > 0 && totals.sduFound > 0
+      ? totals.totalCostsAtlas / totals.sduFound
+      : null;
+  }
 
   const activeMiningFleetKeys = new Set();
   const activeMappedMiningFleetKeys = new Set();
