@@ -85,6 +85,7 @@ const earningsCargoSyncStatus = document.querySelector('#earnings-cargo-sync-sta
 const earningsCargoTableHead = document.querySelector('#earnings-cargo-table-head');
 const earningsCargoTableBody = document.querySelector('#earnings-cargo-table-body');
 const earningsCargoAllocationSyncStatus = document.querySelector('#earnings-cargo-allocation-sync-status');
+const earningsCargoAllocationTableHead = document.querySelector('#earnings-cargo-allocation-table-head');
 const earningsCargoAllocationTableBody = document.querySelector('#earnings-cargo-allocation-table-body');
 const earningsCraftingSyncStatus = document.querySelector('#earnings-crafting-sync-status');
 const earningsCraftingTableHead = document.querySelector('#earnings-crafting-table-head');
@@ -278,6 +279,7 @@ const factionButtons = Array.from(document.querySelectorAll('.faction-button'));
 let currentSection = 'production';
 let currentSubtab = 'scanning';
 let currentEarningsSubtab = 'scanning';
+let activeCargoTable = 'fleet';
 let latestSettings = null;
 let latestFleetResult = null;
 let latestEarningsResult = null;
@@ -383,6 +385,17 @@ const cargoEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
 
+const cargoAllocationEarningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'assignment', label: 'Assignment' }),
+  Object.freeze({ id: 'amount', label: 'Amount' }),
+  Object.freeze({ id: 'cargoVolume', label: 'Cargo Volume' }),
+  Object.freeze({ id: 'allocatedFuel', label: 'Allocated Fuel' }),
+  Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
+  Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
+  Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
+  Object.freeze({ id: 'costsPerUnit', label: 'Costs per Unit' }),
+]);
+
 const craftingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
   Object.freeze({ id: 'crafted', label: 'Crafted' }),
@@ -414,6 +427,7 @@ const earningsColumnsBySubtab = Object.freeze({
   scanning: scanningEarningsOptionalColumns,
   mining: miningEarningsOptionalColumns,
   cargo: cargoEarningsOptionalColumns,
+  cargoAllocation: cargoAllocationEarningsOptionalColumns,
   crafting: craftingEarningsOptionalColumns,
   upgrading: upgradingEarningsOptionalColumns,
 });
@@ -422,6 +436,7 @@ const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
   cargo: new Set(['txsDaily', 'assignment', 'preferredCargoType', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct']),
+  cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
 };
@@ -4502,6 +4517,10 @@ function getEarningsColumns(subtab = currentEarningsSubtab) {
   return earningsColumnsBySubtab[subtab] || scanningEarningsOptionalColumns;
 }
 
+function getActiveEarningsColumnsSubtab() {
+  return currentEarningsSubtab === 'cargo' && activeCargoTable === 'allocation' ? 'cargoAllocation' : currentEarningsSubtab;
+}
+
 function getVisibleEarningsColumns(subtab = currentEarningsSubtab) {
   const selected = earningsColumnState[subtab] || earningsColumnState.scanning;
   return getEarningsColumns(subtab).filter((column) => selected.has(column.id));
@@ -4556,7 +4575,8 @@ function getEarningsTableColSpan(subtab = currentEarningsSubtab) {
 
 function renderEarningsColumnControls() {
   if (!earningsColumnControlsContainer) return;
-  const subtab = earningsColumnsBySubtab[currentEarningsSubtab] ? currentEarningsSubtab : 'scanning';
+  const activeSubtab = getActiveEarningsColumnsSubtab();
+  const subtab = earningsColumnsBySubtab[activeSubtab] ? activeSubtab : 'scanning';
   const selected = earningsColumnState[subtab] || earningsColumnState.scanning;
   earningsColumnControlsContainer.textContent = '';
   for (const column of getEarningsColumns(subtab)) {
@@ -4573,6 +4593,8 @@ function renderEarningsColumnControls() {
         renderEarningsMining(latestEarningsResult);
       } else if (subtab === 'cargo') {
         renderEarningsCargo(latestEarningsResult);
+      } else if (subtab === 'cargoAllocation') {
+        renderEarningsCargoAllocations(latestEarningsResult);
       } else if (subtab === 'crafting') {
         renderEarningsCrafting(latestEarningsResult);
       } else if (latestEarningsResult) {
@@ -5412,13 +5434,25 @@ function renderEarningsCargo(result) {
 function renderEarningsCargoAllocations(result) {
   if (!earningsCargoAllocationTableBody) return;
   const rows = Array.isArray(result?.cargoAllocationRows) ? result.cargoAllocationRows : [];
+  const visibleColumns = getVisibleEarningsColumns('cargoAllocation');
+  if (earningsCargoAllocationTableHead) {
+    earningsCargoAllocationTableHead.textContent = '';
+    const tr = document.createElement('tr');
+    for (const label of ['Date', 'Asset', ...visibleColumns.map((column) => column.label)]) {
+      const th = document.createElement('th');
+      th.scope = 'col';
+      th.textContent = label;
+      tr.appendChild(th);
+    }
+    earningsCargoAllocationTableHead.appendChild(tr);
+  }
   setText(earningsCargoAllocationSyncStatus, `${formatWholeNumber(rows.length)} allocation rows at ${formatCheckedAt(result?.checkedAt)}${result?.cargoAllocationError ? ' · Influx allocation rows unavailable' : ''}`);
   earningsCargoAllocationTableBody.textContent = '';
   if (!rows.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     const td = document.createElement('td');
-    td.colSpan = 10;
+    td.colSpan = 2 + visibleColumns.length;
     td.textContent = 'No cargo cost allocation data in the last 14 days';
     tr.appendChild(td);
     earningsCargoAllocationTableBody.appendChild(tr);
@@ -5428,14 +5462,16 @@ function renderEarningsCargoAllocations(result) {
     const tr = document.createElement('tr');
     tr.appendChild(createTextCell(entry.label || entry.isoDate));
     tr.appendChild(createTextCell(entry.asset || '--'));
-    tr.appendChild(createTextCell(entry.assignment || '--'));
-    tr.appendChild(createTextCell(formatWholeNumber(entry.amount || 0)));
-    tr.appendChild(createTextCell(formatWholeNumber(entry.cargoVolume || 0)));
-    tr.appendChild(createTextCell(formatWholeNumber(entry.allocatedFuel || 0)));
-    tr.appendChild(createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas)));
-    tr.appendChild(createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas)));
-    tr.appendChild(createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas)));
-    tr.appendChild(createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6)));
+    for (const column of visibleColumns) {
+      if (column.id === 'assignment') tr.appendChild(createTextCell(entry.assignment || '--'));
+      else if (column.id === 'amount') tr.appendChild(createTextCell(formatWholeNumber(entry.amount || 0)));
+      else if (column.id === 'cargoVolume') tr.appendChild(createTextCell(formatWholeNumber(entry.cargoVolume || 0)));
+      else if (column.id === 'allocatedFuel') tr.appendChild(createTextCell(formatWholeNumber(entry.allocatedFuel || 0)));
+      else if (column.id === 'fuelCosts') tr.appendChild(createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas)));
+      else if (column.id === 'txsCosts') tr.appendChild(createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas)));
+      else if (column.id === 'totalCosts') tr.appendChild(createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas)));
+      else if (column.id === 'costsPerUnit') tr.appendChild(createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6)));
+    }
     earningsCargoAllocationTableBody.appendChild(tr);
   }
 }
@@ -5676,6 +5712,8 @@ document.querySelectorAll('[data-cargo-table-toggle]').forEach((button) => {
       panel.classList.toggle('collapsed', !expanded);
       panel.querySelector('[data-cargo-table-toggle]')?.setAttribute('aria-expanded', String(expanded));
     });
+    activeCargoTable = selected.dataset.cargoTablePanel === 'allocation' ? 'allocation' : 'fleet';
+    renderEarningsColumnControls();
   });
 });
 
