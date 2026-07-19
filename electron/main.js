@@ -4238,6 +4238,34 @@ ${scopeFilterFlux}
     .filter((row) => row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0);
 }
 
+async function fetchCargoAllocationEarningsRows(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
+  const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
+  |> keep(columns: ["_time", "_field", "_value", "rss", "assignment"])
+  |> sort(columns: ["_time"])`;
+  const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
+  const grouped = new Map();
+  for (const row of parseInfluxCsv(await queryInfluxFlux(settings, flux))) {
+    const date = new Date(row._time);
+    const isoDate = getUtcDateKey(date);
+    const asset = String(row.rss || 'Unknown asset').trim() || 'Unknown asset';
+    const assignment = String(row.assignment || 'Unknown').trim() || 'Unknown';
+    if (!includedDays.has(isoDate)) continue;
+    const key = `${isoDate}\n${asset}\n${assignment}`;
+    if (!grouped.has(key)) grouped.set(key, { isoDate, label: formatShortUtcDate(date), asset, assignment, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
+    const target = grouped.get(key);
+    const value = Number(row._value);
+    if (Number.isFinite(value) && Object.hasOwn(target, row._field)) target[row._field] += value;
+  }
+  return Array.from(grouped.values()).sort((a, b) => b.isoDate.localeCompare(a.isoDate) || a.asset.localeCompare(b.asset) || a.assignment.localeCompare(b.assignment));
+}
+
 async function fetchFleetSignatureDailyCounts(connection, fleetKeys, includedDays) {
   const uniqueFleetKeys = Array.from(new Set(fleetKeys.filter(Boolean)));
   if (!uniqueFleetKeys.length) return new Map();
@@ -4441,6 +4469,8 @@ async function fetchEarningsSnapshot(payload) {
   let miningError = '';
   let cargoRows = [];
   let cargoError = '';
+  let cargoAllocationRows = [];
+  let cargoAllocationError = '';
   let craftingRows = [];
   let craftingError = '';
   let upgradingRows = [];
@@ -4452,6 +4482,7 @@ async function fetchEarningsSnapshot(payload) {
     () => fetchScanningEarningsRows(settings),
     () => fetchMiningEarningsRows(settings),
     () => fetchCargoEarningsRows(settings),
+    () => fetchCargoAllocationEarningsRows(settings),
     () => fetchCraftingEarningsRows(settings),
     () => fetchUpgradingEarningsRows(settings),
   ];
@@ -4467,13 +4498,15 @@ async function fetchEarningsSnapshot(payload) {
       }
     }
   }));
-  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult] = earningsRowResults;
+  const [scanningResult, miningResult, cargoResult, cargoAllocationResult, craftingResult, upgradingResult] = earningsRowResults;
   if (scanningResult.status === 'fulfilled') scanningRows = scanningResult.value;
   else scanningError = String(scanningResult.reason?.message || scanningResult.reason || 'scan_rows_unavailable');
   if (miningResult.status === 'fulfilled') miningRows = miningResult.value;
   else miningError = String(miningResult.reason?.message || miningResult.reason || 'mining_rows_unavailable');
   if (cargoResult.status === 'fulfilled') cargoRows = cargoResult.value;
   else cargoError = String(cargoResult.reason?.message || cargoResult.reason || 'cargo_rows_unavailable');
+  if (cargoAllocationResult.status === 'fulfilled') cargoAllocationRows = cargoAllocationResult.value;
+  else cargoAllocationError = String(cargoAllocationResult.reason?.message || cargoAllocationResult.reason || 'cargo_allocation_rows_unavailable');
   if (craftingResult.status === 'fulfilled') craftingRows = craftingResult.value;
   else craftingError = String(craftingResult.reason?.message || craftingResult.reason || 'crafting_rows_unavailable');
   if (upgradingResult.status === 'fulfilled') upgradingRows = upgradingResult.value;
@@ -4666,6 +4699,20 @@ async function fetchEarningsSnapshot(payload) {
     if (!row.fleetAccount || !row.isoDate) continue;
     row.txsDaily = cargoSignatureCounts.get(`${row.isoDate}\n${row.fleetAccount}`) || 0;
   }
+  const cargoAllocations = cargoAllocationRows.map((row) => {
+    const fuelCostsAtlas = fuelPriceAtl != null ? row.allocatedFuel * fuelPriceAtl : null;
+    const txsCostsAtlas = atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
+    const totalCostsAtlas = Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)
+      ? fuelCostsAtlas + txsCostsAtlas
+      : null;
+    return {
+      ...row,
+      fuelCostsAtlas,
+      txsCostsAtlas,
+      totalCostsAtlas,
+      costsPerUnitAtlas: Number.isFinite(totalCostsAtlas) && row.amount > 0 ? totalCostsAtlas / row.amount : null,
+    };
+  });
 
   rows.sort((a, b) => {
     const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));
@@ -4996,12 +5043,14 @@ async function fetchEarningsSnapshot(payload) {
     scanningError,
     miningError,
     cargoError,
+    cargoAllocationError,
     activeMiningFleetCount: activeMiningFleetKeys.size,
     activeMappedMiningFleetCount: activeMappedMiningFleetKeys.size,
     miningRowCount: mining.length,
     activeCargoFleetCount: activeCargoFleetKeys.size,
     activeMappedCargoFleetCount: activeMappedCargoFleetKeys.size,
     cargoRowCount: cargo.length,
+    cargoAllocationRowCount: cargoAllocations.length,
     totalMined,
     totalMiningRevenueAtlas: totalMiningRevenueCount > 0 ? totalMiningRevenueAtlas : null,
     todayMined: todayMiningTotals.mined,
@@ -5027,6 +5076,7 @@ async function fetchEarningsSnapshot(payload) {
     rows,
     miningRows: mining,
     cargoRows: cargo,
+    cargoAllocationRows: cargoAllocations,
     craftingRows: crafting,
     upgradingRows: upgrading,
   };

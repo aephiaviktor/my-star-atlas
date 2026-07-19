@@ -84,6 +84,8 @@ const earningsMiningRentalNote = document.querySelector('#earnings-mining-rental
 const earningsCargoSyncStatus = document.querySelector('#earnings-cargo-sync-status');
 const earningsCargoTableHead = document.querySelector('#earnings-cargo-table-head');
 const earningsCargoTableBody = document.querySelector('#earnings-cargo-table-body');
+const earningsCargoAllocationSyncStatus = document.querySelector('#earnings-cargo-allocation-sync-status');
+const earningsCargoAllocationTableBody = document.querySelector('#earnings-cargo-allocation-table-body');
 const earningsCraftingSyncStatus = document.querySelector('#earnings-crafting-sync-status');
 const earningsCraftingTableHead = document.querySelector('#earnings-crafting-table-head');
 const earningsCraftingTableBody = document.querySelector('#earnings-crafting-table-body');
@@ -5352,6 +5354,7 @@ function renderEarningsCargo(result) {
   }
 
   const rows = Array.isArray(result.cargoRows) ? result.cargoRows : [];
+  renderEarningsCargoAllocations(result);
   const colorMap = buildEarningsFleetColorMap(rows, 11);
   populateEarningsFilterOptions('cargo', rows);
   renderEarningsHeader('cargo');
@@ -5403,6 +5406,37 @@ function renderEarningsCargo(result) {
       row.appendChild(createCargoEarningsOptionalCell(entry, column.id, colorMap));
     }
     earningsCargoTableBody.appendChild(row);
+  }
+}
+
+function renderEarningsCargoAllocations(result) {
+  if (!earningsCargoAllocationTableBody) return;
+  const rows = Array.isArray(result?.cargoAllocationRows) ? result.cargoAllocationRows : [];
+  setText(earningsCargoAllocationSyncStatus, `${formatWholeNumber(rows.length)} allocation rows at ${formatCheckedAt(result?.checkedAt)}${result?.cargoAllocationError ? ' · Influx allocation rows unavailable' : ''}`);
+  earningsCargoAllocationTableBody.textContent = '';
+  if (!rows.length) {
+    const tr = document.createElement('tr');
+    tr.className = 'empty-row';
+    const td = document.createElement('td');
+    td.colSpan = 10;
+    td.textContent = 'No cargo cost allocation data in the last 14 days';
+    tr.appendChild(td);
+    earningsCargoAllocationTableBody.appendChild(tr);
+    return;
+  }
+  for (const entry of rows) {
+    const tr = document.createElement('tr');
+    tr.appendChild(createTextCell(entry.label || entry.isoDate));
+    tr.appendChild(createTextCell(entry.asset || '--'));
+    tr.appendChild(createTextCell(entry.assignment || '--'));
+    tr.appendChild(createTextCell(formatWholeNumber(entry.amount || 0)));
+    tr.appendChild(createTextCell(formatWholeNumber(entry.cargoVolume || 0)));
+    tr.appendChild(createTextCell(formatWholeNumber(entry.allocatedFuel || 0)));
+    tr.appendChild(createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas)));
+    tr.appendChild(createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas)));
+    tr.appendChild(createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas)));
+    tr.appendChild(createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6)));
+    earningsCargoAllocationTableBody.appendChild(tr);
   }
 }
 
