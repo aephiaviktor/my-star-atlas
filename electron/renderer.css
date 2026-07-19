@@ -1060,6 +1060,22 @@ select:focus {
   display: none;
 }
 
+.cargo-table-panel .cargo-table-toggle {
+  margin: -4px 0 12px;
+}
+
+.cargo-table-panel.collapsed .chart-toggle-arrow {
+  transform: rotate(-90deg);
+}
+
+.cargo-table-panel.collapsed .cargo-table-body {
+  display: none;
+}
+
+.cargo-table-panel.collapsed {
+  padding-bottom: 12px;
+}
+
 .earnings-chart-surface.collapsed {
   padding-bottom: 14px;
 }

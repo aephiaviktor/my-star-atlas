@@ -1003,7 +1003,12 @@
               </div>
             </section>
 
-            <section class="work-surface earnings-surface">
+            <section class="work-surface earnings-surface cargo-table-panel" data-cargo-table-panel="fleet">
+              <button class="earnings-chart-toggle cargo-table-toggle" type="button" data-cargo-table-toggle aria-expanded="true">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Cargo Costs by Fleet</span>
+              </button>
+              <div class="cargo-table-body">
               <div class="activity-filter-bar earnings-filter-bar">
                 <label class="activity-filter">
                   <span>Date</span>
@@ -1047,10 +1052,15 @@
                 <summary>How to read this table</summary>
                 <div id="earnings-cargo-metric-guide" class="earnings-metric-guide-list"></div>
               </details>
+              </div>
             </section>
 
-            <section class="work-surface earnings-surface">
-              <h3>Cargo Cost Allocation by Asset</h3>
+            <section class="work-surface earnings-surface cargo-table-panel collapsed" data-cargo-table-panel="allocation">
+              <button class="earnings-chart-toggle cargo-table-toggle" type="button" data-cargo-table-toggle aria-expanded="false">
+                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
+                <span>Cargo Cost Allocation by Asset</span>
+              </button>
+              <div class="cargo-table-body">
               <div id="earnings-cargo-allocation-sync-status" class="fleet-sync-status" role="status">Awaiting cargo allocation data</div>
               <div class="fleet-table-wrap">
                 <table class="fleet-table earnings-table">
@@ -1072,6 +1082,7 @@
                     <tr class="empty-row"><td colspan="10">No cargo allocation data loaded</td></tr>
                   </tbody>
                 </table>
+              </div>
               </div>
             </section>
           </div>

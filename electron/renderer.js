@@ -5667,6 +5667,18 @@ document.querySelectorAll('[data-chart-toggle]').forEach((button) => {
   });
 });
 
+document.querySelectorAll('[data-cargo-table-toggle]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const selected = button.closest('[data-cargo-table-panel]');
+    if (!selected || !selected.classList.contains('collapsed')) return;
+    document.querySelectorAll('[data-cargo-table-panel]').forEach((panel) => {
+      const expanded = panel === selected;
+      panel.classList.toggle('collapsed', !expanded);
+      panel.querySelector('[data-cargo-table-toggle]')?.setAttribute('aria-expanded', String(expanded));
+    });
+  });
+});
+
 sidebarToggleButton?.addEventListener('click', () => {
   const collapsed = appShell?.classList.toggle('nav-collapsed') || false;
   sidebarToggleButton.setAttribute('aria-pressed', String(collapsed));
