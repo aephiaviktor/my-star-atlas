@@ -4245,7 +4245,7 @@ async function fetchCargoAllocationEarningsRows(settings) {
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
   |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
-  |> keep(columns: ["_time", "_field", "_value", "fleet", "rss", "assignment"])
+  |> keep(columns: ["_time", "_field", "_value", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase"])
   |> sort(columns: ["_time"])`;
   const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
   const grouped = new Map();
@@ -4255,14 +4255,16 @@ async function fetchCargoAllocationEarningsRows(settings) {
     const asset = String(row.rss || 'Unknown asset').trim() || 'Unknown asset';
     const assignment = String(row.assignment || 'Unknown').trim() || 'Unknown';
     const fleet = String(row.fleet || '').trim();
+    const origin = String(row.originStarbase || '').trim() || '--';
+    const destination = String(row.deliveryStarbase || '').trim() || '--';
     if (!includedDays.has(isoDate) || !fleet) continue;
-    const key = `${isoDate}\n${fleet}\n${asset}\n${assignment}`;
-    if (!grouped.has(key)) grouped.set(key, { isoDate, label: formatShortUtcDate(date), fleet, asset, assignment, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
+    const key = `${isoDate}\n${fleet}\n${asset}\n${origin}\n${destination}\n${assignment}`;
+    if (!grouped.has(key)) grouped.set(key, { isoDate, label: formatShortUtcDate(date), fleet, asset, origin, destination, assignment, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
     const target = grouped.get(key);
     const value = Number(row._value);
     if (Number.isFinite(value) && Object.hasOwn(target, row._field)) target[row._field] += value;
   }
-  return Array.from(grouped.values()).sort((a, b) => b.isoDate.localeCompare(a.isoDate) || a.asset.localeCompare(b.asset) || a.assignment.localeCompare(b.assignment) || a.fleet.localeCompare(b.fleet));
+  return Array.from(grouped.values()).sort((a, b) => b.isoDate.localeCompare(a.isoDate) || a.fleet.localeCompare(b.fleet) || a.asset.localeCompare(b.asset) || a.origin.localeCompare(b.origin) || a.destination.localeCompare(b.destination) || a.assignment.localeCompare(b.assignment));
 }
 
 async function fetchFleetSignatureDailyCounts(connection, fleetKeys, includedDays) {

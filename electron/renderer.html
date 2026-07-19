@@ -1058,7 +1058,7 @@
             <section class="work-surface earnings-surface cargo-table-panel collapsed" data-cargo-table-panel="allocation">
               <button class="earnings-chart-toggle cargo-table-toggle" type="button" data-cargo-table-toggle aria-expanded="false">
                 <span class="chart-toggle-arrow" aria-hidden="true">v</span>
-                <span>Cargo Cost Allocation by Asset</span>
+                <span>Cargo Cost Allocation by Asset &amp; Fleet</span>
               </button>
               <div class="cargo-table-body">
               <div class="activity-filter-bar earnings-filter-bar">
@@ -1067,12 +1067,12 @@
                   <select id="earnings-cargo-allocation-date-filter" aria-label="Filter cargo allocation by date"><option value="">All Dates</option></select>
                 </label>
                 <label class="activity-filter">
-                  <span>Asset</span>
-                  <select id="earnings-cargo-allocation-asset-filter" aria-label="Filter cargo allocation by asset"><option value="">All Assets</option></select>
+                  <span>Fleet</span>
+                  <select id="earnings-cargo-allocation-fleet-filter" aria-label="Filter cargo allocation by fleet"><option value="">All Fleets</option></select>
                 </label>
                 <label class="activity-filter">
-                  <span>Assignment</span>
-                  <select id="earnings-cargo-allocation-assignment-filter" aria-label="Filter cargo allocation by assignment"><option value="">All Assignments</option></select>
+                  <span>Asset</span>
+                  <select id="earnings-cargo-allocation-asset-filter" aria-label="Filter cargo allocation by asset"><option value="">All Assets</option></select>
                 </label>
                 <span class="activity-filter-note">Filters combine with AND</span>
               </div>
@@ -1082,19 +1082,14 @@
                   <thead id="earnings-cargo-allocation-table-head">
                     <tr>
                       <th scope="col">Date</th>
+                      <th scope="col">Fleet</th>
                       <th scope="col">Asset</th>
-                      <th scope="col">Assignment</th>
-                      <th scope="col">Amount</th>
-                      <th scope="col">Cargo Volume</th>
-                      <th scope="col">Allocated Fuel</th>
-                      <th scope="col">Fuel Costs</th>
-                      <th scope="col">Txs Costs</th>
-                      <th scope="col">Total Costs</th>
-                      <th scope="col">Costs per Unit</th>
+                      <th scope="col">Origin Starbase</th>
+                      <th scope="col">Destination Starbase</th>
                     </tr>
                   </thead>
                   <tbody id="earnings-cargo-allocation-table-body">
-                    <tr class="empty-row"><td colspan="10">No cargo allocation data loaded</td></tr>
+                    <tr class="empty-row"><td colspan="5">No cargo allocation data loaded</td></tr>
                   </tbody>
                 </table>
               </div>

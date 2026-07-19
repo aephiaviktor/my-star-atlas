@@ -118,8 +118,8 @@ const earningsMiningMaterialFilter = document.querySelector('#earnings-mining-ma
 const earningsCargoDateFilter = document.querySelector('#earnings-cargo-date-filter');
 const earningsCargoFleetFilter = document.querySelector('#earnings-cargo-fleet-filter');
 const earningsCargoAllocationDateFilter = document.querySelector('#earnings-cargo-allocation-date-filter');
+const earningsCargoAllocationFleetFilter = document.querySelector('#earnings-cargo-allocation-fleet-filter');
 const earningsCargoAllocationAssetFilter = document.querySelector('#earnings-cargo-allocation-asset-filter');
-const earningsCargoAllocationAssignmentFilter = document.querySelector('#earnings-cargo-allocation-assignment-filter');
 const earningsCargoNetProfitChart = document.querySelector('#earnings-cargo-net-profit-chart');
 const earningsCargoCostBreakdownChart = document.querySelector('#earnings-cargo-cost-breakdown-chart');
 const sduTotalValue = document.querySelector('#sdu-total-value');
@@ -520,7 +520,7 @@ const earningsFilters = {
   scanning: { date: '', fleet: '' },
   mining: { date: '', fleet: '', rawMaterial: '' },
   cargo: { date: '', fleet: '' },
-  cargoAllocation: { date: '', asset: '', assignment: '' },
+  cargoAllocation: { date: '', fleet: '', asset: '' },
   crafting: { date: '', starbase: '', asset: '' },
   upgrading: { date: '', starbase: '', asset: '' },
 };
@@ -577,6 +577,8 @@ const earningsSortKeyByColumnId = Object.freeze({
   mined: 'mined',
   assignment: 'assignment',
   asset: 'output',
+  origin: 'origin',
+  destination: 'destination',
   crafted: 'crafted',
   crew: 'crew',
   ingCosts: 'ingCostsAtlas',
@@ -594,7 +596,7 @@ const earningsFilterBarBySubtab = Object.freeze({
   scanning: () => ({ date: earningsScanningDateFilter, fleet: earningsScanningFleetFilter }),
   mining: () => ({ date: earningsMiningDateFilter, fleet: earningsMiningFleetFilter, rawMaterial: earningsMiningMaterialFilter }),
   cargo: () => ({ date: earningsCargoDateFilter, fleet: earningsCargoFleetFilter }),
-  cargoAllocation: () => ({ date: earningsCargoAllocationDateFilter, asset: earningsCargoAllocationAssetFilter, assignment: earningsCargoAllocationAssignmentFilter }),
+  cargoAllocation: () => ({ date: earningsCargoAllocationDateFilter, fleet: earningsCargoAllocationFleetFilter, asset: earningsCargoAllocationAssetFilter }),
   crafting: () => ({ date: earningsCraftingDateFilter, starbase: earningsCraftingStarbaseFilter, asset: earningsCraftingAssetFilter }),
   upgrading: () => ({ date: earningsUpgradingDateFilter, starbase: earningsUpgradingStarbaseFilter, asset: earningsUpgradingAssetFilter }),
 });
@@ -4805,8 +4807,8 @@ function setupEarningsFilterHandlers() {
   wire('cargo', earningsCargoDateFilter, 'date');
   wire('cargo', earningsCargoFleetFilter, 'fleet');
   wire('cargoAllocation', earningsCargoAllocationDateFilter, 'date');
+  wire('cargoAllocation', earningsCargoAllocationFleetFilter, 'fleet');
   wire('cargoAllocation', earningsCargoAllocationAssetFilter, 'asset');
-  wire('cargoAllocation', earningsCargoAllocationAssignmentFilter, 'assignment');
   wire('crafting', earningsCraftingDateFilter, 'date');
   wire('crafting', earningsCraftingStarbaseFilter, 'starbase');
   wire('crafting', earningsCraftingAssetFilter, 'asset');
@@ -5465,7 +5467,7 @@ function renderEarningsCargoAllocations(result) {
   if (earningsCargoAllocationTableHead) {
     earningsCargoAllocationTableHead.textContent = '';
     const tr = document.createElement('tr');
-    for (const label of ['Date', 'Asset', ...visibleColumns.map((column) => column.label)]) {
+    for (const label of ['Date', 'Fleet', 'Asset', 'Origin Starbase', 'Destination Starbase', ...visibleColumns.map((column) => column.label)]) {
       const th = document.createElement('th');
       th.scope = 'col';
       th.textContent = label;
@@ -5479,7 +5481,7 @@ function renderEarningsCargoAllocations(result) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     const td = document.createElement('td');
-    td.colSpan = 2 + visibleColumns.length;
+    td.colSpan = 5 + visibleColumns.length;
     td.textContent = rows.length ? 'No rows match the current filters' : 'No cargo cost allocation data in the last 14 days';
     tr.appendChild(td);
     earningsCargoAllocationTableBody.appendChild(tr);
@@ -5488,7 +5490,10 @@ function renderEarningsCargoAllocations(result) {
   for (const entry of filteredRows) {
     const tr = document.createElement('tr');
     tr.appendChild(createTextCell(entry.label || entry.isoDate));
+    tr.appendChild(createTextCell(entry.fleet || '--'));
     tr.appendChild(createTextCell(entry.asset || '--'));
+    tr.appendChild(createTextCell(entry.origin || '--'));
+    tr.appendChild(createTextCell(entry.destination || '--'));
     for (const column of visibleColumns) {
       if (column.id === 'assignment') tr.appendChild(createTextCell(entry.assignment || '--'));
       else if (column.id === 'amount') tr.appendChild(createTextCell(formatWholeNumber(entry.amount || 0)));
