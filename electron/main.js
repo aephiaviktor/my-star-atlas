@@ -4241,13 +4241,11 @@ ${scopeFilterFlux}
 async function fetchCargoAllocationEarningsRows(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
   const bucket = escapeFluxString(settings.influxBucket);
-  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
-${scopeFilterFlux}
   |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
-  |> keep(columns: ["_time", "_field", "_value", "rss", "assignment"])
+  |> keep(columns: ["_time", "_field", "_value", "fleet", "rss", "assignment"])
   |> sort(columns: ["_time"])`;
   const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
   const grouped = new Map();
@@ -4256,14 +4254,15 @@ ${scopeFilterFlux}
     const isoDate = getUtcDateKey(date);
     const asset = String(row.rss || 'Unknown asset').trim() || 'Unknown asset';
     const assignment = String(row.assignment || 'Unknown').trim() || 'Unknown';
-    if (!includedDays.has(isoDate)) continue;
-    const key = `${isoDate}\n${asset}\n${assignment}`;
-    if (!grouped.has(key)) grouped.set(key, { isoDate, label: formatShortUtcDate(date), asset, assignment, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
+    const fleet = String(row.fleet || '').trim();
+    if (!includedDays.has(isoDate) || !fleet) continue;
+    const key = `${isoDate}\n${fleet}\n${asset}\n${assignment}`;
+    if (!grouped.has(key)) grouped.set(key, { isoDate, label: formatShortUtcDate(date), fleet, asset, assignment, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
     const target = grouped.get(key);
     const value = Number(row._value);
     if (Number.isFinite(value) && Object.hasOwn(target, row._field)) target[row._field] += value;
   }
-  return Array.from(grouped.values()).sort((a, b) => b.isoDate.localeCompare(a.isoDate) || a.asset.localeCompare(b.asset) || a.assignment.localeCompare(b.assignment));
+  return Array.from(grouped.values()).sort((a, b) => b.isoDate.localeCompare(a.isoDate) || a.asset.localeCompare(b.asset) || a.assignment.localeCompare(b.assignment) || a.fleet.localeCompare(b.fleet));
 }
 
 async function fetchFleetSignatureDailyCounts(connection, fleetKeys, includedDays) {
@@ -4699,7 +4698,24 @@ async function fetchEarningsSnapshot(payload) {
     if (!row.fleetAccount || !row.isoDate) continue;
     row.txsDaily = cargoSignatureCounts.get(`${row.isoDate}\n${row.fleetAccount}`) || 0;
   }
-  const cargoAllocations = cargoAllocationRows.map((row) => {
+  // cargo_cost_allocation predates the standard instance/faction tags. Scope
+  // those rows through the already faction-scoped movement fleets, then fold
+  // fleet-level allocations back into the requested date/asset/assignment rows.
+  const scopedCargoFleetLabels = new Set(cargoRows.map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
+  const cargoAllocationGroups = new Map();
+  for (const row of cargoAllocationRows) {
+    if (!scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet))) continue;
+    const key = `${row.isoDate}\n${row.asset}\n${row.assignment}`;
+    if (!cargoAllocationGroups.has(key)) {
+      cargoAllocationGroups.set(key, { ...row, fleet: undefined, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
+    }
+    const group = cargoAllocationGroups.get(key);
+    group.amount += Number(row.amount) || 0;
+    group.cargoVolume += Number(row.cargoVolume) || 0;
+    group.allocatedFuel += Number(row.allocatedFuel) || 0;
+    group.allocatedTxCostSol += Number(row.allocatedTxCostSol) || 0;
+  }
+  const cargoAllocations = Array.from(cargoAllocationGroups.values()).map((row) => {
     const fuelCostsAtlas = fuelPriceAtl != null ? row.allocatedFuel * fuelPriceAtl : null;
     const txsCostsAtlas = atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
     const totalCostsAtlas = Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)
