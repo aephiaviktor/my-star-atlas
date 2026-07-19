@@ -488,6 +488,16 @@ const earningsMetricGuideBySubtab = Object.freeze({
     totalCosts: ['Estimated cargo operating cost represented by available data.', 'Fuel Costs + Txs Costs.', 'Cargo revenue is not tracked here, so this is a cost-efficiency view rather than profit.'],
     txsCostsPct: ['Transaction fees as a share of represented cargo costs.', '(Txs Costs ÷ Total Costs) × 100.', 'A high value means fees dominate fuel; reduce unnecessary transactions where practical.'],
   }),
+  cargoAllocation: Object.freeze({
+    assignment: ['Logistics assignment that delivered this asset.', 'Recorded assignment: Transport or Supply Chain.', 'Use it to separate direct transport from supply-chain activity for the same asset.'],
+    amount: ['Units of the asset delivered during the UTC day.', 'Σ delivered asset amount.', 'This is the quantity used for Costs per Unit.'],
+    cargoVolume: ['Cargo-space volume represented by the delivered asset.', 'Σ delivered cargo volume.', 'Compare it with Amount to understand how much hold capacity the asset consumed.'],
+    allocatedFuel: ['Fuel attributed to delivery of this asset, including its share of empty-leg overhead.', 'Loaded-leg fuel + allocated empty-leg fuel overhead.', 'This assigns the complete cycle fuel cost across the assets delivered by that cycle.'],
+    fuelCosts: ['Current ATLAS value of the fuel allocated to this asset.', 'Allocated Fuel × current fuel price.', 'This is a current-price estimate; historical fuel acquisition prices are not retained.'],
+    txsCosts: ['ATLAS value of transaction fees allocated to this asset, including empty-leg overhead.', 'Allocated transaction cost in SOL × current ATLAS-per-SOL rate.', 'The cycle’s transaction fees are distributed across its delivered assets.'],
+    totalCosts: ['Total represented logistics cost allocated to this asset.', 'Fuel Costs + Txs Costs.', 'Use it to compare the absolute delivery cost of different assets.'],
+    costsPerUnit: ['Allocated logistics cost for one delivered asset unit.', 'Total Costs ÷ Amount.', 'Lower is better; compare it with the asset’s value or margin when judging route efficiency.'],
+  }),
   crafting: Object.freeze({
     crafted: ['Total output units crafted during the UTC day.', 'Σ crafted output quantity.', 'Use with unit prices and costs to understand production scale.'],
     ingCosts: ['Current ATLAS value of ingredients consumed.', 'Σ(ingredient quantity × current ingredient price).', 'This is a current-price opportunity-cost estimate, not necessarily the price originally paid.'],
@@ -5435,6 +5445,7 @@ function renderEarningsCargoAllocations(result) {
   if (!earningsCargoAllocationTableBody) return;
   const rows = Array.isArray(result?.cargoAllocationRows) ? result.cargoAllocationRows : [];
   const visibleColumns = getVisibleEarningsColumns('cargoAllocation');
+  renderEarningsMetricGuide('cargoAllocation');
   if (earningsCargoAllocationTableHead) {
     earningsCargoAllocationTableHead.textContent = '';
     const tr = document.createElement('tr');
