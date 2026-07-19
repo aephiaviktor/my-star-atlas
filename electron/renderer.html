@@ -1061,6 +1061,21 @@
                 <span>Cargo Cost Allocation by Asset</span>
               </button>
               <div class="cargo-table-body">
+              <div class="activity-filter-bar earnings-filter-bar">
+                <label class="activity-filter">
+                  <span>Date</span>
+                  <select id="earnings-cargo-allocation-date-filter" aria-label="Filter cargo allocation by date"><option value="">All Dates</option></select>
+                </label>
+                <label class="activity-filter">
+                  <span>Asset</span>
+                  <select id="earnings-cargo-allocation-asset-filter" aria-label="Filter cargo allocation by asset"><option value="">All Assets</option></select>
+                </label>
+                <label class="activity-filter">
+                  <span>Assignment</span>
+                  <select id="earnings-cargo-allocation-assignment-filter" aria-label="Filter cargo allocation by assignment"><option value="">All Assignments</option></select>
+                </label>
+                <span class="activity-filter-note">Filters combine with AND</span>
+              </div>
               <div id="earnings-cargo-allocation-sync-status" class="fleet-sync-status" role="status">Awaiting cargo allocation data</div>
               <div class="fleet-table-wrap">
                 <table class="fleet-table earnings-table">

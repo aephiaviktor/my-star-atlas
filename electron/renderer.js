@@ -117,6 +117,9 @@ const earningsMiningFleetFilter = document.querySelector('#earnings-mining-fleet
 const earningsMiningMaterialFilter = document.querySelector('#earnings-mining-material-filter');
 const earningsCargoDateFilter = document.querySelector('#earnings-cargo-date-filter');
 const earningsCargoFleetFilter = document.querySelector('#earnings-cargo-fleet-filter');
+const earningsCargoAllocationDateFilter = document.querySelector('#earnings-cargo-allocation-date-filter');
+const earningsCargoAllocationAssetFilter = document.querySelector('#earnings-cargo-allocation-asset-filter');
+const earningsCargoAllocationAssignmentFilter = document.querySelector('#earnings-cargo-allocation-assignment-filter');
 const earningsCargoNetProfitChart = document.querySelector('#earnings-cargo-net-profit-chart');
 const earningsCargoCostBreakdownChart = document.querySelector('#earnings-cargo-cost-breakdown-chart');
 const sduTotalValue = document.querySelector('#sdu-total-value');
@@ -517,6 +520,7 @@ const earningsFilters = {
   scanning: { date: '', fleet: '' },
   mining: { date: '', fleet: '', rawMaterial: '' },
   cargo: { date: '', fleet: '' },
+  cargoAllocation: { date: '', asset: '', assignment: '' },
   crafting: { date: '', starbase: '', asset: '' },
   upgrading: { date: '', starbase: '', asset: '' },
 };
@@ -590,6 +594,7 @@ const earningsFilterBarBySubtab = Object.freeze({
   scanning: () => ({ date: earningsScanningDateFilter, fleet: earningsScanningFleetFilter }),
   mining: () => ({ date: earningsMiningDateFilter, fleet: earningsMiningFleetFilter, rawMaterial: earningsMiningMaterialFilter }),
   cargo: () => ({ date: earningsCargoDateFilter, fleet: earningsCargoFleetFilter }),
+  cargoAllocation: () => ({ date: earningsCargoAllocationDateFilter, asset: earningsCargoAllocationAssetFilter, assignment: earningsCargoAllocationAssignmentFilter }),
   crafting: () => ({ date: earningsCraftingDateFilter, starbase: earningsCraftingStarbaseFilter, asset: earningsCraftingAssetFilter }),
   upgrading: () => ({ date: earningsUpgradingDateFilter, starbase: earningsUpgradingStarbaseFilter, asset: earningsUpgradingAssetFilter }),
 });
@@ -4647,19 +4652,22 @@ function populateEarningsFilterOptions(subtab, rows) {
   const materials = new Set();
   const starbases = new Set();
   const assets = new Set();
+  const assignments = new Set();
   for (const row of rows) {
     if (row.isoDate) dates.add(row.isoDate);
     const fleet = row.fleetName || row.fleet;
     if (fleet) fleets.add(fleet);
     if (row.rawMaterial) materials.add(row.rawMaterial);
     if (row.starbase) starbases.add(row.starbase);
-    if (row.output) assets.add(row.output);
+    if (row.output || row.asset) assets.add(row.output || row.asset);
+    if (row.assignment) assignments.add(row.assignment);
   }
   const sortedDates = Array.from(dates).sort((a, b) => b.localeCompare(a));
   const sortedFleets = Array.from(fleets).sort((a, b) => String(a).localeCompare(String(b)));
   const sortedMaterials = Array.from(materials).sort((a, b) => String(a).localeCompare(String(b)));
   const sortedStarbases = Array.from(starbases).sort((a, b) => String(a).localeCompare(String(b)));
   const sortedAssets = Array.from(assets).sort((a, b) => String(a).localeCompare(String(b)));
+  const sortedAssignments = Array.from(assignments).sort((a, b) => String(a).localeCompare(String(b)));
   const fillSelect = (select, values, defaultLabel) => {
     if (!select) return;
     const current = earningsFilters[subtab] && select.dataset.filterKey ? earningsFilters[subtab][select.dataset.filterKey] : '';
@@ -4688,6 +4696,7 @@ function populateEarningsFilterOptions(subtab, rows) {
   fillSelect(filters.rawMaterial, sortedMaterials, 'All Materials');
   fillSelect(filters.starbase, sortedStarbases, 'All Starbases');
   fillSelect(filters.asset, sortedAssets, 'All Assets');
+  fillSelect(filters.assignment, sortedAssignments, 'All Assignments');
 }
 
 function getFilteredEarningsRows(subtab, rows) {
@@ -4698,7 +4707,8 @@ function getFilteredEarningsRows(subtab, rows) {
     if (filterState.fleet && filterState.fleet !== EARNINGS_TOTAL_FLEETS_FILTER && fleet !== filterState.fleet) return false;
     if (filterState.rawMaterial && row.rawMaterial !== filterState.rawMaterial) return false;
     if (filterState.starbase && row.starbase !== filterState.starbase) return false;
-    if (filterState.asset && row.output !== filterState.asset) return false;
+    if (filterState.asset && (row.output || row.asset) !== filterState.asset) return false;
+    if (filterState.assignment && row.assignment !== filterState.assignment) return false;
     return true;
   });
 }
@@ -4782,6 +4792,7 @@ function setupEarningsFilterHandlers() {
       earningsFilters[subtab][key] = select.value;
       if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
       else if (subtab === 'cargo') renderEarningsCargo(latestEarningsResult);
+      else if (subtab === 'cargoAllocation') renderEarningsCargoAllocations(latestEarningsResult);
       else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
       else if (latestEarningsResult) renderEarnings(latestEarningsResult);
     });
@@ -4793,6 +4804,9 @@ function setupEarningsFilterHandlers() {
   wire('mining', earningsMiningMaterialFilter, 'rawMaterial');
   wire('cargo', earningsCargoDateFilter, 'date');
   wire('cargo', earningsCargoFleetFilter, 'fleet');
+  wire('cargoAllocation', earningsCargoAllocationDateFilter, 'date');
+  wire('cargoAllocation', earningsCargoAllocationAssetFilter, 'asset');
+  wire('cargoAllocation', earningsCargoAllocationAssignmentFilter, 'assignment');
   wire('crafting', earningsCraftingDateFilter, 'date');
   wire('crafting', earningsCraftingStarbaseFilter, 'starbase');
   wire('crafting', earningsCraftingAssetFilter, 'asset');
@@ -5444,6 +5458,8 @@ function renderEarningsCargo(result) {
 function renderEarningsCargoAllocations(result) {
   if (!earningsCargoAllocationTableBody) return;
   const rows = Array.isArray(result?.cargoAllocationRows) ? result.cargoAllocationRows : [];
+  populateEarningsFilterOptions('cargoAllocation', rows);
+  const filteredRows = getFilteredEarningsRows('cargoAllocation', rows);
   const visibleColumns = getVisibleEarningsColumns('cargoAllocation');
   renderEarningsMetricGuide('cargoAllocation');
   if (earningsCargoAllocationTableHead) {
@@ -5459,17 +5475,17 @@ function renderEarningsCargoAllocations(result) {
   }
   setText(earningsCargoAllocationSyncStatus, `${formatWholeNumber(rows.length)} allocation rows at ${formatCheckedAt(result?.checkedAt)}${result?.cargoAllocationError ? ' · Influx allocation rows unavailable' : ''}`);
   earningsCargoAllocationTableBody.textContent = '';
-  if (!rows.length) {
+  if (!filteredRows.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     const td = document.createElement('td');
     td.colSpan = 2 + visibleColumns.length;
-    td.textContent = 'No cargo cost allocation data in the last 14 days';
+    td.textContent = rows.length ? 'No rows match the current filters' : 'No cargo cost allocation data in the last 14 days';
     tr.appendChild(td);
     earningsCargoAllocationTableBody.appendChild(tr);
     return;
   }
-  for (const entry of rows) {
+  for (const entry of filteredRows) {
     const tr = document.createElement('tr');
     tr.appendChild(createTextCell(entry.label || entry.isoDate));
     tr.appendChild(createTextCell(entry.asset || '--'));
