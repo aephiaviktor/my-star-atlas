@@ -5508,45 +5508,77 @@ function renderEarningsCargoAllocations(result) {
   }
 }
 
+// Singleton in-flight guard: every concurrent caller awaits the same
+// promise instead of each kicking off its own Earnings snapshot. Multiple
+// UI triggers in the same tick (tab open + section change + interval
+// refresh) used to fan out into a parallel RPC storm and surface HTTP 429
+// to the UI on first app start.
+let earningsRefreshInFlight = null;
 async function refreshEarnings() {
-  const settings = latestSettings || getFormPayload();
-  if (!getActivePlayerProfile(settings)) {
-    renderEarningsEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
-    renderEarningsMiningEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
-    renderEarningsCargoEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
-    setEarningsStatus('Awaiting player profile');
-    setEarningsMiningStatus('Awaiting player profile');
-    setEarningsCargoStatus('Awaiting player profile');
-    return;
-  }
-
-  const faction = normalizeFaction(settings.faction);
-  const cached = getCachedFactionResult(faction, 'earnings');
-  if (cached) {
-    renderEarnings(cached);
-  } else {
-    renderEarningsEmpty('Loading earnings data...');
-    renderEarningsMiningEmpty('Loading mining earnings data...');
-    renderEarningsCargoEmpty('Loading cargo earnings data...');
-    setEarningsStatus('Loading earnings data...');
-    setEarningsMiningStatus('Loading mining earnings data...');
-    setEarningsCargoStatus('Loading cargo earnings data...');
-  }
-
-  try {
-    const result = await api.getEarningsSnapshot(settings);
-    renderEarnings(result);
-  } catch (error) {
-    console.error(error);
-    if (!cached) {
-      renderEarningsEmpty('Earnings data unavailable');
-      renderEarningsMiningEmpty('Mining earnings data unavailable');
-      renderEarningsCargoEmpty('Cargo earnings data unavailable');
-      setEarningsStatus('Earnings sync failed');
-      setEarningsMiningStatus('Earnings sync failed');
-      setEarningsCargoStatus('Earnings sync failed');
+  if (earningsRefreshInFlight) return earningsRefreshInFlight;
+  earningsRefreshInFlight = (async () => {
+    const settings = latestSettings || getFormPayload();
+    if (!getActivePlayerProfile(settings)) {
+      renderEarningsEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
+      renderEarningsMiningEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
+      renderEarningsCargoEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
+      setEarningsStatus('Awaiting player profile');
+      setEarningsMiningStatus('Awaiting player profile');
+      setEarningsCargoStatus('Awaiting player profile');
+      return;
     }
-  }
+
+    const faction = normalizeFaction(settings.faction);
+    const cached = getCachedFactionResult(faction, 'earnings');
+    if (cached) {
+      renderEarnings(cached);
+    } else {
+      renderEarningsEmpty('Loading earnings data...');
+      renderEarningsMiningEmpty('Loading mining earnings data...');
+      renderEarningsCargoEmpty('Loading cargo earnings data...');
+      setEarningsStatus('Loading earnings data...');
+      setEarningsMiningStatus('Loading mining earnings data...');
+      setEarningsCargoStatus('Loading cargo earnings data...');
+    }
+
+    try {
+      const result = await api.getEarningsSnapshot(settings);
+      if (result && result.ok === false) {
+        // IPC handler returns {ok: false, error} on failure. Throw so the
+        // catch block can apply the same rate-limit / generic handling.
+        throw new Error(result.error || 'Earnings snapshot failed');
+      }
+      renderEarnings(result);
+    } catch (error) {
+      console.error(error);
+      if (cached) return; // keep stale UI visible; do not clobber with an error
+      const message = String(error?.message || '');
+      if (message.startsWith('RPC_RATE_LIMIT:')) {
+        // Extract retry-after hint from the main-process error string and
+        // surface a clear, non-scary status. Format produced by
+        // fetchWithRpcBackoff in main.js: `RPC_RATE_LIMIT: HTTP <s> (...) retry_after=<ms>ms`.
+        const match = /retry_after=(\d+)ms/.exec(message);
+        const waitSec = match ? Math.max(1, Math.ceil(Number(match[1]) / 1000)) : 60;
+        const status = `RPC rate-limited — retry in ${waitSec}s`;
+        renderEarningsEmpty(status);
+        renderEarningsMiningEmpty(status);
+        renderEarningsCargoEmpty(status);
+        setEarningsStatus(status);
+        setEarningsMiningStatus(status);
+        setEarningsCargoStatus(status);
+      } else {
+        renderEarningsEmpty('Earnings data unavailable');
+        renderEarningsMiningEmpty('Mining earnings data unavailable');
+        renderEarningsCargoEmpty('Cargo earnings data unavailable');
+        setEarningsStatus('Earnings sync failed');
+        setEarningsMiningStatus('Earnings sync failed');
+        setEarningsCargoStatus('Earnings sync failed');
+      }
+    }
+  })().finally(() => {
+    earningsRefreshInFlight = null;
+  });
+  return earningsRefreshInFlight;
 }
 
 function setActiveSection(section) {

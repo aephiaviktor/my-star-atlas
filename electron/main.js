@@ -3470,30 +3470,162 @@ function decodeFleetAccount(account) {
   };
 }
 
-async function getProgramAccountsV2(rpcUrl, programId, config) {
+// ============================================================================
+// RPC resilience helpers (My Star Atlas 0.5.82)
+//
+// The only direct JSON-RPC call site in this file is getProgramAccountsV2.
+// Earlier versions surfaced a hard HTTP 429 to the UI on first app start
+// (Earnings tab) when the parallel owned+managed fleet scans hit the Helius
+// rate limit. These helpers add:
+//   - retry/backoff on HTTP 429, HTTP 5xx, and JSON-RPC rate-limit errors
+//     (-32005, -32016, or "rate limit" / "too many requests" in message),
+//     honoring Retry-After header and JSON-RPC error.data.retry_after
+//   - exponential backoff with full jitter when no server hint is present
+//   - per-call rate gating (1 / rpcRequestsPerSecond) so the burst is shaped
+//     proactively, not just retried reactively
+// ============================================================================
+
+function getRpcRateLimitSettings(settings) {
+  const rps = Number(settings?.rpcRequestsPerSecond);
+  return {
+    enabled: !!settings?.useRpcLimiter,
+    requestsPerSecond: Number.isFinite(rps) && rps > 0 ? rps : 5,
+  };
+}
+
+const RATE_LIMIT_RPC_CODES = new Set([-32005, -32016]);
+const MAX_RPC_ATTEMPTS = 5;
+const MAX_BACKOFF_MS = 30_000;
+
+function parseRetryAfterMs(value) {
+  if (value == null) return null;
+  const str = String(value).trim();
+  if (!str) return null;
+  const num = Number(str);
+  if (Number.isFinite(num) && num >= 0) return Math.round(num * 1000);
+  const dateMs = Date.parse(str);
+  if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
+  return null;
+}
+
+function extractRetryAfterMs(response, payload) {
+  const header = response?.headers?.get?.('retry-after');
+  if (header) {
+    const fromHeader = parseRetryAfterMs(header);
+    if (fromHeader != null) return fromHeader;
+  }
+  const dataRetry = payload?.error?.data?.retry_after ?? payload?.error?.data?.retryAfter;
+  if (dataRetry != null) {
+    const fromData = parseRetryAfterMs(dataRetry);
+    if (fromData != null) return fromData;
+  }
+  return null;
+}
+
+function isRetriableStatus(status) {
+  return status === 429 || (status >= 500 && status < 600);
+}
+
+function isRetriableJsonRpcError(payload) {
+  if (!payload?.error) return false;
+  if (RATE_LIMIT_RPC_CODES.has(payload.error.code)) return true;
+  const message = String(payload.error.message || '').toLowerCase();
+  return message.includes('rate limit') || message.includes('too many requests');
+}
+
+function backoffMs(attempt, retryAfterMs) {
+  if (retryAfterMs != null) {
+    // Honor server hint with a small jitter (10-20%) to avoid thundering herd
+    // when several requests fail in the same window.
+    const jitter = retryAfterMs * (0.1 + Math.random() * 0.1);
+    return Math.min(MAX_BACKOFF_MS, Math.round(retryAfterMs + jitter));
+  }
+  // Exponential backoff with full jitter: random in [0, min(cap, base * 2^attempt)]
+  const base = 500;
+  const cap = Math.min(MAX_BACKOFF_MS, base * 2 ** attempt);
+  return Math.round(Math.random() * cap);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// fetch() with retry/backoff for HTTP 429, HTTP 5xx, and JSON-RPC rate-limit
+// errors. Returns the raw Response on success. On hard failure throws an
+// Error whose message starts with `RPC_RATE_LIMIT:` so the UI layer can
+// detect rate-limit and surface a retry hint.
+async function fetchWithRpcBackoff(url, init, { logLabel = 'rpc' } = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt < MAX_RPC_ATTEMPTS; attempt += 1) {
+    const response = await fetch(url, init);
+    if (response.ok) return response;
+    const status = response.status;
+    let payload = null;
+    let jsonErrorRetriable = false;
+    if (isRetriableStatus(status)) {
+      // Best-effort JSON parse for retry hints + JSON-RPC rate-limit code.
+      // Tolerate non-JSON bodies (e.g. an HTML 502 page from a CDN).
+      try {
+        payload = await response.clone().json();
+        if (isRetriableJsonRpcError(payload)) jsonErrorRetriable = true;
+      } catch (_) { /* not JSON */ }
+    }
+    if (!isRetriableStatus(status) && !jsonErrorRetriable) {
+      throw new Error(`RPC HTTP ${status} (${logLabel})`);
+    }
+    const retryAfter = extractRetryAfterMs(response, payload);
+    lastError = new Error(
+      `RPC_RATE_LIMIT: HTTP ${status} (${logLabel})${retryAfter != null ? ` retry_after=${retryAfter}ms` : ''}`
+    );
+    if (attempt + 1 >= MAX_RPC_ATTEMPTS) break;
+    const wait = backoffMs(attempt, retryAfter);
+    console.warn(`[rpc] ${logLabel} attempt ${attempt + 1}/${MAX_RPC_ATTEMPTS} -> ${status}; backing off ${wait}ms`);
+    await sleep(wait);
+  }
+  throw lastError || new Error(`RPC failed after ${MAX_RPC_ATTEMPTS} attempts (${logLabel})`);
+}
+
+// Module-level last-call timestamp shared across all direct JSON-RPC calls
+// so the configured rate budget is enforced globally, not per-call.
+let lastDirectRpcCallAt = 0;
+async function acquireRpcSlot(settings) {
+  const { enabled, requestsPerSecond } = getRpcRateLimitSettings(settings);
+  if (!enabled) return;
+  const minIntervalMs = 1000 / requestsPerSecond;
+  const wait = lastDirectRpcCallAt + minIntervalMs - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastDirectRpcCallAt = Date.now();
+}
+
+async function getProgramAccountsV2(rpcUrl, programId, config, options = {}) {
+  const settings = options.settings;
   const accounts = [];
   let paginationKey = null;
   do {
-    const response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: `my-star-atlas-${Date.now()}`,
-        method: 'getProgramAccountsV2',
-        params: [
-          programId.toBase58(),
-          {
-            ...config,
-            encoding: 'base64',
-            limit: 1000,
-            ...(paginationKey ? { paginationKey } : {}),
-          },
-        ],
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!response.ok) throw new Error(`getProgramAccountsV2 HTTP ${response.status}`);
+    await acquireRpcSlot(settings);
+    const response = await fetchWithRpcBackoff(
+      rpcUrl,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: `my-star-atlas-${Date.now()}`,
+          method: 'getProgramAccountsV2',
+          params: [
+            programId.toBase58(),
+            {
+              ...config,
+              encoding: 'base64',
+              limit: 1000,
+              ...(paginationKey ? { paginationKey } : {}),
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(30000),
+      },
+      { logLabel: 'getProgramAccountsV2' }
+    );
     const payload = await response.json();
     if (payload?.error) {
       const error = new Error(payload.error.message || 'getProgramAccountsV2 failed');
@@ -3516,9 +3648,9 @@ async function getProgramAccountsV2(rpcUrl, programId, config) {
   return accounts;
 }
 
-async function getFilteredProgramAccounts(connection, rpcUrl, programId, config) {
+async function getFilteredProgramAccounts(connection, rpcUrl, programId, config, options = {}) {
   try {
-    return await getProgramAccountsV2(rpcUrl, programId, config);
+    return await getProgramAccountsV2(rpcUrl, programId, config, options);
   } catch (error) {
     const message = String(error?.message || '').toLowerCase();
     const unsupported = error?.code === -32601 || message.includes('method not found') || message.includes('not supported');
@@ -3562,8 +3694,16 @@ async function fetchProfileFleetsUncached(payload) {
     },
   ];
 
-  const [ownedAccounts, managedAccounts] = await Promise.all([
-    getFilteredProgramAccounts(connection, rpcUrl, SAGE_PROGRAM_ID, {
+  // Sequential (not Promise.all): a parallel burst of paginated
+  // getProgramAccountsV2 calls used to cause HTTP 429 on the Helius RPC at
+  // app startup when the Earnings tab opened. Each call now goes through
+  // acquireRpcSlot internally to space out its pages, and the two fleet
+  // filters run back-to-back so the per-call delay between them is honored.
+  const ownedAccounts = await getFilteredProgramAccounts(
+    connection,
+    rpcUrl,
+    SAGE_PROGRAM_ID,
+    {
       commitment: 'confirmed',
       filters: [
         ...baseFilters,
@@ -3574,8 +3714,14 @@ async function fetchProfileFleetsUncached(payload) {
           },
         },
       ],
-    }),
-    getFilteredProgramAccounts(connection, rpcUrl, SAGE_PROGRAM_ID, {
+    },
+    { settings }
+  );
+  const managedAccounts = await getFilteredProgramAccounts(
+    connection,
+    rpcUrl,
+    SAGE_PROGRAM_ID,
+    {
       commitment: 'confirmed',
       filters: [
         ...baseFilters,
@@ -3586,8 +3732,9 @@ async function fetchProfileFleetsUncached(payload) {
           },
         },
       ],
-    }),
-  ]);
+    },
+    { settings }
+  );
 
   const fleetMap = new Map();
   for (const account of ownedAccounts) {
