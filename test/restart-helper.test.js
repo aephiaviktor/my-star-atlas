@@ -52,7 +52,7 @@ test('restart helper waits for the parent, starts the scheduled task, then launc
     verifierPath: 'C:\\Apps\\my-star-atlas\\electron\\restart-status.ps1',
     pollIntervalMs: 0,
     maxWaitMs: 100,
-    supervisorSettleMs: 0,
+    getScheduledTaskState: async () => 3,
     isProcessRunning: () => {
       checks += 1;
       events.push(`check:${checks}`);
@@ -80,7 +80,7 @@ test('restart helper refuses to restart while the parent remains alive', async (
     taskName: 'My Star Atlas',
     pollIntervalMs: 1,
     maxWaitMs: 3,
-    supervisorSettleMs: 0,
+    getScheduledTaskState: async () => 3,
     isProcessRunning: () => true,
     runScheduledTask: async () => { taskStarted = true; return true; },
     launchVerifier: () => {},
@@ -90,12 +90,34 @@ test('restart helper refuses to restart while the parent remains alive', async (
   assert.equal(taskStarted, false);
 });
 
+test('restart helper waits for the scheduled task to become Ready before requesting restart', async () => {
+  const states = [4, 4, 3];
+  const events = [];
+  const launched = await launchAfterParentExits({
+    parentPid: 123,
+    taskName: 'My Star Atlas',
+    taskPollIntervalMs: 0,
+    taskReadyWaitMs: 100,
+    isProcessRunning: () => false,
+    getScheduledTaskState: async () => {
+      const state = states.shift();
+      events.push(`state:${state}`);
+      return state;
+    },
+    runScheduledTask: async () => { events.push('run'); return true; },
+    launchVerifier: () => { events.push('verify'); },
+  });
+
+  assert.equal(launched, true);
+  assert.deepEqual(events, ['state:4', 'state:4', 'state:3', 'run', 'verify']);
+});
+
 test('restart helper does not launch the verifier when the scheduled task fails', async () => {
   let verifierStarted = false;
   const launched = await launchAfterParentExits({
     parentPid: 123,
     taskName: 'My Star Atlas',
-    supervisorSettleMs: 0,
+    getScheduledTaskState: async () => 3,
     isProcessRunning: () => false,
     runScheduledTask: async () => false,
     launchVerifier: () => { verifierStarted = true; },

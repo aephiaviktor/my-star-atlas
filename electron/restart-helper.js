@@ -62,6 +62,22 @@ function waitForExit(child) {
   });
 }
 
+async function getScheduledTaskState(taskName, spawnProcess = spawn) {
+  const child = spawnProcess(
+    'powershell.exe',
+    ['-NoProfile', '-Command', '[int](Get-ScheduledTask -TaskName $env:MSA_RESTART_TASK).State'],
+    {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, MSA_RESTART_TASK: taskName },
+    }
+  );
+  let output = '';
+  child.stdout.on('data', (chunk) => { output += chunk.toString(); });
+  const succeeded = await waitForExit(child);
+  return succeeded ? Number.parseInt(output.trim(), 10) : null;
+}
+
 async function runScheduledTask(taskName, spawnProcess = spawn) {
   const child = spawnProcess('schtasks.exe', ['/Run', '/TN', taskName], {
     windowsHide: true,
@@ -99,8 +115,10 @@ async function launchAfterParentExits(options) {
     taskName,
     pollIntervalMs = 250,
     maxWaitMs = 30_000,
-    supervisorSettleMs = 1000,
+    taskPollIntervalMs = 250,
+    taskReadyWaitMs = 30_000,
     isProcessRunning: processProbe = isProcessRunning,
+    getScheduledTaskState: readTaskState = getScheduledTaskState,
     runScheduledTask: startTask = runScheduledTask,
     launchVerifier: startVerifier = launchVerifier,
   } = options;
@@ -111,9 +129,14 @@ async function launchAfterParentExits(options) {
     await sleep(pollIntervalMs);
   }
 
-  // The scheduled-task wrapper may still be unwinding after Electron exits.
-  // Give it a moment to become runnable before requesting the new instance.
-  await sleep(supervisorSettleMs);
+  // A /Run request issued while the existing scheduled task is still Running
+  // is accepted but does not queue another instance. Wait for the supervisor
+  // wrapper itself to become Ready before requesting the replacement.
+  const taskDeadline = Date.now() + taskReadyWaitMs;
+  while (await readTaskState(taskName) !== 3) {
+    if (Date.now() >= taskDeadline) return false;
+    await sleep(taskPollIntervalMs);
+  }
   if (!await startTask(taskName)) return false;
   startVerifier(options);
   return true;
@@ -130,4 +153,10 @@ if (require.main === module) {
   void main().catch(() => process.exit(1));
 }
 
-module.exports = { launchAfterParentExits, launchVerifier, parseRestartArguments, runScheduledTask };
+module.exports = {
+  getScheduledTaskState,
+  launchAfterParentExits,
+  launchVerifier,
+  parseRestartArguments,
+  runScheduledTask,
+};
