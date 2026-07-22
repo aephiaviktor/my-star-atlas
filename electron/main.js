@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const os = require('os');
 const { spawn } = require('child_process');
+const { pathToFileURL } = require('url');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { BorshAccountsCoder } = require('@staratlas/anchor');
 const bs58Module = require('bs58');
@@ -10,6 +11,7 @@ const { resolvePaths: resolveRpcLimiterPaths } = require('rpc_limiter');
 const { readState: readRpcLimiterState } = require('rpc_limiter/dist/state');
 const packageJson = require('../package.json');
 const { fetchWithInfluxRetry, loadSduSources } = require('./influx-resilience');
+const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -5300,13 +5302,23 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer.html'));
 }
 
-ipcMain.handle('app:get-profile-name', () => profileName);
-ipcMain.handle('app:get-version', () => packageJson.version);
-ipcMain.handle('updates:check', () => checkForUpdates());
-ipcMain.handle('updates:download-and-restart', () => downloadUpdateAndRestart());
-ipcMain.handle('settings:get', () => readSettings());
-ipcMain.handle('settings:save', (_event, payload) => writeSettings(payload));
-ipcMain.handle('fleet:list', async (_event, payload) => {
+const rendererUrl = pathToFileURL(path.join(__dirname, 'renderer.html')).href;
+
+function handleTrustedIpc(channel, handler) {
+  ipcMain.handle(channel, (event, ...args) => {
+    assertTrustedSender(event, mainWindow?.webContents, rendererUrl);
+    args.forEach((arg) => validateIpcPayload(arg));
+    return handler(event, ...args);
+  });
+}
+
+handleTrustedIpc('app:get-profile-name', () => profileName);
+handleTrustedIpc('app:get-version', () => packageJson.version);
+handleTrustedIpc('updates:check', () => checkForUpdates());
+handleTrustedIpc('updates:download-and-restart', () => downloadUpdateAndRestart());
+handleTrustedIpc('settings:get', () => readSettings());
+handleTrustedIpc('settings:save', (_event, payload) => writeSettings(payload));
+handleTrustedIpc('fleet:list', async (_event, payload) => {
   try {
     return await fetchProfileFleets(payload);
   } catch (error) {
@@ -5317,7 +5329,7 @@ ipcMain.handle('fleet:list', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('earnings:snapshot', async (_event, payload) => {
+handleTrustedIpc('earnings:snapshot', async (_event, payload) => {
   try {
     return await fetchEarningsSnapshot(payload);
   } catch (error) {
@@ -5328,7 +5340,7 @@ ipcMain.handle('earnings:snapshot', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('influx:test', async (_event, payload) => {
+handleTrustedIpc('influx:test', async (_event, payload) => {
   try {
     return await testInfluxConnection(payload);
   } catch (error) {
@@ -5339,7 +5351,7 @@ ipcMain.handle('influx:test', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('sdu:daily', async (_event, payload) => {
+handleTrustedIpc('sdu:daily', async (_event, payload) => {
   try {
     return await fetchDailySdu(payload);
   } catch (error) {
@@ -5350,7 +5362,7 @@ ipcMain.handle('sdu:daily', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('mining:daily', async (_event, payload) => {
+handleTrustedIpc('mining:daily', async (_event, payload) => {
   try {
     return await fetchDailyMining(payload);
   } catch (error) {
@@ -5361,7 +5373,7 @@ ipcMain.handle('mining:daily', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('crafting:daily', async (_event, payload) => {
+handleTrustedIpc('crafting:daily', async (_event, payload) => {
   try {
     return await fetchDailyCrafting(payload);
   } catch (error) {
@@ -5372,7 +5384,7 @@ ipcMain.handle('crafting:daily', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('production:daily', async (_event, payload) => {
+handleTrustedIpc('production:daily', async (_event, payload) => {
   try {
     return await fetchDailyProduction(payload);
   } catch (error) {
@@ -5383,7 +5395,7 @@ ipcMain.handle('production:daily', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('consumption:mining', async (_event, payload) => {
+handleTrustedIpc('consumption:mining', async (_event, payload) => {
   try {
     return await fetchConsumptionMining(payload);
   } catch (error) {
@@ -5394,7 +5406,7 @@ ipcMain.handle('consumption:mining', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('consumption:crafting', async (_event, payload) => {
+handleTrustedIpc('consumption:crafting', async (_event, payload) => {
   try {
     return await fetchConsumptionCrafting(payload);
   } catch (error) {
@@ -5405,7 +5417,7 @@ ipcMain.handle('consumption:crafting', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('consumption:upgrading', async (_event, payload) => {
+handleTrustedIpc('consumption:upgrading', async (_event, payload) => {
   try {
     return await fetchConsumptionUpgrading(payload);
   } catch (error) {
@@ -5416,7 +5428,7 @@ ipcMain.handle('consumption:upgrading', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('consumption:scanning', async (_event, payload) => {
+handleTrustedIpc('consumption:scanning', async (_event, payload) => {
   try {
     return await fetchConsumptionScanning(payload);
   } catch (error) {
@@ -5427,7 +5439,7 @@ ipcMain.handle('consumption:scanning', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('consumption:cargo', async (_event, payload) => {
+handleTrustedIpc('consumption:cargo', async (_event, payload) => {
   try {
     return await fetchConsumptionCargo(payload);
   } catch (error) {
@@ -5438,7 +5450,7 @@ ipcMain.handle('consumption:cargo', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('consumption:total', async (_event, payload) => {
+handleTrustedIpc('consumption:total', async (_event, payload) => {
   try {
     return await fetchConsumptionTotal(payload);
   } catch (error) {
@@ -5449,7 +5461,7 @@ ipcMain.handle('consumption:total', async (_event, payload) => {
     };
   }
 });
-ipcMain.handle('pcr:daily', async (_event, payload) => {
+handleTrustedIpc('pcr:daily', async (_event, payload) => {
   try {
     return await fetchPcrCharts(payload);
   } catch (error) {
@@ -5461,7 +5473,7 @@ ipcMain.handle('pcr:daily', async (_event, payload) => {
   }
 });
 
-ipcMain.handle('inventory:daily', async (_event, payload) => {
+handleTrustedIpc('inventory:daily', async (_event, payload) => {
   try {
     return await fetchInventory(payload);
   } catch (error) {
