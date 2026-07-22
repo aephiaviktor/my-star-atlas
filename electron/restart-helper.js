@@ -46,15 +46,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isProcessRunning(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (_error) {
-    return false;
-  }
-}
-
 function waitForExit(child) {
   return new Promise((resolve) => {
     child.once('error', () => resolve(false));
@@ -111,30 +102,27 @@ function launchVerifier(options, spawnProcess = spawn) {
 
 async function launchAfterParentExits(options) {
   const {
-    parentPid,
     taskName,
-    pollIntervalMs = 250,
-    maxWaitMs = 30_000,
     taskPollIntervalMs = 250,
-    taskReadyWaitMs = 30_000,
-    isProcessRunning: processProbe = isProcessRunning,
+    taskReadyWaitMs = 300_000,
     getScheduledTaskState: readTaskState = getScheduledTaskState,
     runScheduledTask: startTask = runScheduledTask,
     launchVerifier: startVerifier = launchVerifier,
   } = options;
-  const deadline = Date.now() + maxWaitMs;
 
-  while (processProbe(parentPid)) {
-    if (Date.now() >= deadline) return false;
-    await sleep(pollIntervalMs);
-  }
-
+  // Parent-PID probing is intentionally not used here. During a real update
+  // Electron can remain observable long after the helper starts. The task
+  // state is the authoritative signal that both Electron and its supervisor
+  // wrapper have finished.
   // A /Run request issued while the existing scheduled task is still Running
   // is accepted but does not queue another instance. Wait for the supervisor
   // wrapper itself to become Ready before requesting the replacement.
   const taskDeadline = Date.now() + taskReadyWaitMs;
   while (await readTaskState(taskName) !== 3) {
-    if (Date.now() >= taskDeadline) return false;
+    if (Date.now() >= taskDeadline) {
+      startVerifier(options);
+      return false;
+    }
     await sleep(taskPollIntervalMs);
   }
   if (!await startTask(taskName)) return false;

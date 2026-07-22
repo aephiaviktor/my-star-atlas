@@ -39,25 +39,17 @@ test('restart helper accepts the supervisor-aware argument contract', () => {
   assert.equal(parsed.logPath, 'C:\\logs\\supervisor.log');
 });
 
-test('restart helper waits for the parent, starts the scheduled task, then launches the verifier', async () => {
+test('restart helper starts the scheduled task after it is Ready, then launches the verifier', async () => {
   const events = [];
-  let checks = 0;
   const launched = await launchAfterParentExits({
     parentPid: 123,
     taskName: 'My Star Atlas',
     appName: 'My Star Atlas',
-    expectedVersion: '0.5.90',
+    expectedVersion: '0.5.93',
     appRoot: 'C:\\Apps\\my-star-atlas',
     logPath: 'C:\\logs\\supervisor.log',
     verifierPath: 'C:\\Apps\\my-star-atlas\\electron\\restart-status.ps1',
-    pollIntervalMs: 0,
-    maxWaitMs: 100,
     getScheduledTaskState: async () => 3,
-    isProcessRunning: () => {
-      checks += 1;
-      events.push(`check:${checks}`);
-      return checks < 3;
-    },
     runScheduledTask: async (taskName) => {
       events.push(`task:${taskName}`);
       return true;
@@ -70,24 +62,22 @@ test('restart helper waits for the parent, starts the scheduled task, then launc
   });
 
   assert.equal(launched, true);
-  assert.deepEqual(events, ['check:1', 'check:2', 'check:3', 'task:My Star Atlas', 'verify:0.5.90']);
+  assert.deepEqual(events, ['task:My Star Atlas', 'verify:0.5.93']);
 });
 
-test('restart helper refuses to restart while the parent remains alive', async () => {
+test('restart helper does not let a stale parent PID probe block task handoff', async () => {
   let taskStarted = false;
   const launched = await launchAfterParentExits({
     parentPid: 123,
     taskName: 'My Star Atlas',
-    pollIntervalMs: 1,
-    maxWaitMs: 3,
     getScheduledTaskState: async () => 3,
-    isProcessRunning: () => true,
+    isProcessRunning: () => { throw new Error('parent probe must not be called'); },
     runScheduledTask: async () => { taskStarted = true; return true; },
     launchVerifier: () => {},
   });
 
-  assert.equal(launched, false);
-  assert.equal(taskStarted, false);
+  assert.equal(launched, true);
+  assert.equal(taskStarted, true);
 });
 
 test('restart helper waits for the scheduled task to become Ready before requesting restart', async () => {
