@@ -12,6 +12,7 @@ const { readState: readRpcLimiterState } = require('rpc_limiter/dist/state');
 const packageJson = require('../package.json');
 const { fetchWithInfluxRetry, loadSduSources } = require('./influx-resilience');
 const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
+const { writeJsonAtomic } = require('./atomic-json');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -327,8 +328,7 @@ async function readSettings() {
 
 async function writeSettings(payload) {
   const settings = normalizeSettings(payload);
-  await fs.mkdir(app.getPath('userData'), { recursive: true });
-  await fs.writeFile(settingsPath(), `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+  await writeJsonAtomic(settingsPath(), settings);
   return settings;
 }
 
