@@ -256,7 +256,20 @@ async function downloadUpdateAndRestart() {
   });
   await runCommand('npm', ['install'], { cwd: getAppRoot() });
 
-  app.relaunch();
+  const restartHelper = spawn(process.execPath, [
+    path.join(__dirname, 'restart-helper.js'),
+    String(process.pid),
+    process.execPath,
+    getAppRoot(),
+    getProfileName(),
+  ], {
+    cwd: getAppRoot(),
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+  });
+  restartHelper.unref();
   app.exit(0);
   return { updated: true, currentVersion, latestVersion: latest.version };
 }
