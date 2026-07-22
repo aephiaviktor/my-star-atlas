@@ -14,6 +14,7 @@ const { fetchWithInfluxRetry, loadSduSources } = require('./influx-resilience');
 const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
 const { createRpcFetcher, createRpcRateGate } = require('./rpc-resilience');
+const { dependencyInstallRequired } = require('./update-dependencies');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -251,6 +252,9 @@ async function downloadUpdateAndRestart() {
   const extracted = entries.find((entry) => entry.isDirectory() && entry.name.startsWith('my-star-atlas-'));
   if (!extracted) throw new Error('Downloaded update archive did not contain the expected project folder.');
   const extractedRoot = path.join(tempDir, extracted.name);
+  const currentLockText = await fs.readFile(path.join(getAppRoot(), 'package-lock.json'), 'utf8').catch(() => null);
+  const nextLockText = await fs.readFile(path.join(extractedRoot, 'package-lock.json'), 'utf8').catch(() => null);
+  const shouldInstallDependencies = dependencyInstallRequired(currentLockText, nextLockText);
   await fs.cp(extractedRoot, getAppRoot(), {
     recursive: true,
     force: true,
@@ -259,7 +263,9 @@ async function downloadUpdateAndRestart() {
       return !relative.startsWith('.git') && !relative.startsWith('node_modules') && !relative.startsWith('analysis');
     },
   });
-  await runCommand('npm', ['install'], { cwd: getAppRoot() });
+  if (shouldInstallDependencies) {
+    await runCommand('npm', ['install'], { cwd: getAppRoot() });
+  }
 
   const restartHelper = spawn(process.execPath, [
     path.join(__dirname, 'restart-helper.js'),

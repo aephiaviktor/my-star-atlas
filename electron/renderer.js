@@ -6145,7 +6145,7 @@ updateConfirmButton.addEventListener('click', async () => {
   if (!availableUpdate?.updateAvailable) return;
   updateConfirmButton.disabled = true;
   updateCancelButton.disabled = true;
-  setText(updateMessage, `Downloading My Star Atlas v${availableUpdate.latestVersion}, installing dependencies, and restarting...`);
+  setText(updateMessage, `Downloading My Star Atlas v${availableUpdate.latestVersion}, preparing the update, and restarting...`);
   try {
     await api.downloadUpdateAndRestart();
   } catch (error) {
