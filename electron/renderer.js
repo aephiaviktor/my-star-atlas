@@ -1,4 +1,14 @@
 const api = window.myStarAtlas;
+const requestGuard = window.RequestGuard.createRequestGuard();
+
+function getRefreshContext(filters = {}) {
+  const settings = latestSettings || getFormPayload();
+  return {
+    faction: normalizeFaction(settings?.faction),
+    playerProfile: getActivePlayerProfile(settings),
+    ...filters,
+  };
+}
 
 const sectionLabels = {
   production: 'Production/Consumption',
@@ -1830,6 +1840,11 @@ async function refreshConsMining() {
   }
 
   const faction = normalizeFaction(latestSettings?.faction);
+  const context = getRefreshContext({
+    starbaseFilter: selectedConsMiningStarbase,
+    fleetFilter: selectedConsMiningFleet,
+  });
+  const request = requestGuard.begin('consumption:mining', context);
   const cached = getCachedFilterResult(faction, 'consMining', selectedConsMiningStarbase, selectedConsMiningFleet);
   if (cached) {
     renderConsMining(cached);
@@ -1839,13 +1854,20 @@ async function refreshConsMining() {
   try {
     const result = await api.getDailyConsumptionMining({
       ...(latestSettings || getFormPayload()),
+      starbaseFilter: context.starbaseFilter,
+      fleetFilter: context.fleetFilter,
+    });
+    if (!requestGuard.isCurrent(request, getRefreshContext({
       starbaseFilter: selectedConsMiningStarbase,
       fleetFilter: selectedConsMiningFleet,
-    });
+    }))) return;
     renderConsMining(result);
   } catch (error) {
     console.error(error);
-    if (!cached) renderConsMiningEmpty('Influx unavailable');
+    if (requestGuard.isCurrent(request, getRefreshContext({
+      starbaseFilter: selectedConsMiningStarbase,
+      fleetFilter: selectedConsMiningFleet,
+    })) && !cached) renderConsMiningEmpty('Influx unavailable');
   }
 }
 
@@ -3689,6 +3711,11 @@ async function refreshDailyProduction() {
   }
 
   const faction = normalizeFaction(latestSettings?.faction);
+  const context = getRefreshContext({
+    starbaseFilter: selectedProductionStarbase,
+    assetFilter: selectedProductionAsset,
+  });
+  const request = requestGuard.begin('production:daily', context);
   const cached = getCachedFilterResult(faction, 'production', selectedProductionStarbase, selectedProductionAsset);
   if (cached) {
     renderProductionCharts(cached);
@@ -3698,13 +3725,20 @@ async function refreshDailyProduction() {
   try {
     const result = await api.getDailyProduction({
       ...(latestSettings || getFormPayload()),
+      starbaseFilter: context.starbaseFilter,
+      assetFilter: context.assetFilter,
+    });
+    if (!requestGuard.isCurrent(request, getRefreshContext({
       starbaseFilter: selectedProductionStarbase,
       assetFilter: selectedProductionAsset,
-    });
+    }))) return;
     renderProductionCharts(result);
   } catch (error) {
     console.error(error);
-    if (!cached) renderProductionEmpty('Influx unavailable');
+    if (requestGuard.isCurrent(request, getRefreshContext({
+      starbaseFilter: selectedProductionStarbase,
+      assetFilter: selectedProductionAsset,
+    })) && !cached) renderProductionEmpty('Influx unavailable');
   }
 }
 
@@ -3715,6 +3749,11 @@ async function refreshDailyCrafting() {
   }
 
   const faction = normalizeFaction(latestSettings?.faction);
+  const context = getRefreshContext({
+    starbaseFilter: selectedCraftingStarbase,
+    recipeFilter: selectedCraftingRecipe,
+  });
+  const request = requestGuard.begin('crafting:daily', context);
   const cached = getCachedFilterResult(faction, 'crafting', selectedCraftingStarbase, selectedCraftingRecipe);
   if (cached) {
     renderCraftingCharts(cached);
@@ -3724,13 +3763,20 @@ async function refreshDailyCrafting() {
   try {
     const result = await api.getDailyCrafting({
       ...(latestSettings || getFormPayload()),
+      starbaseFilter: context.starbaseFilter,
+      recipeFilter: context.recipeFilter,
+    });
+    if (!requestGuard.isCurrent(request, getRefreshContext({
       starbaseFilter: selectedCraftingStarbase,
       recipeFilter: selectedCraftingRecipe,
-    });
+    }))) return;
     renderCraftingCharts(result);
   } catch (error) {
     console.error(error);
-    if (!cached) renderCraftingEmpty('Influx unavailable');
+    if (requestGuard.isCurrent(request, getRefreshContext({
+      starbaseFilter: selectedCraftingStarbase,
+      recipeFilter: selectedCraftingRecipe,
+    })) && !cached) renderCraftingEmpty('Influx unavailable');
   }
 }
 
@@ -5567,8 +5613,13 @@ function renderEarningsCargoAllocations(result) {
 let earningsRefreshInFlight = null;
 async function refreshEarnings() {
   if (earningsRefreshInFlight) return earningsRefreshInFlight;
-  earningsRefreshInFlight = (async () => {
+  const refreshPromise = (async () => {
     const settings = latestSettings || getFormPayload();
+    const context = {
+      faction: normalizeFaction(settings?.faction),
+      playerProfile: getActivePlayerProfile(settings),
+    };
+    const request = requestGuard.begin('earnings:snapshot', context);
     if (!getActivePlayerProfile(settings)) {
       renderEarningsEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
       renderEarningsMiningEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
@@ -5599,9 +5650,11 @@ async function refreshEarnings() {
         // catch block can apply the same rate-limit / generic handling.
         throw new Error(result.error || 'Earnings snapshot failed');
       }
+      if (!requestGuard.isCurrent(request, getRefreshContext())) return;
       renderEarnings(result);
     } catch (error) {
       console.error(error);
+      if (!requestGuard.isCurrent(request, getRefreshContext())) return;
       if (cached) return; // keep stale UI visible; do not clobber with an error
       const message = String(error?.message || '');
       if (message.startsWith('RPC_RATE_LIMIT:')) {
@@ -5626,10 +5679,12 @@ async function refreshEarnings() {
         setEarningsCargoStatus('Earnings sync failed');
       }
     }
-  })().finally(() => {
-    earningsRefreshInFlight = null;
+  })();
+  earningsRefreshInFlight = refreshPromise;
+  refreshPromise.finally(() => {
+    if (earningsRefreshInFlight === refreshPromise) earningsRefreshInFlight = null;
   });
-  return earningsRefreshInFlight;
+  return refreshPromise;
 }
 
 function setActiveSection(section) {
@@ -5891,6 +5946,9 @@ factionButtons.forEach((button) => {
 
     const nextSettings = mergeSettingsFromForm({ faction: clickedFaction });
     latestSettings = nextSettings;
+    // Allow the new faction to start its own earnings request immediately;
+    // the request guard prevents the superseded response from committing.
+    earningsRefreshInFlight = null;
     updateFactionButtons(nextSettings);
     updateSettingsStatus(nextSettings);
 
