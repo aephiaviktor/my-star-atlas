@@ -2764,21 +2764,36 @@ function pcrCreateLineChart(category, days, assets) {
       tooltip.style.display = 'none';
       return;
     }
-    const rows = visibleSegments
-      .map((seg) => {
-        const assetDay = seg.asset.days[dayIndex];
-        const resolved = pcrRatioValue(seg.asset, assetDay);
-        const ratioText = !resolved
-          ? 'no data'
-          : resolved.clipped
-            ? '∞'
-            : pcrFormatRatio(resolved.ratio);
-        const prod = pcrFormatInteger(assetDay.production);
-        const cons = pcrFormatInteger(assetDay.consumption);
-        return `<div class="pcr-tooltip-row"><span class="pcr-tooltip-swatch" style="background:${seg.color}"></span><span>${seg.asset.label}</span><span style="color:var(--muted)">${prod} / ${cons}</span><span style="margin-left:6px">${ratioText}</span></div>`;
-      })
-      .join('');
-    tooltip.innerHTML = `<div style="font-weight:600;margin-bottom:4px">${day.label}</div>${rows}`;
+    tooltip.textContent = '';
+    const heading = document.createElement('div');
+    heading.style.fontWeight = '600';
+    heading.style.marginBottom = '4px';
+    heading.textContent = day.label;
+    tooltip.appendChild(heading);
+    for (const seg of visibleSegments) {
+      const assetDay = seg.asset.days[dayIndex];
+      const resolved = pcrRatioValue(seg.asset, assetDay);
+      const ratioText = !resolved
+        ? 'no data'
+        : resolved.clipped
+          ? '∞'
+          : pcrFormatRatio(resolved.ratio);
+      const row = document.createElement('div');
+      row.className = 'pcr-tooltip-row';
+      const swatch = document.createElement('span');
+      swatch.className = 'pcr-tooltip-swatch';
+      swatch.style.background = seg.color;
+      const label = document.createElement('span');
+      label.textContent = seg.asset.label;
+      const values = document.createElement('span');
+      values.style.color = 'var(--muted)';
+      values.textContent = `${pcrFormatInteger(assetDay.production)} / ${pcrFormatInteger(assetDay.consumption)}`;
+      const ratio = document.createElement('span');
+      ratio.style.marginLeft = '6px';
+      ratio.textContent = ratioText;
+      row.append(swatch, label, values, ratio);
+      tooltip.appendChild(row);
+    }
     tooltip.style.display = 'block';
     const left = padding.left + dayIndex * xStep;
     const tipRect = tooltip.getBoundingClientRect();
@@ -3321,7 +3336,7 @@ function invInstallHoverOverlay(wrap, points, padding, innerWidth, innerHeight, 
     if (!best) { hide(); return; }
     show();
     guide.style.left = `${best.x}px`;
-    tip.innerHTML = '';
+    tip.textContent = '';
     const assetRow = document.createElement('div');
     assetRow.className = 'inv-hover-asset';
     const swatch = document.createElement('span');
@@ -5400,7 +5415,14 @@ function renderEarningsUpgradingEmpty(message) {
   renderEarningsNetProfitChart(null, new Map(), { target: earningsUpgradingAssetNetProfitChart, label: 'Upgrading net profit by asset in ATLAS by day' });
   setText(earningsUpgradingSyncStatus, message);
   if (!earningsUpgradingTableBody) return;
-  earningsUpgradingTableBody.innerHTML = `<tr class="empty-row"><td colspan="${getEarningsTableColSpan('upgrading')}">${message}</td></tr>`;
+  earningsUpgradingTableBody.textContent = '';
+  const row = document.createElement('tr');
+  row.className = 'empty-row';
+  const cell = document.createElement('td');
+  cell.colSpan = getEarningsTableColSpan('upgrading');
+  cell.textContent = message;
+  row.appendChild(cell);
+  earningsUpgradingTableBody.appendChild(row);
 }
 
 function renderEarningsUpgrading(result) {
