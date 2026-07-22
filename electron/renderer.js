@@ -41,6 +41,7 @@ const sectionEyebrow = document.querySelector('#section-eyebrow');
 const sectionTitle = document.querySelector('#section-title');
 const profileLabel = document.querySelector('#profile-label');
 const versionLabel = document.querySelector('#version-label');
+const refreshDataButton = document.querySelector('#refresh-data-btn');
 const updateButton = document.querySelector('#update-btn');
 const updateModal = document.querySelector('#update-modal');
 const updateCurrentVersion = document.querySelector('#update-current-version');
@@ -1272,7 +1273,12 @@ function renderSduChart(result) {
 
   const maxValue = Math.max(...days.map((day) => Number(day.value) || 0), 1);
   setText(sduTotalValue, formatWholeNumber(result.total));
-  setText(sduTotalNote, `Updated ${formatCheckedAt(result.checkedAt)}`);
+  setText(
+    sduTotalNote,
+    result.warning
+      ? `Updated ${formatCheckedAt(result.checkedAt)} · consumption unavailable`
+      : `Updated ${formatCheckedAt(result.checkedAt)}`
+  );
   setText(sduChartTotal, formatWholeNumber(result.total));
 
   const todayKey = getUtcTodayKey();
@@ -3739,6 +3745,15 @@ async function refreshDailyMining() {
   }
 }
 
+function formatInfluxFailure(error) {
+  const message = String(error || '');
+  if (/timeout/i.test(message)) return 'timeout';
+  const status = message.match(/influx_(?:flux|bucket_lookup)_(\d{3})/i)?.[1];
+  if (status === '401' || status === '403') return 'authentication failed';
+  if (status) return `HTTP ${status}`;
+  return 'Influx request failed';
+}
+
 async function refreshDailySdu() {
   if (!hasInfluxSettings(latestSettings || getFormPayload())) {
     renderSduEmpty('Awaiting Influx connection');
@@ -3757,10 +3772,24 @@ async function refreshDailySdu() {
       ...(latestSettings || getFormPayload()),
       fleetFilter: selectedScanningFleet,
     });
+    if (!result?.ok && cached) {
+      renderSduChart(cached);
+      const failure = formatInfluxFailure(result.error);
+      setText(sduTotalNote, `Last updated ${formatCheckedAt(cached.checkedAt)} · ${failure}`);
+      setText(scanningFleetNote, `Showing cached data · ${failure}`);
+      return;
+    }
     renderSduChart(result);
   } catch (error) {
     console.error(error);
-    if (!cached) renderSduEmpty('Influx unavailable');
+    if (cached) {
+      renderSduChart(cached);
+      const failure = formatInfluxFailure(error?.message || error);
+      setText(sduTotalNote, `Last updated ${formatCheckedAt(cached.checkedAt)} · ${failure}`);
+      setText(scanningFleetNote, `Showing cached data · ${failure}`);
+    } else {
+      renderSduEmpty('Influx unavailable');
+    }
   }
 }
 
@@ -5626,6 +5655,27 @@ function refreshVisibleFactionViews() {
   return Promise.resolve();
 }
 
+function refreshCurrentVisibleData() {
+  if (currentSection === 'fleet') return refreshFleets();
+  if (currentSection === 'earnings') return refreshEarnings();
+  if (currentSection !== 'production') return Promise.resolve();
+  if (currentSubtab === 'scanning') return refreshDailySdu();
+  if (currentSubtab === 'mining') return refreshDailyMining();
+  if (currentSubtab === 'crafting') return refreshDailyCrafting();
+  if (currentSubtab === 'production') return refreshDailyProduction();
+  if (currentSubtab === 'pct-charts') return refreshPcrCharts();
+  if (currentSubtab === 'inventory') return refreshInventory();
+  if (currentSubtab === 'consumption') {
+    if (currentConsumptionSubtab === 'mining') return refreshConsMining();
+    if (currentConsumptionSubtab === 'crafting') return refreshConsCrafting();
+    if (currentConsumptionSubtab === 'upgrading') return refreshConsUpgrading();
+    if (currentConsumptionSubtab === 'scanning') return refreshConsScanning();
+    if (currentConsumptionSubtab === 'cargo') return refreshConsCargo();
+    return refreshConsTotal();
+  }
+  return Promise.resolve();
+}
+
 function setActiveSubtab(subtab) {
   currentSubtab = subtab;
   document.querySelectorAll('.subtab-button').forEach((button) => {
@@ -5990,6 +6040,17 @@ consTotalAssetFilter.addEventListener('change', () => {
 
 openSettingsButton.addEventListener('click', openSettings);
 closeSettingsButton.addEventListener('click', closeSettings);
+
+refreshDataButton?.addEventListener('click', async () => {
+  refreshDataButton.disabled = true;
+  refreshDataButton.textContent = 'Refreshing...';
+  try {
+    await refreshCurrentVisibleData();
+  } finally {
+    refreshDataButton.disabled = false;
+    refreshDataButton.textContent = 'Refresh data';
+  }
+});
 
 updateButton.addEventListener('click', () => {
   void checkForUpdates({ openModal: true });

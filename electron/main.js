@@ -9,6 +9,7 @@ const bs58Module = require('bs58');
 const { resolvePaths: resolveRpcLimiterPaths } = require('rpc_limiter');
 const { readState: readRpcLimiterState } = require('rpc_limiter/dist/state');
 const packageJson = require('../package.json');
+const { fetchWithInfluxRetry, loadSduSources } = require('./influx-resilience');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -380,15 +381,19 @@ async function queryInfluxFlux(settings, flux) {
 
   const orgId = await resolveInfluxOrgId(influxUrl, token, bucket);
   const url = `${getInfluxBaseUrl(influxUrl)}/api/v2/query?org=${encodeURIComponent(orgId)}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/csv',
-      'Content-Type': 'application/vnd.flux',
-      Authorization: `Token ${token}`,
-    },
-    body: flux,
-  });
+  const response = await fetchWithInfluxRetry(
+    ({ signal }) => fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/csv',
+        'Content-Type': 'application/vnd.flux',
+        Authorization: `Token ${token}`,
+      },
+      body: flux,
+      signal,
+    }),
+    { timeoutMs: 15_000, retries: 1, retryDelayMs: 250 }
+  );
 
   if (!response.ok) {
     let detail = '';
@@ -410,12 +415,16 @@ async function resolveInfluxOrgId(influxUrl, token, bucket) {
 
   const lookup = (async () => {
     const url = `${baseUrl}/api/v2/buckets?name=${encodeURIComponent(bucket)}`;
-    const response = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Token ${token}`,
-      },
-    });
+    const response = await fetchWithInfluxRetry(
+      ({ signal }) => fetch(url, {
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Token ${token}`,
+        },
+        signal,
+      }),
+      { timeoutMs: 15_000, retries: 1, retryDelayMs: 250 }
+    );
     if (!response.ok) {
       let detail = '';
       try {
@@ -762,45 +771,10 @@ async function fetchDailySdu(payload) {
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const requestedFleet = normalizeFleetFilter(payload);
+  const totalStartedAt = Date.now();
 
-  async function queryDailySum(filterFlux) {
-    const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
-${scopeFilterFlux}
-${filterFlux}
-  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["_time"])
-  |> sum(column: "_value")
-  |> group()
-  |> sort(columns: ["_time"])`;
-    const csv = await queryInfluxFlux(settings, flux);
-    const rows = parseInfluxCsv(csv);
-    const valuesByDay = new Map();
-
-    for (const row of rows) {
-      const date = new Date(row._time);
-      const value = Number(row._value || 0);
-      if (Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
-      const key = getUtcDateKey(date);
-      valuesByDay.set(key, (valuesByDay.get(key) || 0) + value);
-    }
-
-    const days = getLastUtcDays(14).map((date) => {
-      const key = getUtcDateKey(date);
-      return {
-        isoDate: key,
-        label: formatShortUtcDate(date),
-        value: valuesByDay.get(key) || 0,
-      };
-    });
-
-    return {
-      days,
-      total: days.reduce((sum, day) => sum + day.value, 0),
-    };
-  }
-
-  const productionFlux = `from(bucket: "${bucket}")
+  async function queryProduction() {
+    const productionFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "sdu")
   |> filter(fn: (r) => r._field == "amount")
@@ -812,53 +786,97 @@ ${scopeFilterFlux}
   |> group()
   |> keep(columns: ["fleet", "_time", "_value"])
   |> sort(columns: ["fleet", "_time"])`;
-  const productionRows = parseInfluxCsv(await queryInfluxFlux(settings, productionFlux));
-  const productionDays = createDayTemplates();
-  const fleetTotals = new Map();
+    const productionRows = parseInfluxCsv(await queryInfluxFlux(settings, productionFlux));
+    const productionDays = createDayTemplates();
+    const fleetTotals = new Map();
 
-  for (const row of productionRows) {
-    const fleet = String(row.fleet || '').trim();
-    const date = new Date(row._time);
-    const value = Number(row._value || 0);
-    if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
-    fleetTotals.set(fleet, (fleetTotals.get(fleet) || 0) + value);
-    if (!requestedFleet || requestedFleet === fleet) {
-      addValueToDay(productionDays, date, value);
-    }
-  }
-
-  const fleets = summarizeFleetOptions(fleetTotals);
-  const selectedFleet = fleets.some((fleet) => fleet.value === requestedFleet) ? requestedFleet : '';
-  if (requestedFleet && !selectedFleet) {
-    for (const day of productionDays) day.value = 0;
     for (const row of productionRows) {
+      const fleet = String(row.fleet || '').trim();
       const date = new Date(row._time);
       const value = Number(row._value || 0);
-      if (Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
-      addValueToDay(productionDays, date, value);
+      if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+      fleetTotals.set(fleet, (fleetTotals.get(fleet) || 0) + value);
+      if (!requestedFleet || requestedFleet === fleet) addValueToDay(productionDays, date, value);
     }
+
+    const fleets = summarizeFleetOptions(fleetTotals);
+    const selectedFleet = fleets.some((fleet) => fleet.value === requestedFleet) ? requestedFleet : '';
+    if (requestedFleet && !selectedFleet) {
+      for (const day of productionDays) day.value = 0;
+      for (const row of productionRows) {
+        const date = new Date(row._time);
+        const value = Number(row._value || 0);
+        if (!Number.isNaN(date.getTime()) && Number.isFinite(value)) addValueToDay(productionDays, date, value);
+      }
+    }
+
+    return {
+      days: productionDays,
+      total: productionDays.reduce((sum, day) => sum + day.value, 0),
+      fleets,
+      selectedFleet,
+    };
   }
 
-  const production = {
-    days: productionDays,
-    total: productionDays.reduce((sum, day) => sum + day.value, 0),
-  };
-  const consumption = await queryDailySum(`  |> filter(fn: (r) => r._field == "amount")
+  async function queryConsumption() {
+    const flux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._field == "amount")
+${scopeFilterFlux}
   |> filter(fn: (r) =>
     (r._measurement == "crafting" and exists r.input and r.input == "Survey Data Unit") or
     (r._measurement == "upgrade" and exists r.input and r.input == "Survey Data Unit")
-  )`);
+  )
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> sort(columns: ["_time"])`;
+    const rows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
+    const valuesByDay = new Map();
+    for (const row of rows) {
+      const date = new Date(row._time);
+      const value = Number(row._value || 0);
+      if (Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+      const key = getUtcDateKey(date);
+      valuesByDay.set(key, (valuesByDay.get(key) || 0) + value);
+    }
+    const days = getLastUtcDays(14).map((date) => {
+      const key = getUtcDateKey(date);
+      return { isoDate: key, label: formatShortUtcDate(date), value: valuesByDay.get(key) || 0 };
+    });
+    return { days, total: days.reduce((sum, day) => sum + day.value, 0) };
+  }
 
+  const sources = await loadSduSources({ production: queryProduction, consumption: queryConsumption });
+  console.info('[MyStarAtlas][Influx] SDU query timings', {
+    faction: normalizeFaction(settings.faction),
+    productionMs: sources.production.durationMs,
+    consumptionMs: sources.consumption.durationMs,
+    totalMs: Date.now() - totalStartedAt,
+    productionOk: sources.production.ok,
+    consumptionOk: sources.consumption.ok,
+  });
+
+  if (!sources.production.ok) throw new Error(`sdu_production_failed:${sources.production.error}`);
+  const production = sources.production.value;
+  const consumption = sources.consumption.ok ? sources.consumption.value : null;
   return {
     ok: true,
     field: 'amount',
     days: production.days,
     total: production.total,
-    production,
+    production: { days: production.days, total: production.total },
     consumption,
-    surplus: selectedFleet ? null : production.total - consumption.total,
-    fleets,
-    selectedFleet,
+    surplus: production.selectedFleet || !consumption ? null : production.total - consumption.total,
+    fleets: production.fleets,
+    selectedFleet: production.selectedFleet,
+    warning: sources.consumption.ok ? null : `SDU consumption unavailable: ${sources.consumption.error}`,
+    timings: {
+      productionMs: sources.production.durationMs,
+      consumptionMs: sources.consumption.durationMs,
+      totalMs: Date.now() - totalStartedAt,
+    },
     faction: normalizeFaction(settings.faction),
     scopeNote: getInfluxScopeNote(settings),
     checkedAt: new Date().toISOString(),
