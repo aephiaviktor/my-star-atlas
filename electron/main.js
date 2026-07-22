@@ -13,6 +13,7 @@ const packageJson = require('../package.json');
 const { fetchWithInfluxRetry, loadSduSources } = require('./influx-resilience');
 const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
+const { createRpcFetcher, createRpcRateGate } = require('./rpc-resilience');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -3518,116 +3519,11 @@ function decodeFleetAccount(account) {
 //     proactively, not just retried reactively
 // ============================================================================
 
-function getRpcRateLimitSettings(settings) {
-  const rps = Number(settings?.rpcRequestsPerSecond);
-  return {
-    enabled: !!settings?.useRpcLimiter,
-    requestsPerSecond: Number.isFinite(rps) && rps > 0 ? rps : 5,
-  };
-}
+const fetchWithRpcBackoff = createRpcFetcher();
+const rpcRateGate = createRpcRateGate();
 
-const RATE_LIMIT_RPC_CODES = new Set([-32005, -32016]);
-const MAX_RPC_ATTEMPTS = 5;
-const MAX_BACKOFF_MS = 30_000;
-
-function parseRetryAfterMs(value) {
-  if (value == null) return null;
-  const str = String(value).trim();
-  if (!str) return null;
-  const num = Number(str);
-  if (Number.isFinite(num) && num >= 0) return Math.round(num * 1000);
-  const dateMs = Date.parse(str);
-  if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
-  return null;
-}
-
-function extractRetryAfterMs(response, payload) {
-  const header = response?.headers?.get?.('retry-after');
-  if (header) {
-    const fromHeader = parseRetryAfterMs(header);
-    if (fromHeader != null) return fromHeader;
-  }
-  const dataRetry = payload?.error?.data?.retry_after ?? payload?.error?.data?.retryAfter;
-  if (dataRetry != null) {
-    const fromData = parseRetryAfterMs(dataRetry);
-    if (fromData != null) return fromData;
-  }
-  return null;
-}
-
-function isRetriableStatus(status) {
-  return status === 429 || (status >= 500 && status < 600);
-}
-
-function isRetriableJsonRpcError(payload) {
-  if (!payload?.error) return false;
-  if (RATE_LIMIT_RPC_CODES.has(payload.error.code)) return true;
-  const message = String(payload.error.message || '').toLowerCase();
-  return message.includes('rate limit') || message.includes('too many requests');
-}
-
-function backoffMs(attempt, retryAfterMs) {
-  if (retryAfterMs != null) {
-    // Honor server hint with a small jitter (10-20%) to avoid thundering herd
-    // when several requests fail in the same window.
-    const jitter = retryAfterMs * (0.1 + Math.random() * 0.1);
-    return Math.min(MAX_BACKOFF_MS, Math.round(retryAfterMs + jitter));
-  }
-  // Exponential backoff with full jitter: random in [0, min(cap, base * 2^attempt)]
-  const base = 500;
-  const cap = Math.min(MAX_BACKOFF_MS, base * 2 ** attempt);
-  return Math.round(Math.random() * cap);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// fetch() with retry/backoff for HTTP 429, HTTP 5xx, and JSON-RPC rate-limit
-// errors. Returns the raw Response on success. On hard failure throws an
-// Error whose message starts with `RPC_RATE_LIMIT:` so the UI layer can
-// detect rate-limit and surface a retry hint.
-async function fetchWithRpcBackoff(url, init, { logLabel = 'rpc' } = {}) {
-  let lastError = null;
-  for (let attempt = 0; attempt < MAX_RPC_ATTEMPTS; attempt += 1) {
-    const response = await fetch(url, init);
-    if (response.ok) return response;
-    const status = response.status;
-    let payload = null;
-    let jsonErrorRetriable = false;
-    if (isRetriableStatus(status)) {
-      // Best-effort JSON parse for retry hints + JSON-RPC rate-limit code.
-      // Tolerate non-JSON bodies (e.g. an HTML 502 page from a CDN).
-      try {
-        payload = await response.clone().json();
-        if (isRetriableJsonRpcError(payload)) jsonErrorRetriable = true;
-      } catch (_) { /* not JSON */ }
-    }
-    if (!isRetriableStatus(status) && !jsonErrorRetriable) {
-      throw new Error(`RPC HTTP ${status} (${logLabel})`);
-    }
-    const retryAfter = extractRetryAfterMs(response, payload);
-    lastError = new Error(
-      `RPC_RATE_LIMIT: HTTP ${status} (${logLabel})${retryAfter != null ? ` retry_after=${retryAfter}ms` : ''}`
-    );
-    if (attempt + 1 >= MAX_RPC_ATTEMPTS) break;
-    const wait = backoffMs(attempt, retryAfter);
-    console.warn(`[rpc] ${logLabel} attempt ${attempt + 1}/${MAX_RPC_ATTEMPTS} -> ${status}; backing off ${wait}ms`);
-    await sleep(wait);
-  }
-  throw lastError || new Error(`RPC failed after ${MAX_RPC_ATTEMPTS} attempts (${logLabel})`);
-}
-
-// Module-level last-call timestamp shared across all direct JSON-RPC calls
-// so the configured rate budget is enforced globally, not per-call.
-let lastDirectRpcCallAt = 0;
 async function acquireRpcSlot(settings) {
-  const { enabled, requestsPerSecond } = getRpcRateLimitSettings(settings);
-  if (!enabled) return;
-  const minIntervalMs = 1000 / requestsPerSecond;
-  const wait = lastDirectRpcCallAt + minIntervalMs - Date.now();
-  if (wait > 0) await sleep(wait);
-  lastDirectRpcCallAt = Date.now();
+  await rpcRateGate.acquire(settings);
 }
 
 async function getProgramAccountsV2(rpcUrl, programId, config, options = {}) {
