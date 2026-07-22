@@ -87,6 +87,7 @@ const GITHUB_REPO = 'aephiaviktor/my-star-atlas';
 const GITHUB_BRANCH = 'master';
 const GITHUB_PACKAGE_URL = `https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/package.json`;
 const GITHUB_ARCHIVE_URL = `https://github.com/${GITHUB_REPO}/archive/refs/heads/${GITHUB_BRANCH}.tar.gz`;
+const RESTART_TASK_NAME = 'My Star Atlas';
 const UPGRADE_ATLAS_POOLS = Object.freeze({ MUD: 1983250, ONI: 2000000, USTUR: 2000000 });
 const UPGRADE_LP_BY_COMPONENT = Object.freeze({ framework: 68, electronics: 92, 'power source': 98, electromagnet: 133, 'field stabilizer': 222, 'particle accelerator': 498, 'radiation absorber': 331, 'survey data unit': 1325, sdu: 1325, ink: 100000 });
 const JUPITER_PRICE_URL = 'https://lite-api.jup.ag/price/v3?ids=So11111111111111111111111111111111111111112,ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
@@ -263,9 +264,12 @@ async function downloadUpdateAndRestart() {
   const restartHelper = spawn(process.execPath, [
     path.join(__dirname, 'restart-helper.js'),
     String(process.pid),
-    process.execPath,
+    RESTART_TASK_NAME,
+    'My Star Atlas',
+    latest.version,
     getAppRoot(),
-    getProfileName(),
+    path.join(__dirname, 'restart-status.ps1'),
+    path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'MyStarAtlas', 'logs', 'supervisor.log'),
   ], {
     cwd: getAppRoot(),
     detached: true,
