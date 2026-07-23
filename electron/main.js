@@ -3380,6 +3380,230 @@ function getCurrentResourcePriceAtl(prices, resourceName) {
   return Number.isFinite(price) ? price : null;
 }
 
+// Breakeven analysis: combine per-starbase mining production cost and
+// per-destination cargo allocation cost with current inventory and the
+// current GM price. The output is one row per (starbase, asset) with
+// `landedCostPerUnit` (= base + cargo) and `inventoryValue`. The base
+// cost comes from weighted mining `costsPerUnit` for that starbase and
+// material; the cargo cost comes from weighted cargo allocation
+// `costsPerUnit` where the destination matches the starbase. Both
+// values stay `null` if there is no telemetry for the row. Mining and
+// cargo coverage are tracked independently so the UI can label the
+// provenance accurately.
+function buildBreakevenRows({ miningRows = [], cargoAllocations = [], inventoryRows = [], prices = null } = {}) {
+  const resourcePriceByName = (prices && prices.resourcePricesAtlByName) || {};
+
+  // Mining base cost: weighted average costsPerUnit per (starbase, rawMaterial).
+  // Units come from `mined` so a single high-cost day does not dominate.
+  const baseAggregator = new Map();
+  for (const row of miningRows) {
+    const starbase = String(row.starbase || '').trim();
+    const asset = String(row.rawMaterial || '').trim();
+    if (!starbase || !asset) continue;
+    const mined = Number(row.mined);
+    const costsPerUnit = Number(row.costsPerUnit);
+    if (!Number.isFinite(mined) || mined <= 0) continue;
+    if (!Number.isFinite(costsPerUnit) || costsPerUnit < 0) continue;
+    const key = `${starbase}\n${asset}`;
+    const entry = baseAggregator.get(key) || { starbase, asset, totalCost: 0, totalUnits: 0, ammoCost: 0, foodCost: 0, fuelCost: 0, rentalCost: 0, txsCost: 0 };
+    entry.totalCost += costsPerUnit * mined;
+    entry.totalUnits += mined;
+    if (Number.isFinite(Number(row.ammoCostsAtlas))) entry.ammoCost += Number(row.ammoCostsAtlas);
+    if (Number.isFinite(Number(row.foodCostsAtlas))) entry.foodCost += Number(row.foodCostsAtlas);
+    if (Number.isFinite(Number(row.fuelCostsAtlas))) entry.fuelCost += Number(row.fuelCostsAtlas);
+    if (Number.isFinite(Number(row.rentalAtlasPerDay))) entry.rentalCost += Number(row.rentalAtlasPerDay);
+    if (Number.isFinite(Number(row.txsCostsAtlas))) entry.txsCost += Number(row.txsCostsAtlas);
+    baseAggregator.set(key, entry);
+  }
+  const baseByKey = new Map();
+  for (const [key, entry] of baseAggregator.entries()) {
+    if (entry.totalUnits > 0) {
+      const baseCostPerUnit = entry.totalCost / entry.totalUnits;
+      baseByKey.set(key, {
+        starbase: entry.starbase,
+        asset: entry.asset,
+        baseCostPerUnit,
+        baseTotalCost: entry.totalCost,
+        baseAmmoCostPerUnit: entry.ammoCost / entry.totalUnits,
+        baseFoodCostPerUnit: entry.foodCost / entry.totalUnits,
+        baseFuelCostPerUnit: entry.fuelCost / entry.totalUnits,
+        baseRentalCostPerUnit: entry.rentalCost / entry.totalUnits,
+        baseTxsCostPerUnit: entry.txsCost / entry.totalUnits,
+      });
+    }
+  }
+
+  // Cargo cost: weighted average costsPerUnit per (destination, asset).
+  // Units come from `amount` so empty legs do not dilute the result.
+  const cargoAggregator = new Map();
+  for (const row of cargoAllocations) {
+    const starbase = String(row.destination || '').trim();
+    const asset = String(row.asset || '').trim();
+    if (!starbase || !asset) continue;
+    const amount = Number(row.amount);
+    const costsPerUnit = Number(row.costsPerUnit);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    if (!Number.isFinite(costsPerUnit) || costsPerUnit < 0) continue;
+    const key = `${starbase}\n${asset}`;
+    const entry = cargoAggregator.get(key) || { starbase, asset, totalCost: 0, totalUnits: 0, fuelCost: 0, txsCost: 0 };
+    entry.totalCost += costsPerUnit * amount;
+    entry.totalUnits += amount;
+    if (Number.isFinite(Number(row.fuelCosts))) entry.fuelCost += Number(row.fuelCosts);
+    if (Number.isFinite(Number(row.txsCosts))) entry.txsCost += Number(row.txsCosts);
+    cargoAggregator.set(key, entry);
+  }
+  const cargoByKey = new Map();
+  for (const [key, entry] of cargoAggregator.entries()) {
+    if (entry.totalUnits > 0) {
+      cargoByKey.set(key, {
+        starbase: entry.starbase,
+        asset: entry.asset,
+        cargoCostPerUnit: entry.totalCost / entry.totalUnits,
+        cargoTotalCost: entry.totalCost,
+        cargoFuelCostPerUnit: entry.fuelCost / entry.totalUnits,
+        cargoTxsCostPerUnit: entry.txsCost / entry.totalUnits,
+      });
+    }
+  }
+
+  // Inventory rows: [{ starbase, asset, quantity, lastDate }].
+  const rows = [];
+  const seen = new Set();
+  for (const inventory of inventoryRows) {
+    const starbase = String(inventory.starbase || '').trim();
+    const asset = String(inventory.asset || '').trim();
+    if (!starbase || !asset) continue;
+    const key = `${starbase}\n${asset}`;
+    const base = baseByKey.get(key);
+    const cargo = cargoByKey.get(key);
+    const baseCostPerUnit = base?.baseCostPerUnit ?? null;
+    const cargoCostPerUnit = cargo?.cargoCostPerUnit ?? null;
+    const landedCostPerUnit = (baseCostPerUnit != null || cargoCostPerUnit != null)
+      ? (baseCostPerUnit || 0) + (cargoCostPerUnit || 0)
+      : null;
+    const inventory = Number(inventory.quantity) || 0;
+    const inventoryValue = landedCostPerUnit != null ? inventory * landedCostPerUnit : null;
+    const gmPricePerUnit = Number(resourcePriceByName[normalizeShipName(asset)]) || null;
+    const source = !base && !cargo
+      ? 'Inventory only'
+      : base && cargo
+        ? 'Mining + Cargo'
+        : base
+          ? 'Mining'
+          : 'Cargo';
+    rows.push({
+      starbase,
+      asset,
+      inventory,
+      baseCostPerUnit,
+      cargoCostPerUnit,
+      landedCostPerUnit,
+      inventoryValue,
+      gmPricePerUnit,
+      source,
+      baseAmmoCostPerUnit: base?.baseAmmoCostPerUnit ?? null,
+      baseFoodCostPerUnit: base?.baseFoodCostPerUnit ?? null,
+      baseFuelCostPerUnit: base?.baseFuelCostPerUnit ?? null,
+      baseRentalCostPerUnit: base?.baseRentalCostPerUnit ?? null,
+      baseTxsCostPerUnit: base?.baseTxsCostPerUnit ?? null,
+      cargoFuelCostPerUnit: cargo?.cargoFuelCostPerUnit ?? null,
+      cargoTxsCostPerUnit: cargo?.cargoTxsCostPerUnit ?? null,
+      lastInventoryDate: inventory.lastDate || null,
+    });
+    seen.add(key);
+  }
+
+  // Mining/cargo-only rows (no current inventory) are still useful as
+  // landed-cost reference, but the v1 table is anchored to inventory.
+  for (const [key, base] of baseByKey.entries()) {
+    if (seen.has(key)) continue;
+    const cargo = cargoByKey.get(key);
+    const cargoCostPerUnit = cargo?.cargoCostPerUnit ?? null;
+    const baseCostPerUnit = base.baseCostPerUnit;
+    const landedCostPerUnit = (baseCostPerUnit || 0) + (cargoCostPerUnit || 0) || null;
+    const gmPricePerUnit = Number(resourcePriceByName[normalizeShipName(base.asset)]) || null;
+    rows.push({
+      starbase: base.starbase,
+      asset: base.asset,
+      inventory: 0,
+      baseCostPerUnit,
+      cargoCostPerUnit,
+      landedCostPerUnit,
+      inventoryValue: 0,
+      gmPricePerUnit,
+      source: cargo ? 'Mining + Cargo' : 'Mining',
+      baseAmmoCostPerUnit: base.baseAmmoCostPerUnit,
+      baseFoodCostPerUnit: base.baseFoodCostPerUnit,
+      baseFuelCostPerUnit: base.baseFuelCostPerUnit,
+      baseRentalCostPerUnit: base.baseRentalCostPerUnit,
+      baseTxsCostPerUnit: base.baseTxsCostPerUnit,
+      cargoFuelCostPerUnit: cargo?.cargoFuelCostPerUnit ?? null,
+      cargoTxsCostPerUnit: cargo?.cargoTxsCostPerUnit ?? null,
+      lastInventoryDate: null,
+    });
+  }
+  for (const [key, cargo] of cargoByKey.entries()) {
+    if (seen.has(key)) continue;
+    const gmPricePerUnit = Number(resourcePriceByName[normalizeShipName(cargo.asset)]) || null;
+    rows.push({
+      starbase: cargo.starbase,
+      asset: cargo.asset,
+      inventory: 0,
+      baseCostPerUnit: null,
+      cargoCostPerUnit: cargo.cargoCostPerUnit,
+      landedCostPerUnit: cargo.cargoCostPerUnit,
+      inventoryValue: 0,
+      gmPricePerUnit,
+      source: 'Cargo',
+      baseAmmoCostPerUnit: null,
+      baseFoodCostPerUnit: null,
+      baseFuelCostPerUnit: null,
+      baseRentalCostPerUnit: null,
+      baseTxsCostPerUnit: null,
+      cargoFuelCostPerUnit: cargo.cargoFuelCostPerUnit,
+      cargoTxsCostPerUnit: cargo.cargoTxsCostPerUnit,
+      lastInventoryDate: null,
+    });
+  }
+
+  rows.sort((a, b) => a.starbase.localeCompare(b.starbase) || a.asset.localeCompare(b.asset));
+  return rows;
+}
+
+async function fetchCurrentPerStarbaseInventory(settings) {
+  // Lightweight inventory snapshot for the Breakeven Analysis: the
+  // latest non-zero `curAmount` per (starbase, rss) within the last
+  // 7 days. Keeps the response under control because we already have
+  // the full day-by-day inventory elsewhere.
+  const bucket = escapeFluxString(settings.influxBucket);
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -7d)
+  |> filter(fn: (r) => r._measurement == "starbase")
+  |> filter(fn: (r) => r._field == "curAmount")
+  |> filter(fn: (r) => exists r.rss and r._value > 0)
+  |> group(columns: ["rss", "starbase"])
+  |> last()
+  |> keep(columns: ["rss", "starbase", "_value", "_time"])
+  |> sort(columns: ["starbase", "rss"])`;
+  const csv = await queryInfluxFlux(settings, flux).catch(() => '');
+  const rows = parseInfluxCsv(csv);
+  const result = [];
+  for (const row of rows) {
+    const starbase = String(row.starbase || '').trim();
+    const asset = String(row.rss || '').trim();
+    if (!starbase || !asset) continue;
+    const quantity = Number(row._value);
+    if (!Number.isFinite(quantity) || quantity <= 0) continue;
+    result.push({
+      starbase,
+      asset,
+      quantity,
+      lastDate: row._time ? new Date(row._time).toISOString() : null,
+    });
+  }
+  return result;
+}
+
 async function fetchShipStatsSot() {
   const now = Date.now();
   if (shipStatsCache && shipStatsCache.expiresAt > now) return shipStatsCache.data;
@@ -4782,6 +5006,19 @@ async function fetchEarningsSnapshot(payload) {
     return fleetSort || String(a.assignment || '').localeCompare(String(b.assignment || ''));
   });
 
+  // Breakeven analysis: combine per-starbase mining production cost and
+  // per-destination cargo allocation cost with current inventory and the
+  // current GM price. The inventory fetch is best-effort: a failure here
+  // just leaves `breakevenRows` empty and surfaces the error so the UI
+  // can warn instead of crashing the rest of the snapshot.
+  let breakevenRows = [];
+  try {
+    const inventoryRows = await fetchCurrentPerStarbaseInventory(settings);
+    breakevenRows = buildBreakevenRows({ miningRows: mining, cargoAllocations, inventoryRows, prices });
+  } catch (error) {
+    breakevenError = String(error?.message || error || 'breakeven_unavailable');
+  }
+
   // Crafting per-row enrichment: each row is per (starbase, output, date).
   // Revenue = crafted * outputPriceAtl. IngCosts = sum over all
   // ingredients of (ingredientAmount * ingredientPriceAtl). FeeCosts is
@@ -5128,6 +5365,8 @@ async function fetchEarningsSnapshot(payload) {
     cargoAllocationRows: cargoAllocations,
     craftingRows: crafting,
     upgradingRows: upgrading,
+    breakevenRows,
+    breakevenError,
   };
 }
 

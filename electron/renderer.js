@@ -441,6 +441,15 @@ const upgradingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
 ]);
 
+const breakevenEarningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'source', label: 'Source' }),
+  Object.freeze({ id: 'ammoCost', label: 'Ammo Cost / Unit' }),
+  Object.freeze({ id: 'foodCost', label: 'Food Cost / Unit' }),
+  Object.freeze({ id: 'fuelCost', label: 'Fuel Cost / Unit' }),
+  Object.freeze({ id: 'rentalCost', label: 'Rental Cost / Unit' }),
+  Object.freeze({ id: 'txsCost', label: 'Txs Cost / Unit' }),
+]);
+
 const earningsColumnsBySubtab = Object.freeze({
   scanning: scanningEarningsOptionalColumns,
   mining: miningEarningsOptionalColumns,
@@ -605,6 +614,18 @@ const earningsSortKeyByColumnId = Object.freeze({
   starbases: 'starbaseLabel',
   txsCostsPct: 'txsCostsPercent',
   account: 'fleetAccount',
+  baseCost: 'baseCostPerUnit',
+  cargoCost: 'cargoCostPerUnit',
+  landedCost: 'landedCostPerUnit',
+  inventoryValue: 'inventoryValue',
+  gmPrice: 'gmPricePerUnit',
+  inventory: 'inventory',
+  ammoCost: 'baseAmmoCostPerUnit',
+  foodCost: 'baseFoodCostPerUnit',
+  fuelCost: 'baseFuelCostPerUnit',
+  rentalCost: 'baseRentalCostPerUnit',
+  txsCost: 'baseTxsCostPerUnit',
+  source: 'source',
 });
 
 const earningsFilterBarBySubtab = Object.freeze({
@@ -614,6 +635,7 @@ const earningsFilterBarBySubtab = Object.freeze({
   cargoAllocation: () => ({ date: earningsCargoAllocationDateFilter, fleet: earningsCargoAllocationFleetFilter, asset: earningsCargoAllocationAssetFilter }),
   crafting: () => ({ date: earningsCraftingDateFilter, starbase: earningsCraftingStarbaseFilter, asset: earningsCraftingAssetFilter }),
   upgrading: () => ({ date: earningsUpgradingDateFilter, starbase: earningsUpgradingStarbaseFilter, asset: earningsUpgradingAssetFilter }),
+  breakeven: () => ({ starbase: earningsBreakevenStarbaseFilter, asset: earningsBreakevenAssetFilter, source: earningsBreakevenSourceFilter }),
 });
 
 const earningsTableHeadBySubtab = Object.freeze({
@@ -622,6 +644,7 @@ const earningsTableHeadBySubtab = Object.freeze({
   cargo: () => earningsCargoTableHead,
   crafting: () => earningsCraftingTableHead,
   upgrading: () => earningsUpgradingTableHead,
+  breakeven: () => earningsBreakevenTableHead,
 });
 
 const earningsRowsKeyBySubtab = Object.freeze({
@@ -630,6 +653,7 @@ const earningsRowsKeyBySubtab = Object.freeze({
   cargo: 'cargoRows',
   crafting: 'craftingRows',
   upgrading: 'upgradingRows',
+  breakeven: 'breakevenRows',
 });
 
 const earningsFleetPalette = Object.freeze([
@@ -4708,6 +4732,8 @@ function renderEarningsColumnControls() {
         renderEarningsCargoAllocations(latestEarningsResult);
       } else if (subtab === 'crafting') {
         renderEarningsCrafting(latestEarningsResult);
+      } else if (subtab === 'breakeven') {
+        renderEarningsBreakeven(latestEarningsResult);
       } else if (latestEarningsResult) {
         renderEarnings(latestEarningsResult);
       } else {
@@ -4890,6 +4916,7 @@ function setupEarningsFilterHandlers() {
       else if (subtab === 'cargo') renderEarningsCargo(latestEarningsResult);
       else if (subtab === 'cargoAllocation') renderEarningsCargoAllocations(latestEarningsResult);
       else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
+      else if (subtab === 'breakeven') renderEarningsBreakeven(latestEarningsResult);
       else if (latestEarningsResult) renderEarnings(latestEarningsResult);
     });
   };
@@ -4909,6 +4936,9 @@ function setupEarningsFilterHandlers() {
   wire('upgrading', earningsUpgradingDateFilter, 'date');
   wire('upgrading', earningsUpgradingStarbaseFilter, 'starbase');
   wire('upgrading', earningsUpgradingAssetFilter, 'asset');
+  wire('breakeven', earningsBreakevenStarbaseFilter, 'starbase');
+  wire('breakeven', earningsBreakevenAssetFilter, 'asset');
+  wire('breakeven', earningsBreakevenSourceFilter, 'source');
 }
 
 // Apply the active state on every Total / Per Crew button inside
@@ -4934,6 +4964,7 @@ function setEarningsChartMode(subtab, mode) {
   if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
   else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
   else if (subtab === 'upgrading') renderEarningsUpgrading(latestEarningsResult);
+  else if (subtab === 'breakeven') renderEarningsBreakeven(latestEarningsResult);
   else renderEarnings(latestEarningsResult);
 }
 
@@ -4957,6 +4988,7 @@ function setupEarningsHeaderSortHandlers() {
       if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
       else if (subtab === 'cargo') renderEarningsCargo(latestEarningsResult);
       else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
+      else if (subtab === 'breakeven') renderEarningsBreakeven(latestEarningsResult);
       else if (latestEarningsResult) renderEarnings(latestEarningsResult);
       else renderEarningsHeader(subtab);
       highlightEarningsMetricGuide(subtab, columnId);
@@ -5145,6 +5177,7 @@ function renderEarnings(result) {
     renderEarningsCargoEmpty(result?.error || 'Earnings sync failed');
     renderEarningsCraftingEmpty(result?.error || 'Earnings sync failed');
     renderEarningsUpgradingEmpty(result?.error || 'Earnings sync failed');
+    renderEarningsBreakevenEmpty(result?.error || 'Earnings sync failed');
     setEarningsStatus('Earnings sync failed');
     setEarningsMiningStatus('Earnings sync failed');
     setEarningsCargoStatus('Earnings sync failed');
@@ -5457,6 +5490,111 @@ function renderEarningsCrafting(result) {
       row.appendChild(createCraftingEarningsOptionalCell(entry, column.id, null));
     }
     earningsCraftingTableBody.appendChild(row);
+  }
+}
+
+function renderEarningsBreakevenEmpty(message) {
+  if (earningsBreakevenTableHead) {
+    earningsBreakevenTableHead.textContent = '';
+    const headRow = document.createElement('tr');
+    for (const label of ['Starbase', 'Asset', 'Inventory', 'Source', 'Base Cost / Unit', 'Cargo Cost / Unit', 'Landed Cost / Unit', 'Inventory Value', 'GM Price / Unit']) {
+      const th = document.createElement('th');
+      th.scope = 'col';
+      th.textContent = label;
+      headRow.appendChild(th);
+    }
+    earningsBreakevenTableHead.appendChild(headRow);
+  }
+  setText(earningsBreakevenSyncStatus, message);
+  if (!earningsBreakevenTableBody) return;
+  earningsBreakevenTableBody.textContent = '';
+  const row = document.createElement('tr');
+  row.className = 'empty-row';
+  const cell = document.createElement('td');
+  cell.colSpan = 9;
+  cell.textContent = message;
+  row.appendChild(cell);
+  earningsBreakevenTableBody.appendChild(row);
+}
+
+function renderEarningsBreakeven(result) {
+  const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
+  const sources = new Set();
+  for (const row of rows) {
+    if (row.source) sources.add(row.source);
+  }
+  const syncMessage = `${formatWholeNumber(rows.length)} breakeven rows at ${formatCheckedAt(result?.checkedAt)}${result?.breakevenError ? ' · ' + result.breakevenError : ''}`;
+  setText(earningsBreakevenSyncStatus, syncMessage);
+  // Filter population
+  const starbaseSet = new Set();
+  const assetSet = new Set();
+  for (const row of rows) {
+    if (row.starbase) starbaseSet.add(row.starbase);
+    if (row.asset) assetSet.add(row.asset);
+  }
+  const fillBreakeven = (select, values, defaultLabel) => {
+    if (!select) return;
+    const currentValue = select.value;
+    select.textContent = '';
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = defaultLabel;
+    select.appendChild(defaultOption);
+    for (const value of values) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    }
+    if (currentValue && Array.from(select.options).some((option) => option.value === currentValue)) {
+      select.value = currentValue;
+    }
+  };
+  fillBreakeven(earningsBreakevenStarbaseFilter, Array.from(starbaseSet).sort((a, b) => a.localeCompare(b)), 'All Starbases');
+  fillBreakeven(earningsBreakevenAssetFilter, Array.from(assetSet).sort((a, b) => a.localeCompare(b)), 'All Assets');
+  fillBreakeven(earningsBreakevenSourceFilter, Array.from(sources).sort((a, b) => a.localeCompare(b)), 'All Sources');
+
+  // Filter rows
+  const starbaseFilter = earningsBreakevenStarbaseFilter?.value || '';
+  const assetFilter = earningsBreakevenAssetFilter?.value || '';
+  const sourceFilter = earningsBreakevenSourceFilter?.value || '';
+  const filteredRows = rows.filter((row) => {
+    if (starbaseFilter && row.starbase !== starbaseFilter) return false;
+    if (assetFilter && row.asset !== assetFilter) return false;
+    if (sourceFilter && row.source !== sourceFilter) return false;
+    return true;
+  });
+
+  // Header
+  if (earningsBreakevenTableHead) {
+    earningsBreakevenTableHead.textContent = '';
+    const headRow = document.createElement('tr');
+    for (const label of ['Starbase', 'Asset', 'Inventory', 'Source', 'Base Cost / Unit', 'Cargo Cost / Unit', 'Landed Cost / Unit', 'Inventory Value', 'GM Price / Unit']) {
+      const th = document.createElement('th');
+      th.scope = 'col';
+      th.textContent = label;
+      headRow.appendChild(th);
+    }
+    earningsBreakevenTableHead.appendChild(headRow);
+  }
+
+  if (!earningsBreakevenTableBody) return;
+  earningsBreakevenTableBody.textContent = '';
+  if (!filteredRows.length) {
+    return renderEarningsBreakevenEmpty(rows.length ? 'No breakeven rows match the current filters' : 'No breakeven data available — check mining, cargo, and inventory telemetry');
+  }
+  for (const entry of filteredRows) {
+    const tr = document.createElement('tr');
+    tr.appendChild(createTextCell(entry.starbase || '--'));
+    tr.appendChild(createTextCell(entry.asset || '--'));
+    tr.appendChild(createTextCell(formatWholeNumber(entry.inventory || 0)));
+    tr.appendChild(createTextCell(entry.source || '--'));
+    tr.appendChild(createTextCell(entry.baseCostPerUnit == null ? '--' : formatAtlasNumber(entry.baseCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.cargoCostPerUnit == null ? '--' : formatAtlasNumber(entry.cargoCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.landedCostPerUnit == null ? '--' : formatAtlasNumber(entry.landedCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.inventoryValue == null ? '--' : formatAtlasWhole(entry.inventoryValue)));
+    tr.appendChild(createTextCell(entry.gmPricePerUnit == null ? '--' : formatAtlasNumber(entry.gmPricePerUnit, 6)));
+    earningsBreakevenTableBody.appendChild(tr);
   }
 }
 

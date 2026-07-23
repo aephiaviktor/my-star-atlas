@@ -764,6 +764,7 @@
             <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="cargo" aria-selected="false">Cargo</button>
             <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="crafting" aria-selected="false">Crafting</button>
             <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="upgrading" aria-selected="false">Upgrading</button>
+            <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="breakeven" aria-selected="false">Breakeven Analysis</button>
           </div>
 
           <div class="earnings-panel active" data-earnings-panel="scanning">
@@ -1225,6 +1226,19 @@
               <div id="earnings-upgrading-sync-status" class="fleet-sync-status" role="status">Awaiting upgrading data</div>
               <div class="fleet-table-wrap"><table class="fleet-table earnings-table"><thead id="earnings-upgrading-table-head"><tr><th>Date</th><th>Starbase</th><th>Asset</th><th>Installed</th><th>Avg Crew</th><th>Revenue</th><th>UPG Costs</th><th>Txs Costs</th><th>Total Costs</th><th>Net Profit</th><th>Net Profit per Crew</th><th>Profit Margin</th></tr></thead><tbody id="earnings-upgrading-table-body"><tr class="empty-row"><td colspan="12">No upgrading data loaded</td></tr></tbody></table></div>
               <details class="earnings-metric-guide" open><summary>How to read this table</summary><div id="earnings-upgrading-metric-guide" class="earnings-metric-guide-list"></div></details>
+            </section>
+          </div>
+          <div class="earnings-panel" data-earnings-panel="breakeven">
+            <section class="work-surface earnings-surface">
+              <div class="activity-filter-bar earnings-filter-bar">
+                <label class="activity-filter"><span>Starbase</span><select id="earnings-breakeven-starbase-filter"><option value="">All Starbases</option></select></label>
+                <label class="activity-filter"><span>Asset</span><select id="earnings-breakeven-asset-filter"><option value="">All Assets</option></select></label>
+                <label class="activity-filter"><span>Source</span><select id="earnings-breakeven-source-filter"><option value="">All Sources</option></select></label>
+                <span class="activity-filter-note">Landed cost = mining base + cargo delivery (ATLAS/unit) · GM price from /gm/resource</span>
+              </div>
+              <div id="earnings-breakeven-sync-status" class="fleet-sync-status" role="status">Awaiting breakeven data</div>
+              <div class="fleet-table-wrap"><table class="fleet-table earnings-table"><thead id="earnings-breakeven-table-head"><tr><th>Starbase</th><th>Asset</th><th>Inventory</th><th>Source</th><th>Base Cost / Unit</th><th>Cargo Cost / Unit</th><th>Landed Cost / Unit</th><th>Inventory Value</th><th>GM Price / Unit</th></tr></thead><tbody id="earnings-breakeven-table-body"><tr class="empty-row"><td colspan="9">No breakeven data loaded</td></tr></tbody></table></div>
+              <details class="earnings-metric-guide" open><summary>How to read this table</summary><div id="earnings-breakeven-metric-guide" class="earnings-metric-guide-list"></div></details>
             </section>
           </div>
         </section>
