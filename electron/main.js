@@ -15,6 +15,7 @@ const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
 const { createRpcFetcher, createRpcRateGate } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
+const { parseInfluxCsv, groupCargoAllocationRows } = require('./influx-data');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -356,45 +357,6 @@ function getInfluxBaseUrl(rawUrl) {
   const hostMatch = cleanUrl.match(/^(https?:\/\/[^/]+)/i);
   if (hostMatch) return hostMatch[1].replace(/\/$/, '');
   return cleanUrl.replace(/\/api\/v3\/write[^/]*$/i, '').replace(/\/orgs\/[^/]+$/i, '').replace(/\/$/, '');
-}
-
-function parseInfluxCsv(text) {
-  const lines = String(text || '').split(/\r?\n/).filter((line) => line.trim().length);
-  let header = null;
-  const rows = [];
-  for (const line of lines) {
-    if (line.startsWith('#')) continue;
-    const columns = [];
-    let value = '';
-    let quoted = false;
-    for (let index = 0; index < line.length; index += 1) {
-      const char = line[index];
-      if (char === '"') {
-        if (quoted && line[index + 1] === '"') {
-          value += '"';
-          index += 1;
-        } else {
-          quoted = !quoted;
-        }
-      } else if (char === ',' && !quoted) {
-        columns.push(value);
-        value = '';
-      } else {
-        value += char;
-      }
-    }
-    columns.push(value);
-    if (!header) {
-      header = columns;
-      continue;
-    }
-    const row = {};
-    header.forEach((name, index) => {
-      row[name] = columns[index] ?? '';
-    });
-    rows.push(row);
-  }
-  return rows;
 }
 
 async function queryInfluxFlux(settings, flux) {
@@ -4786,24 +4748,13 @@ async function fetchEarningsSnapshot(payload) {
     if (!row.fleetAccount || !row.isoDate) continue;
     row.txsDaily = cargoSignatureCounts.get(`${row.isoDate}\n${row.fleetAccount}`) || 0;
   }
-  // cargo_cost_allocation predates the standard instance/faction tags. Scope
-  // those rows through the already faction-scoped movement fleets, then fold
-  // fleet-level allocations back into the requested date/asset/assignment rows.
+  // Scope allocation rows through the already faction-scoped movement fleets,
+  // while preserving each fleet and route as separate cost dimensions.
   const scopedCargoFleetLabels = new Set(cargoRows.map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
-  const cargoAllocationGroups = new Map();
-  for (const row of cargoAllocationRows) {
-    if (!scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet))) continue;
-    const key = `${row.isoDate}\n${row.asset}\n${row.assignment}`;
-    if (!cargoAllocationGroups.has(key)) {
-      cargoAllocationGroups.set(key, { ...row, fleet: undefined, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
-    }
-    const group = cargoAllocationGroups.get(key);
-    group.amount += Number(row.amount) || 0;
-    group.cargoVolume += Number(row.cargoVolume) || 0;
-    group.allocatedFuel += Number(row.allocatedFuel) || 0;
-    group.allocatedTxCostSol += Number(row.allocatedTxCostSol) || 0;
-  }
-  const cargoAllocations = Array.from(cargoAllocationGroups.values()).map((row) => {
+  const scopedCargoAllocationRows = cargoAllocationRows.filter((row) =>
+    scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet))
+  );
+  const cargoAllocations = groupCargoAllocationRows(scopedCargoAllocationRows).map((row) => {
     const fuelCostsAtlas = fuelPriceAtl != null ? row.allocatedFuel * fuelPriceAtl : null;
     const txsCostsAtlas = atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
     const totalCostsAtlas = Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)
