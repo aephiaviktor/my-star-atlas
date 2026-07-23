@@ -5012,6 +5012,7 @@ async function fetchEarningsSnapshot(payload) {
   // just leaves `breakevenRows` empty and surfaces the error so the UI
   // can warn instead of crashing the rest of the snapshot.
   let breakevenRows = [];
+  let breakevenError = '';
   try {
     const inventoryRows = await fetchCurrentPerStarbaseInventory(settings);
     breakevenRows = buildBreakevenRows({ miningRows: mining, cargoAllocations, inventoryRows, prices });

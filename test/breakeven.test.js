@@ -262,3 +262,8 @@ test('production breakeven inventory loop does not shadow its source row', () =>
   assert.match(main, /for \(const inventoryRow of inventoryRows\)/);
   assert.doesNotMatch(main, /for \(const inventory of inventoryRows\)[\s\S]*?const inventory = Number\(inventory\.quantity\)/);
 });
+
+test('earnings snapshot declares the optional Breakeven error before returning it', () => {
+  const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /let breakevenRows = \[\];\s+let breakevenError = '';/);
+});
