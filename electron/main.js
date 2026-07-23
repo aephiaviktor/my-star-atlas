@@ -3469,9 +3469,9 @@ function buildBreakevenRows({ miningRows = [], cargoAllocations = [], inventoryR
   // Inventory rows: [{ starbase, asset, quantity, lastDate }].
   const rows = [];
   const seen = new Set();
-  for (const inventory of inventoryRows) {
-    const starbase = String(inventory.starbase || '').trim();
-    const asset = String(inventory.asset || '').trim();
+  for (const inventoryRow of inventoryRows) {
+    const starbase = String(inventoryRow.starbase || '').trim();
+    const asset = String(inventoryRow.asset || '').trim();
     if (!starbase || !asset) continue;
     const key = `${starbase}\n${asset}`;
     const base = baseByKey.get(key);
@@ -3481,7 +3481,7 @@ function buildBreakevenRows({ miningRows = [], cargoAllocations = [], inventoryR
     const landedCostPerUnit = (baseCostPerUnit != null || cargoCostPerUnit != null)
       ? (baseCostPerUnit || 0) + (cargoCostPerUnit || 0)
       : null;
-    const inventory = Number(inventory.quantity) || 0;
+    const inventory = Number(inventoryRow.quantity) || 0;
     const inventoryValue = landedCostPerUnit != null ? inventory * landedCostPerUnit : null;
     const gmPricePerUnit = Number(resourcePriceByName[normalizeShipName(asset)]) || null;
     const source = !base && !cargo
@@ -3508,7 +3508,7 @@ function buildBreakevenRows({ miningRows = [], cargoAllocations = [], inventoryR
       baseTxsCostPerUnit: base?.baseTxsCostPerUnit ?? null,
       cargoFuelCostPerUnit: cargo?.cargoFuelCostPerUnit ?? null,
       cargoTxsCostPerUnit: cargo?.cargoTxsCostPerUnit ?? null,
-      lastInventoryDate: inventory.lastDate || null,
+      lastInventoryDate: inventoryRow.lastDate || null,
     });
     seen.add(key);
   }

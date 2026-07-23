@@ -241,8 +241,24 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(html, /<th>Inventory Value<\/th>/);
   assert.match(html, /<th>GM Price \/ Unit<\/th>/);
   assert.match(js, /function renderEarningsBreakeven\(/);
+  for (const name of [
+    'earningsBreakevenTableHead',
+    'earningsBreakevenTableBody',
+    'earningsBreakevenSyncStatus',
+    'earningsBreakevenStarbaseFilter',
+    'earningsBreakevenAssetFilter',
+    'earningsBreakevenSourceFilter',
+  ]) {
+    assert.match(js, new RegExp(`const ${name} = document\\.querySelector`), `${name} must be declared before use`);
+  }
   assert.match(js, /breakeven: 'breakevenRows'/);
   assert.match(js, /breakeven: \(\) => earningsBreakevenTableHead/);
   assert.match(js, /const breakevenEarningsOptionalColumns/);
   assert.match(js, /else if \(subtab === 'breakeven'\) renderEarningsBreakeven\(latestEarningsResult\);/);
+});
+
+test('production breakeven inventory loop does not shadow its source row', () => {
+  const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /for \(const inventoryRow of inventoryRows\)/);
+  assert.doesNotMatch(main, /for \(const inventory of inventoryRows\)[\s\S]*?const inventory = Number\(inventory\.quantity\)/);
 });
