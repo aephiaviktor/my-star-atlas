@@ -1066,20 +1066,35 @@ select:focus {
   display: none;
 }
 
-.cargo-table-panel .cargo-table-toggle {
-  margin: -4px 0 12px;
+.cargo-table-switch {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(36, 70, 85, 0.74);
+  background: rgba(2, 16, 23, 0.72);
 }
 
-.cargo-table-panel.collapsed .chart-toggle-arrow {
-  transform: rotate(-90deg);
+.cargo-table-switch-button {
+  min-height: 36px;
+  padding: 7px 14px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
 }
 
-.cargo-table-panel.collapsed .cargo-table-body {
+.cargo-table-switch-button.active {
+  border-color: rgba(69, 214, 193, 0.62);
+  color: var(--text);
+  background: rgba(69, 214, 193, 0.16);
+}
+
+.cargo-table-view[hidden] {
   display: none;
 }
 
-.cargo-table-panel.collapsed {
-  padding-bottom: 12px;
+.cargo-table-view > .fleet-table-wrap {
+  height: 560px;
 }
 
 .earnings-chart-surface.collapsed {

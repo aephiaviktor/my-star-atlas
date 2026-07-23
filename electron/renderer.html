@@ -794,7 +794,7 @@
               <header class="earnings-chart-header">
                 <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                   <span class="chart-toggle-arrow" aria-hidden="true">v</span>
-                  <span>Scanning: Net Profit by Fleet</span>
+                  <span>Net Profit by Fleet</span>
                 </button>
                 <div class="earnings-chart-mode-switch" role="group" aria-label="Chart mode">
                   <button class="earnings-chart-mode-btn" type="button" data-earnings-chart-mode="total">Total</button>
@@ -883,7 +883,7 @@
               <header class="earnings-chart-header">
                 <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                   <span class="chart-toggle-arrow" aria-hidden="true">v</span>
-                  <span>Mining: Net Profit by Fleet</span>
+                  <span>Net Profit by Fleet</span>
                 </button>
                 <div class="earnings-chart-mode-switch" role="group" aria-label="Chart mode">
                   <button class="earnings-chart-mode-btn" type="button" data-earnings-chart-mode="total">Total</button>
@@ -899,7 +899,7 @@
               <header class="earnings-chart-header">
                 <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                   <span class="chart-toggle-arrow" aria-hidden="true">v</span>
-                  <span>Mining: Net Profit by Raw Material</span>
+                  <span>Net Profit by Raw Material</span>
                 </button>
                 <div class="earnings-chart-mode-switch" role="group" aria-label="Chart mode">
                   <button class="earnings-chart-mode-btn" type="button" data-earnings-chart-mode="total">Total</button>
@@ -915,7 +915,7 @@
               <header class="earnings-chart-header">
                 <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                   <span class="chart-toggle-arrow" aria-hidden="true">v</span>
-                  <span>Mining: Net Profit by Starbase</span>
+                  <span>Net Profit by Starbase</span>
                 </button>
                 <div class="earnings-chart-mode-switch" role="group" aria-label="Chart mode">
                   <button class="earnings-chart-mode-btn" type="button" data-earnings-chart-mode="total">Total</button>
@@ -988,7 +988,7 @@
             <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
               <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                 <span class="chart-toggle-arrow" aria-hidden="true">v</span>
-                <span>Cargo: Total Costs by Fleet</span>
+                <span>Total Costs by Fleet</span>
               </button>
               <div class="earnings-chart-body">
                 <div id="earnings-cargo-net-profit-chart" class="earnings-net-profit-chart" aria-label="Cargo total costs by fleet over the last 14 days"></div>
@@ -998,19 +998,19 @@
             <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
               <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">
                 <span class="chart-toggle-arrow" aria-hidden="true">v</span>
-                <span>Cargo: Total Costs Breakdown</span>
+                <span>Total Costs Breakdown</span>
               </button>
               <div class="earnings-chart-body">
                 <div id="earnings-cargo-cost-breakdown-chart" class="earnings-net-profit-chart" aria-label="Cargo total costs by day"></div>
               </div>
             </section>
 
-            <section class="work-surface earnings-surface cargo-table-panel" data-cargo-table-panel="fleet">
-              <button class="earnings-chart-toggle cargo-table-toggle" type="button" data-cargo-table-toggle aria-expanded="true">
-                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
-                <span>Cargo Costs by Fleet</span>
-              </button>
-              <div class="cargo-table-body">
+            <section class="work-surface earnings-surface cargo-table-panel">
+              <div class="cargo-table-switch" role="tablist" aria-label="Cargo cost table">
+                <button class="cargo-table-switch-button active" type="button" role="tab" data-cargo-table-select="fleet" aria-selected="true">Cargo Costs by Fleet</button>
+                <button class="cargo-table-switch-button" type="button" role="tab" data-cargo-table-select="allocation" aria-selected="false">Cargo Cost Allocation by Fleet &amp; Asset</button>
+              </div>
+              <div class="cargo-table-view" data-cargo-table-panel="fleet">
               <div class="activity-filter-bar earnings-filter-bar">
                 <label class="activity-filter">
                   <span>Date</span>
@@ -1055,14 +1055,7 @@
                 <div id="earnings-cargo-metric-guide" class="earnings-metric-guide-list"></div>
               </details>
               </div>
-            </section>
-
-            <section class="work-surface earnings-surface cargo-table-panel collapsed" data-cargo-table-panel="allocation">
-              <button class="earnings-chart-toggle cargo-table-toggle" type="button" data-cargo-table-toggle aria-expanded="false">
-                <span class="chart-toggle-arrow" aria-hidden="true">v</span>
-                <span>Cargo Cost Allocation by Asset &amp; Fleet</span>
-              </button>
-              <div class="cargo-table-body">
+              <div class="cargo-table-view" data-cargo-table-panel="allocation" hidden>
               <div class="activity-filter-bar earnings-filter-bar">
                 <label class="activity-filter">
                   <span>Date</span>

@@ -5894,16 +5894,18 @@ document.querySelectorAll('[data-chart-toggle]').forEach((button) => {
   });
 });
 
-document.querySelectorAll('[data-cargo-table-toggle]').forEach((button) => {
+document.querySelectorAll('[data-cargo-table-select]').forEach((button) => {
   button.addEventListener('click', () => {
-    const selected = button.closest('[data-cargo-table-panel]');
-    if (!selected || !selected.classList.contains('collapsed')) return;
-    document.querySelectorAll('[data-cargo-table-panel]').forEach((panel) => {
-      const expanded = panel === selected;
-      panel.classList.toggle('collapsed', !expanded);
-      panel.querySelector('[data-cargo-table-toggle]')?.setAttribute('aria-expanded', String(expanded));
+    activeCargoTable = button.dataset.cargoTableSelect === 'allocation' ? 'allocation' : 'fleet';
+    document.querySelectorAll('[data-cargo-table-select]').forEach((option) => {
+      const selected = option.dataset.cargoTableSelect === activeCargoTable;
+      option.classList.toggle('active', selected);
+      option.setAttribute('aria-selected', String(selected));
     });
-    activeCargoTable = selected.dataset.cargoTablePanel === 'allocation' ? 'allocation' : 'fleet';
+    document.querySelectorAll('[data-cargo-table-panel]').forEach((view) => {
+      const selected = view.dataset.cargoTablePanel === activeCargoTable;
+      view.hidden = !selected;
+    });
     renderEarningsColumnControls();
   });
 });
