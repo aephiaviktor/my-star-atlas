@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
 
+const BREAKEVEN_COST_BASIS_START_ISO = '2026-07-24';
+
 // Re-implement the breakeven aggregation logic from electron/main.js in a
 // small pure helper so the v1 ledger can be tested without spinning up
 // the full Electron main process. Mirrors the production code shape.
@@ -11,11 +13,12 @@ function buildBreakevenRows({ miningRows = [], cargoAllocations = [], inventoryR
 
   const baseAggregator = new Map();
   for (const row of miningRows) {
+    if (String(row.isoDate || '') < BREAKEVEN_COST_BASIS_START_ISO) continue;
     const starbase = String(row.starbase || '').trim();
     const asset = String(row.rawMaterial || '').trim();
     if (!starbase || !asset) continue;
     const mined = Number(row.mined);
-    const costsPerUnit = Number(row.costsPerUnit);
+    const costsPerUnit = Number(row.costsPerUnitAtlas);
     if (!Number.isFinite(mined) || mined <= 0) continue;
     if (!Number.isFinite(costsPerUnit) || costsPerUnit < 0) continue;
     const key = `${starbase}\n${asset}`;
@@ -37,11 +40,12 @@ function buildBreakevenRows({ miningRows = [], cargoAllocations = [], inventoryR
 
   const cargoAggregator = new Map();
   for (const row of cargoAllocations) {
+    if (String(row.isoDate || '') < BREAKEVEN_COST_BASIS_START_ISO) continue;
     const starbase = String(row.destination || '').trim();
     const asset = String(row.asset || '').trim();
     if (!starbase || !asset) continue;
     const amount = Number(row.amount);
-    const costsPerUnit = Number(row.costsPerUnit);
+    const costsPerUnit = Number(row.costsPerUnitAtlas);
     if (!Number.isFinite(amount) || amount <= 0) continue;
     if (!Number.isFinite(costsPerUnit) || costsPerUnit < 0) continue;
     const key = `${starbase}\n${asset}`;
@@ -127,10 +131,10 @@ function normalizeName(value) {
 
 test('buildBreakevenRows combines mining base cost and cargo delivery cost for the same starbase and asset', () => {
   const miningRows = [
-    { starbase: 'MRZ-17', rawMaterial: 'ARCO', mined: 1000, costsPerUnit: 0.000388 },
+    { isoDate: '2026-07-24', starbase: 'MRZ-17', rawMaterial: 'ARCO', mined: 1000, costsPerUnitAtlas: 0.000388 },
   ];
   const cargoAllocations = [
-    { destination: 'MRZ-21', asset: 'ARCO', amount: 500, costsPerUnit: 0.000143 },
+    { isoDate: '2026-07-24', destination: 'MRZ-21', asset: 'ARCO', amount: 500, costsPerUnitAtlas: 0.000143 },
   ];
   const inventoryRows = [
     { starbase: 'MRZ-21', asset: 'ARCO', quantity: 100, lastDate: '2026-07-22T00:00:00Z' },
@@ -150,10 +154,10 @@ test('buildBreakevenRows combines mining base cost and cargo delivery cost for t
 
 test('buildBreakevenRows adds mining + cargo together when both are present for the same starbase and asset', () => {
   const miningRows = [
-    { starbase: 'MRZ-17', rawMaterial: 'ARCO', mined: 1000, costsPerUnit: 0.000388 },
+    { isoDate: '2026-07-24', starbase: 'MRZ-17', rawMaterial: 'ARCO', mined: 1000, costsPerUnitAtlas: 0.000388 },
   ];
   const cargoAllocations = [
-    { destination: 'MRZ-17', asset: 'ARCO', amount: 500, costsPerUnit: 0.000143 },
+    { isoDate: '2026-07-24', destination: 'MRZ-17', asset: 'ARCO', amount: 500, costsPerUnitAtlas: 0.000143 },
   ];
   const inventoryRows = [
     { starbase: 'MRZ-17', asset: 'ARCO', quantity: 2000, lastDate: '2026-07-22T00:00:00Z' },
@@ -187,8 +191,8 @@ test('buildBreakevenRows keeps an inventory-only row when no mining or cargo tel
 
 test('buildBreakevenRows weights base cost by mined units, not by row count', () => {
   const miningRows = [
-    { starbase: 'MRZ-9', rawMaterial: 'Iron', mined: 100, costsPerUnit: 0.001 },
-    { starbase: 'MRZ-9', rawMaterial: 'Iron', mined: 900, costsPerUnit: 0.0001 },
+    { isoDate: '2026-07-24', starbase: 'MRZ-9', rawMaterial: 'Iron', mined: 100, costsPerUnitAtlas: 0.001 },
+    { isoDate: '2026-07-24', starbase: 'MRZ-9', rawMaterial: 'Iron', mined: 900, costsPerUnitAtlas: 0.0001 },
   ];
   const inventoryRows = [
     { starbase: 'MRZ-9', asset: 'Iron', quantity: 1000, lastDate: '2026-07-22T00:00:00Z' },
@@ -201,11 +205,11 @@ test('buildBreakevenRows weights base cost by mined units, not by row count', ()
 
 test('buildBreakevenRows skips rows with zero units or negative cost', () => {
   const miningRows = [
-    { starbase: 'MRZ-1', rawMaterial: 'Carbon', mined: 0, costsPerUnit: 0.0002 },
-    { starbase: 'MRZ-1', rawMaterial: 'Carbon', mined: 500, costsPerUnit: -0.0001 },
+    { isoDate: '2026-07-24', starbase: 'MRZ-1', rawMaterial: 'Carbon', mined: 0, costsPerUnitAtlas: 0.0002 },
+    { isoDate: '2026-07-24', starbase: 'MRZ-1', rawMaterial: 'Carbon', mined: 500, costsPerUnitAtlas: -0.0001 },
   ];
   const cargoAllocations = [
-    { destination: 'MRZ-1', asset: 'Carbon', amount: 0, costsPerUnit: 0.0003 },
+    { isoDate: '2026-07-24', destination: 'MRZ-1', asset: 'Carbon', amount: 0, costsPerUnitAtlas: 0.0003 },
   ];
   const inventoryRows = [
     { starbase: 'MRZ-1', asset: 'Carbon', quantity: 100, lastDate: '2026-07-22T00:00:00Z' },
@@ -216,6 +220,22 @@ test('buildBreakevenRows skips rows with zero units or negative cost', () => {
   assert.equal(carbon.baseCostPerUnit, null);
   assert.equal(carbon.cargoCostPerUnit, null);
   assert.equal(carbon.source, 'Inventory only');
+});
+
+test('buildBreakevenRows excludes cost telemetry before the fresh UTC cutoff', () => {
+  const miningRows = [
+    { isoDate: '2026-07-23', starbase: 'MRZ-17', rawMaterial: 'ARCO', mined: 1000, costsPerUnitAtlas: 0.000388 },
+    { isoDate: '2026-07-24', starbase: 'MRZ-17', rawMaterial: 'ARCO', mined: 1000, costsPerUnitAtlas: 0.0005 },
+  ];
+  const cargoAllocations = [
+    { isoDate: '2026-07-23', destination: 'MRZ-17', asset: 'ARCO', amount: 500, costsPerUnitAtlas: 0.000143 },
+    { isoDate: '2026-07-24', destination: 'MRZ-17', asset: 'ARCO', amount: 500, costsPerUnitAtlas: 0.0002 },
+  ];
+  const inventoryRows = [{ starbase: 'MRZ-17', asset: 'ARCO', quantity: 100 }];
+  const [arco] = buildBreakevenRows({ miningRows, cargoAllocations, inventoryRows });
+  assert.equal(arco.baseCostPerUnit, 0.0005);
+  assert.equal(arco.cargoCostPerUnit, 0.0002);
+  assert.equal(arco.landedCostPerUnit, 0.0007);
 });
 
 test('buildBreakevenRows sorts output by starbase then asset for a stable table layout', () => {
@@ -238,6 +258,8 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(html, /id="earnings-breakeven-starbase-filter"/);
   assert.match(html, /id="earnings-breakeven-asset-filter"/);
   assert.match(html, /id="earnings-breakeven-source-filter"/);
+  assert.match(html, /id="earnings-breakeven-hide-low-inventory"/);
+  assert.doesNotMatch(html, /activity-filter-note">Landed cost =/);
   assert.match(html, /<th>Inventory Value<\/th>/);
   assert.match(html, /<th>GM Price \/ Unit<\/th>/);
   assert.match(js, /function renderEarningsBreakeven\(/);
@@ -254,6 +276,10 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(js, /breakeven: 'breakevenRows'/);
   assert.match(js, /breakeven: \(\) => earningsBreakevenTableHead/);
   assert.match(js, /const breakevenEarningsOptionalColumns/);
+  assert.match(js, /breakeven: breakevenEarningsOptionalColumns/);
+  assert.match(js, /breakeven: new Set\(\['source'\]\)/);
+  assert.match(js, /breakeven: \{ starbase: '', asset: '', source: '', hideLowInventory: false \}/);
+  assert.match(js, /handle\(earningsBreakevenTableHead, 'breakeven'\)/);
   assert.match(js, /else if \(subtab === 'breakeven'\) renderEarningsBreakeven\(latestEarningsResult\);/);
   assert.match(js, /renderEarningsUpgrading\(result\);\s+renderEarningsBreakeven\(result\);/);
 });
@@ -267,4 +293,12 @@ test('production breakeven inventory loop does not shadow its source row', () =>
 test('earnings snapshot declares the optional Breakeven error before returning it', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   assert.match(main, /let breakevenRows = \[\];\s+let breakevenError = '';/);
+});
+
+test('production Breakeven cost basis uses enriched Atlas fields and the fresh cutoff', () => {
+  const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /const BREAKEVEN_COST_BASIS_START_ISO = '2026-07-24';/);
+  assert.match(main, /const costsPerUnit = Number\(row\.costsPerUnitAtlas\);/);
+  assert.match(main, /row\.fuelCostsAtlas/);
+  assert.match(main, /row\.txsCostsAtlas/);
 });

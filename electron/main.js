@@ -3390,6 +3390,8 @@ function getCurrentResourcePriceAtl(prices, resourceName) {
 // values stay `null` if there is no telemetry for the row. Mining and
 // cargo coverage are tracked independently so the UI can label the
 // provenance accurately.
+const BREAKEVEN_COST_BASIS_START_ISO = '2026-07-24';
+
 function buildBreakevenRows({ miningRows = [], cargoAllocations = [], inventoryRows = [], prices = null } = {}) {
   const resourcePriceByName = (prices && prices.resourcePricesAtlByName) || {};
 
@@ -3397,11 +3399,12 @@ function buildBreakevenRows({ miningRows = [], cargoAllocations = [], inventoryR
   // Units come from `mined` so a single high-cost day does not dominate.
   const baseAggregator = new Map();
   for (const row of miningRows) {
+    if (String(row.isoDate || '') < BREAKEVEN_COST_BASIS_START_ISO) continue;
     const starbase = String(row.starbase || '').trim();
     const asset = String(row.rawMaterial || '').trim();
     if (!starbase || !asset) continue;
     const mined = Number(row.mined);
-    const costsPerUnit = Number(row.costsPerUnit);
+    const costsPerUnit = Number(row.costsPerUnitAtlas);
     if (!Number.isFinite(mined) || mined <= 0) continue;
     if (!Number.isFinite(costsPerUnit) || costsPerUnit < 0) continue;
     const key = `${starbase}\n${asset}`;
@@ -3437,19 +3440,20 @@ function buildBreakevenRows({ miningRows = [], cargoAllocations = [], inventoryR
   // Units come from `amount` so empty legs do not dilute the result.
   const cargoAggregator = new Map();
   for (const row of cargoAllocations) {
+    if (String(row.isoDate || '') < BREAKEVEN_COST_BASIS_START_ISO) continue;
     const starbase = String(row.destination || '').trim();
     const asset = String(row.asset || '').trim();
     if (!starbase || !asset) continue;
     const amount = Number(row.amount);
-    const costsPerUnit = Number(row.costsPerUnit);
+    const costsPerUnit = Number(row.costsPerUnitAtlas);
     if (!Number.isFinite(amount) || amount <= 0) continue;
     if (!Number.isFinite(costsPerUnit) || costsPerUnit < 0) continue;
     const key = `${starbase}\n${asset}`;
     const entry = cargoAggregator.get(key) || { starbase, asset, totalCost: 0, totalUnits: 0, fuelCost: 0, txsCost: 0 };
     entry.totalCost += costsPerUnit * amount;
     entry.totalUnits += amount;
-    if (Number.isFinite(Number(row.fuelCosts))) entry.fuelCost += Number(row.fuelCosts);
-    if (Number.isFinite(Number(row.txsCosts))) entry.txsCost += Number(row.txsCosts);
+    if (Number.isFinite(Number(row.fuelCostsAtlas))) entry.fuelCost += Number(row.fuelCostsAtlas);
+    if (Number.isFinite(Number(row.txsCostsAtlas))) entry.txsCost += Number(row.txsCostsAtlas);
     cargoAggregator.set(key, entry);
   }
   const cargoByKey = new Map();
