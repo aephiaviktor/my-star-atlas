@@ -16,6 +16,7 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { createRpcFetcher, createRpcRateGate } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, groupCargoAllocationRows, enrichCargoAllocationRows } = require('./influx-data');
+const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment } = require('./earnings-math');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -4682,6 +4683,8 @@ async function fetchEarningsSnapshot(payload) {
       const mapped = Number.isFinite(sduPerScan);
       const requiredCrewRaw = Number(sotRow?.requiredCrew);
       const crewMapped = Number.isFinite(requiredCrewRaw);
+      const cargoCapacityRaw = Number(sotRow?.cargoCapacity);
+      const cargoCapacityMapped = Number.isFinite(cargoCapacityRaw) && cargoCapacityRaw >= 0;
       if (mapped) {
         mappedShipTypeCount += 1;
         expectedSduPerScan += entry.amount * sduPerScan;
@@ -4699,6 +4702,7 @@ async function fetchEarningsSnapshot(payload) {
         sduPerScan: mapped ? sduPerScan : null,
         expectedSduPerScan: mapped ? entry.amount * sduPerScan : null,
         requiredCrew: crewMapped ? requiredCrewRaw : null,
+        cargoCapacity: cargoCapacityMapped ? cargoCapacityRaw : null,
         mapped,
       };
     });
@@ -4711,6 +4715,7 @@ async function fetchEarningsSnapshot(payload) {
       expectedSduPerScan,
       expectedSduValueAtl: sduPriceAtl != null ? expectedSduPerScan * sduPriceAtl : null,
       totalRequiredCrew: totalRequiredCrew > 0 ? totalRequiredCrew : null,
+      totalCargoCapacity: calculateFleetCargoCapacity(ships),
       shipTypes: ships.length,
       ships,
     };
@@ -4955,6 +4960,8 @@ async function fetchEarningsSnapshot(payload) {
       ships: fleet?.ships || [],
       shipTypes: fleet?.shipTypes || 0,
       totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
+      fleetCargoCapacity: fleet?.totalCargoCapacity ?? null,
+      cargoLegs: Number(cargoRow.txsDaily) || 0,
       starbaseLabel: Array.isArray(cargoRow.starbases) && cargoRow.starbases.length ? cargoRow.starbases.join(', ') : '--',
       fuelCostsAtlas,
       txsCostsAtlas,
@@ -4990,6 +4997,22 @@ async function fetchEarningsSnapshot(payload) {
       costsPerUnitAtlas: Number.isFinite(totalCostsAtlas) && row.amount > 0 ? totalCostsAtlas / row.amount : null,
     };
   });
+  const cargoVolumeByFleetDayAssignment = buildCargoVolumeByFleetDayAssignment(cargoAllocations);
+  const cargoAllocationAvailable = cargoAllocationResult.status === 'fulfilled';
+  for (const row of cargo) {
+    const volumeKey = `${row.isoDate}\n${normalizeFleetLabel(row.fleetName)}\n${row.assignment}`;
+    const cargoVolume = cargoAllocationAvailable
+      ? (cargoVolumeByFleetDayAssignment.get(volumeKey) || 0)
+      : null;
+    const efficiency = calculateCargoEfficiency({
+      cargoVolume,
+      fleetCargoCapacity: row.fleetCargoCapacity,
+      cargoLegs: row.cargoLegs,
+    });
+    row.cargoVolume = cargoVolume;
+    row.cargoCapacity = efficiency.cargoCapacity;
+    row.cargoEfficiencyPercent = efficiency.cargoEfficiencyPercent;
+  }
 
   rows.sort((a, b) => {
     const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));

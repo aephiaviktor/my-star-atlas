@@ -403,6 +403,9 @@ const cargoEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'txsCostsPct', label: 'Txs Costs Pct' }),
+  Object.freeze({ id: 'cargoVolume', label: 'Cargo Volume' }),
+  Object.freeze({ id: 'cargoCapacity', label: 'Cargo Capacity' }),
+  Object.freeze({ id: 'cargoEfficiency', label: 'Cargo Efficiency' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
 
@@ -454,7 +457,7 @@ const breakevenEarningsBaseColumns = Object.freeze([
   Object.freeze({ id: 'inventory', label: 'Inventory' }),
   Object.freeze({ id: 'baseCost', label: 'Base Cost / Unit' }),
   Object.freeze({ id: 'cargoCost', label: 'Cargo Cost / Unit' }),
-  Object.freeze({ id: 'landedCost', label: 'Landed Cost / Unit' }),
+  Object.freeze({ id: 'landedCost', label: 'Total Cost / Unit' }),
   Object.freeze({ id: 'inventoryValue', label: 'Inventory Value' }),
   Object.freeze({ id: 'gmPrice', label: 'GM Price / Unit' }),
 ]);
@@ -481,7 +484,7 @@ const earningsColumnsBySubtab = Object.freeze({
 const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
-  cargo: new Set(['txsDaily', 'assignment', 'preferredCargoType', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct']),
+  cargo: new Set(['txsDaily', 'assignment', 'preferredCargoType', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
@@ -534,6 +537,9 @@ const earningsMetricGuideBySubtab = Object.freeze({
     fuelCosts: ['ATLAS value of fuel consumed by cargo movement.', 'Fuel burned × current fuel price.', 'The main operating-resource cost represented in Cargo.'],
     totalCosts: ['Estimated cargo operating cost represented by available data.', 'Fuel Costs + Txs Costs.', 'Cargo revenue is not tracked here, so this is a cost-efficiency view rather than profit.'],
     txsCostsPct: ['Transaction fees as a share of represented cargo costs.', '(Txs Costs ÷ Total Costs) × 100.', 'A high value means fees dominate fuel; reduce unnecessary transactions where practical.'],
+    cargoVolume: ['Total cargo-space volume delivered by the fleet during the UTC day.', 'Σ delivered cargo volume from cargo-allocation telemetry.', 'Compare it with Cargo Capacity to see how much available hold space was used.'],
+    cargoCapacity: ['Total cargo-space opportunity across the fleet’s cargo legs that day.', 'Fleet cargo capacity × Transport/Supply Chain movement legs.', 'Every leg counts, including an empty return leg, so one full outbound and one empty return produces 50% efficiency.'],
+    cargoEfficiency: ['Share of available cargo capacity used across all cargo legs.', '(Cargo Volume ÷ Cargo Capacity) × 100.', 'Higher means the fleet carried more cargo relative to its available hold space across the full route.'],
   }),
   cargoAllocation: Object.freeze({
     assignment: ['Logistics assignment that delivered this asset.', 'Recorded assignment: Transport or Supply Chain.', 'Use it to separate direct transport from supply-chain activity for the same asset.'],
@@ -566,8 +572,8 @@ const earningsMetricGuideBySubtab = Object.freeze({
     baseCost: ['Weighted mining production cost per unit.', 'Σ daily mining costs ÷ Σ units mined since 2026-07-24 00:00 UTC.', 'Includes represented ammo, food, fuel, rental, and transaction costs.'],
     cargoCost: ['Weighted inbound delivery cost per unit.', 'Σ allocated inbound cargo costs ÷ Σ units delivered since 2026-07-24 00:00 UTC.', 'Uses the corrected delivery starbase as the destination.'],
     landedCost: ['Combined represented cost per unit at this starbase.', 'Base Cost / Unit + Cargo Cost / Unit.', 'This is the estimated breakeven price before any unrepresented costs or sale fees.'],
-    inventoryValue: ['Estimated represented cost basis of current inventory.', 'Inventory × Landed Cost / Unit.', 'A dash means no qualifying base or cargo cost exists yet.'],
-    gmPrice: ['Current Galactic Marketplace reference price.', 'Aephia /gm/resource pricingATL.priceATL.', 'Compare with Landed Cost; it is a current market reference, not guaranteed sale proceeds.'],
+    inventoryValue: ['Estimated represented cost basis of current inventory.', 'Inventory × Total Cost / Unit.', 'A dash means no qualifying base or cargo cost exists yet.'],
+    gmPrice: ['Current Galactic Marketplace reference price.', 'Aephia /gm/resource pricingATL.priceATL.', 'Compare with Total Cost; it is a current market reference, not guaranteed sale proceeds.'],
     ammoCost: ['Mining ammunition cost per produced unit.', 'Σ ammunition cost ÷ Σ units mined.', 'One optional component of Base Cost / Unit.'],
     foodCost: ['Mining food cost per produced unit.', 'Σ food cost ÷ Σ units mined.', 'One optional component of Base Cost / Unit.'],
     fuelCost: ['Mining and inbound cargo fuel cost per unit.', 'Mining fuel per mined unit + allocated cargo fuel per delivered unit.', 'Shows represented fuel across both cost layers.'],
@@ -651,6 +657,9 @@ const earningsSortKeyByColumnId = Object.freeze({
   preferredCargoType: 'preferredCargoType',
   starbases: 'starbaseLabel',
   txsCostsPct: 'txsCostsPercent',
+  cargoVolume: 'cargoVolume',
+  cargoCapacity: 'cargoCapacity',
+  cargoEfficiency: 'cargoEfficiencyPercent',
   account: 'fleetAccount',
   baseCost: 'baseCostPerUnit',
   cargoCost: 'cargoCostPerUnit',
@@ -5229,6 +5238,9 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
   if (columnId === 'txsCostsPct') return createTextCell(formatPercentNumber(entry.txsCostsPercent, 0));
+  if (columnId === 'cargoVolume') return createTextCell(entry.cargoVolume == null ? '--' : formatWholeNumber(entry.cargoVolume));
+  if (columnId === 'cargoCapacity') return createTextCell(entry.cargoCapacity == null ? '--' : formatWholeNumber(entry.cargoCapacity));
+  if (columnId === 'cargoEfficiency') return createTextCell(formatPercentNumber(entry.cargoEfficiencyPercent, 1));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
 }
