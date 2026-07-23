@@ -5251,6 +5251,9 @@ function renderEarnings(result) {
     earningsTableBody.appendChild(row);
     renderEarningsMining(result);
     renderEarningsCargo(result);
+    renderEarningsCrafting(result);
+    renderEarningsUpgrading(result);
+    renderEarningsBreakeven(result);
     return;
   }
   const visibleColumns = getVisibleEarningsColumns('scanning');
@@ -5270,6 +5273,7 @@ function renderEarnings(result) {
   renderEarningsCargo(result);
   renderEarningsCrafting(result);
   renderEarningsUpgrading(result);
+  renderEarningsBreakeven(result);
 }
 
 function renderEarningsMining(result) {

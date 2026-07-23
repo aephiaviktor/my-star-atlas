@@ -255,6 +255,7 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(js, /breakeven: \(\) => earningsBreakevenTableHead/);
   assert.match(js, /const breakevenEarningsOptionalColumns/);
   assert.match(js, /else if \(subtab === 'breakeven'\) renderEarningsBreakeven\(latestEarningsResult\);/);
+  assert.match(js, /renderEarningsUpgrading\(result\);\s+renderEarningsBreakeven\(result\);/);
 });
 
 test('production breakeven inventory loop does not shadow its source row', () => {
