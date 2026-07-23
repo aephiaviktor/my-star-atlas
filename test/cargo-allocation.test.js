@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   parseInfluxCsv,
   groupCargoAllocationRows,
+  enrichCargoAllocationRows,
 } = require('../electron/influx-data');
 
 test('parseInfluxCsv realigns rows when Flux emits a new table header', () => {
@@ -29,6 +30,18 @@ test('groupCargoAllocationRows keeps fleet and route dimensions separate', () =>
   ];
 
   assert.deepEqual(groupCargoAllocationRows(rows), rows);
+});
+
+test('enrichCargoAllocationRows adds fleet metadata without changing allocation dimensions', () => {
+  const rows = [{ isoDate: '2026-07-22', fleet: 'Fleet Alpha', asset: 'Food', origin: 'MRZ-1', destination: 'MRZ-2' }];
+  const fleetByLabel = new Map([['fleet alpha', {
+    key: 'fleet-key', ownership: 'Owned', relationship: 'owned', ships: [{ name: 'Pearce X4', amount: 2 }], shipTypes: 1, totalRequiredCrew: 16,
+  }]]);
+
+  assert.deepEqual(enrichCargoAllocationRows(rows, fleetByLabel, (value) => String(value).toLowerCase()), [{
+    ...rows[0], fleetName: 'Fleet Alpha', fleetAccount: 'fleet-key', ownership: 'Owned', relationship: 'owned',
+    ships: [{ name: 'Pearce X4', amount: 2 }], shipTypes: 1, totalRequiredCrew: 16,
+  }]);
 });
 
 test('groupCargoAllocationRows sums duplicate field rows for the same fleet route and asset', () => {

@@ -46,6 +46,22 @@ function parseInfluxCsv(text) {
   return rows;
 }
 
+function enrichCargoAllocationRows(rows, fleetByLabel, normalizeFleetLabel) {
+  return rows.map((row) => {
+    const fleet = fleetByLabel.get(normalizeFleetLabel(row.fleet));
+    return {
+      ...row,
+      fleetName: row.fleet,
+      fleetAccount: fleet?.key || '',
+      ownership: fleet?.ownership || '',
+      relationship: fleet?.relationship || '',
+      ships: fleet?.ships || [],
+      shipTypes: fleet?.shipTypes || 0,
+      totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
+    };
+  });
+}
+
 function groupCargoAllocationRows(rows) {
   const groups = new Map();
   for (const row of rows) {
@@ -62,4 +78,4 @@ function groupCargoAllocationRows(rows) {
   return Array.from(groups.values());
 }
 
-module.exports = { parseInfluxCsv, groupCargoAllocationRows };
+module.exports = { parseInfluxCsv, groupCargoAllocationRows, enrichCargoAllocationRows };

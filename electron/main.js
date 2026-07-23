@@ -15,7 +15,7 @@ const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
 const { createRpcFetcher, createRpcRateGate } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
-const { parseInfluxCsv, groupCargoAllocationRows } = require('./influx-data');
+const { parseInfluxCsv, groupCargoAllocationRows, enrichCargoAllocationRows } = require('./influx-data');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -4269,6 +4269,7 @@ ${scopeFilterFlux}
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, fleet, assignment, date);
     entry.cargoTypes.set(cargoType, (entry.cargoTypes.get(cargoType) || 0) + 1);
+    entry.txsDaily += 1;
   }
 
   for (const row of rowsByKey.values()) {
@@ -4736,25 +4737,18 @@ async function fetchEarningsSnapshot(payload) {
         : null,
     };
   });
-  const cargoSignatureCounts = await Promise.race([
-    fetchFleetSignatureDailyCounts(
-      connection,
-      cargo.map((row) => row.fleetAccount).filter(Boolean),
-      new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)))
-    ),
-    new Promise((resolve) => setTimeout(() => resolve(new Map()), 5000)),
-  ]);
-  for (const row of cargo) {
-    if (!row.fleetAccount || !row.isoDate) continue;
-    row.txsDaily = cargoSignatureCounts.get(`${row.isoDate}\n${row.fleetAccount}`) || 0;
-  }
   // Scope allocation rows through the already faction-scoped movement fleets,
   // while preserving each fleet and route as separate cost dimensions.
   const scopedCargoFleetLabels = new Set(cargoRows.map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
   const scopedCargoAllocationRows = cargoAllocationRows.filter((row) =>
     scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet))
   );
-  const cargoAllocations = groupCargoAllocationRows(scopedCargoAllocationRows).map((row) => {
+  const enrichedCargoAllocationRows = enrichCargoAllocationRows(
+    scopedCargoAllocationRows,
+    fleetByLabel,
+    normalizeFleetLabel
+  );
+  const cargoAllocations = groupCargoAllocationRows(enrichedCargoAllocationRows).map((row) => {
     const fuelCostsAtlas = fuelPriceAtl != null ? row.allocatedFuel * fuelPriceAtl : null;
     const txsCostsAtlas = atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
     const totalCostsAtlas = Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)

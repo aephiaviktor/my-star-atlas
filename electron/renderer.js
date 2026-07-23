@@ -400,6 +400,10 @@ const cargoEarningsOptionalColumns = Object.freeze([
 ]);
 
 const cargoAllocationEarningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'color', label: 'Color' }),
+  Object.freeze({ id: 'ownership', label: 'Ownership' }),
+  Object.freeze({ id: 'ships', label: 'Ships' }),
+  Object.freeze({ id: 'requiredCrew', label: 'Required Crew' }),
   Object.freeze({ id: 'assignment', label: 'Assignment' }),
   Object.freeze({ id: 'amount', label: 'Amount' }),
   Object.freeze({ id: 'cargoVolume', label: 'Cargo Volume' }),
@@ -5560,11 +5564,15 @@ function renderEarningsCargoAllocations(result) {
   populateEarningsFilterOptions('cargoAllocation', rows);
   const filteredRows = getFilteredEarningsRows('cargoAllocation', rows);
   const visibleColumns = getVisibleEarningsColumns('cargoAllocation');
+  const fleetDetailIds = new Set(['color', 'ownership', 'ships', 'requiredCrew']);
+  const fleetDetailColumns = visibleColumns.filter((column) => fleetDetailIds.has(column.id));
+  const remainingColumns = visibleColumns.filter((column) => !fleetDetailIds.has(column.id));
+  const colorMap = buildEarningsFleetColorMap(rows, 0);
   renderEarningsMetricGuide('cargoAllocation');
   if (earningsCargoAllocationTableHead) {
     earningsCargoAllocationTableHead.textContent = '';
     const tr = document.createElement('tr');
-    for (const label of ['Date', 'Fleet', 'Asset', 'Origin Starbase', 'Destination Starbase', ...visibleColumns.map((column) => column.label)]) {
+    for (const label of ['Date', 'Fleet', ...fleetDetailColumns.map((column) => column.label), 'Asset', 'Origin Starbase', 'Destination Starbase', ...remainingColumns.map((column) => column.label)]) {
       const th = document.createElement('th');
       th.scope = 'col';
       th.textContent = label;
@@ -5587,11 +5595,14 @@ function renderEarningsCargoAllocations(result) {
   for (const entry of filteredRows) {
     const tr = document.createElement('tr');
     tr.appendChild(createTextCell(entry.label || entry.isoDate));
-    tr.appendChild(createTextCell(entry.fleet || '--'));
+    tr.appendChild(createEarningsFleetCell(entry));
+    for (const column of fleetDetailColumns) {
+      tr.appendChild(createCargoEarningsOptionalCell(entry, column.id, colorMap));
+    }
     tr.appendChild(createTextCell(entry.asset || '--'));
     tr.appendChild(createTextCell(entry.origin || '--'));
     tr.appendChild(createTextCell(entry.destination || '--'));
-    for (const column of visibleColumns) {
+    for (const column of remainingColumns) {
       if (column.id === 'assignment') tr.appendChild(createTextCell(entry.assignment || '--'));
       else if (column.id === 'amount') tr.appendChild(createTextCell(formatWholeNumber(entry.amount || 0)));
       else if (column.id === 'cargoVolume') tr.appendChild(createTextCell(formatWholeNumber(entry.cargoVolume || 0)));
