@@ -678,6 +678,23 @@ select:focus {
   font-size: 12px;
 }
 
+.breakeven-inventory-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.breakeven-inventory-toggle input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

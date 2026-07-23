@@ -258,7 +258,8 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(html, /id="earnings-breakeven-starbase-filter"/);
   assert.match(html, /id="earnings-breakeven-asset-filter"/);
   assert.match(html, /id="earnings-breakeven-source-filter"/);
-  assert.match(html, /id="earnings-breakeven-hide-low-inventory"/);
+  assert.match(html, /id="earnings-breakeven-hide-low-inventory"[^>]*> Hide Inventory ≤ 2/);
+  assert.match(html, /class="breakeven-inventory-toggle"/);
   assert.doesNotMatch(html, /activity-filter-note">Landed cost =/);
   assert.match(html, /<th>Inventory Value<\/th>/);
   assert.match(html, /<th>GM Price \/ Unit<\/th>/);
@@ -279,6 +280,8 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(js, /breakeven: breakevenEarningsOptionalColumns/);
   assert.match(js, /breakeven: new Set\(\['source'\]\)/);
   assert.match(js, /breakeven: \{ starbase: '', asset: '', source: '', hideLowInventory: false \}/);
+  const css = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.css'), 'utf8');
+  assert.match(css, /\.breakeven-inventory-toggle\s*\{[^}]*font-size:\s*0\.72rem/s);
   assert.match(js, /handle\(earningsBreakevenTableHead, 'breakeven'\)/);
   assert.match(js, /else if \(subtab === 'breakeven'\) renderEarningsBreakeven\(latestEarningsResult\);/);
   assert.match(js, /renderEarningsUpgrading\(result\);\s+renderEarningsBreakeven\(result\);/);
