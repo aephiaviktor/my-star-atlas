@@ -901,7 +901,7 @@ function restoreFactionFilterState(faction) {
 
 function openSettings() {
   form.classList.add('sensitive-hidden');
-  toggleSensitiveButton.textContent = 'Show Current RPC Limiter URL';
+  toggleSensitiveButton.textContent = 'Show RPC URL';
   void refreshRpcLimiterStatus();
   settingsOverlay.classList.remove('hidden');
   settingsOverlay.setAttribute('aria-hidden', 'false');
@@ -6407,7 +6407,7 @@ document.addEventListener('keydown', (event) => {
 
 toggleSensitiveButton.addEventListener('click', () => {
   const hidden = form.classList.toggle('sensitive-hidden');
-  toggleSensitiveButton.textContent = hidden ? 'Show Current RPC Limiter URL' : 'Hide Current RPC Limiter URL';
+  toggleSensitiveButton.textContent = hidden ? 'Show RPC URL' : 'Hide RPC URL';
 });
 
 sendRpcLimiterButton.addEventListener('click', async () => {

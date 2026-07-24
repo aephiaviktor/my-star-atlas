@@ -1484,6 +1484,14 @@ select:focus {
   padding: 6px 10px;
 }
 
+#toggle-sensitive-btn {
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .icon-button {
   min-width: 36px;
   width: 36px;
