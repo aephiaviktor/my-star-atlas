@@ -4576,7 +4576,7 @@ ${scopeFilterFlux}
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
   |> filter(fn: (r) => exists r.fleet)
-  |> keep(columns: ["fleet", "assignment", "_time", "_value"])
+  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "assignment"])`;
   const moveTimeFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
@@ -4612,6 +4612,7 @@ ${scopeFilterFlux}
         isoDate,
         label: formatShortUtcDate(date),
         starbases: new Set(),
+        cycleIds: new Set(),
         travelTimeByMode: { warp: 0, subwarp: 0 },
         burnedFuel: 0,
         txCostSol: 0,
@@ -4659,11 +4660,13 @@ ${scopeFilterFlux}
     const fleet = String(row.fleet || '').trim();
     const assignment = String(row.assignment || '').trim();
     const travelMode = String(row._value || '').trim().toLowerCase();
+    const cycleId = String(row.cycleId || '').trim();
     const date = new Date(row._time);
     if (!fleet || !assignment || !travelMode || Number.isNaN(date.getTime())) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, fleet, assignment, date);
+    if (cycleId) entry.cycleIds.add(cycleId);
     travelModeByMovement.set(`${row._time}\n${fleet}\n${assignment}`, travelMode);
     entry.txsDaily += 1;
   }
@@ -4691,6 +4694,7 @@ ${scopeFilterFlux}
       return {
         ...row,
         starbases: Array.from(row.starbases).sort((a, b) => a.localeCompare(b)),
+        cargoCycles: row.cycleIds.size,
         travelModeTime,
         travelModeWarpPercent: travelModeTime?.warpPercent ?? null,
       };
@@ -5140,7 +5144,7 @@ async function fetchEarningsSnapshot(payload) {
       shipTypes: fleet?.shipTypes || 0,
       totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
       fleetCargoCapacity: fleet?.totalCargoCapacity ?? null,
-      cargoLegs: Number(cargoRow.txsDaily) || 0,
+      cargoCycles: Number(cargoRow.cargoCycles) || 0,
       starbaseLabel: Array.isArray(cargoRow.starbases) && cargoRow.starbases.length ? cargoRow.starbases.join(', ') : '--',
       fuelCostsAtlas,
       txsCostsAtlas,
@@ -5186,7 +5190,7 @@ async function fetchEarningsSnapshot(payload) {
     const efficiency = calculateCargoEfficiency({
       cargoVolume,
       fleetCargoCapacity: row.fleetCargoCapacity,
-      cargoLegs: row.cargoLegs,
+      cargoCycles: row.cargoCycles,
     });
     row.cargoVolume = cargoVolume;
     row.cargoCapacity = efficiency.cargoCapacity;

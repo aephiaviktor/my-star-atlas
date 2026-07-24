@@ -21,11 +21,11 @@ test('fleet cargo capacity sums ship capacity across quantities and rejects part
   ]), null);
 });
 
-test('cargo efficiency counts every movement leg as a capacity opportunity', () => {
+test('cargo efficiency counts two cargo legs per completed cycle regardless of warp jumps', () => {
   const result = calculateCargoEfficiency({
     cargoVolume: 1000,
     fleetCargoCapacity: 1000,
-    cargoLegs: 2,
+    cargoCycles: 1,
   });
 
   assert.deepEqual(result, {
@@ -34,13 +34,13 @@ test('cargo efficiency counts every movement leg as a capacity opportunity', () 
   });
 });
 
-test('cargo efficiency returns null when fleet capacity or legs are unavailable', () => {
+test('cargo efficiency returns null when fleet capacity or completed cycles are unavailable', () => {
   assert.deepEqual(
-    calculateCargoEfficiency({ cargoVolume: 1000, fleetCargoCapacity: null, cargoLegs: 2 }),
+    calculateCargoEfficiency({ cargoVolume: 1000, fleetCargoCapacity: null, cargoCycles: 1 }),
     { cargoCapacity: null, cargoEfficiencyPercent: null }
   );
   assert.deepEqual(
-    calculateCargoEfficiency({ cargoVolume: 1000, fleetCargoCapacity: 1000, cargoLegs: 0 }),
+    calculateCargoEfficiency({ cargoVolume: 1000, fleetCargoCapacity: 1000, cargoCycles: 0 }),
     { cargoCapacity: null, cargoEfficiencyPercent: null }
   );
 });
@@ -83,7 +83,9 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   const html = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
 
   assert.match(main, /totalCargoCapacity/);
-  assert.match(main, /cargoLegs: Number\(cargoRow\.txsDaily\) \|\| 0/);
+  assert.match(main, /cargoCycles: Number\(cargoRow\.cargoCycles\) \|\| 0/);
+  assert.match(main, /entry\.cycleIds\.add\(cycleId\)/);
+  assert.match(main, /cargoCycles: row\.cycleIds\.size/);
   assert.match(main, /buildCargoVolumeByFleetDayAssignment\(cargoAllocations\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);
   assert.match(main, /const moveTimeFlux =/);
