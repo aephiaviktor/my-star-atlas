@@ -10,31 +10,6 @@ function getRefreshContext(filters = {}) {
   };
 }
 
-const sectionLabels = {
-  production: 'Production/Consumption',
-  fleet: 'My Fleet',
-  earnings: 'Earnings',
-  optimization: 'Optimization',
-};
-
-const subtabLabels = {
-  scanning: 'Scanning',
-  mining: 'Mining',
-  crafting: 'Crafting',
-  production: 'Production',
-  consumption: 'Consumption',
-  'pct-charts': 'PCR Charts',
-  inventory: 'Inventory',
-};
-
-const earningsSubtabLabels = {
-  scanning: 'Scanning',
-  mining: 'Mining',
-  cargo: 'Cargo',
-  crafting: 'Crafting',
-  upgrading: 'Upgrading',
-};
-
 const form = document.querySelector('#settings-form');
 const appShell = document.querySelector('.app-shell');
 const saveStatus = document.querySelector('#save-status');
@@ -51,8 +26,6 @@ const openSettingsButton = document.querySelector('#open-settings-btn');
 const closeSettingsButton = document.querySelector('#close-settings-btn');
 const sidebarToggleButton = document.querySelector('#sidebar-toggle-btn');
 const settingsOverlay = document.querySelector('#settings-overlay');
-const sectionEyebrow = document.querySelector('#section-eyebrow');
-const sectionTitle = document.querySelector('#section-title');
 const profileLabel = document.querySelector('#profile-label');
 const versionLabel = document.querySelector('#version-label');
 const refreshDataButton = document.querySelector('#refresh-data-btn');
@@ -1147,14 +1120,9 @@ function resetFactionScopedState() {
 }
 
 function updateTitle() {
-  const section = sectionLabels[currentSection] || '';
-  const title = currentSection === 'production'
-    ? subtabLabels[currentSubtab]
-    : currentSection === 'earnings'
-      ? earningsSubtabLabels[currentEarningsSubtab]
-      : section;
-  setText(sectionEyebrow, section);
-  setText(sectionTitle, title);
+  document.querySelectorAll('[data-toolbar-section]').forEach((group) => {
+    group.hidden = group.dataset.toolbarSection !== currentSection;
+  });
 }
 
 function updateInfluxResult(result) {

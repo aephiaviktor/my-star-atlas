@@ -79,9 +79,30 @@
 
       <main class="main-area">
         <header class="top-bar">
-          <div>
-            <p class="eyebrow" id="section-eyebrow">Production/Consumption</p>
-            <h2 id="section-title">Scanning</h2>
+          <div class="toolbar-tabs">
+            <div class="subtab-bar toolbar-tab-group" data-toolbar-section="production" role="tablist" aria-label="Production and consumption views">
+              <button class="subtab-button active" type="button" data-subtab="scanning" aria-selected="true">Scanning</button>
+              <button class="subtab-button" type="button" data-subtab="mining" aria-selected="false">Mining</button>
+              <button class="subtab-button" type="button" data-subtab="crafting" aria-selected="false">Crafting</button>
+              <button class="subtab-button" type="button" data-subtab="production" aria-selected="false">Production</button>
+              <button class="subtab-button" type="button" data-subtab="consumption" aria-selected="false">Consumption</button>
+              <button class="subtab-button" type="button" data-subtab="pct-charts" aria-selected="false">PCR Charts</button>
+              <button class="subtab-button" type="button" data-subtab="inventory" aria-selected="false">Inventory</button>
+            </div>
+            <div class="subtab-bar toolbar-tab-group" data-toolbar-section="fleet" role="tablist" aria-label="Fleet views" hidden>
+              <button class="subtab-button active" type="button" aria-selected="true">My Fleet</button>
+            </div>
+            <div class="subtab-bar toolbar-tab-group" data-toolbar-section="optimization" role="tablist" aria-label="Optimization views" hidden>
+              <button class="subtab-button active" type="button" aria-selected="true">Optimization</button>
+            </div>
+            <div class="subtab-bar toolbar-tab-group" data-toolbar-section="earnings" role="tablist" aria-label="Earnings views" hidden>
+              <button class="earnings-subtab-button subtab-button active" type="button" data-earnings-subtab="scanning" aria-selected="true">Scanning</button>
+              <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="mining" aria-selected="false">Mining</button>
+              <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="cargo" aria-selected="false">Cargo</button>
+              <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="crafting" aria-selected="false">Crafting</button>
+              <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="upgrading" aria-selected="false">Upgrading</button>
+              <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="breakeven" aria-selected="false">Breakeven Analysis</button>
+            </div>
           </div>
           <div class="top-actions">
             <div class="faction-switch" role="group" aria-label="Active faction">
@@ -95,16 +116,6 @@
         </header>
 
         <section class="section-view active" data-section-panel="production">
-          <div class="subtab-bar" role="tablist" aria-label="Production and consumption views">
-            <button class="subtab-button active" type="button" data-subtab="scanning" aria-selected="true">Scanning</button>
-            <button class="subtab-button" type="button" data-subtab="mining" aria-selected="false">Mining</button>
-            <button class="subtab-button" type="button" data-subtab="crafting" aria-selected="false">Crafting</button>
-            <button class="subtab-button" type="button" data-subtab="production" aria-selected="false">Production</button>
-            <button class="subtab-button" type="button" data-subtab="consumption" aria-selected="false">Consumption</button>
-            <button class="subtab-button" type="button" data-subtab="pct-charts" aria-selected="false">PCR Charts</button>
-            <button class="subtab-button" type="button" data-subtab="inventory" aria-selected="false">Inventory</button>
-          </div>
-
           <div class="production-panel active" data-production-panel="scanning">
             <div class="activity-filter-bar">
               <label class="activity-filter">
@@ -758,15 +769,6 @@
         </section>
 
         <section class="section-view" data-section-panel="earnings">
-          <div class="subtab-bar" role="tablist" aria-label="Earnings views">
-            <button class="earnings-subtab-button subtab-button active" type="button" data-earnings-subtab="scanning" aria-selected="true">Scanning</button>
-            <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="mining" aria-selected="false">Mining</button>
-            <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="cargo" aria-selected="false">Cargo</button>
-            <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="crafting" aria-selected="false">Crafting</button>
-            <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="upgrading" aria-selected="false">Upgrading</button>
-            <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="breakeven" aria-selected="false">Breakeven Analysis</button>
-          </div>
-
           <div class="earnings-panel active" data-earnings-panel="scanning">
             <div class="dashboard-grid earnings-metrics-grid">
               <section class="metric-card">
@@ -1253,8 +1255,7 @@
           <form id="settings-form" class="settings-form sensitive-hidden">
           <div class="settings-header">
             <div>
-              <p class="eyebrow">Settings</p>
-              <h2 id="settings-title">USTUR Profile</h2>
+              <p class="eyebrow" id="settings-title">Settings</p>
             </div>
             <div class="settings-header-actions">
               <button id="toggle-sensitive-btn" class="ghost-button" type="button">Show RPC URL</button>
