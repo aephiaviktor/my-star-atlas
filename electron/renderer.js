@@ -41,6 +41,10 @@ const saveStatus = document.querySelector('#save-status');
 const settingsStatus = document.querySelector('#settings-status');
 const syncDot = document.querySelector('.sync-dot');
 const toggleSensitiveButton = document.querySelector('#toggle-sensitive-btn');
+const rpcLimiterCurrentUrl = document.querySelector('#rpc-limiter-current-url');
+const rpcLimiterStatePath = document.querySelector('#rpc-limiter-state-path');
+const rpcLimiterUpdated = document.querySelector('#rpc-limiter-updated');
+const sendRpcLimiterButton = document.querySelector('#send-rpc-limiter-btn');
 const testInfluxButton = document.querySelector('#test-influx-btn');
 const fleetSearchInput = document.querySelector('#fleet-search-input');
 const openSettingsButton = document.querySelector('#open-settings-btn');
@@ -898,9 +902,24 @@ function restoreFactionFilterState(faction) {
 function openSettings() {
   form.classList.add('sensitive-hidden');
   toggleSensitiveButton.textContent = 'Show Current RPC Limiter URL';
+  void refreshRpcLimiterStatus();
   settingsOverlay.classList.remove('hidden');
   settingsOverlay.setAttribute('aria-hidden', 'false');
   closeSettingsButton.focus();
+}
+
+function renderRpcLimiterStatus(status) {
+  rpcLimiterCurrentUrl.value = status?.currentRpcUrl || '';
+  rpcLimiterStatePath.textContent = status?.path || '—';
+  const detail = [];
+  if (status?.updatedBy) detail.push(`updated by ${status.updatedBy}`);
+  if (status?.updatedAt) detail.push(`at ${status.updatedAt}`);
+  rpcLimiterUpdated.textContent = detail.join(' ');
+}
+
+async function refreshRpcLimiterStatus() {
+  try { renderRpcLimiterStatus(await api.getRpcLimiterStatus()); }
+  catch (error) { console.error('[MyStarAtlas] Failed to load RPC limiter status:', error); }
 }
 
 function closeSettings() {
@@ -1046,13 +1065,17 @@ function hasRequiredSettings(settings) {
   return Boolean(
     getActivePlayerProfile(settings) &&
       settings.influxUrl &&
-      settings.influxAuthToken &&
+      hasSecureSetting(settings, 'influxAuthToken') &&
       settings.influxBucket
   );
 }
 
 function hasInfluxSettings(settings) {
-  return Boolean(settings?.influxUrl && settings?.influxAuthToken && settings?.influxBucket);
+  return Boolean(settings?.influxUrl && hasSecureSetting(settings, 'influxAuthToken') && settings?.influxBucket);
+}
+
+function hasSecureSetting(settings, key) {
+  return Boolean(settings?.[key] || settings?.secureSettingsStatus?.[key]);
 }
 
 function updateSettingsStatus(settings) {
@@ -6387,6 +6410,24 @@ toggleSensitiveButton.addEventListener('click', () => {
   toggleSensitiveButton.textContent = hidden ? 'Show Current RPC Limiter URL' : 'Hide Current RPC Limiter URL';
 });
 
+sendRpcLimiterButton.addEventListener('click', async () => {
+  sendRpcLimiterButton.disabled = true;
+  saveStatus.textContent = 'Sending RPC limiter settings...';
+  try {
+    const payload = getFormPayload();
+    const status = await api.sendSettingsToRpcLimiter({
+      rpcUrl: payload.rpcUrl,
+      rpcRequestsPerSecond: payload.rpcRequestsPerSecond,
+    });
+    renderRpcLimiterStatus(status);
+    saveStatus.textContent = 'RPC limiter settings updated';
+  } catch (error) {
+    saveStatus.textContent = `RPC limiter update failed: ${error?.message || String(error)}`;
+  } finally {
+    sendRpcLimiterButton.disabled = false;
+  }
+});
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   saveStatus.textContent = 'Saving...';
@@ -6439,7 +6480,10 @@ testInfluxButton.addEventListener('click', async () => {
 });
 
 form.addEventListener('input', () => {
-  latestSettings = getFormPayload();
+  latestSettings = {
+    ...getFormPayload(),
+    secureSettingsStatus: latestSettings?.secureSettingsStatus || {},
+  };
   updateFactionButtons(latestSettings);
   updateSettingsStatus(latestSettings);
 });

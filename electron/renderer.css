@@ -1523,6 +1523,14 @@ label {
   min-height: 16px;
 }
 
+.rpc-limiter-state-row {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .settings-actions {
   display: flex;
   align-items: center;
@@ -1551,10 +1559,6 @@ label {
 
 .sensitive-hidden .sensitive-field {
   filter: blur(5px);
-}
-
-.sensitive-hidden .sensitive-field:focus {
-  filter: none;
 }
 
 .measurement-section {

@@ -1,20 +1,26 @@
 const { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { BorshAccountsCoder } = require('@staratlas/anchor');
 const bs58Module = require('bs58');
-const { resolvePaths: resolveRpcLimiterPaths } = require('rpc_limiter');
-const { readState: readRpcLimiterState } = require('rpc_limiter/dist/state');
+const { RpcLimiter, resolvePaths: resolveRpcLimiterPaths } = require('rpc_limiter');
+const {
+  readState: readRpcLimiterState,
+  writeStateSync: writeRpcLimiterStateSync,
+  bumpRevision: bumpRpcLimiterRevision,
+} = require('rpc_limiter/dist/state');
+const lockfile = require('proper-lockfile');
 const packageJson = require('../package.json');
 const { fetchWithInfluxRetry, loadSduSources } = require('./influx-resilience');
 const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
 const { createSecureSettingsStore } = require('./secure-settings');
-const { createRpcFetcher, createRpcRateGate } = require('./rpc-resilience');
+const { createRpcFetcher } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, groupCargoAllocationRows, enrichCargoAllocationRows } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment } = require('./earnings-math');
@@ -3205,16 +3211,73 @@ function isUsableSharedRpcUrl(value) {
   }
 }
 
+function getRpcLimiterStatus() {
+  const paths = resolveRpcLimiterPaths();
+  const state = readRpcLimiterState(paths.stateFile, Date.now());
+  return {
+    path: paths.stateFile,
+    enabled: Boolean(state.enabled),
+    currentRpcUrl: buildSharedRpcUrl(state.rpcBaseUrl, state.apiKey),
+    updatedBy: state.updatedBy || '',
+    updatedAt: state.updatedAt || '',
+    revision: state.revision ?? 0,
+    rpcRequestsPerSecond: state.buckets?.['rpc:shared']?.intervalMs > 0
+      ? String(1000 / state.buckets['rpc:shared'].intervalMs)
+      : '',
+  };
+}
+
+function parseRpcUrlForLimiter(rawValue) {
+  const url = new URL(String(rawValue || '').trim());
+  const apiKey = url.searchParams.get('api-key') || '';
+  url.searchParams.delete('api-key');
+  const query = url.searchParams.toString();
+  const pathname = url.pathname === '/' ? '' : url.pathname;
+  return {
+    rpcBaseUrl: `${url.origin}${pathname}${query ? `?${query}` : ''}`,
+    apiKey,
+  };
+}
+
+async function sendSettingsToRpcLimiter(payload) {
+  const { rpcBaseUrl, apiKey } = parseRpcUrlForLimiter(payload.rpcUrl);
+  const requestsPerSecond = Number(payload.rpcRequestsPerSecond);
+  if (!Number.isFinite(requestsPerSecond) || requestsPerSecond <= 0) {
+    throw new Error('Requests / sec must be a positive number.');
+  }
+  const paths = resolveRpcLimiterPaths();
+  fsSync.mkdirSync(path.dirname(paths.lockfile), { recursive: true });
+  if (!fsSync.existsSync(paths.lockfile)) fsSync.writeFileSync(paths.lockfile, '');
+  const release = await lockfile.lock(paths.lockfile, {
+    stale: 5000,
+    retries: { retries: 50, minTimeout: 5, maxTimeout: 50, factor: 1.2 },
+    realpath: false,
+  });
+  try {
+    const state = readRpcLimiterState(paths.stateFile, Date.now());
+    state.enabled = true;
+    state.rpcBaseUrl = rpcBaseUrl;
+    state.apiKey = apiKey;
+    state.buckets ||= {};
+    state.buckets['rpc:shared'] = {
+      ...(state.buckets['rpc:shared'] || { nextSlotMs: 0 }),
+      intervalMs: Math.max(1, Math.round(1000 / requestsPerSecond)),
+    };
+    state.updatedBy = 'My Star Atlas';
+    state.updatedAt = new Date().toISOString();
+    bumpRpcLimiterRevision(state);
+    writeRpcLimiterStateSync(paths.stateFile, state);
+  } finally {
+    await release().catch(() => undefined);
+  }
+  return getRpcLimiterStatus();
+}
+
 function getRpcUrl(settings) {
   if (settings && settings.useRpcLimiter) {
-    try {
-      const paths = resolveRpcLimiterPaths();
-      const state = readRpcLimiterState(paths.stateFile, Date.now());
-      const shared = buildSharedRpcUrl(state.rpcBaseUrl, state.apiKey);
-      if (shared && isUsableSharedRpcUrl(shared)) return shared;
-    } catch (_error) {
-      // fall through to the configured rpcUrl
-    }
+    const status = getRpcLimiterStatus();
+    if (status.currentRpcUrl && isUsableSharedRpcUrl(status.currentRpcUrl)) return status.currentRpcUrl;
+    throw new Error('Use RPC Limiter is enabled, but no Current RPC Limiter URL is configured. Send settings to RPC Limiter first.');
   }
   return String(settings?.rpcUrl || '').trim() || DEFAULT_RPC_URL;
 }
@@ -3788,10 +3851,39 @@ function decodeFleetAccount(account) {
 // ============================================================================
 
 const fetchWithRpcBackoff = createRpcFetcher();
-const rpcRateGate = createRpcRateGate();
+let sharedRpcLimiter = null;
+let sharedRpcLimiterRevision = null;
 
-async function acquireRpcSlot(settings) {
-  await rpcRateGate.acquire(settings);
+function getRpcMethodLabel(init) {
+  try { return JSON.parse(String(init?.body || '{}')).method || 'solanaRpc'; }
+  catch (_error) { return 'solanaRpc'; }
+}
+
+async function acquireRpcSlot(settings, label = 'solanaRpc') {
+  if (!settings?.useRpcLimiter) return;
+  const status = getRpcLimiterStatus();
+  if (!status.currentRpcUrl || !isUsableSharedRpcUrl(status.currentRpcUrl)) {
+    throw new Error('Use RPC Limiter is enabled, but no Current RPC Limiter URL is configured. Send settings to RPC Limiter first.');
+  }
+  if (!sharedRpcLimiter || sharedRpcLimiterRevision !== status.revision) {
+    sharedRpcLimiter = new RpcLimiter();
+    sharedRpcLimiterRevision = status.revision;
+  }
+  await sharedRpcLimiter.wait('rpc:shared', {
+    label,
+    metrics: { app: 'My Star Atlas', profile: profileName, method: label },
+  });
+}
+
+function createSolanaConnection(settings) {
+  return new Connection(getRpcUrl(settings), {
+    commitment: 'confirmed',
+    disableRetryOnRateLimit: false,
+    fetch: async (info, init) => {
+      await acquireRpcSlot(settings, getRpcMethodLabel(init));
+      return fetch(info, init);
+    },
+  });
 }
 
 async function getProgramAccountsV2(rpcUrl, programId, config, options = {}) {
@@ -3799,7 +3891,7 @@ async function getProgramAccountsV2(rpcUrl, programId, config, options = {}) {
   const accounts = [];
   let paginationKey = null;
   do {
-    await acquireRpcSlot(settings);
+    await acquireRpcSlot(settings, 'getProgramAccountsV2');
     const response = await fetchWithRpcBackoff(
       rpcUrl,
       {
@@ -3871,10 +3963,7 @@ async function fetchProfileFleetsUncached(payload) {
   }
 
   const rpcUrl = getRpcUrl(settings);
-  const connection = new Connection(rpcUrl, {
-    commitment: 'confirmed',
-    disableRetryOnRateLimit: false,
-  });
+  const connection = createSolanaConnection(settings);
 
   const baseFilters = [
     {
@@ -4661,10 +4750,7 @@ async function fetchEarningsSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const fleetResult = await fetchProfileFleets(settings);
   const fleets = Array.isArray(fleetResult.fleets) ? fleetResult.fleets : [];
-  const connection = new Connection(getRpcUrl(settings), {
-    commitment: 'confirmed',
-    disableRetryOnRateLimit: false,
-  });
+  const connection = createSolanaConnection(settings);
 
   const [prices, sot] = await Promise.all([
     fetchCurrentEarningsPrices().catch(() => ({
@@ -5510,6 +5596,11 @@ handleTrustedIpc('updates:check', () => checkForUpdates());
 handleTrustedIpc('updates:download-and-restart', () => downloadUpdateAndRestart());
 handleTrustedIpc('settings:get', async () => redactSettings(await readSettings()));
 handleTrustedIpc('settings:save', async (_event, payload) => redactSettings(await writeSettings(payload)));
+handleTrustedIpc('rpc-limiter:get-status', () => getRpcLimiterStatus());
+handleTrustedIpc('rpc-limiter:send-settings', async (_event, payload) => {
+  const hydrated = await hydrateSecureSettings(payload);
+  return sendSettingsToRpcLimiter(hydrated);
+});
 handleTrustedIpc('fleet:list', async (_event, payload) => {
   try {
     return await fetchProfileFleets(payload);

@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   downloadUpdateAndRestart: () => ipcRenderer.invoke('updates:download-and-restart'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (payload) => ipcRenderer.invoke('settings:save', payload),
+  getRpcLimiterStatus: () => ipcRenderer.invoke('rpc-limiter:get-status'),
+  sendSettingsToRpcLimiter: (payload) => ipcRenderer.invoke('rpc-limiter:send-settings', payload),
   getFleets: (payload) => ipcRenderer.invoke('fleet:list', payload),
   getEarningsSnapshot: (payload) => ipcRenderer.invoke('earnings:snapshot', payload),
   testInflux: (payload) => ipcRenderer.invoke('influx:test', payload),

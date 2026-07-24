@@ -1305,13 +1305,22 @@
               <span>Use RPC limiter</span>
             </label>
             <label>
-              RPC URL
+              Current RPC Limiter URL
+              <input class="sensitive-field" id="rpc-limiter-current-url" type="text" readonly autocomplete="off" />
+            </label>
+            <div class="rpc-limiter-state-row">
+              <span>State: <strong id="rpc-limiter-state-path">—</strong></span>
+              <span id="rpc-limiter-updated"></span>
+            </div>
+            <label>
+              Replacement RPC URL
               <input name="rpcUrl" type="password" autocomplete="new-password" spellcheck="false" />
             </label>
             <label>
               Requests / sec
               <input name="rpcRequestsPerSecond" type="number" min="0.1" step="0.1" autocomplete="off" />
             </label>
+            <button id="send-rpc-limiter-btn" class="ghost-button" type="button">Send settings to RPC Limiter</button>
           </section>
 
           <div class="settings-actions">
