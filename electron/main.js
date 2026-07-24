@@ -23,7 +23,7 @@ const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, groupCargoAllocationRows, enrichCargoAllocationRows } = require('./influx-data');
-const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment } = require('./earnings-math');
+const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, calculateTravelModeTime } = require('./earnings-math');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -4572,11 +4572,12 @@ ${scopeFilterFlux}
   const typeFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "movement")
-  |> filter(fn: (r) => r._field == "type")
+  |> filter(fn: (r) => r._field == "type" or r._field == "moveTime")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
   |> filter(fn: (r) => exists r.fleet)
-  |> keep(columns: ["fleet", "assignment", "_time", "_value"])
+  |> pivot(rowKey: ["_time", "fleet", "assignment"], columnKey: ["_field"], valueColumn: "_value")
+  |> keep(columns: ["fleet", "assignment", "_time", "type", "moveTime"])
   |> sort(columns: ["_time", "fleet", "assignment"])`;
   const txDailyFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
@@ -4602,7 +4603,7 @@ ${scopeFilterFlux}
         isoDate,
         label: formatShortUtcDate(date),
         starbases: new Set(),
-        cargoTypes: new Map(),
+        travelTimeByMode: { warp: 0, subwarp: 0 },
         burnedFuel: 0,
         txCostSol: 0,
         txsDaily: 0,
@@ -4647,13 +4648,16 @@ ${scopeFilterFlux}
   for (const row of parseInfluxCsv(typeCsv)) {
     const fleet = String(row.fleet || '').trim();
     const assignment = String(row.assignment || '').trim();
-    const cargoType = String(row._value || '').trim();
+    const travelMode = String(row.type || '').trim().toLowerCase();
+    const moveTime = Number(row.moveTime);
     const date = new Date(row._time);
-    if (!fleet || !assignment || !cargoType || Number.isNaN(date.getTime())) continue;
+    if (!fleet || !assignment || !travelMode || Number.isNaN(date.getTime())) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, fleet, assignment, date);
-    entry.cargoTypes.set(cargoType, (entry.cargoTypes.get(cargoType) || 0) + 1);
+    if ((travelMode === 'warp' || travelMode === 'subwarp') && Number.isFinite(moveTime) && moveTime >= 0) {
+      entry.travelTimeByMode[travelMode] += moveTime;
+    }
     entry.txsDaily += 1;
   }
 
@@ -4663,12 +4667,15 @@ ${scopeFilterFlux}
   }
 
   return Array.from(rowsByKey.values())
-    .map((row) => ({
-      ...row,
-      starbases: Array.from(row.starbases).sort((a, b) => a.localeCompare(b)),
-      preferredCargoType: Array.from(row.cargoTypes.entries())
-        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || '',
-    }))
+    .map((row) => {
+      const travelModeTime = calculateTravelModeTime(row.travelTimeByMode);
+      return {
+        ...row,
+        starbases: Array.from(row.starbases).sort((a, b) => a.localeCompare(b)),
+        travelModeTime,
+        travelModeWarpPercent: travelModeTime?.warpPercent ?? null,
+      };
+    })
     .filter((row) => row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0);
 }
 

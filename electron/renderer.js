@@ -374,7 +374,7 @@ const cargoEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'requiredCrew', label: 'Required Crew' }),
   Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
   Object.freeze({ id: 'assignment', label: 'Assignment' }),
-  Object.freeze({ id: 'preferredCargoType', label: 'Preferred Cargo Type' }),
+  Object.freeze({ id: 'travelModeTime', label: 'Travel Mode (time)' }),
   Object.freeze({ id: 'starbases', label: 'Starbase' }),
   Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
   Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
@@ -461,7 +461,7 @@ const earningsColumnsBySubtab = Object.freeze({
 const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
-  cargo: new Set(['txsDaily', 'assignment', 'preferredCargoType', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
+  cargo: new Set(['txsDaily', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
@@ -509,7 +509,7 @@ const earningsMetricGuideBySubtab = Object.freeze({
   }),
   cargo: Object.freeze({
     assignment: ['Recorded transport or supply-chain assignment.', 'Most specific assignment recorded for the row.', 'Use it to separate different logistics duties for the same fleet.'],
-    preferredCargoType: ['Cargo type most frequently recorded for this activity.', 'Most-used cargo type across matching movement rows.', 'It describes typical usage; it is not the full list of cargo moved.'],
+    travelModeTime: ['Share of recorded movement time spent in each travel mode.', 'Mode moveTime ÷ total movement moveTime, rounded to whole percentages totaling 100%.', 'Time-weighting represents long legs more accurately than counting movement transactions.'],
     starbases: ['Starbases touched by the fleet’s cargo activity.', 'Distinct recorded starbases joined into one row.', 'More locations can indicate a broader or more complex route.'],
     fuelCosts: ['ATLAS value of fuel consumed by cargo movement.', 'Fuel burned × current fuel price.', 'The main operating-resource cost represented in Cargo.'],
     totalCosts: ['Estimated cargo operating cost represented by available data.', 'Fuel Costs + Txs Costs.', 'Cargo revenue is not tracked here, so this is a cost-efficiency view rather than profit.'],
@@ -631,7 +631,7 @@ const earningsSortKeyByColumnId = Object.freeze({
   installed: 'installed',
   lpRedemption: 'factionRedeemedLp',
   upgCosts: 'upgradingCostsAtlas',
-  preferredCargoType: 'preferredCargoType',
+  travelModeTime: 'travelModeWarpPercent',
   starbases: 'starbaseLabel',
   txsCostsPct: 'txsCostsPercent',
   cargoVolume: 'cargoVolume',
@@ -5238,7 +5238,7 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
   if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
   if (columnId === 'assignment') return createTextCell(entry.assignment || '--');
-  if (columnId === 'preferredCargoType') return createTextCell(entry.preferredCargoType || '--');
+  if (columnId === 'travelModeTime') return createTextCell(entry.travelModeTime?.label || '--');
   if (columnId === 'starbases') return createTextCell(entry.starbaseLabel || '--');
   if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas));
   if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));

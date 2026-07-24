@@ -7,6 +7,7 @@ const {
   calculateFleetCargoCapacity,
   calculateCargoEfficiency,
   buildCargoVolumeByFleetDayAssignment,
+  calculateTravelModeTime,
 } = require('../electron/earnings-math');
 
 test('fleet cargo capacity sums ship capacity across quantities and rejects partial mappings', () => {
@@ -57,6 +58,25 @@ test('cargo volume is summed by UTC date, fleet, and assignment', () => {
   assert.equal(totals.get('2026-07-25\nfreight one\nTransport'), 300);
 });
 
+test('travel mode time rounds to whole percentages totaling exactly 100', () => {
+  assert.deepEqual(calculateTravelModeTime({ warp: 61, subwarp: 39 }), {
+    warpPercent: 61,
+    subwarpPercent: 39,
+    label: '61% Warp | 39% Subwarp',
+  });
+  assert.deepEqual(calculateTravelModeTime({ warp: 1, subwarp: 2 }), {
+    warpPercent: 33,
+    subwarpPercent: 67,
+    label: '33% Warp | 67% Subwarp',
+  });
+});
+
+test('travel mode time rejects rows without usable movement duration', () => {
+  assert.equal(calculateTravelModeTime({}), null);
+  assert.equal(calculateTravelModeTime({ warp: 0, subwarp: 0 }), null);
+  assert.equal(calculateTravelModeTime({ warp: -1, subwarp: 4 }), null);
+});
+
 test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
@@ -66,9 +86,13 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(main, /cargoLegs: Number\(cargoRow\.txsDaily\) \|\| 0/);
   assert.match(main, /buildCargoVolumeByFleetDayAssignment\(cargoAllocations\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);
+  assert.match(main, /r\._field == "type" or r\._field == "moveTime"/);
+  assert.match(main, /travelModeTime: calculateTravelModeTime|const travelModeTime = calculateTravelModeTime/);
   assert.match(renderer, /id: 'cargoVolume', label: 'Cargo Volume'/);
   assert.match(renderer, /id: 'cargoCapacity', label: 'Cargo Capacity'/);
   assert.match(renderer, /id: 'cargoEfficiency', label: 'Cargo Efficiency'/);
+  assert.match(renderer, /id: 'travelModeTime', label: 'Travel Mode \(time\)'/);
+  assert.doesNotMatch(renderer, /Preferred Cargo Type/);
   assert.match(html, /<th scope="col">Cargo Volume<\/th>\s*<th scope="col">Cargo Capacity<\/th>\s*<th scope="col">Cargo Efficiency<\/th>/);
 });
 

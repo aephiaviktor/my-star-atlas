@@ -46,8 +46,24 @@ function buildCargoVolumeByFleetDayAssignment(rows = []) {
   return totals;
 }
 
+function calculateTravelModeTime(durations = {}) {
+  const warp = Number(durations.warp || 0);
+  const subwarp = Number(durations.subwarp || 0);
+  if (!Number.isFinite(warp) || !Number.isFinite(subwarp) || warp < 0 || subwarp < 0 || warp + subwarp <= 0) {
+    return null;
+  }
+  const warpPercent = Math.round((warp / (warp + subwarp)) * 100);
+  const subwarpPercent = 100 - warpPercent;
+  return {
+    warpPercent,
+    subwarpPercent,
+    label: `${warpPercent}% Warp | ${subwarpPercent}% Subwarp`,
+  };
+}
+
 module.exports = {
   calculateFleetCargoCapacity,
   calculateCargoEfficiency,
   buildCargoVolumeByFleetDayAssignment,
+  calculateTravelModeTime,
 };
