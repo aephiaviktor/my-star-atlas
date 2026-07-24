@@ -1257,7 +1257,7 @@
               <h2 id="settings-title">USTUR Profile</h2>
             </div>
             <div class="settings-header-actions">
-              <button id="toggle-sensitive-btn" class="ghost-button" type="button">Show</button>
+              <button id="toggle-sensitive-btn" class="ghost-button" type="button">Show Current RPC Limiter URL</button>
               <button id="close-settings-btn" class="ghost-button icon-button" type="button" aria-label="Close settings">X</button>
             </div>
           </div>
@@ -1266,7 +1266,7 @@
             <h3>Profile</h3>
             <label>
               Aephia API key
-              <input class="sensitive-field" name="aephiaApiKey" type="text" autocomplete="off" spellcheck="false" />
+              <input name="aephiaApiKey" type="password" autocomplete="new-password" spellcheck="false" />
             </label>
             <label>
               MUD player profile
@@ -1290,7 +1290,7 @@
             </label>
             <label>
               Influx auth token
-              <input class="sensitive-field" name="influxAuthToken" type="text" autocomplete="off" spellcheck="false" />
+              <input name="influxAuthToken" type="password" autocomplete="new-password" spellcheck="false" />
             </label>
             <label>
               Influx database/bucket
@@ -1306,7 +1306,7 @@
             </label>
             <label>
               RPC URL
-              <input class="sensitive-field" name="rpcUrl" type="url" autocomplete="off" spellcheck="false" />
+              <input name="rpcUrl" type="password" autocomplete="new-password" spellcheck="false" />
             </label>
             <label>
               Requests / sec

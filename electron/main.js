@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
 const os = require('os');
@@ -13,6 +13,7 @@ const packageJson = require('../package.json');
 const { fetchWithInfluxRetry, loadSduSources } = require('./influx-resilience');
 const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
+const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher, createRpcRateGate } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, groupCargoAllocationRows, enrichCargoAllocationRows } = require('./influx-data');
@@ -81,6 +82,8 @@ const defaultSettings = Object.freeze({
   rpcRequestsPerSecond: '5',
 });
 
+const SECRET_SETTING_KEYS = Object.freeze(['aephiaApiKey', 'influxAuthToken', 'rpcUrl']);
+let secureSettingsStore = null;
 let mainWindow = null;
 const influxOrgIdCache = new Map();
 const DEFAULT_RPC_URL = 'https://api.mainnet-beta.solana.com';
@@ -328,21 +331,85 @@ function normalizeSettings(payload = {}) {
 }
 
 async function readSettings() {
+  let storedSettings = {};
   try {
     const raw = await fs.readFile(settingsPath(), 'utf8');
-    return normalizeSettings(JSON.parse(raw));
+    storedSettings = JSON.parse(raw);
   } catch (error) {
     if (error && error.code !== 'ENOENT') {
       console.error('[MyStarAtlas] Failed to read settings:', error);
     }
-    return normalizeSettings(defaultSettings);
   }
+
+  const secureStore = getSecureSettingsStore();
+  let secureValues = await secureStore.read();
+  const plaintextMigration = {};
+  for (const key of SECRET_SETTING_KEYS) {
+    if (!secureValues[key] && String(storedSettings[key] || '').trim()) {
+      plaintextMigration[key] = storedSettings[key];
+    }
+  }
+  if (Object.keys(plaintextMigration).length) {
+    secureValues = await secureStore.update(plaintextMigration);
+  }
+
+  let scrubbedPlaintext = false;
+  for (const key of SECRET_SETTING_KEYS) {
+    if (Object.hasOwn(storedSettings, key)) {
+      delete storedSettings[key];
+      scrubbedPlaintext = true;
+    }
+  }
+  if (scrubbedPlaintext) await writeJsonAtomic(settingsPath(), storedSettings);
+
+  return normalizeSettings({ ...storedSettings, ...secureValues });
 }
 
 async function writeSettings(payload) {
-  const settings = normalizeSettings(payload);
-  await writeJsonAtomic(settingsPath(), settings);
-  return settings;
+  const current = await readSettings();
+  const incoming = normalizeSettings({ ...current, ...payload });
+  await getSecureSettingsStore().update(Object.fromEntries(
+    SECRET_SETTING_KEYS.map((key) => [key, payload?.[key] ?? ''])
+  ));
+  const publicSettings = { ...incoming };
+  for (const key of SECRET_SETTING_KEYS) delete publicSettings[key];
+  await writeJsonAtomic(settingsPath(), publicSettings);
+  return readSettings();
+}
+
+function secureSettingsPath() {
+  return path.join(app.getPath('userData'), 'secure-settings.json');
+}
+
+function getSecureSettingsStore() {
+  if (secureSettingsStore) return secureSettingsStore;
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('OS safe storage is unavailable; sensitive settings were not loaded.');
+  }
+  secureSettingsStore = createSecureSettingsStore({
+    filePath: secureSettingsPath(),
+    encryptString: async (value) => safeStorage.encryptString(value),
+    decryptString: async (value) => safeStorage.decryptString(value),
+  });
+  return secureSettingsStore;
+}
+
+function redactSettings(settings) {
+  const redacted = { ...settings, secureSettingsStatus: {} };
+  for (const key of SECRET_SETTING_KEYS) {
+    redacted.secureSettingsStatus[key] = Boolean(settings[key]);
+    redacted[key] = '';
+  }
+  return redacted;
+}
+
+async function hydrateSecureSettings(payload = {}) {
+  const current = await readSettings();
+  const hydrated = { ...payload };
+  for (const key of SECRET_SETTING_KEYS) {
+    if (!String(hydrated[key] || '').trim()) hydrated[key] = current[key];
+  }
+  return hydrated;
 }
 
 function escapeFluxString(value) {
@@ -5423,10 +5490,17 @@ function createWindow() {
 const rendererUrl = pathToFileURL(path.join(__dirname, 'renderer.html')).href;
 
 function handleTrustedIpc(channel, handler) {
-  ipcMain.handle(channel, (event, ...args) => {
+  ipcMain.handle(channel, async (event, ...args) => {
     assertTrustedSender(event, mainWindow?.webContents, rendererUrl);
     args.forEach((arg) => validateIpcPayload(arg));
-    return handler(event, ...args);
+    const hydratedArgs = channel === 'settings:save'
+      ? args
+      : await Promise.all(args.map((arg) => (
+        arg && typeof arg === 'object' && !Array.isArray(arg)
+          ? hydrateSecureSettings(arg)
+          : arg
+      )));
+    return handler(event, ...hydratedArgs);
   });
 }
 
@@ -5434,8 +5508,8 @@ handleTrustedIpc('app:get-profile-name', () => profileName);
 handleTrustedIpc('app:get-version', () => packageJson.version);
 handleTrustedIpc('updates:check', () => checkForUpdates());
 handleTrustedIpc('updates:download-and-restart', () => downloadUpdateAndRestart());
-handleTrustedIpc('settings:get', () => readSettings());
-handleTrustedIpc('settings:save', (_event, payload) => writeSettings(payload));
+handleTrustedIpc('settings:get', async () => redactSettings(await readSettings()));
+handleTrustedIpc('settings:save', async (_event, payload) => redactSettings(await writeSettings(payload)));
 handleTrustedIpc('fleet:list', async (_event, payload) => {
   try {
     return await fetchProfileFleets(payload);

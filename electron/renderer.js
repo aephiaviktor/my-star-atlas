@@ -896,6 +896,8 @@ function restoreFactionFilterState(faction) {
 }
 
 function openSettings() {
+  form.classList.add('sensitive-hidden');
+  toggleSensitiveButton.textContent = 'Show Current RPC Limiter URL';
   settingsOverlay.classList.remove('hidden');
   settingsOverlay.setAttribute('aria-hidden', 'false');
   closeSettingsButton.focus();
@@ -1024,6 +1026,19 @@ function setFormValues(settings) {
     } else {
       field.value = value ?? '';
     }
+  }
+  const secureLabels = {
+    aephiaApiKey: 'Aephia API key',
+    influxAuthToken: 'Influx auth token',
+    rpcUrl: 'RPC URL',
+  };
+  for (const [key, label] of Object.entries(secureLabels)) {
+    const field = form.elements[key];
+    if (!field) continue;
+    field.value = '';
+    field.placeholder = settings?.secureSettingsStatus?.[key]
+      ? 'Stored securely — enter a new value to replace'
+      : `Enter ${label} to store securely`;
   }
 }
 
@@ -6369,7 +6384,7 @@ document.addEventListener('keydown', (event) => {
 
 toggleSensitiveButton.addEventListener('click', () => {
   const hidden = form.classList.toggle('sensitive-hidden');
-  toggleSensitiveButton.textContent = hidden ? 'Show' : 'Hide';
+  toggleSensitiveButton.textContent = hidden ? 'Show Current RPC Limiter URL' : 'Hide Current RPC Limiter URL';
 });
 
 form.addEventListener('submit', async (event) => {
