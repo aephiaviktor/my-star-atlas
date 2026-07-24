@@ -86,7 +86,9 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(main, /cargoLegs: Number\(cargoRow\.txsDaily\) \|\| 0/);
   assert.match(main, /buildCargoVolumeByFleetDayAssignment\(cargoAllocations\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);
-  assert.match(main, /r\._field == "type" or r\._field == "moveTime"/);
+  assert.match(main, /const moveTimeFlux =/);
+  assert.match(main, /travelModeByMovement\.get/);
+  assert.doesNotMatch(main, /pivot\(rowKey: \["_time", "fleet", "assignment"\]/);
   assert.match(main, /travelModeTime: calculateTravelModeTime|const travelModeTime = calculateTravelModeTime/);
   assert.match(renderer, /id: 'cargoVolume', label: 'Cargo Volume'/);
   assert.match(renderer, /id: 'cargoCapacity', label: 'Cargo Capacity'/);

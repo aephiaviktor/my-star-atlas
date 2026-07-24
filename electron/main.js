@@ -4572,12 +4572,20 @@ ${scopeFilterFlux}
   const typeFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "movement")
-  |> filter(fn: (r) => r._field == "type" or r._field == "moveTime")
+  |> filter(fn: (r) => r._field == "type")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
   |> filter(fn: (r) => exists r.fleet)
-  |> pivot(rowKey: ["_time", "fleet", "assignment"], columnKey: ["_field"], valueColumn: "_value")
-  |> keep(columns: ["fleet", "assignment", "_time", "type", "moveTime"])
+  |> keep(columns: ["fleet", "assignment", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet", "assignment"])`;
+  const moveTimeFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "movement")
+  |> filter(fn: (r) => r._field == "moveTime")
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
+  |> filter(fn: (r) => exists r.fleet)
+  |> keep(columns: ["fleet", "assignment", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "assignment"])`;
   const txDailyFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
@@ -4594,6 +4602,7 @@ ${scopeFilterFlux}
 
   const rowsByKey = new Map();
   const txDailyByDayFleet = new Map();
+  const travelModeByMovement = new Map();
   const ensureRow = (isoDate, fleet, assignment, date) => {
     const key = `${isoDate}\n${fleet}\n${assignment}`;
     if (!rowsByKey.has(key)) {
@@ -4612,9 +4621,10 @@ ${scopeFilterFlux}
     return rowsByKey.get(key);
   };
 
-  const [cargoCsv, typeCsv, txDailyCsv] = await Promise.all([
+  const [cargoCsv, typeCsv, moveTimeCsv, txDailyCsv] = await Promise.all([
     queryInfluxFlux(settings, cargoFlux),
     queryInfluxFlux(settings, typeFlux),
+    queryInfluxFlux(settings, moveTimeFlux),
     queryInfluxFlux(settings, txDailyFlux),
   ]);
 
@@ -4648,17 +4658,26 @@ ${scopeFilterFlux}
   for (const row of parseInfluxCsv(typeCsv)) {
     const fleet = String(row.fleet || '').trim();
     const assignment = String(row.assignment || '').trim();
-    const travelMode = String(row.type || '').trim().toLowerCase();
-    const moveTime = Number(row.moveTime);
+    const travelMode = String(row._value || '').trim().toLowerCase();
     const date = new Date(row._time);
     if (!fleet || !assignment || !travelMode || Number.isNaN(date.getTime())) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, fleet, assignment, date);
-    if ((travelMode === 'warp' || travelMode === 'subwarp') && Number.isFinite(moveTime) && moveTime >= 0) {
-      entry.travelTimeByMode[travelMode] += moveTime;
-    }
+    travelModeByMovement.set(`${row._time}\n${fleet}\n${assignment}`, travelMode);
     entry.txsDaily += 1;
+  }
+
+  for (const row of parseInfluxCsv(moveTimeCsv)) {
+    const fleet = String(row.fleet || '').trim();
+    const assignment = String(row.assignment || '').trim();
+    const moveTime = Number(row._value);
+    const date = new Date(row._time);
+    const travelMode = travelModeByMovement.get(`${row._time}\n${fleet}\n${assignment}`);
+    if (!fleet || !assignment || (travelMode !== 'warp' && travelMode !== 'subwarp') || !Number.isFinite(moveTime) || moveTime < 0 || Number.isNaN(date.getTime())) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    ensureRow(isoDate, fleet, assignment, date).travelTimeByMode[travelMode] += moveTime;
   }
 
   for (const row of rowsByKey.values()) {
