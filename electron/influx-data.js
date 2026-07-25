@@ -29,7 +29,11 @@ function parseInfluxCsv(text) {
   for (const line of lines) {
     if (line.startsWith('#')) continue;
     const columns = parseCsvLine(line);
-    if (columns.includes('_field') && columns.includes('_value')) {
+    // Annotated Flux CSV can start a new table with a different tag schema and
+    // column order. Aggregate queries often omit `_field`, so key header
+    // detection on the invariant metadata/system columns instead.
+    if (columns.includes('result') && columns.includes('table')
+      && (columns.includes('_value') || columns.includes('_time') || columns.includes('_field'))) {
       header = columns;
       continue;
     }
@@ -44,6 +48,10 @@ function parseInfluxCsv(text) {
     rows.push(row);
   }
   return rows;
+}
+
+function isCargoCycleId(value) {
+  return /^[^;]+;-?\d+,-?\d+;\d+$/.test(String(value || '').trim());
 }
 
 function enrichCargoAllocationRows(rows, fleetByLabel, normalizeFleetLabel) {
@@ -78,4 +86,4 @@ function groupCargoAllocationRows(rows) {
   return Array.from(groups.values());
 }
 
-module.exports = { parseInfluxCsv, groupCargoAllocationRows, enrichCargoAllocationRows };
+module.exports = { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows };

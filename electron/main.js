@@ -22,7 +22,7 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
-const { parseInfluxCsv, groupCargoAllocationRows, enrichCargoAllocationRows } = require('./influx-data');
+const { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, calculateTravelModeTime } = require('./earnings-math');
 
 const bs58 = bs58Module.default || bs58Module;
@@ -4291,7 +4291,7 @@ ${scopeFilterFlux}
     const fleet = String(row.fleet || '').trim();
     const date = new Date(row._time);
     const value = Number(row._value || 0);
-    if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    if (!fleet || isCargoCycleId(fleet) || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const key = `${isoDate}\n${fleet}`;
@@ -4648,7 +4648,7 @@ ${scopeFilterFlux}
     const starbase = resolveStarbaseName(row, coordinateMap);
     const date = new Date(row._time);
     const value = Number(row._value || 0);
-    if (!fleet || !assignment || !starbase || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    if (!fleet || isCargoCycleId(fleet) || !assignment || !starbase || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, fleet, assignment, date);
@@ -4662,7 +4662,7 @@ ${scopeFilterFlux}
     const travelMode = String(row._value || '').trim().toLowerCase();
     const cycleId = String(row.cycleId || '').trim();
     const date = new Date(row._time);
-    if (!fleet || !assignment || !travelMode || Number.isNaN(date.getTime())) continue;
+    if (!fleet || isCargoCycleId(fleet) || !assignment || !travelMode || Number.isNaN(date.getTime())) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, fleet, assignment, date);
@@ -4677,7 +4677,7 @@ ${scopeFilterFlux}
     const moveTime = Number(row._value);
     const date = new Date(row._time);
     const travelMode = travelModeByMovement.get(`${row._time}\n${fleet}\n${assignment}`);
-    if (!fleet || !assignment || (travelMode !== 'warp' && travelMode !== 'subwarp') || !Number.isFinite(moveTime) || moveTime < 0 || Number.isNaN(date.getTime())) continue;
+    if (!fleet || isCargoCycleId(fleet) || !assignment || (travelMode !== 'warp' && travelMode !== 'subwarp') || !Number.isFinite(moveTime) || moveTime < 0 || Number.isNaN(date.getTime())) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     ensureRow(isoDate, fleet, assignment, date).travelTimeByMode[travelMode] += moveTime;
