@@ -373,6 +373,7 @@ const cargoEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'ships', label: 'Ships' }),
   Object.freeze({ id: 'requiredCrew', label: 'Required Crew' }),
   Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
+  Object.freeze({ id: 'cargoCycles', label: 'Cycles Daily' }),
   Object.freeze({ id: 'assignment', label: 'Assignment' }),
   Object.freeze({ id: 'travelModeTime', label: 'Travel Mode (time)' }),
   Object.freeze({ id: 'starbases', label: 'Starbase' }),
@@ -461,7 +462,7 @@ const earningsColumnsBySubtab = Object.freeze({
 const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
-  cargo: new Set(['txsDaily', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
+  cargo: new Set(['txsDaily', 'cargoCycles', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
@@ -508,6 +509,7 @@ const earningsMetricGuideBySubtab = Object.freeze({
     costsPerUnit: ['Estimated cost per unit of this material.', 'Total costs for fleet/date/material ÷ total units mined.', 'Lower is better; compare with the material’s current ATLAS price.'],
   }),
   cargo: Object.freeze({
+    cargoCycles: ['Completed cargo cycles recorded during the UTC day.', 'Count of distinct cargo cycle IDs for the fleet and assignment.', 'Each cycle contributes two cargo legs to Cargo Capacity; multiple warp jumps within one leg do not increase this count.'],
     assignment: ['Recorded transport or supply-chain assignment.', 'Most specific assignment recorded for the row.', 'Use it to separate different logistics duties for the same fleet.'],
     travelModeTime: ['Share of recorded movement time spent in each travel mode.', 'Mode moveTime ÷ total movement moveTime, rounded to whole percentages totaling 100%.', 'Time-weighting represents long legs more accurately than counting movement transactions.'],
     starbases: ['Starbases touched by the fleet’s cargo activity.', 'Distinct recorded starbases joined into one row.', 'More locations can indicate a broader or more complex route.'],
@@ -5237,6 +5239,7 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'ships') return createShipsCell(entry);
   if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
   if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
+  if (columnId === 'cargoCycles') return createTextCell(formatWholeNumber(entry.cargoCycles || 0));
   if (columnId === 'assignment') return createTextCell(entry.assignment || '--');
   if (columnId === 'travelModeTime') return createTextCell(entry.travelModeTime?.label || '--');
   if (columnId === 'starbases') return createTextCell(entry.starbaseLabel || '--');

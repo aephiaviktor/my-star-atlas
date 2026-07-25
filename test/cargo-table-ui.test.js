@@ -23,6 +23,12 @@ test('Cargo movement telemetry provides Txs Daily without being overwritten by a
   assert.doesNotMatch(main, /const cargoSignatureCounts = await Promise\.race/);
 });
 
+test('Cargo table shows completed cycles immediately after Txs Daily', () => {
+  assert.match(js, /id: 'txsDaily', label: 'Txs Daily' \}\),\s*Object\.freeze\(\{ id: 'cargoCycles', label: 'Cycles Daily'/);
+  assert.match(js, /columnId === 'cargoCycles'[^\n]*entry\.cargoCycles/);
+  assert.match(html, /<th scope="col">Txs Daily<\/th>\s*<th scope="col">Cycles Daily<\/th>\s*<th scope="col">Assignment<\/th>/);
+});
+
 test('Cargo allocation offers fleet detail columns off by default', () => {
   const allocationColumns = js.slice(
     js.indexOf('const cargoAllocationEarningsOptionalColumns'),
