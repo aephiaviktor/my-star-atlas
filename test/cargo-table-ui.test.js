@@ -25,8 +25,13 @@ test('Cargo movement telemetry provides Txs Daily without being overwritten by a
 
 test('optional Cargo telemetry queries cannot discard core fleet rows', () => {
   assert.match(main, /Promise\.allSettled\(\[/);
-  assert.match(main, /if \(cargoResult\.status === 'rejected'\) throw cargoResult\.reason/);
+  assert.match(main, /const cargoCsv = await queryInfluxFlux\(settings, cargoFlux\);/);
+  assert.match(main, /const \[typeResult, moveTimeResult, txDailyResult, completedCycleResult\] = await Promise\.allSettled/);
   assert.match(main, /const optionalCsv = \(result\) => result\.status === 'fulfilled' \? result\.value : ''/);
+});
+
+test('Cargo query errors expose the actionable failure instead of a generic unavailable label', () => {
+  assert.match(js, /Cargo query failed: \$\{formatInfluxError\(result\.cargoError\)\}/);
 });
 
 test('Cargo table shows completed cycles immediately after Txs Daily', () => {

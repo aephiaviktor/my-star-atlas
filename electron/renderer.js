@@ -5778,7 +5778,7 @@ function renderEarningsCargo(result) {
   renderEarningsCargoCostBreakdownChart({ ...result, rows });
   setEarningsCargoStatus(
     `${formatWholeNumber(result.cargoRowCount || 0)} cargo rows from ${formatWholeNumber(result.activeCargoFleetCount || 0)} active fleets at ${formatCheckedAt(result.checkedAt)}${
-      result.cargoError ? ' · Influx cargo rows unavailable' : ''
+      result.cargoError ? ` · Cargo query failed: ${formatInfluxError(result.cargoError)}` : ''
     }`
   );
 

@@ -4739,15 +4739,16 @@ ${scopeFilterFlux}
     return rowsByKey.get(key);
   };
 
-  const [cargoResult, typeResult, moveTimeResult, txDailyResult, completedCycleResult] = await Promise.allSettled([
-    queryInfluxFlux(settings, cargoFlux),
+  // Fetch the row-defining fuel query before the optional enrichment fan-out.
+  // Running all five together can overload the Influx proxy and lose the core
+  // Cargo table to a transient 504 even though the underlying rows are valid.
+  const cargoCsv = await queryInfluxFlux(settings, cargoFlux);
+  const [typeResult, moveTimeResult, txDailyResult, completedCycleResult] = await Promise.allSettled([
     queryInfluxFlux(settings, typeFlux),
     queryInfluxFlux(settings, moveTimeFlux),
     queryInfluxFlux(settings, txDailyFlux),
     queryInfluxFlux(settings, completedCycleFlux),
   ]);
-  if (cargoResult.status === 'rejected') throw cargoResult.reason;
-  const cargoCsv = cargoResult.value;
   const optionalCsv = (result) => result.status === 'fulfilled' ? result.value : '';
   const typeCsv = optionalCsv(typeResult);
   const moveTimeCsv = optionalCsv(moveTimeResult);
