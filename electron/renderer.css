@@ -183,8 +183,16 @@ select:focus {
   font-size: 12px;
 }
 
-.app-shell.earnings-active .nav-subsection {
+.app-shell.earnings-active #earnings-column-controls,
+.app-shell.optimization-active #optimization-column-controls {
   display: grid;
+}
+
+#optimization-column-list {
+  display: grid;
+  gap: 8px;
+  max-height: 48vh;
+  overflow-y: auto;
 }
 
 .nav-subsection-title {
@@ -1365,6 +1373,31 @@ select:focus {
 
 .earnings-filter-bar {
   margin: 0 0 10px;
+}
+
+.optimization-surface {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.optimization-filter-bar {
+  flex-wrap: wrap;
+  padding: 12px 14px 0;
+}
+
+.optimization-filter-bar .activity-filter {
+  grid-template-columns: auto minmax(150px, 220px);
+}
+
+.optimization-table {
+  min-width: max-content;
+}
+
+#optimization-load-more {
+  align-self: center;
+  margin: 10px;
 }
 
 .fleet-table tbody tr {

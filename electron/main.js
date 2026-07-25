@@ -83,6 +83,7 @@ const defaultSettings = Object.freeze({
   influxUrl: '',
   influxAuthToken: '',
   influxBucket: '',
+  influxOptimizationBucket: 'optimization',
   useRpcLimiter: false,
   rpcUrl: '',
   rpcRequestsPerSecond: '5',
@@ -330,6 +331,7 @@ function normalizeSettings(payload = {}) {
     influxUrl: String(payload.influxUrl ?? ''),
     influxAuthToken: String(payload.influxAuthToken ?? ''),
     influxBucket: String(payload.influxBucket ?? ''),
+    influxOptimizationBucket: String(payload.influxOptimizationBucket ?? 'optimization').trim() || 'optimization',
     useRpcLimiter: Boolean(payload.useRpcLimiter),
     rpcUrl: String(payload.rpcUrl ?? ''),
     rpcRequestsPerSecond: String(payload.rpcRequestsPerSecond ?? defaultSettings.rpcRequestsPerSecond),
@@ -551,6 +553,66 @@ function buildInstanceScopeFilter(settings) {
     ((exists r.instance and contains(value: r.instance, set: ${instanceValues})) or
      (exists r.faction and contains(value: r.faction, set: ${factionValues})))
   )`;
+}
+
+const OPTIMIZATION_SCANNING_START = '2026-07-25T08:13:52.240Z';
+
+function normalizeOptimizationFaction(faction) {
+  return normalizeFaction(faction) === 'USTUR' ? 'UST' : normalizeFaction(faction);
+}
+
+function cleanOptimizationRow(row) {
+  const cleaned = {};
+  for (const [key, value] of Object.entries(row || {})) {
+    if (!key || ['result', 'table', '_start', '_stop', '_measurement'].includes(key)) continue;
+    cleaned[key === '_time' ? 'time' : key.replace(/^_/, '')] = value;
+  }
+  return cleaned;
+}
+
+async function fetchScanningOptimization(payload = {}) {
+  const settings = await readSettings();
+  const bucket = String(settings.influxOptimizationBucket || 'optimization').trim();
+  const querySettings = { ...settings, influxBucket: bucket };
+  const faction = normalizeOptimizationFaction(payload.faction || settings.faction);
+  const baselineStartMs = Date.parse(OPTIMIZATION_SCANNING_START);
+  const requestedStartMs = Date.parse(String(payload.start || ''));
+  const start = new Date(Math.max(baselineStartMs, Number.isFinite(requestedStartMs) ? requestedStartMs : baselineStartMs)).toISOString();
+  const requestedStopMs = Date.parse(String(payload.stop || ''));
+  const stop = Number.isFinite(requestedStopMs) && requestedStopMs > Date.parse(start) ? new Date(requestedStopMs).toISOString() : '';
+  const offset = Math.max(0, Number.parseInt(payload.offset, 10) || 0);
+  const pageSize = Math.min(500, Math.max(1, Number.parseInt(payload.limit, 10) || 500));
+  const filters = [
+    `r._measurement == "optimization_event"`,
+    `r.optimization_type == "scanning"`,
+    `r.faction == "${escapeFluxString(faction)}"`,
+  ];
+  for (const [field, value] of [['fleet', payload.fleet], ['event_type', payload.eventType], ['operation', payload.operation]]) {
+    if (value && value !== '__all__') filters.push(`r.${field} == "${escapeFluxString(value)}"`);
+  }
+  const statusFilter = payload.status === 'successful'
+    ? '\n  |> filter(fn: (r) => r.success == true)'
+    : (payload.status === 'failed' ? '\n  |> filter(fn: (r) => r.success == false)' : '');
+  const range = stop ? `range(start: time(v: "${escapeFluxString(start)}"), stop: time(v: "${escapeFluxString(stop)}"))` : `range(start: time(v: "${escapeFluxString(start)}"))`;
+  const flux = `from(bucket: "${escapeFluxString(bucket)}")
+  |> ${range}
+  |> filter(fn: (r) => ${filters.join(' and ')})
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")${statusFilter}
+  |> sort(columns: ["_time"], desc: true)
+  |> limit(n: ${pageSize + 1}, offset: ${offset})`;
+  const parsed = parseInfluxCsv(await queryInfluxFlux(querySettings, flux)).map(cleanOptimizationRow);
+  const rows = parsed.slice(0, pageSize);
+  const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  return {
+    ok: true,
+    rows,
+    columns,
+    hasMore: parsed.length > pageSize,
+    offset,
+    bucket,
+    start,
+    checkedAt: new Date().toISOString(),
+  };
 }
 
 function getInfluxScopeNote(settings) {
@@ -5813,6 +5875,18 @@ handleTrustedIpc('inventory:daily', async (_event, payload) => {
     return {
       ok: false,
       error: String(error?.message || error || 'inventory_daily_failed'),
+      checkedAt: new Date().toISOString(),
+    };
+  }
+});
+
+handleTrustedIpc('optimization:scanning', async (_event, payload) => {
+  try {
+    return await fetchScanningOptimization(payload);
+  } catch (error) {
+    return {
+      ok: false,
+      error: String(error?.message || error || 'optimization_scanning_failed'),
       checkedAt: new Date().toISOString(),
     };
   }

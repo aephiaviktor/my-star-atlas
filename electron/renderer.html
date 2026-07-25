@@ -60,6 +60,10 @@
             <label><input type="checkbox" data-earnings-column="profitMargin" checked /> Profit Margin</label>
             <label><input type="checkbox" data-earnings-column="account" /> Account</label>
           </div>
+          <div class="nav-subsection" id="optimization-column-controls" aria-label="Optimization table columns">
+            <span class="nav-subsection-title">Columns</span>
+            <div id="optimization-column-list"><span class="activity-filter-note">Load Scanning to discover columns</span></div>
+          </div>
         </nav>
 
         <div class="nav-footer">
@@ -93,7 +97,7 @@
               <button class="subtab-button active" type="button" aria-selected="true">My Fleet</button>
             </div>
             <div class="subtab-bar toolbar-tab-group" data-toolbar-section="optimization" role="tablist" aria-label="Optimization views" hidden>
-              <button class="subtab-button active" type="button" aria-selected="true">Optimization</button>
+              <button class="subtab-button active" type="button" aria-selected="true">Scanning</button>
             </div>
             <div class="subtab-bar toolbar-tab-group" data-toolbar-section="earnings" role="tablist" aria-label="Earnings views" hidden>
               <button class="earnings-subtab-button subtab-button active" type="button" data-earnings-subtab="scanning" aria-selected="true">Scanning</button>
@@ -763,8 +767,35 @@
         </section>
 
         <section class="section-view" data-section-panel="optimization">
-          <section class="work-surface quiet-panel">
-            <h2>Optimization</h2>
+          <section class="work-surface optimization-surface">
+            <div class="activity-filter-bar optimization-filter-bar">
+              <label class="activity-filter">From
+                <input id="optimization-start-filter" type="datetime-local" step="0.001" value="2026-07-25T08:13:52.240" />
+              </label>
+              <label class="activity-filter">To
+                <input id="optimization-stop-filter" type="datetime-local" step="1" />
+              </label>
+              <label class="activity-filter">Fleet
+                <select id="optimization-fleet-filter"><option value="__all__">All fleets</option></select>
+              </label>
+              <label class="activity-filter">Event
+                <select id="optimization-event-filter"><option value="__all__">All events</option><option value="transaction">transaction</option><option value="scan_result">scan_result</option></select>
+              </label>
+              <label class="activity-filter">Operation
+                <select id="optimization-operation-filter"><option value="__all__">All operations</option></select>
+              </label>
+              <label class="activity-filter">Status
+                <select id="optimization-status-filter"><option value="__all__">All statuses</option><option value="successful">Successful</option><option value="failed">Failed</option></select>
+              </label>
+            </div>
+            <div class="fleet-sync-status" id="optimization-sync-status">Awaiting optimization data</div>
+            <div class="fleet-table-wrap">
+              <table class="fleet-table optimization-table">
+                <thead><tr id="optimization-table-head"><th>Time</th></tr></thead>
+                <tbody id="optimization-table-body"><tr class="empty-row"><td>Awaiting optimization data</td></tr></tbody>
+              </table>
+            </div>
+            <button id="optimization-load-more" class="secondary-btn" type="button" hidden>Load more</button>
           </section>
         </section>
 
@@ -1295,8 +1326,12 @@
               <input name="influxAuthToken" type="password" autocomplete="new-password" spellcheck="false" />
             </label>
             <label>
-              Influx database/bucket
+              SLYA bucket
               <input name="influxBucket" type="text" autocomplete="off" spellcheck="false" />
+            </label>
+            <label>
+              Optimization bucket
+              <input name="influxOptimizationBucket" type="text" value="optimization" autocomplete="off" spellcheck="false" />
             </label>
           </section>
 

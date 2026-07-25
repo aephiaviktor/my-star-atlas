@@ -39,6 +39,17 @@ const updateCancelButton = document.querySelector('#update-cancel-btn');
 const measurementList = document.querySelector('#measurement-list');
 const fleetSyncStatus = document.querySelector('#fleet-sync-status');
 const fleetTableBody = document.querySelector('#fleet-table-body');
+const optimizationSyncStatus = document.querySelector('#optimization-sync-status');
+const optimizationTableHead = document.querySelector('#optimization-table-head');
+const optimizationTableBody = document.querySelector('#optimization-table-body');
+const optimizationColumnList = document.querySelector('#optimization-column-list');
+const optimizationLoadMore = document.querySelector('#optimization-load-more');
+const optimizationStartFilter = document.querySelector('#optimization-start-filter');
+const optimizationStopFilter = document.querySelector('#optimization-stop-filter');
+const optimizationFleetFilter = document.querySelector('#optimization-fleet-filter');
+const optimizationEventFilter = document.querySelector('#optimization-event-filter');
+const optimizationOperationFilter = document.querySelector('#optimization-operation-filter');
+const optimizationStatusFilter = document.querySelector('#optimization-status-filter');
 const earningsSyncStatus = document.querySelector('#earnings-sync-status');
 const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
@@ -281,6 +292,11 @@ let activeCargoTable = 'fleet';
 let latestSettings = null;
 let latestFleetResult = null;
 let latestEarningsResult = null;
+let latestOptimizationResult = null;
+let optimizationRows = [];
+let optimizationColumns = [];
+let optimizationSelectedColumns = new Set();
+let optimizationSort = { key: 'time', direction: 'desc' };
 let latestSduResult = null;
 let latestMiningResult = null;
 let latestCraftingResult = null;
@@ -998,6 +1014,7 @@ function getFormPayload() {
     influxUrl: String(data.get('influxUrl') || ''),
     influxAuthToken: String(data.get('influxAuthToken') || ''),
     influxBucket: String(data.get('influxBucket') || ''),
+    influxOptimizationBucket: String(data.get('influxOptimizationBucket') || 'optimization'),
     useRpcLimiter: Boolean(data.get('useRpcLimiter')),
     rpcUrl: String(data.get('rpcUrl') || ''),
     rpcRequestsPerSecond: String(data.get('rpcRequestsPerSecond') || ''),
@@ -1090,6 +1107,8 @@ function mergeSettingsFromForm(overrides = {}) {
 function resetFactionScopedState() {
   latestFleetResult = null;
   latestEarningsResult = null;
+  latestOptimizationResult = null;
+  optimizationRows = [];
   latestSduResult = null;
   latestMiningResult = null;
   latestCraftingResult = null;
@@ -5892,9 +5911,152 @@ async function refreshEarnings() {
   return refreshPromise;
 }
 
+function optimizationFilterIso(input) {
+  return input?.value ? new Date(input.value).toISOString() : '';
+}
+
+function optimizationCellValue(value) {
+  if (value === null || value === undefined || value === '') return '--';
+  return String(value);
+}
+
+function compareOptimizationValues(left, right) {
+  const leftEmpty = left === null || left === undefined || left === '';
+  const rightEmpty = right === null || right === undefined || right === '';
+  if (leftEmpty || rightEmpty) return leftEmpty === rightEmpty ? 0 : (leftEmpty ? 1 : -1);
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber - rightNumber;
+  const leftDate = Date.parse(left);
+  const rightDate = Date.parse(right);
+  if (Number.isFinite(leftDate) && Number.isFinite(rightDate)) return leftDate - rightDate;
+  if (/^(true|false)$/i.test(String(left)) && /^(true|false)$/i.test(String(right))) return String(left).localeCompare(String(right));
+  return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: 'base' });
+}
+
+function getOrderedOptimizationColumns(columns) {
+  const preferred = ['time', 'fleet', 'event_type', 'operation'];
+  return [...columns].sort((a, b) => {
+    const ai = preferred.indexOf(a);
+    const bi = preferred.indexOf(b);
+    if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    return a.localeCompare(b);
+  });
+}
+
+function renderOptimizationColumnControls() {
+  if (!optimizationColumnList) return;
+  optimizationColumnList.replaceChildren();
+  for (const column of optimizationColumns) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = optimizationSelectedColumns.has(column);
+    input.addEventListener('change', () => {
+      if (input.checked) optimizationSelectedColumns.add(column);
+      else optimizationSelectedColumns.delete(column);
+      renderOptimizationTable();
+    });
+    label.append(input, document.createTextNode(` ${column}`));
+    optimizationColumnList.append(label);
+  }
+}
+
+function renderOptimizationTable() {
+  const visible = optimizationColumns.filter((column) => optimizationSelectedColumns.has(column));
+  optimizationTableHead?.replaceChildren();
+  for (const column of visible) {
+    const th = document.createElement('th');
+    th.className = 'earnings-sortable-th';
+    if (optimizationSort.key === column) th.classList.add('earnings-sort-active');
+    th.textContent = column;
+    const arrow = document.createElement('span');
+    arrow.className = 'earnings-sort-arrow';
+    arrow.textContent = optimizationSort.key === column ? (optimizationSort.direction === 'desc' ? '▼' : '▲') : '';
+    th.append(arrow);
+    th.addEventListener('click', () => {
+      if (optimizationSort.key !== column) optimizationSort = { key: column, direction: 'desc' };
+      else if (optimizationSort.direction === 'desc') optimizationSort.direction = 'asc';
+      else optimizationSort = { key: 'time', direction: 'desc' };
+      renderOptimizationTable();
+    });
+    optimizationTableHead?.append(th);
+  }
+  optimizationTableBody?.replaceChildren();
+  const direction = optimizationSort.direction === 'asc' ? 1 : -1;
+  const rows = [...optimizationRows].sort((a, b) => {
+    const left = a[optimizationSort.key];
+    const right = b[optimizationSort.key];
+    const leftEmpty = left === null || left === undefined || left === '';
+    const rightEmpty = right === null || right === undefined || right === '';
+    if (leftEmpty || rightEmpty) return leftEmpty === rightEmpty ? 0 : (leftEmpty ? 1 : -1);
+    return compareOptimizationValues(left, right) * direction;
+  });
+  if (!rows.length || !visible.length) {
+    const tr = document.createElement('tr');
+    tr.className = 'empty-row';
+    const td = document.createElement('td');
+    td.colSpan = Math.max(1, visible.length);
+    td.textContent = rows.length ? 'Select at least one column' : 'No optimization rows match the current filters';
+    tr.append(td);
+    optimizationTableBody?.append(tr);
+    return;
+  }
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    for (const column of visible) {
+      const td = document.createElement('td');
+      td.textContent = optimizationCellValue(row[column]);
+      tr.append(td);
+    }
+    optimizationTableBody?.append(tr);
+  }
+}
+
+function populateOptimizationFilter(select, rows, key, allLabel) {
+  const selected = select?.value || '__all__';
+  const existing = Array.from(select?.options || []).map((option) => option.value).filter((value) => value !== '__all__');
+  const values = Array.from(new Set([...existing, ...rows.map((row) => row[key]).filter(Boolean)])).sort((a, b) => String(a).localeCompare(String(b)));
+  select?.replaceChildren(new Option(allLabel, '__all__'), ...values.map((value) => new Option(value, value)));
+  if (values.includes(selected)) select.value = selected;
+}
+
+async function refreshScanningOptimization({ append = false } = {}) {
+  if (!api.getScanningOptimization) return;
+  optimizationSyncStatus.textContent = append ? 'Loading more optimization rows...' : 'Loading optimization rows...';
+  const result = await api.getScanningOptimization({
+    faction: normalizeFaction((latestSettings || getFormPayload()).faction),
+    start: optimizationFilterIso(optimizationStartFilter),
+    stop: optimizationFilterIso(optimizationStopFilter),
+    fleet: optimizationFleetFilter.value,
+    eventType: optimizationEventFilter.value,
+    operation: optimizationOperationFilter.value,
+    status: optimizationStatusFilter.value,
+    offset: append ? optimizationRows.length : 0,
+    limit: 500,
+  });
+  if (!result?.ok) {
+    optimizationSyncStatus.textContent = `Optimization sync failed: ${result?.error || 'unknown error'}`;
+    if (!append) { optimizationRows = []; renderOptimizationTable(); }
+    return;
+  }
+  latestOptimizationResult = result;
+  optimizationRows = append ? [...optimizationRows, ...result.rows] : result.rows;
+  const discovered = getOrderedOptimizationColumns(new Set([...optimizationColumns, ...(result.columns || [])]));
+  for (const column of discovered) if (!optimizationColumns.includes(column)) optimizationSelectedColumns.add(column);
+  optimizationColumns = discovered;
+  renderOptimizationColumnControls();
+  renderOptimizationTable();
+  populateOptimizationFilter(optimizationFleetFilter, optimizationRows, 'fleet', 'All fleets');
+  populateOptimizationFilter(optimizationOperationFilter, optimizationRows, 'operation', 'All operations');
+  optimizationLoadMore.hidden = !result.hasMore;
+  optimizationSyncStatus.textContent = `${optimizationRows.length.toLocaleString()} rows · ${result.bucket} · ${normalizeFaction((latestSettings || getFormPayload()).faction)}`;
+}
+
 function setActiveSection(section) {
   currentSection = section;
   appShell?.classList.toggle('earnings-active', section === 'earnings');
+  appShell?.classList.toggle('optimization-active', section === 'optimization');
   document.querySelectorAll('.nav-button').forEach((button) => {
     const active = button.dataset.section === section;
     button.classList.toggle('active', active);
@@ -5906,6 +6068,7 @@ function setActiveSection(section) {
   updateTitle();
   if (section === 'fleet' && !latestFleetResult) refreshFleets();
   if (section === 'earnings' && !latestEarningsResult) refreshEarnings();
+  if (section === 'optimization' && !latestOptimizationResult) refreshScanningOptimization();
   if (section === 'production') refreshVisibleProductionSubtab();
 }
 
@@ -5933,6 +6096,7 @@ function refreshVisibleProductionSubtab() {
 function refreshVisibleFactionViews() {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') return refreshEarnings();
+  if (currentSection === 'optimization') return refreshScanningOptimization();
   if (currentSection === 'production') return refreshVisibleProductionSubtab();
   return Promise.resolve();
 }
@@ -5940,6 +6104,7 @@ function refreshVisibleFactionViews() {
 function refreshCurrentVisibleData() {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') return refreshEarnings();
+  if (currentSection === 'optimization') return refreshScanningOptimization();
   if (currentSection !== 'production') return Promise.resolve();
   if (currentSubtab === 'scanning') return refreshDailySdu();
   if (currentSubtab === 'mining') return refreshDailyMining();
@@ -6421,6 +6586,7 @@ form.addEventListener('submit', async (event) => {
     refreshConsScanning();
     refreshConsCargo();
     refreshConsTotal();
+    if (currentSection === 'optimization') refreshScanningOptimization();
     saveStatus.textContent = 'Saved';
     setTimeout(() => {
       if (saveStatus.textContent === 'Saved') {
@@ -6460,6 +6626,11 @@ form.addEventListener('input', () => {
 });
 
 fleetSearchInput.addEventListener('input', renderFleetSearch);
+
+for (const filter of [optimizationStartFilter, optimizationStopFilter, optimizationFleetFilter, optimizationEventFilter, optimizationOperationFilter, optimizationStatusFilter]) {
+  filter?.addEventListener('change', () => refreshScanningOptimization());
+}
+optimizationLoadMore?.addEventListener('click', () => refreshScanningOptimization({ append: true }));
 
 loadInitialState().catch((error) => {
   console.error(error);
