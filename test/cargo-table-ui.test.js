@@ -24,10 +24,11 @@ test('Cargo movement telemetry provides Txs Daily without being overwritten by a
 });
 
 test('optional Cargo telemetry queries cannot discard core fleet rows', () => {
-  assert.match(main, /Promise\.allSettled\(\[/);
-  assert.match(main, /const cargoCsv = await queryInfluxFlux\(settings, cargoFlux\);/);
-  assert.match(main, /const \[typeResult, moveTimeResult, txDailyResult, completedCycleResult\] = await Promise\.allSettled/);
-  assert.match(main, /const optionalCsv = \(result\) => result\.status === 'fulfilled' \? result\.value : ''/);
+  const cargoFunction = main.slice(main.indexOf('async function fetchCargoEarningsRows'), main.indexOf('async function fetchCargoAllocationEarningsRows'));
+  assert.match(cargoFunction, /const completedCycleFlux =/);
+  assert.match(cargoFunction, /const cargoCsv = await queryInfluxFlux\(settings, cargoFlux\);/);
+  assert.match(cargoFunction, /const \[typeResult, moveTimeResult, txDailyResult, completedCycleResult\] = await Promise\.allSettled/);
+  assert.match(cargoFunction, /const optionalCsv = \(result\) => result\.status === 'fulfilled' \? result\.value : ''/);
 });
 
 test('Cargo query errors expose the actionable failure instead of a generic unavailable label', () => {

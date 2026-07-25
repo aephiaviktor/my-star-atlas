@@ -4369,14 +4369,6 @@ ${scopeFilterFlux}
   |> group()
   |> keep(columns: ["fleet", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
-  const completedCycleFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
-  |> filter(fn: (r) => r._measurement == "cargo_cycle_completed" and r._field == "legCount")
-${scopeFilterFlux}
-  |> filter(fn: (r) => exists r.fleet and exists r.assignment and exists r.cycleId)
-  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
-  |> sort(columns: ["_time", "fleet", "assignment"])`;
-
   const rowsByKey = new Map();
   const txDailyByDayFleet = new Map();
   const ensureRow = (isoDate, fleet, starbase, rawMaterial, date) => {
@@ -4716,6 +4708,13 @@ ${scopeFilterFlux}
   |> group()
   |> keep(columns: ["fleet", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
+  const completedCycleFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "cargo_cycle_completed" and r._field == "legCount")
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.fleet and exists r.assignment and exists r.cycleId)
+  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet", "assignment"])`;
 
   const rowsByKey = new Map();
   const txDailyByDayFleet = new Map();
