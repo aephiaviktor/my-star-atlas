@@ -5395,6 +5395,9 @@ async function fetchEarningsSnapshot(payload) {
     const txsCostsAtlas = atlasPerSol != null ? craftingRow.txCostSol * atlasPerSol : null;
     const costParts = [ingCostsAtlas, feeCostsAtlas, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
+    const costsPerUnitAtlas = Number.isFinite(totalCostsAtlas) && craftingRow.crafted > 0
+      ? totalCostsAtlas / craftingRow.crafted
+      : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
       ? revenueAtlasPerDay - totalCostsAtlas
       : null;
@@ -5411,6 +5414,7 @@ async function fetchEarningsSnapshot(payload) {
       feeCostsAtlas,
       txsCostsAtlas,
       totalCostsAtlas,
+      costsPerUnitAtlas,
       netProfitAtlas,
       crew,
       netProfitPerCrew,

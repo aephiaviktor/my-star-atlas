@@ -466,6 +466,7 @@ const craftingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
   Object.freeze({ id: 'npPerCrew', label: 'NP per crew' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
+  Object.freeze({ id: 'costsPerUnit', label: 'Costs per Unit' }),
 ]);
 
 const upgradingEarningsOptionalColumns = Object.freeze([
@@ -516,7 +517,7 @@ const earningsColumnState = {
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
   cargo: new Set(['txsDaily', 'cargoCycles', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
-  crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
+  crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin', 'costsPerUnit']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   breakeven: new Set(['source']),
 };
@@ -587,6 +588,7 @@ const earningsMetricGuideBySubtab = Object.freeze({
     ingCosts: ['Current ATLAS value of ingredients consumed.', 'Σ(ingredient quantity × current ingredient price).', 'This is a current-price opportunity-cost estimate, not necessarily the price originally paid.'],
     feeCosts: ['ATLAS crafting fees recorded for the activity.', 'Σ recorded crafting fee amount.', 'A direct crafting expense included in Total Costs.'],
     totalCosts: ['Estimated cost of the crafted output.', 'Ingredient Costs + Crafting Fee Costs + Txs Costs.', 'Missing ingredient prices can make this estimate incomplete.'],
+    costsPerUnit: ['Estimated cost for each crafted output unit.', 'Total Costs ÷ Crafted.', 'This becomes the base cost per unit when crafted assets are added to inventory.'],
   }),
   upgrading: Object.freeze({
     installed: ['Components installed during the completed UTC day.', 'Σ installed component quantity.', 'This is the output quantity used for both estimated reward value and component cost.'],
@@ -5278,6 +5280,7 @@ function createCraftingEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
   if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
   if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
+  if (columnId === 'costsPerUnit') return createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6));
   return createTextCell('--');
 }
 
