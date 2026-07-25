@@ -5363,7 +5363,11 @@ async function fetchEarningsSnapshot(payload) {
   let breakevenError = '';
   try {
     const inventoryRows = await fetchCurrentPerStarbaseInventory(settings);
-    breakevenRows = buildBreakevenRows({ miningRows: mining, cargoAllocations, inventoryRows, prices });
+    const factionStarbases = await fetchFactionStarbases(settings);
+    if (!factionStarbases) throw new Error('breakeven_faction_starbases_unavailable');
+    const faction = normalizeFaction(settings.faction);
+    breakevenRows = buildBreakevenRows({ miningRows: mining, cargoAllocations, inventoryRows, prices })
+      .filter((row) => isStarbaseIncluded(row.starbase, factionStarbases, faction));
   } catch (error) {
     breakevenError = String(error?.message || error || 'breakeven_unavailable');
   }

@@ -305,3 +305,11 @@ test('production Breakeven cost basis uses enriched Atlas fields and the fresh c
   assert.match(main, /row\.fuelCostsAtlas/);
   assert.match(main, /row\.txsCostsAtlas/);
 });
+
+test('production Breakeven rows are restricted to starbases in the selected faction', () => {
+  const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  assert.match(
+    main,
+    /const factionStarbases = await fetchFactionStarbases\(settings\);[\s\S]*?breakevenRows = buildBreakevenRows\([\s\S]*?\)\s*\.filter\(\(row\) => isStarbaseIncluded\(row\.starbase, factionStarbases, faction\)\);/,
+  );
+});
