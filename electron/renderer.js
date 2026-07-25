@@ -50,6 +50,12 @@ const optimizationFleetFilter = document.querySelector('#optimization-fleet-filt
 const optimizationEventFilter = document.querySelector('#optimization-event-filter');
 const optimizationOperationFilter = document.querySelector('#optimization-operation-filter');
 const optimizationStatusFilter = document.querySelector('#optimization-status-filter');
+const optimizationUpgradingSyncStatus = document.querySelector('#optimization-upgrading-sync-status');
+const optimizationUpgradingTableHead = document.querySelector('#optimization-upgrading-table-head');
+const optimizationUpgradingTableBody = document.querySelector('#optimization-upgrading-table-body');
+const optimizationUpgradingStartFilter = document.querySelector('#optimization-upgrading-start-filter');
+const optimizationUpgradingStopFilter = document.querySelector('#optimization-upgrading-stop-filter');
+const optimizationUpgradingInstanceFilter = document.querySelector('#optimization-upgrading-instance-filter');
 const earningsSyncStatus = document.querySelector('#earnings-sync-status');
 const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
@@ -297,6 +303,36 @@ let optimizationRows = [];
 let optimizationColumns = [];
 let optimizationSelectedColumns = new Set();
 let optimizationSort = { key: 'time', direction: 'desc' };
+let currentOptimizationSubtab = 'scanning';
+let latestUpgradingOptimizationResult = null;
+let optimizationUpgradingRows = [];
+let optimizationUpgradingSort = { key: 'time', direction: 'desc' };
+const optimizationUpgradingComponents = [
+  ['framework', 'Framework'], ['electronics', 'Electronics'], ['power_source', 'Power Source'],
+  ['electromagnet', 'Electromagnet'], ['field_stabilizer', 'Field Stabilizer'],
+  ['particle_accelerator', 'Particle Accelerator'], ['radiation_absorber', 'Radiation Absorber'],
+  ['survey_data_unit', 'Survey Data Unit'],
+];
+const optimizationUpgradingColumns = [
+  { key: 'time', label: 'Date and Time' }, { key: 'faction', label: 'Faction' }, { key: 'instance', label: 'Instance' },
+  { key: 'player_lp_installed_today', label: 'Player LP Installed Today' },
+  { key: 'phantom_crew', label: 'Phantom Crew' },
+  ...optimizationUpgradingComponents.flatMap(([key, label]) => [
+    { key: `${key}_installed`, label: `${label} Installed` },
+    { key: `${key}_installed_lp`, label: `${label} Installed LP` },
+  ]),
+  { key: 'neutral_lp_target', label: 'Neutral LP Target' }, { key: 'requested_lp_target', label: 'Requested LP Target' },
+  { key: 'optimizer_lp_target', label: 'Optimizer LP Target' }, { key: 'aggressiveness_rel', label: 'Aggr. (rel.)' },
+  { key: 'aggressiveness_abs', label: 'Aggr. (abs.)' }, { key: 'aggressiveness', label: 'Aggr.' },
+  { key: 'faction_lp_installed_today', label: 'Faction LP Installed Today' },
+  { key: 'expected_additional_lp_eod', label: 'Expected Additional LP by EOD' },
+  { key: 'expected_total_lp_eod', label: 'Expected Total LP by EOD' },
+  { key: 'uninstalled_automated_lp', label: 'Uninstalled automated LP' },
+  { key: 'uninstalled_not_automated_lp', label: 'Uninstalled not automated LP' },
+  { key: 'uninstalled_not_automated_older_24h_lp', label: 'Uninstalled not automated LP (>24h)' },
+  { key: 'oldest_uninstalled_not_automated_age_seconds', label: 'Oldest Uninstalled Age' },
+];
+let optimizationUpgradingSelectedColumns = new Set(optimizationUpgradingColumns.map((column) => column.key));
 let latestSduResult = null;
 let latestMiningResult = null;
 let latestCraftingResult = null;
@@ -1109,6 +1145,12 @@ function resetFactionScopedState() {
   latestEarningsResult = null;
   latestOptimizationResult = null;
   optimizationRows = [];
+  latestUpgradingOptimizationResult = null;
+  optimizationUpgradingRows = [];
+  if (optimizationUpgradingInstanceFilter) {
+    optimizationUpgradingInstanceFilter.replaceChildren(new Option('All instances', '__all__'));
+    optimizationUpgradingInstanceFilter.value = '__all__';
+  }
   latestSduResult = null;
   latestMiningResult = null;
   latestCraftingResult = null;
@@ -5947,6 +5989,22 @@ function getOrderedOptimizationColumns(columns) {
 function renderOptimizationColumnControls() {
   if (!optimizationColumnList) return;
   optimizationColumnList.replaceChildren();
+  if (currentOptimizationSubtab === 'upgrading') {
+    for (const column of optimizationUpgradingColumns) {
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = optimizationUpgradingSelectedColumns.has(column.key);
+      input.addEventListener('change', () => {
+        if (input.checked) optimizationUpgradingSelectedColumns.add(column.key);
+        else optimizationUpgradingSelectedColumns.delete(column.key);
+        renderUpgradingOptimizationTable();
+      });
+      label.append(input, document.createTextNode(` ${column.label}`));
+      optimizationColumnList.append(label);
+    }
+    return;
+  }
   for (const column of optimizationColumns) {
     const label = document.createElement('label');
     const input = document.createElement('input');
@@ -6053,6 +6111,80 @@ async function refreshScanningOptimization({ append = false } = {}) {
   optimizationSyncStatus.textContent = `${optimizationRows.length.toLocaleString()} rows · ${result.bucket} · ${normalizeFaction((latestSettings || getFormPayload()).faction)}`;
 }
 
+function upgradingOptimizationCell(column, value) {
+  if (value === null || value === undefined || value === '') return '--';
+  if (column.key === 'time') return new Date(value).toLocaleString();
+  if (column.key === 'oldest_uninstalled_not_automated_age_seconds') {
+    const hours = Number(value) / 3600;
+    return hours >= 48 ? `${(hours / 24).toFixed(1)}d` : `${hours.toFixed(1)}h`;
+  }
+  if (column.key.startsWith('aggressiveness')) return Number(value).toFixed(3);
+  return Number.isFinite(Number(value)) ? Math.round(Number(value)).toLocaleString() : String(value);
+}
+
+function renderUpgradingOptimizationTable() {
+  const visible = optimizationUpgradingColumns.filter((column) => optimizationUpgradingSelectedColumns.has(column.key));
+  optimizationUpgradingTableHead?.replaceChildren();
+  for (const column of visible) {
+    const th = document.createElement('th');
+    th.className = 'earnings-sortable-th';
+    th.textContent = column.label;
+    const arrow = document.createElement('span');
+    arrow.className = 'earnings-sort-arrow';
+    arrow.textContent = optimizationUpgradingSort.key === column.key ? (optimizationUpgradingSort.direction === 'desc' ? '▼' : '▲') : '';
+    th.append(arrow);
+    th.addEventListener('click', () => {
+      if (optimizationUpgradingSort.key !== column.key) optimizationUpgradingSort = { key: column.key, direction: 'desc' };
+      else optimizationUpgradingSort.direction = optimizationUpgradingSort.direction === 'desc' ? 'asc' : 'desc';
+      renderUpgradingOptimizationTable();
+    });
+    optimizationUpgradingTableHead?.append(th);
+  }
+  optimizationUpgradingTableBody?.replaceChildren();
+  const direction = optimizationUpgradingSort.direction === 'asc' ? 1 : -1;
+  const rows = [...optimizationUpgradingRows].sort((a, b) => compareOptimizationValues(a[optimizationUpgradingSort.key], b[optimizationUpgradingSort.key]) * direction);
+  if (!rows.length || !visible.length) {
+    const tr = document.createElement('tr'); tr.className = 'empty-row';
+    const td = document.createElement('td'); td.colSpan = Math.max(1, visible.length);
+    td.textContent = rows.length ? 'Select at least one column' : 'No upgrading optimization rows match the current filters';
+    tr.append(td); optimizationUpgradingTableBody?.append(tr); return;
+  }
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    for (const column of visible) { const td = document.createElement('td'); td.textContent = upgradingOptimizationCell(column, row[column.key]); tr.append(td); }
+    optimizationUpgradingTableBody?.append(tr);
+  }
+}
+
+async function refreshUpgradingOptimization() {
+  if (!api.getUpgradingOptimization) return;
+  optimizationUpgradingSyncStatus.textContent = 'Loading upgrading optimization rows...';
+  const result = await api.getUpgradingOptimization({
+    faction: normalizeFaction((latestSettings || getFormPayload()).faction),
+    start: optimizationFilterIso(optimizationUpgradingStartFilter),
+    stop: optimizationFilterIso(optimizationUpgradingStopFilter),
+    instance: optimizationUpgradingInstanceFilter.value,
+  });
+  if (!result?.ok) { optimizationUpgradingSyncStatus.textContent = `Upgrading optimization sync failed: ${result?.error || 'unknown error'}`; return; }
+  latestUpgradingOptimizationResult = result;
+  optimizationUpgradingRows = result.rows || [];
+  populateOptimizationFilter(optimizationUpgradingInstanceFilter, optimizationUpgradingRows, 'instance', 'All instances');
+  renderUpgradingOptimizationTable();
+  optimizationUpgradingSyncStatus.textContent = `${optimizationUpgradingRows.length.toLocaleString()} rows · ${result.bucket} · ${normalizeFaction((latestSettings || getFormPayload()).faction)}`;
+}
+
+function setActiveOptimizationSubtab(subtab) {
+  currentOptimizationSubtab = subtab;
+  document.querySelectorAll('.optimization-subtab-button').forEach((button) => {
+    const active = button.dataset.optimizationSubtab === subtab;
+    button.classList.toggle('active', active); button.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll('[data-optimization-panel]').forEach((panel) => panel.classList.toggle('active', panel.dataset.optimizationPanel === subtab));
+  renderOptimizationColumnControls();
+  if (subtab === 'upgrading' && !latestUpgradingOptimizationResult) refreshUpgradingOptimization();
+  if (subtab === 'scanning' && !latestOptimizationResult) refreshScanningOptimization();
+}
+
 function setActiveSection(section) {
   currentSection = section;
   appShell?.classList.toggle('earnings-active', section === 'earnings');
@@ -6068,7 +6200,11 @@ function setActiveSection(section) {
   updateTitle();
   if (section === 'fleet' && !latestFleetResult) refreshFleets();
   if (section === 'earnings' && !latestEarningsResult) refreshEarnings();
-  if (section === 'optimization' && !latestOptimizationResult) refreshScanningOptimization();
+  if (section === 'optimization') {
+    if (currentOptimizationSubtab === 'upgrading') refreshUpgradingOptimization();
+    else if (!latestOptimizationResult) refreshScanningOptimization();
+    renderOptimizationColumnControls();
+  }
   if (section === 'production') refreshVisibleProductionSubtab();
 }
 
@@ -6096,7 +6232,7 @@ function refreshVisibleProductionSubtab() {
 function refreshVisibleFactionViews() {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') return refreshEarnings();
-  if (currentSection === 'optimization') return refreshScanningOptimization();
+  if (currentSection === 'optimization') return currentOptimizationSubtab === 'upgrading' ? refreshUpgradingOptimization() : refreshScanningOptimization();
   if (currentSection === 'production') return refreshVisibleProductionSubtab();
   return Promise.resolve();
 }
@@ -6104,7 +6240,7 @@ function refreshVisibleFactionViews() {
 function refreshCurrentVisibleData() {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') return refreshEarnings();
-  if (currentSection === 'optimization') return refreshScanningOptimization();
+  if (currentSection === 'optimization') return currentOptimizationSubtab === 'upgrading' ? refreshUpgradingOptimization() : refreshScanningOptimization();
   if (currentSection !== 'production') return Promise.resolve();
   if (currentSubtab === 'scanning') return refreshDailySdu();
   if (currentSubtab === 'mining') return refreshDailyMining();
@@ -6229,6 +6365,10 @@ document.querySelectorAll('.subtab-button[data-subtab]').forEach((button) => {
 
 document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
   button.addEventListener('click', () => setActiveEarningsSubtab(button.dataset.earningsSubtab));
+});
+
+document.querySelectorAll('.optimization-subtab-button').forEach((button) => {
+  button.addEventListener('click', () => setActiveOptimizationSubtab(button.dataset.optimizationSubtab));
 });
 
 renderEarningsColumnControls();
@@ -6586,7 +6726,10 @@ form.addEventListener('submit', async (event) => {
     refreshConsScanning();
     refreshConsCargo();
     refreshConsTotal();
-    if (currentSection === 'optimization') refreshScanningOptimization();
+    if (currentSection === 'optimization') {
+      if (currentOptimizationSubtab === 'upgrading') refreshUpgradingOptimization();
+      else refreshScanningOptimization();
+    }
     saveStatus.textContent = 'Saved';
     setTimeout(() => {
       if (saveStatus.textContent === 'Saved') {
@@ -6629,6 +6772,9 @@ fleetSearchInput.addEventListener('input', renderFleetSearch);
 
 for (const filter of [optimizationStartFilter, optimizationStopFilter, optimizationFleetFilter, optimizationEventFilter, optimizationOperationFilter, optimizationStatusFilter]) {
   filter?.addEventListener('change', () => refreshScanningOptimization());
+}
+for (const filter of [optimizationUpgradingStartFilter, optimizationUpgradingStopFilter, optimizationUpgradingInstanceFilter]) {
+  filter?.addEventListener('change', () => refreshUpgradingOptimization());
 }
 optimizationLoadMore?.addEventListener('click', () => refreshScanningOptimization({ append: true }));
 

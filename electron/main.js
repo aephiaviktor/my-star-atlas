@@ -615,6 +615,54 @@ async function fetchScanningOptimization(payload = {}) {
   };
 }
 
+const OPTIMIZATION_UPGRADING_START = '2026-07-25T12:50:00.000Z';
+const OPTIMIZATION_UPGRADING_COMPONENT_KEYS = Object.freeze({
+  Framework: 'framework', Electronics: 'electronics', 'Power Source': 'power_source',
+  Electromagnet: 'electromagnet', 'Field Stabilizer': 'field_stabilizer',
+  'Particle Accelerator': 'particle_accelerator', 'Radiation Absorber': 'radiation_absorber',
+  'Survey Data Unit': 'survey_data_unit',
+});
+
+function mergeUpgradingOptimizationRows(aggregateRows, componentRows) {
+  const byTime = new Map((aggregateRows || []).map((row) => [String(row._time || row.time || ''), cleanOptimizationRow(row)]));
+  for (const row of (componentRows || [])) {
+    const time = String(row._time || row.time || '');
+    const target = byTime.get(time);
+    const key = OPTIMIZATION_UPGRADING_COMPONENT_KEYS[String(row.component || '')];
+    if (!target || !key) continue;
+    target[`${key}_installed`] = Number(row.installed_today || 0);
+    target[`${key}_installed_lp`] = Number(row.installed_lp_today || 0);
+  }
+  return [...byTime.values()];
+}
+
+async function fetchUpgradingOptimization(payload = {}) {
+  const settings = await readSettings();
+  const bucket = String(settings.influxOptimizationBucket || 'optimization').trim();
+  const querySettings = { ...settings, influxBucket: bucket };
+  const faction = normalizeOptimizationFaction(payload.faction || settings.faction);
+  const requestedStart = Date.parse(String(payload.start || ''));
+  const start = new Date(Math.max(Date.parse(OPTIMIZATION_UPGRADING_START), Number.isFinite(requestedStart) ? requestedStart : Date.parse(OPTIMIZATION_UPGRADING_START))).toISOString();
+  const requestedStop = Date.parse(String(payload.stop || ''));
+  const stop = Number.isFinite(requestedStop) && requestedStop > Date.parse(start) ? new Date(requestedStop).toISOString() : '';
+  const instanceFilter = payload.instance && payload.instance !== '__all__' ? ` and r.instance == "${escapeFluxString(payload.instance)}"` : '';
+  const range = stop ? `range(start: time(v: "${escapeFluxString(start)}"), stop: time(v: "${escapeFluxString(stop)}"))` : `range(start: time(v: "${escapeFluxString(start)}"))`;
+  const base = (measurement) => `from(bucket: "${escapeFluxString(bucket)}")
+  |> ${range}
+  |> filter(fn: (r) => r._measurement == "${measurement}" and r.faction == "${escapeFluxString(faction)}"${instanceFilter})
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> sort(columns: ["_time"], desc: true)`;
+  const [aggregateCsv, componentCsv] = await Promise.all([
+    queryInfluxFlux(querySettings, base('optimization_upgrading')),
+    queryInfluxFlux(querySettings, `from(bucket: "${escapeFluxString(bucket)}")
+  |> ${range}
+  |> filter(fn: (r) => r._measurement == "optimization_upgrading_component" and r.faction == "${escapeFluxString(faction)}"${instanceFilter})
+  |> pivot(rowKey: ["_time", "component"], columnKey: ["_field"], valueColumn: "_value")`),
+  ]);
+  const rows = mergeUpgradingOptimizationRows(parseInfluxCsv(aggregateCsv), parseInfluxCsv(componentCsv));
+  return { ok: true, rows, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
+}
+
 function getInfluxScopeNote(settings) {
   const faction = normalizeFaction(settings.faction);
   return `${faction} tagged`;
@@ -5890,6 +5938,11 @@ handleTrustedIpc('optimization:scanning', async (_event, payload) => {
       checkedAt: new Date().toISOString(),
     };
   }
+});
+
+handleTrustedIpc('optimization:upgrading', async (_event, payload) => {
+  try { return await fetchUpgradingOptimization(payload); }
+  catch (error) { return { ok: false, error: String(error?.message || error || 'optimization_upgrading_failed'), checkedAt: new Date().toISOString() }; }
 });
 
 app.whenReady().then(async () => {

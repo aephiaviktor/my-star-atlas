@@ -188,6 +188,9 @@ select:focus {
   display: grid;
 }
 
+.optimization-panel { display: none; }
+.optimization-panel.active { display: block; }
+
 #optimization-column-list {
   display: grid;
   gap: 8px;

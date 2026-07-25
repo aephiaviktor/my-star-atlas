@@ -25,4 +25,5 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getPcrCharts: (payload) => ipcRenderer.invoke('pcr:daily', payload),
   getInventory: (payload) => ipcRenderer.invoke('inventory:daily', payload),
   getScanningOptimization: (payload) => ipcRenderer.invoke('optimization:scanning', payload),
+  getUpgradingOptimization: (payload) => ipcRenderer.invoke('optimization:upgrading', payload),
 });

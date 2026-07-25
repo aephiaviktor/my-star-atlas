@@ -97,7 +97,8 @@
               <button class="subtab-button active" type="button" aria-selected="true">My Fleet</button>
             </div>
             <div class="subtab-bar toolbar-tab-group" data-toolbar-section="optimization" role="tablist" aria-label="Optimization views" hidden>
-              <button class="subtab-button active" type="button" aria-selected="true">Scanning</button>
+              <button class="optimization-subtab-button subtab-button active" type="button" data-optimization-subtab="scanning" aria-selected="true">Scanning</button>
+              <button class="optimization-subtab-button subtab-button" type="button" data-optimization-subtab="upgrading" aria-selected="false">Upgrading</button>
             </div>
             <div class="subtab-bar toolbar-tab-group" data-toolbar-section="earnings" role="tablist" aria-label="Earnings views" hidden>
               <button class="earnings-subtab-button subtab-button active" type="button" data-earnings-subtab="scanning" aria-selected="true">Scanning</button>
@@ -767,6 +768,7 @@
         </section>
 
         <section class="section-view" data-section-panel="optimization">
+          <div class="optimization-panel active" data-optimization-panel="scanning">
           <section class="work-surface optimization-surface">
             <div class="activity-filter-bar optimization-filter-bar">
               <label class="activity-filter">From
@@ -797,6 +799,23 @@
             </div>
             <button id="optimization-load-more" class="secondary-btn" type="button" hidden>Load more</button>
           </section>
+          </div>
+          <div class="optimization-panel" data-optimization-panel="upgrading">
+            <section class="work-surface optimization-surface">
+              <div class="activity-filter-bar optimization-filter-bar">
+                <label class="activity-filter">From <input id="optimization-upgrading-start-filter" type="datetime-local" step="0.001" value="2026-07-25T12:50:00.000" /></label>
+                <label class="activity-filter">To <input id="optimization-upgrading-stop-filter" type="datetime-local" step="1" /></label>
+                <label class="activity-filter">Instance <select id="optimization-upgrading-instance-filter"><option value="__all__">All instances</option></select></label>
+              </div>
+              <div class="fleet-sync-status" id="optimization-upgrading-sync-status">Awaiting upgrading optimization data</div>
+              <div class="fleet-table-wrap">
+                <table class="fleet-table optimization-table">
+                  <thead><tr id="optimization-upgrading-table-head"><th>Date and Time</th></tr></thead>
+                  <tbody id="optimization-upgrading-table-body"><tr class="empty-row"><td>Awaiting upgrading optimization data</td></tr></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
         </section>
 
         <section class="section-view" data-section-panel="earnings">
