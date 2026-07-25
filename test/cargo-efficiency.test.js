@@ -7,8 +7,26 @@ const {
   calculateFleetCargoCapacity,
   calculateCargoEfficiency,
   buildCargoVolumeByFleetDayAssignment,
+  filterCargoAllocationsToCompletedCycles,
   calculateTravelModeTime,
 } = require('../electron/earnings-math');
+
+test('cargo volume only includes allocations from explicitly completed cycles', () => {
+  const allocations = [
+    { cycleId: 'completed-a', cargoVolume: 100 },
+    { cycleId: 'legacy-without-completion', cargoVolume: 200 },
+    { cycleId: 'completed-b', cargoVolume: 300 },
+  ];
+  const cargoRows = [
+    { completedCycleIds: ['completed-a'] },
+    { completedCycleIds: ['completed-b'] },
+  ];
+
+  assert.deepEqual(filterCargoAllocationsToCompletedCycles(allocations, cargoRows), [
+    allocations[0],
+    allocations[2],
+  ]);
+});
 
 test('fleet cargo capacity sums ship capacity across quantities and rejects partial mappings', () => {
   assert.equal(calculateFleetCargoCapacity([
@@ -86,7 +104,8 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(main, /cargoCycles: Number\(cargoRow\.cargoCycles\) \|\| 0/);
   assert.match(main, /_measurement == "cargo_cycle_completed" and r\._field == "legCount"/);
   assert.match(main, /completedCycleLegs\.set\(cycleId, legCount\)/);
-  assert.match(main, /cargoCycles: row\.completedCycleLegs\.size/);
+  assert.match(main, /cargoCycles: completedCycleIds\.length/);
+  assert.match(main, /filterCargoAllocationsToCompletedCycles\(fleetScopedCargoAllocationRows, cargoRows\)/);
   assert.match(main, /cargoLegs: Array\.from\(row\.completedCycleLegs\.values\(\)\)/);
   assert.match(main, /buildCargoVolumeByFleetDayAssignment\(cargoAllocations\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);

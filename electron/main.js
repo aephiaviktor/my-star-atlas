@@ -23,7 +23,7 @@ const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows } = require('./influx-data');
-const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, calculateTravelModeTime } = require('./earnings-math');
+const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -4826,10 +4826,12 @@ ${scopeFilterFlux}
   return Array.from(rowsByKey.values())
     .map((row) => {
       const travelModeTime = calculateTravelModeTime(row.travelTimeByMode);
+      const completedCycleIds = Array.from(row.completedCycleLegs.keys());
       return {
         ...row,
         starbases: Array.from(row.starbases).sort((a, b) => a.localeCompare(b)),
-        cargoCycles: row.completedCycleLegs.size,
+        completedCycleIds,
+        cargoCycles: completedCycleIds.length,
         cargoLegs: Array.from(row.completedCycleLegs.values()).reduce((sum, value) => sum + value, 0),
         travelModeTime,
         travelModeWarpPercent: travelModeTime?.warpPercent ?? null,
@@ -4859,8 +4861,9 @@ async function fetchCargoAllocationEarningsRows(settings) {
     const origin = String(row.originStarbase || '').trim() || '--';
     const destination = String(row.deliveryStarbase || '').trim() || '--';
     if (!includedDays.has(isoDate) || !fleet) continue;
-    const key = `${isoDate}\n${fleet}\n${asset}\n${origin}\n${destination}\n${assignment}`;
-    if (!grouped.has(key)) grouped.set(key, { isoDate, label: formatShortUtcDate(date), fleet, asset, origin, destination, assignment, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
+    const cycleId = String(row.cycleId || '').trim();
+    const key = `${isoDate}\n${fleet}\n${asset}\n${origin}\n${destination}\n${assignment}\n${cycleId}`;
+    if (!grouped.has(key)) grouped.set(key, { isoDate, label: formatShortUtcDate(date), fleet, asset, origin, destination, assignment, cycleId, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
     const target = grouped.get(key);
     const value = Number(row._value);
     if (Number.isFinite(value) && Object.hasOwn(target, row._field)) target[row._field] += value;
@@ -5296,9 +5299,10 @@ async function fetchEarningsSnapshot(payload) {
   // Scope allocation rows through the already faction-scoped movement fleets,
   // while preserving each fleet and route as separate cost dimensions.
   const scopedCargoFleetLabels = new Set(cargoRows.map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
-  const scopedCargoAllocationRows = cargoAllocationRows.filter((row) =>
+  const fleetScopedCargoAllocationRows = cargoAllocationRows.filter((row) =>
     scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet))
   );
+  const scopedCargoAllocationRows = filterCargoAllocationsToCompletedCycles(fleetScopedCargoAllocationRows, cargoRows);
   const enrichedCargoAllocationRows = enrichCargoAllocationRows(
     scopedCargoAllocationRows,
     fleetByLabel,

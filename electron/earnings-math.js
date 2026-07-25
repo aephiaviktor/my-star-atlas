@@ -46,6 +46,15 @@ function buildCargoVolumeByFleetDayAssignment(rows = []) {
   return totals;
 }
 
+function filterCargoAllocationsToCompletedCycles(allocations = [], cargoRows = []) {
+  const completedCycleIds = new Set(
+    cargoRows.flatMap((row) => Array.isArray(row?.completedCycleIds) ? row.completedCycleIds : [])
+      .map((cycleId) => String(cycleId || '').trim())
+      .filter(Boolean)
+  );
+  return allocations.filter((row) => completedCycleIds.has(String(row?.cycleId || '').trim()));
+}
+
 function calculateTravelModeTime(durations = {}) {
   const warp = Number(durations.warp || 0);
   const subwarp = Number(durations.subwarp || 0);
@@ -65,5 +74,6 @@ module.exports = {
   calculateFleetCargoCapacity,
   calculateCargoEfficiency,
   buildCargoVolumeByFleetDayAssignment,
+  filterCargoAllocationsToCompletedCycles,
   calculateTravelModeTime,
 };
