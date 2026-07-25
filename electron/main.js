@@ -4739,13 +4739,20 @@ ${scopeFilterFlux}
     return rowsByKey.get(key);
   };
 
-  const [cargoCsv, typeCsv, moveTimeCsv, txDailyCsv, completedCycleCsv] = await Promise.all([
+  const [cargoResult, typeResult, moveTimeResult, txDailyResult, completedCycleResult] = await Promise.allSettled([
     queryInfluxFlux(settings, cargoFlux),
     queryInfluxFlux(settings, typeFlux),
     queryInfluxFlux(settings, moveTimeFlux),
     queryInfluxFlux(settings, txDailyFlux),
     queryInfluxFlux(settings, completedCycleFlux),
   ]);
+  if (cargoResult.status === 'rejected') throw cargoResult.reason;
+  const cargoCsv = cargoResult.value;
+  const optionalCsv = (result) => result.status === 'fulfilled' ? result.value : '';
+  const typeCsv = optionalCsv(typeResult);
+  const moveTimeCsv = optionalCsv(moveTimeResult);
+  const txDailyCsv = optionalCsv(txDailyResult);
+  const completedCycleCsv = optionalCsv(completedCycleResult);
 
   for (const row of parseInfluxCsv(completedCycleCsv)) {
     const fleet = String(row.fleet || '').trim();

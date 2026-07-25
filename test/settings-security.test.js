@@ -18,6 +18,12 @@ test('settings always reopen with the revealable field hidden', async () => {
   assert.match(renderer, /function openSettings\(\) \{\s*form\.classList\.add\('sensitive-hidden'\)/);
 });
 
+test('faction switching preserves secure-setting readiness', async () => {
+  const renderer = await fs.readFile(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+  assert.match(renderer, /secureSettingsStatus: latestSettings\?\.secureSettingsStatus \|\| \{\}/);
+  assert.match(renderer, /setFormValues\(saved\);\s*updateSettingsStatus\(saved\);/);
+});
+
 test('RPC limiter UI exposes only the current shared URL through the blur control', async () => {
   const html = await fs.readFile(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
   const main = await fs.readFile(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');

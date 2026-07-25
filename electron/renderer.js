@@ -1132,6 +1132,7 @@ function mergeSettingsFromForm(overrides = {}) {
   const formPayload = getFormPayload();
   return {
     ...formPayload,
+    secureSettingsStatus: latestSettings?.secureSettingsStatus || {},
     ...overrides,
     playerProfiles: {
       ...formPayload.playerProfiles,
@@ -6499,6 +6500,7 @@ factionButtons.forEach((button) => {
       const saved = await api.saveSettings(nextSettings);
       latestSettings = saved;
       setFormValues(saved);
+      updateSettingsStatus(saved);
       await refreshVisibleFactionViews();
       saveStatus.textContent = `${clickedFaction} selected`;
       setTimeout(() => {
