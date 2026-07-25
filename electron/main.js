@@ -22,7 +22,7 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
-const { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows } = require('./influx-data');
+const { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, calculateTravelModeTime } = require('./earnings-math');
 
 const bs58 = bs58Module.default || bs58Module;
@@ -4845,11 +4845,12 @@ async function fetchCargoAllocationEarningsRows(settings) {
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
   |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
-  |> keep(columns: ["_time", "_field", "_value", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase"])
+  |> keep(columns: ["_time", "_field", "_value", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex"])
   |> sort(columns: ["_time"])`;
   const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
   const grouped = new Map();
-  for (const row of parseInfluxCsv(await queryInfluxFlux(settings, flux))) {
+  const fieldRows = dedupeCargoAllocationFieldRows(parseInfluxCsv(await queryInfluxFlux(settings, flux)));
+  for (const row of fieldRows) {
     const date = new Date(row._time);
     const isoDate = getUtcDateKey(date);
     const asset = String(row.rss || 'Unknown asset').trim() || 'Unknown asset';

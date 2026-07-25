@@ -86,4 +86,18 @@ function groupCargoAllocationRows(rows) {
   return Array.from(groups.values());
 }
 
-module.exports = { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows };
+function dedupeCargoAllocationFieldRows(rows = []) {
+  const seen = new Set();
+  return rows.filter((row) => {
+    const cycleId = String(row?.cycleId || '').trim();
+    const allocationIndex = String(row?.allocationIndex ?? '').trim();
+    const field = String(row?._field || '').trim();
+    if (!cycleId || !allocationIndex || !field) return true;
+    const key = `${cycleId}\n${allocationIndex}\n${field}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+module.exports = { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows };

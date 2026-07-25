@@ -6,7 +6,26 @@ const {
   isCargoCycleId,
   groupCargoAllocationRows,
   enrichCargoAllocationRows,
+  dedupeCargoAllocationFieldRows,
 } = require('../electron/influx-data');
+
+test('cargo allocation field rows deduplicate repeated cycle allocations', () => {
+  const duplicate = { cycleId: 'fleet;0,0;1', allocationIndex: '0', _field: 'cargoVolume', _value: '500' };
+  const rows = [
+    duplicate,
+    { ...duplicate },
+    { ...duplicate, allocationIndex: '1', _value: '300' },
+    { _field: 'cargoVolume', _value: '200' },
+    { _field: 'cargoVolume', _value: '200' },
+  ];
+
+  assert.deepEqual(dedupeCargoAllocationFieldRows(rows), [
+    duplicate,
+    { ...duplicate, allocationIndex: '1', _value: '300' },
+    { _field: 'cargoVolume', _value: '200' },
+    { _field: 'cargoVolume', _value: '200' },
+  ]);
+});
 
 test('parseInfluxCsv realigns rows when Flux emits a new table header', () => {
   const csv = [
