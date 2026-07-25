@@ -21,26 +21,26 @@ test('fleet cargo capacity sums ship capacity across quantities and rejects part
   ]), null);
 });
 
-test('cargo efficiency counts two cargo legs per completed cycle regardless of warp jumps', () => {
+test('cargo efficiency uses the completed routes actual leg count', () => {
   const result = calculateCargoEfficiency({
-    cargoVolume: 1000,
+    cargoVolume: 3000,
     fleetCargoCapacity: 1000,
-    cargoCycles: 1,
+    cargoLegs: 5,
   });
 
   assert.deepEqual(result, {
-    cargoCapacity: 2000,
-    cargoEfficiencyPercent: 50,
+    cargoCapacity: 5000,
+    cargoEfficiencyPercent: 60,
   });
 });
 
-test('cargo efficiency returns null when fleet capacity or completed cycles are unavailable', () => {
+test('cargo efficiency returns null when fleet capacity or completed legs are unavailable', () => {
   assert.deepEqual(
-    calculateCargoEfficiency({ cargoVolume: 1000, fleetCargoCapacity: null, cargoCycles: 1 }),
+    calculateCargoEfficiency({ cargoVolume: 1000, fleetCargoCapacity: null, cargoLegs: 2 }),
     { cargoCapacity: null, cargoEfficiencyPercent: null }
   );
   assert.deepEqual(
-    calculateCargoEfficiency({ cargoVolume: 1000, fleetCargoCapacity: 1000, cargoCycles: 0 }),
+    calculateCargoEfficiency({ cargoVolume: 1000, fleetCargoCapacity: 1000, cargoLegs: 0 }),
     { cargoCapacity: null, cargoEfficiencyPercent: null }
   );
 });
@@ -84,8 +84,10 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
 
   assert.match(main, /totalCargoCapacity/);
   assert.match(main, /cargoCycles: Number\(cargoRow\.cargoCycles\) \|\| 0/);
-  assert.match(main, /entry\.cycleIds\.add\(cycleId\)/);
-  assert.match(main, /cargoCycles: row\.cycleIds\.size/);
+  assert.match(main, /_measurement == "cargo_cycle_completed" and r\._field == "legCount"/);
+  assert.match(main, /completedCycleLegs\.set\(cycleId, legCount\)/);
+  assert.match(main, /cargoCycles: row\.completedCycleLegs\.size/);
+  assert.match(main, /cargoLegs: Array\.from\(row\.completedCycleLegs\.values\(\)\)/);
   assert.match(main, /buildCargoVolumeByFleetDayAssignment\(cargoAllocations\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);
   assert.match(main, /const moveTimeFlux =/);

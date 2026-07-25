@@ -509,7 +509,7 @@ const earningsMetricGuideBySubtab = Object.freeze({
     costsPerUnit: ['Estimated cost per unit of this material.', 'Total costs for fleet/date/material ÷ total units mined.', 'Lower is better; compare with the material’s current ATLAS price.'],
   }),
   cargo: Object.freeze({
-    cargoCycles: ['Completed cargo cycles recorded during the UTC day.', 'Count of distinct cargo cycle IDs for the fleet and assignment.', 'Each cycle contributes two cargo legs to Cargo Capacity; multiple warp jumps within one leg do not increase this count.'],
+    cargoCycles: ['Completed cargo cycles recorded during the UTC day.', 'Count of explicit SLYA round-trip completion events for the fleet and assignment.', 'A cycle closes only when the final configured route leg wraps to the beginning; intermediate visits to the first starbase do not count.'],
     assignment: ['Recorded transport or supply-chain assignment.', 'Most specific assignment recorded for the row.', 'Use it to separate different logistics duties for the same fleet.'],
     travelModeTime: ['Share of recorded movement time spent in each travel mode.', 'Mode moveTime ÷ total movement moveTime, rounded to whole percentages totaling 100%.', 'Time-weighting represents long legs more accurately than counting movement transactions.'],
     starbases: ['Starbases touched by the fleet’s cargo activity.', 'Distinct recorded starbases joined into one row.', 'More locations can indicate a broader or more complex route.'],
@@ -517,7 +517,7 @@ const earningsMetricGuideBySubtab = Object.freeze({
     totalCosts: ['Estimated cargo operating cost represented by available data.', 'Fuel Costs + Txs Costs.', 'Cargo revenue is not tracked here, so this is a cost-efficiency view rather than profit.'],
     txsCostsPct: ['Transaction fees as a share of represented cargo costs.', '(Txs Costs ÷ Total Costs) × 100.', 'A high value means fees dominate fuel; reduce unnecessary transactions where practical.'],
     cargoVolume: ['Total cargo-space volume delivered by the fleet during the UTC day.', 'Σ delivered cargo volume from cargo-allocation telemetry.', 'Compare it with Cargo Capacity to see how much available hold space was used.'],
-    cargoCapacity: ['Total cargo-space opportunity across the fleet’s cargo legs that day.', 'Fleet cargo capacity × Transport/Supply Chain movement legs.', 'Every leg counts, including an empty return leg, so one full outbound and one empty return produces 50% efficiency.'],
+    cargoCapacity: ['Total cargo-space opportunity across completed cargo routes that day.', 'Fleet cargo capacity × sum of completed-cycle leg counts.', 'Transport contributes 2 legs per completed cycle; Supply Chain contributes targets + 1 legs. Warp jumps within a leg do not add capacity.'],
     cargoEfficiency: ['Share of available cargo capacity used across all cargo legs.', '(Cargo Volume ÷ Cargo Capacity) × 100.', 'Higher means the fleet carried more cargo relative to its available hold space across the full route.'],
   }),
   cargoAllocation: Object.freeze({

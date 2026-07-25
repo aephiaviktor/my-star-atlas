@@ -4259,6 +4259,13 @@ ${scopeFilterFlux}
   |> group()
   |> keep(columns: ["fleet", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
+  const completedCycleFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "cargo_cycle_completed" and r._field == "legCount")
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.fleet and exists r.assignment and exists r.cycleId)
+  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet", "assignment"])`;
 
   const rowsByKey = new Map();
   const txDailyByDayFleet = new Map();
@@ -4612,7 +4619,7 @@ ${scopeFilterFlux}
         isoDate,
         label: formatShortUtcDate(date),
         starbases: new Set(),
-        cycleIds: new Set(),
+        completedCycleLegs: new Map(),
         travelTimeByMode: { warp: 0, subwarp: 0 },
         burnedFuel: 0,
         txCostSol: 0,
@@ -4622,12 +4629,25 @@ ${scopeFilterFlux}
     return rowsByKey.get(key);
   };
 
-  const [cargoCsv, typeCsv, moveTimeCsv, txDailyCsv] = await Promise.all([
+  const [cargoCsv, typeCsv, moveTimeCsv, txDailyCsv, completedCycleCsv] = await Promise.all([
     queryInfluxFlux(settings, cargoFlux),
     queryInfluxFlux(settings, typeFlux),
     queryInfluxFlux(settings, moveTimeFlux),
     queryInfluxFlux(settings, txDailyFlux),
+    queryInfluxFlux(settings, completedCycleFlux),
   ]);
+
+  for (const row of parseInfluxCsv(completedCycleCsv)) {
+    const fleet = String(row.fleet || '').trim();
+    const assignment = String(row.assignment || '').trim();
+    const cycleId = String(row.cycleId || '').trim();
+    const date = new Date(row._time);
+    const legCount = Number(row._value);
+    if (!fleet || !assignment || !cycleId || !Number.isFinite(legCount) || legCount <= 0 || Number.isNaN(date.getTime())) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    ensureRow(isoDate, fleet, assignment, date).completedCycleLegs.set(cycleId, legCount);
+  }
 
   for (const row of parseInfluxCsv(txDailyCsv)) {
     const fleet = String(row.fleet || '').trim();
@@ -4660,13 +4680,11 @@ ${scopeFilterFlux}
     const fleet = String(row.fleet || '').trim();
     const assignment = String(row.assignment || '').trim();
     const travelMode = String(row._value || '').trim().toLowerCase();
-    const cycleId = String(row.cycleId || '').trim();
     const date = new Date(row._time);
     if (!fleet || isCargoCycleId(fleet) || !assignment || !travelMode || Number.isNaN(date.getTime())) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, fleet, assignment, date);
-    if (cycleId) entry.cycleIds.add(cycleId);
     travelModeByMovement.set(`${row._time}\n${fleet}\n${assignment}`, travelMode);
     entry.txsDaily += 1;
   }
@@ -4694,7 +4712,8 @@ ${scopeFilterFlux}
       return {
         ...row,
         starbases: Array.from(row.starbases).sort((a, b) => a.localeCompare(b)),
-        cargoCycles: row.cycleIds.size,
+        cargoCycles: row.completedCycleLegs.size,
+        cargoLegs: Array.from(row.completedCycleLegs.values()).reduce((sum, value) => sum + value, 0),
         travelModeTime,
         travelModeWarpPercent: travelModeTime?.warpPercent ?? null,
       };
@@ -5145,6 +5164,7 @@ async function fetchEarningsSnapshot(payload) {
       totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
       fleetCargoCapacity: fleet?.totalCargoCapacity ?? null,
       cargoCycles: Number(cargoRow.cargoCycles) || 0,
+      cargoLegs: Number(cargoRow.cargoLegs) || 0,
       starbaseLabel: Array.isArray(cargoRow.starbases) && cargoRow.starbases.length ? cargoRow.starbases.join(', ') : '--',
       fuelCostsAtlas,
       txsCostsAtlas,
@@ -5190,7 +5210,7 @@ async function fetchEarningsSnapshot(payload) {
     const efficiency = calculateCargoEfficiency({
       cargoVolume,
       fleetCargoCapacity: row.fleetCargoCapacity,
-      cargoCycles: row.cargoCycles,
+      cargoLegs: row.cargoLegs,
     });
     row.cargoVolume = cargoVolume;
     row.cargoCapacity = efficiency.cargoCapacity;

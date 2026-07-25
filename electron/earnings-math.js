@@ -16,14 +16,14 @@ function calculateFleetCargoCapacity(ships = []) {
   return total;
 }
 
-function calculateCargoEfficiency({ cargoVolume, fleetCargoCapacity, cargoCycles } = {}) {
+function calculateCargoEfficiency({ cargoVolume, fleetCargoCapacity, cargoLegs } = {}) {
   const capacityPerLeg = Number(fleetCargoCapacity);
-  const cycles = Number(cargoCycles);
+  const legs = Number(cargoLegs);
   const volume = Number(cargoVolume);
-  if (!Number.isFinite(capacityPerLeg) || capacityPerLeg <= 0 || !Number.isFinite(cycles) || cycles <= 0) {
+  if (!Number.isFinite(capacityPerLeg) || capacityPerLeg <= 0 || !Number.isFinite(legs) || legs <= 0) {
     return { cargoCapacity: null, cargoEfficiencyPercent: null };
   }
-  const cargoCapacity = capacityPerLeg * cycles * 2;
+  const cargoCapacity = capacityPerLeg * legs;
   return {
     cargoCapacity,
     cargoEfficiencyPercent: Number.isFinite(volume) && volume >= 0
