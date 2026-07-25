@@ -1397,7 +1397,38 @@ select:focus {
 }
 
 .optimization-surface > .fleet-table-wrap {
+  flex: 1 1 0;
+  height: 0;
+  min-width: 0;
+  max-width: 100%;
   overflow: scroll;
+  scrollbar-gutter: stable;
+}
+
+.optimization-surface > .fleet-table-wrap::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+
+.optimization-surface > .fleet-table-wrap::-webkit-scrollbar-track {
+  background: #06131b;
+  border: 1px solid rgba(59, 111, 132, 0.5);
+}
+
+.optimization-surface > .fleet-table-wrap::-webkit-scrollbar-thumb {
+  min-width: 48px;
+  min-height: 48px;
+  border: 3px solid #06131b;
+  border-radius: 8px;
+  background: #3b6f84;
+}
+
+.optimization-surface > .fleet-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: #45d6c1;
+}
+
+.optimization-surface > .fleet-table-wrap::-webkit-scrollbar-corner {
+  background: #06131b;
 }
 
 .optimization-filter-bar {
