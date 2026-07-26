@@ -910,9 +910,9 @@ select:focus {
 
 .resource-chart-bars {
   display: grid;
-  grid-template-columns: 32px repeat(14, minmax(6px, 1fr));
+  grid-template-columns: 32px repeat(30, minmax(4px, 1fr));
   align-items: end;
-  gap: 5px;
+  gap: 3px;
   height: 300px;
 }
 
