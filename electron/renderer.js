@@ -6118,8 +6118,8 @@ async function refreshEarnings() {
 
 function optimizationFilterIso(input, includeWholeDay = false) {
   if (!input?.value) return '';
-  const date = new Date(`${input.value}T00:00:00`);
-  if (includeWholeDay) date.setDate(date.getDate() + 1);
+  const date = new Date(`${input.value}T00:00:00Z`);
+  if (includeWholeDay) date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString();
 }
 

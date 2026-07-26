@@ -19,10 +19,10 @@ test('Optimization date filters select dates without times', () => {
   assert.doesNotMatch(html, /id="optimization-(?:upgrading-)?(?:start|stop)-filter" type="datetime-local"/);
 });
 
-test('Optimization From starts at midnight and To includes the whole selected day', () => {
+test('Optimization From starts at UTC midnight and To includes the whole selected UTC day', () => {
   assert.match(renderer, /function optimizationFilterIso\(input, includeWholeDay = false\)/);
-  assert.match(renderer, /new Date\(`\$\{input\.value\}T00:00:00`\)/);
-  assert.match(renderer, /if \(includeWholeDay\) date\.setDate\(date\.getDate\(\) \+ 1\)/);
+  assert.match(renderer, /new Date\(`\$\{input\.value\}T00:00:00Z`\)/);
+  assert.match(renderer, /if \(includeWholeDay\) date\.setUTCDate\(date\.getUTCDate\(\) \+ 1\)/);
   assert.match(renderer, /optimizationFilterIso\(optimizationStopFilter, true\)/);
   assert.match(renderer, /optimizationFilterIso\(optimizationUpgradingStopFilter, true\)/);
 });
