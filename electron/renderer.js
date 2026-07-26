@@ -2808,9 +2808,9 @@ function pcrCreateLineChart(category, days, assets) {
   yCaption.style.lineHeight = '12px';
   grid.appendChild(yCaption);
 
-  // x-axis day labels (every other day, plus first and last)
+  // x-axis day labels (every fifth day, plus first and last)
   for (let i = 0; i < days.length; i += 1) {
-    if (i !== 0 && i !== days.length - 1 && i % 2 !== 0) continue;
+    if (i !== 0 && i !== days.length - 1 && i % 5 !== 0) continue;
     const day = days[i];
     const x = padding.left + (dayCount > 1 ? i * xStep : innerWidth / 2);
     const label = document.createElement('div');
@@ -3408,9 +3408,9 @@ function invRenderLineChart(wrap, singleAsset, opts, multiAssets) {
     }
   }
 
-  // X axis day labels (every other day)
+  // X axis day labels (every fifth day, plus first and last)
   for (let i = 0; i < numDays; i += 1) {
-    if (i !== 0 && i !== numDays - 1 && i % 2 !== 0) continue;
+    if (i !== 0 && i !== numDays - 1 && i % 5 !== 0) continue;
     const x = padding.left + (numDays > 1 ? i * xStep : innerWidth / 2);
     const label = document.createElement('div');
     label.className = 'inv-axis-label';
