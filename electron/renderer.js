@@ -6662,6 +6662,10 @@ factionButtons.forEach((button) => {
     // Cache current faction's filter state before switching
     const oldFaction = normalizeFaction(latestSettings?.faction);
     recordFactionFilterState(oldFaction);
+    // Clear the loaded-result guards from the previous faction. Without
+    // this, tab clicks see a non-null result and incorrectly skip both the
+    // new faction's prefetched cache and its on-demand request.
+    resetFactionScopedState();
 
     const nextSettings = mergeSettingsFromForm({ faction: clickedFaction });
     latestSettings = nextSettings;
