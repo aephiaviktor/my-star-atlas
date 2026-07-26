@@ -57,13 +57,66 @@ function buildMiningAcquisitionEvents(rows) {
   return events;
 }
 
-function buildProductionLedger({ scanningRows = [], miningRows = [] } = {}) {
-  const ledger = new InventoryCostLedger();
-  ledger.applyEvents([
-    ...buildScanningAcquisitionEvents(scanningRows),
-    ...buildMiningAcquisitionEvents(miningRows),
-  ]);
-  return ledger;
+function normalizeTimestamp(value, isoDate) {
+  const date = new Date(value || eventTimestamp(isoDate));
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
-module.exports = { buildScanningAcquisitionEvents, buildMiningAcquisitionEvents, buildProductionLedger };
+function buildCargoTransferEvents(rows) {
+  const events = [];
+  for (const row of rows || []) {
+    const timestamp = normalizeTimestamp(row.timestamp, row.isoDate);
+    const origin = String(row.origin || '').trim();
+    const destination = String(row.destination || '').trim();
+    const asset = String(row.asset || '').trim();
+    const quantity = Number(row.amount);
+    const hasCargoCost = row.totalCostsAtlas !== null && row.totalCostsAtlas !== undefined && row.totalCostsAtlas !== ''
+      && Number.isFinite(Number(row.totalCostsAtlas)) && Number(row.totalCostsAtlas) >= 0;
+    if (!timestamp || !origin || origin === '--' || !destination || destination === '--' || origin === destination
+      || !asset || !Number.isFinite(quantity) || quantity <= 0 || !hasCargoCost) continue;
+    events.push({
+      type: 'transfer',
+      timestamp,
+      origin,
+      destination,
+      asset,
+      quantity,
+      cargoCost: Number(row.totalCostsAtlas),
+    });
+  }
+  return events;
+}
+
+function buildCostLedgerResult({ scanningRows = [], miningRows = [], cargoRows = [] } = {}) {
+  const ledger = new InventoryCostLedger();
+  const events = [
+    ...buildScanningAcquisitionEvents(scanningRows),
+    ...buildMiningAcquisitionEvents(miningRows),
+    ...buildCargoTransferEvents(cargoRows),
+  ].map((event, index) => ({ event, index }))
+    .sort((left, right) => Date.parse(left.event.timestamp) - Date.parse(right.event.timestamp) || left.index - right.index)
+    .map(({ event }) => event);
+  const appliedEvents = [];
+  const rejectedEvents = [];
+  for (const event of events) {
+    try {
+      ledger.applyEvent(event);
+      appliedEvents.push(event);
+    } catch (error) {
+      rejectedEvents.push({ event, error: String(error?.message || error) });
+    }
+  }
+  return { ledger, events, appliedEvents, rejectedEvents };
+}
+
+function buildProductionLedger(options = {}) {
+  return buildCostLedgerResult(options).ledger;
+}
+
+module.exports = {
+  buildScanningAcquisitionEvents,
+  buildMiningAcquisitionEvents,
+  buildCargoTransferEvents,
+  buildCostLedgerResult,
+  buildProductionLedger,
+};

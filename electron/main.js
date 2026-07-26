@@ -24,7 +24,7 @@ const { createRpcFetcher } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
-const { buildScanningAcquisitionEvents, buildMiningAcquisitionEvents, buildProductionLedger } = require('./production-ledger-events');
+const { buildCostLedgerResult } = require('./production-ledger-events');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -4893,8 +4893,9 @@ async function fetchCargoAllocationEarningsRows(settings) {
     if (!includedDays.has(isoDate) || !fleet) continue;
     const cycleId = String(row.cycleId || '').trim();
     const key = `${isoDate}\n${fleet}\n${asset}\n${origin}\n${destination}\n${assignment}\n${cycleId}`;
-    if (!grouped.has(key)) grouped.set(key, { isoDate, label: formatShortUtcDate(date), fleet, asset, origin, destination, assignment, cycleId, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
+    if (!grouped.has(key)) grouped.set(key, { isoDate, timestamp: date.toISOString(), label: formatShortUtcDate(date), fleet, asset, origin, destination, assignment, cycleId, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
     const target = grouped.get(key);
+    if (date.toISOString() < target.timestamp) target.timestamp = date.toISOString();
     const value = Number(row._value);
     if (Number.isFinite(value) && Object.hasOwn(target, row._field)) target[row._field] += value;
   }
@@ -5338,6 +5339,16 @@ async function fetchEarningsSnapshot(payload) {
     fleetByLabel,
     normalizeFleetLabel
   );
+  const ledgerCargoAllocations = enrichedCargoAllocationRows.map((row) => {
+    const fuelCostsAtlas = fuelPriceAtl != null ? row.allocatedFuel * fuelPriceAtl : null;
+    const txsCostsAtlas = atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
+    return {
+      ...row,
+      totalCostsAtlas: Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)
+        ? fuelCostsAtlas + txsCostsAtlas
+        : null,
+    };
+  });
   const cargoAllocations = groupCargoAllocationRows(enrichedCargoAllocationRows).map((row) => {
     const fuelCostsAtlas = fuelPriceAtl != null ? row.allocatedFuel * fuelPriceAtl : null;
     const txsCostsAtlas = atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
@@ -5391,11 +5402,14 @@ async function fetchEarningsSnapshot(payload) {
   // Internal weighted-cost ledger adapter. The UI does not consume this yet;
   // later patches will reconcile this chronological production basis against
   // inventory and add cargo/crafting/market events.
-  const inventoryCostLedgerEvents = [
-    ...buildScanningAcquisitionEvents(rows),
-    ...buildMiningAcquisitionEvents(mining),
-  ].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  const inventoryCostLedgerRows = buildProductionLedger({ scanningRows: rows, miningRows: mining }).snapshot();
+  const inventoryCostLedgerResult = buildCostLedgerResult({
+    scanningRows: rows,
+    miningRows: mining,
+    cargoRows: ledgerCargoAllocations,
+  });
+  const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
+  const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
+  const inventoryCostLedgerRejectedEvents = inventoryCostLedgerResult.rejectedEvents;
 
   // Breakeven analysis: combine per-starbase mining production cost and
   // per-destination cargo allocation cost with current inventory and the
@@ -5769,6 +5783,7 @@ async function fetchEarningsSnapshot(payload) {
     breakevenError,
     inventoryCostLedgerEvents,
     inventoryCostLedgerRows,
+    inventoryCostLedgerRejectedEvents,
   };
 }
 

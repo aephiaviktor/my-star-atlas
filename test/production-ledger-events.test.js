@@ -4,6 +4,8 @@ const {
   buildScanningAcquisitionEvents,
   buildMiningAcquisitionEvents,
   buildProductionLedger,
+  buildCargoTransferEvents,
+  buildCostLedgerResult,
 } = require('../electron/production-ledger-events');
 
 test('scanning acquisitions are split across deposit starbases without duplicating daily costs', () => {
@@ -45,4 +47,41 @@ test('production with unavailable cost remains explicit uncosted inventory', () 
 test('rows without a reliable production starbase are omitted rather than assigned to an invented location', () => {
   assert.deepEqual(buildScanningAcquisitionEvents([{ isoDate: '2026-07-25', sduFound: 10, totalCostsAtlas: 2 }]), []);
   assert.deepEqual(buildMiningAcquisitionEvents([{ isoDate: '2026-07-25', rawMaterial: 'Iron Ore', mined: 5, totalCostsAtlas: 1 }]), []);
+});
+
+test('cargo transfers preserve weighted source basis and add cargo costs only at the destination', () => {
+  const result = buildCostLedgerResult({
+    miningRows: [{ isoDate: '2026-07-24', starbase: 'MUD-1', rawMaterial: 'Carbon', mined: 100, totalCostsAtlas: 20 }],
+    cargoRows: [
+      { timestamp: '2026-07-24T12:00:00Z', origin: 'MUD-1', destination: 'MUD-2', asset: 'Carbon', amount: 40, totalCostsAtlas: 4 },
+      { timestamp: '2026-07-24T13:00:00Z', origin: 'MUD-1', destination: 'MUD-2', asset: 'Carbon', amount: 10, totalCostsAtlas: 1 },
+    ],
+  });
+
+  assert.equal(result.rejectedEvents.length, 0);
+  assert.equal(result.ledger.get('MUD-1', 'Carbon').quantity, 50);
+  assert.equal(result.ledger.get('MUD-2', 'Carbon').quantity, 50);
+  assert.equal(result.ledger.get('MUD-2', 'Carbon').costs.mining, 10);
+  assert.equal(result.ledger.get('MUD-2', 'Carbon').cargoCost, 5);
+});
+
+test('cargo events use telemetry timestamps and reject incomplete routes or costs', () => {
+  assert.deepEqual(buildCargoTransferEvents([
+    { timestamp: '2026-07-25T10:15:00Z', origin: 'ONI-1', destination: 'ONI-2', asset: 'Food', amount: 5, totalCostsAtlas: 2 },
+    { isoDate: '2026-07-25', origin: '--', destination: 'ONI-2', asset: 'Food', amount: 5, totalCostsAtlas: 2 },
+    { isoDate: '2026-07-25', origin: 'ONI-1', destination: 'ONI-2', asset: 'Food', amount: 5, totalCostsAtlas: null },
+  ]), [{
+    type: 'transfer', timestamp: '2026-07-25T10:15:00.000Z', origin: 'ONI-1', destination: 'ONI-2', asset: 'Food', quantity: 5, cargoCost: 2,
+  }]);
+});
+
+test('an overdraft cargo event fails closed without corrupting earlier ledger state', () => {
+  const result = buildCostLedgerResult({
+    miningRows: [{ isoDate: '2026-07-24', starbase: 'UST-1', rawMaterial: 'Iron Ore', mined: 5, totalCostsAtlas: 1 }],
+    cargoRows: [{ timestamp: '2026-07-24T12:00:00Z', origin: 'UST-1', destination: 'UST-2', asset: 'Iron Ore', amount: 8, totalCostsAtlas: 2 }],
+  });
+  assert.equal(result.rejectedEvents.length, 1);
+  assert.match(result.rejectedEvents[0].error, /insufficient inventory/);
+  assert.equal(result.ledger.get('UST-1', 'Iron Ore').quantity, 5);
+  assert.equal(result.ledger.get('UST-2', 'Iron Ore').quantity, 0);
 });
