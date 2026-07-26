@@ -19,11 +19,13 @@ test('upgrading optimization backend joins aggregate and component snapshots', (
   assert.match(preload, /getUpgradingOptimization:.*optimization:upgrading/);
 });
 
-test('Optimization exposes Upgrading after Scanning with filters and a table', () => {
+test('Optimization exposes Upgrading after Scanning with date filters and a table', () => {
   assert.match(html, /data-optimization-subtab="scanning"[^>]*>Scanning</);
   assert.match(html, /data-optimization-subtab="upgrading"[^>]*>Upgrading</);
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
-  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-instance-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body']) assert.match(html, new RegExp(`id="${id}"`));
+  assert.doesNotMatch(html, /id="optimization-upgrading-instance-filter"/);
+  assert.doesNotMatch(renderer, /optimizationUpgradingInstanceFilter/);
 });
 
 test('Upgrading renderer defines the agreed columns and component pairs', () => {

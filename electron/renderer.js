@@ -55,7 +55,6 @@ const optimizationUpgradingTableHead = document.querySelector('#optimization-upg
 const optimizationUpgradingTableBody = document.querySelector('#optimization-upgrading-table-body');
 const optimizationUpgradingStartFilter = document.querySelector('#optimization-upgrading-start-filter');
 const optimizationUpgradingStopFilter = document.querySelector('#optimization-upgrading-stop-filter');
-const optimizationUpgradingInstanceFilter = document.querySelector('#optimization-upgrading-instance-filter');
 const earningsSyncStatus = document.querySelector('#earnings-sync-status');
 const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
@@ -907,7 +906,7 @@ async function runFactionBackgroundPrefetch(generation, faction) {
     { key: 'inventory', cached: () => Boolean(getCachedFactionResult(faction, 'inventory::__all__')), load: async () => { const result = await api.getInventory({ ...settings, starbaseFilter: '__all__' }); if (result?.ok) setCachedFactionResult(faction, 'inventory::__all__', result); } },
     { key: 'earnings', cached: () => Boolean(getCachedFactionResult(faction, 'earnings')) || !getActivePlayerProfile(settings), load: async () => { const result = await api.getEarningsSnapshot(settings); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
     { key: 'optimization-scanning', cached: () => Boolean(getCachedFilterResult(faction, 'optimizationScanning', '', '', '__all__', '__all__', '__all__', '__all__')), load: async () => { const result = await api.getScanningOptimization({ faction, start: null, stop: null, fleet: '__all__', eventType: '__all__', operation: '__all__', status: '__all__', offset: 0, limit: 500 }); if (result?.ok) setCachedFilterResult(faction, 'optimizationScanning', result, '', '', '__all__', '__all__', '__all__', '__all__'); } },
-    { key: 'optimization-upgrading', cached: () => Boolean(getCachedFilterResult(faction, 'optimizationUpgrading', '', '', '__all__')), load: async () => { const result = await api.getUpgradingOptimization({ faction, start: null, stop: null, instance: '__all__' }); if (result?.ok) setCachedFilterResult(faction, 'optimizationUpgrading', result, '', '', '__all__'); } },
+    { key: 'optimization-upgrading', cached: () => Boolean(getCachedFilterResult(faction, 'optimizationUpgrading', '', '')), load: async () => { const result = await api.getUpgradingOptimization({ faction, start: null, stop: null }); if (result?.ok) setCachedFilterResult(faction, 'optimizationUpgrading', result, '', ''); } },
   ];
 
   for (const task of tasks) {
@@ -1214,10 +1213,6 @@ function resetFactionScopedState() {
   optimizationRows = [];
   latestUpgradingOptimizationResult = null;
   optimizationUpgradingRows = [];
-  if (optimizationUpgradingInstanceFilter) {
-    optimizationUpgradingInstanceFilter.replaceChildren(new Option('All instances', '__all__'));
-    optimizationUpgradingInstanceFilter.value = '__all__';
-  }
   latestSduResult = null;
   latestMiningResult = null;
   latestCraftingResult = null;
@@ -6123,8 +6118,8 @@ async function refreshEarnings() {
 
 function optimizationFilterIso(input, includeWholeDay = false) {
   if (!input?.value) return '';
-  const date = new Date(`${input.value}T00:00:00`);
-  if (includeWholeDay) date.setDate(date.getDate() + 1);
+  const date = new Date(`${input.value}T00:00:00Z`);
+  if (includeWholeDay) date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString();
 }
 
@@ -6356,12 +6351,10 @@ async function refreshUpgradingOptimization({ force = false } = {}) {
   const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
   const start = optimizationFilterIso(optimizationUpgradingStartFilter);
   const stop = optimizationFilterIso(optimizationUpgradingStopFilter, true);
-  const instance = optimizationUpgradingInstanceFilter.value;
-  const cached = force ? null : getCachedFilterResult(faction, 'optimizationUpgrading', start || '', stop || '', instance);
+  const cached = force ? null : getCachedFilterResult(faction, 'optimizationUpgrading', start || '', stop || '');
   if (cached) {
     latestUpgradingOptimizationResult = cached;
     optimizationUpgradingRows = cached.rows || [];
-    populateOptimizationFilter(optimizationUpgradingInstanceFilter, optimizationUpgradingRows, 'instance', 'All instances');
     renderUpgradingOptimizationTable();
     optimizationUpgradingSyncStatus.textContent = `${optimizationUpgradingRows.length.toLocaleString()} cached rows · ${cached.bucket} · ${faction}`;
     return;
@@ -6371,14 +6364,12 @@ async function refreshUpgradingOptimization({ force = false } = {}) {
     faction,
     start,
     stop,
-    instance,
   });
   if (faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return;
   if (!result?.ok) { optimizationUpgradingSyncStatus.textContent = `Upgrading optimization sync failed: ${result?.error || 'unknown error'}`; return; }
   latestUpgradingOptimizationResult = result;
-  setCachedFilterResult(faction, 'optimizationUpgrading', result, start || '', stop || '', instance);
+  setCachedFilterResult(faction, 'optimizationUpgrading', result, start || '', stop || '');
   optimizationUpgradingRows = result.rows || [];
-  populateOptimizationFilter(optimizationUpgradingInstanceFilter, optimizationUpgradingRows, 'instance', 'All instances');
   renderUpgradingOptimizationTable();
   optimizationUpgradingSyncStatus.textContent = `${optimizationUpgradingRows.length.toLocaleString()} rows · ${result.bucket} · ${normalizeFaction((latestSettings || getFormPayload()).faction)}`;
 }
@@ -6988,7 +6979,7 @@ fleetSearchInput.addEventListener('input', renderFleetSearch);
 for (const filter of [optimizationStartFilter, optimizationStopFilter, optimizationFleetFilter, optimizationEventFilter, optimizationOperationFilter, optimizationStatusFilter]) {
   filter?.addEventListener('change', () => refreshScanningOptimization());
 }
-for (const filter of [optimizationUpgradingStartFilter, optimizationUpgradingStopFilter, optimizationUpgradingInstanceFilter]) {
+for (const filter of [optimizationUpgradingStartFilter, optimizationUpgradingStopFilter]) {
   filter?.addEventListener('change', () => refreshUpgradingOptimization());
 }
 optimizationLoadMore?.addEventListener('click', () => refreshScanningOptimization({ append: true }));
