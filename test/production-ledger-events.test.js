@@ -5,6 +5,7 @@ const {
   buildMiningAcquisitionEvents,
   buildProductionLedger,
   buildCargoTransferEvents,
+  buildCraftingEvents,
   buildCostLedgerResult,
 } = require('../electron/production-ledger-events');
 
@@ -73,6 +74,25 @@ test('cargo events use telemetry timestamps and reject incomplete routes or cost
   ]), [{
     type: 'transfer', timestamp: '2026-07-25T10:15:00.000Z', origin: 'ONI-1', destination: 'ONI-2', asset: 'Food', quantity: 5, cargoCost: 2,
   }]);
+});
+
+test('crafting events carry ingredient basis and add only direct conversion costs', () => {
+  const result = buildCostLedgerResult({
+    miningRows: [{ isoDate: '2026-07-24', starbase: 'UST-1', rawMaterial: 'Carbon', mined: 10, totalCostsAtlas: 5 }],
+    craftingRows: [{ isoDate: '2026-07-25', starbase: 'UST-1', output: 'Framework', crafted: 2, ingredients: [{ input: 'Carbon', amount: 10 }], feeCostsAtlas: 1, txsCostsAtlas: 2 }],
+  });
+  assert.equal(result.rejectedEvents.length, 0);
+  const output = result.ledger.get('UST-1', 'Framework');
+  assert.equal(output.quantity, 2);
+  assert.equal(output.costs.mining, 5);
+  assert.equal(output.costs.crafting, 3);
+});
+
+test('crafting adapter rejects incomplete telemetry rather than inventing ingredients or cost', () => {
+  assert.deepEqual(buildCraftingEvents([
+    { isoDate: '2026-07-25', starbase: 'UST-1', output: 'Framework', crafted: 2, ingredients: [], feeCostsAtlas: 1, txsCostsAtlas: 2 },
+    { isoDate: '2026-07-25', starbase: 'UST-1', output: 'Framework', crafted: 2, ingredients: [{ input: 'Carbon', amount: 10 }], feeCostsAtlas: 1, txsCostsAtlas: null },
+  ]), []);
 });
 
 test('an overdraft cargo event fails closed without corrupting earlier ledger state', () => {

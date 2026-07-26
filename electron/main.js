@@ -4616,8 +4616,27 @@ ${scopeFilterFlux}
     entry.crew += value;
   }
 
-  return Array.from(rowsByKey.values())
+  const result = Array.from(rowsByKey.values())
     .filter((row) => row.crafted > 0 || row.feeAmount > 0 || row.txCostSol > 0 || row.crew > 0 || row.ingredients.length > 0);
+  const ledgerByCraftingId = new Map();
+  for (const raw of craftingRows) {
+    const craftingId = String(raw.craftingID || '').trim();
+    const starbase = resolveStarbaseName(raw, coordinateMap);
+    const output = String(raw.output || '').trim();
+    const eventDate = new Date(raw._time);
+    const timestamp = Number.isNaN(eventDate.getTime()) ? '' : eventDate.toISOString();
+    if (!craftingId || !starbase || !output || !timestamp) continue;
+    if (!ledgerByCraftingId.has(craftingId)) ledgerByCraftingId.set(craftingId, { timestamp, starbase, output, crafted: 0, feeAmount: null, txCostSol: null, ingredients: [] });
+    const event = ledgerByCraftingId.get(craftingId);
+    const value = Number(raw._value);
+    if (!Number.isFinite(value)) continue;
+    if (raw._field === 'amount' && raw.type === 'Output') event.crafted += value;
+    else if (raw._field === 'amount' && raw.type === 'Input') event.ingredients.push({ input: String(raw.input || '').trim(), amount: value });
+    else if (raw._field === 'fee' && raw.type === 'Output') event.feeAmount = (event.feeAmount || 0) + value;
+    else if (raw._field === 'txCostSol' && raw.type === 'Output') event.txCostSol = (event.txCostSol || 0) + value;
+  }
+  result.ledgerEvents = Array.from(ledgerByCraftingId.values());
+  return result;
 }
 async function fetchUpgradingEarningsRows(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
@@ -5402,10 +5421,16 @@ async function fetchEarningsSnapshot(payload) {
   // Internal weighted-cost ledger adapter. The UI does not consume this yet;
   // later patches will reconcile this chronological production basis against
   // inventory and add cargo/crafting/market events.
+  const ledgerCraftingRows = (craftingRows.ledgerEvents || []).map((row) => ({
+    ...row,
+    feeCostsAtlas: Number.isFinite(Number(row.feeAmount)) ? Number(row.feeAmount) : null,
+    txsCostsAtlas: atlasPerSol != null && Number.isFinite(Number(row.txCostSol)) ? Number(row.txCostSol) * atlasPerSol : null,
+  }));
   const inventoryCostLedgerResult = buildCostLedgerResult({
     scanningRows: rows,
     miningRows: mining,
     cargoRows: ledgerCargoAllocations,
+    craftingRows: ledgerCraftingRows,
   });
   const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
   const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();

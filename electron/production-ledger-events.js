@@ -87,12 +87,34 @@ function buildCargoTransferEvents(rows) {
   return events;
 }
 
-function buildCostLedgerResult({ scanningRows = [], miningRows = [], cargoRows = [] } = {}) {
+function buildCraftingEvents(rows) {
+  const events = [];
+  for (const row of rows || []) {
+    const timestamp = normalizeTimestamp(row.timestamp, row.isoDate);
+    const location = String(row.starbase || '').trim();
+    const outputAsset = String(row.output || '').trim();
+    const outputQuantity = Number(row.crafted);
+    const ingredients = Array.isArray(row.ingredients) ? row.ingredients.map((ingredient) => ({
+      asset: String(ingredient?.input || '').trim(),
+      quantity: Number(ingredient?.amount),
+    })) : [];
+    const fee = Number(row.feeCostsAtlas);
+    const txs = Number(row.txsCostsAtlas);
+    if (!timestamp || !location || !outputAsset || !Number.isFinite(outputQuantity) || outputQuantity <= 0
+      || !ingredients.length || ingredients.some((ingredient) => !ingredient.asset || !Number.isFinite(ingredient.quantity) || ingredient.quantity <= 0)
+      || row.feeCostsAtlas == null || row.txsCostsAtlas == null || !Number.isFinite(fee) || fee < 0 || !Number.isFinite(txs) || txs < 0) continue;
+    events.push({ type: 'craft', timestamp, location, outputAsset, outputQuantity, ingredients, craftingCost: fee + txs });
+  }
+  return events;
+}
+
+function buildCostLedgerResult({ scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [] } = {}) {
   const ledger = new InventoryCostLedger();
   const events = [
     ...buildScanningAcquisitionEvents(scanningRows),
     ...buildMiningAcquisitionEvents(miningRows),
     ...buildCargoTransferEvents(cargoRows),
+    ...buildCraftingEvents(craftingRows),
   ].map((event, index) => ({ event, index }))
     .sort((left, right) => Date.parse(left.event.timestamp) - Date.parse(right.event.timestamp) || left.index - right.index)
     .map(({ event }) => event);
@@ -117,6 +139,7 @@ module.exports = {
   buildScanningAcquisitionEvents,
   buildMiningAcquisitionEvents,
   buildCargoTransferEvents,
+  buildCraftingEvents,
   buildCostLedgerResult,
   buildProductionLedger,
 };
