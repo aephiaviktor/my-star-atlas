@@ -24,6 +24,7 @@ const { createRpcFetcher } = require('./rpc-resilience');
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
+const { buildScanningAcquisitionEvents, buildMiningAcquisitionEvents, buildProductionLedger } = require('./production-ledger-events');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -4205,6 +4206,7 @@ async function fetchScanningEarningsRows(settings) {
   const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
   const sduCostsFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
   |> filter(fn: (r) => r._measurement == "sdu")
@@ -4217,6 +4219,18 @@ ${scopeFilterFlux}
   |> group()
   |> keep(columns: ["fleet", "_measurement", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
+
+  const sduProductionByStarbaseFlux = `from(bucket: "${bucket}")
+  |> range(start: -15d)
+  |> filter(fn: (r) => r._measurement == "sdu" and r._field == "amount")
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.fleet and exists r.starbase)
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group(columns: ["fleet", "starbase", "_time"])
+  |> sum(column: "_value")
+  |> group()
+  |> keep(columns: ["fleet", "starbase", "sectorX", "sectorY", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet", "starbase"])`;
 
   const movementCostsFlux = `from(bucket: "${bucket}")
   |> range(start: -15d)
@@ -4283,13 +4297,15 @@ ${scopeFilterFlux}
         scanAttempts: 0,
         successfulScans: 0,
         chanceSumPercent: 0,
+        productionByStarbase: [],
       });
     }
     return rowsByDayFleet.get(key);
   };
 
-  const [sduCostsCsv, movementCostsCsv, chanceSumCsv, chanceCountCsv, successfulCountCsv] = await Promise.all([
+  const [sduCostsCsv, sduProductionByStarbaseCsv, movementCostsCsv, chanceSumCsv, chanceCountCsv, successfulCountCsv] = await Promise.all([
     queryInfluxFlux(settings, sduCostsFlux),
+    queryInfluxFlux(settings, sduProductionByStarbaseFlux),
     queryInfluxFlux(settings, movementCostsFlux),
     queryInfluxFlux(settings, chanceSumFlux),
     queryInfluxFlux(settings, chanceCountFlux),
@@ -4308,6 +4324,20 @@ ${scopeFilterFlux}
     if (row._measurement === 'sdu' && row._field === 'burnedFood') entry.burnedFood += value;
     if (row._measurement === 'sdu' && row._field === 'txCostSol') entry.txCostSol += value;
     if (row._measurement === 'movement' && row._field === 'burnedFuel') entry.burnedFuel += value;
+  }
+
+  for (const row of parseInfluxCsv(sduProductionByStarbaseCsv)) {
+    const fleet = String(row.fleet || '').trim();
+    const date = new Date(row._time);
+    const quantity = Number(row._value);
+    const starbase = resolveStarbaseName(row, coordinateMap);
+    if (!fleet || !starbase || Number.isNaN(date.getTime()) || !Number.isFinite(quantity) || quantity <= 0) continue;
+    const isoDate = getUtcDateKey(date);
+    if (!includedDays.has(isoDate)) continue;
+    const entry = ensureRow(isoDate, fleet, date);
+    const existing = entry.productionByStarbase.find((item) => item.starbase === starbase);
+    if (existing) existing.quantity += quantity;
+    else entry.productionByStarbase.push({ starbase, quantity });
   }
 
   const applyDailyScanStat = (csv, field) => {
@@ -5358,6 +5388,15 @@ async function fetchEarningsSnapshot(payload) {
     return fleetSort || String(a.assignment || '').localeCompare(String(b.assignment || ''));
   });
 
+  // Internal weighted-cost ledger adapter. The UI does not consume this yet;
+  // later patches will reconcile this chronological production basis against
+  // inventory and add cargo/crafting/market events.
+  const inventoryCostLedgerEvents = [
+    ...buildScanningAcquisitionEvents(rows),
+    ...buildMiningAcquisitionEvents(mining),
+  ].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const inventoryCostLedgerRows = buildProductionLedger({ scanningRows: rows, miningRows: mining }).snapshot();
+
   // Breakeven analysis: combine per-starbase mining production cost and
   // per-destination cargo allocation cost with current inventory and the
   // current GM price. The inventory fetch is best-effort: a failure here
@@ -5728,6 +5767,8 @@ async function fetchEarningsSnapshot(payload) {
     upgradingRows: upgrading,
     breakevenRows,
     breakevenError,
+    inventoryCostLedgerEvents,
+    inventoryCostLedgerRows,
   };
 }
 
