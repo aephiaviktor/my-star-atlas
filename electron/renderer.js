@@ -1336,7 +1336,7 @@ function updateActivityFleetFilter(select, note, fleets, selectedFleet) {
     const option = document.createElement('option');
     option.value = fleet.value;
     option.textContent = fleet.label || fleet.value;
-    option.title = `${fleet.label || fleet.value}: ${formatWholeNumber(fleet.total)} over 14 days`;
+    option.title = `${fleet.label || fleet.value}: ${formatWholeNumber(fleet.total)} over 30 days`;
     select.appendChild(option);
   }
 
@@ -1344,8 +1344,8 @@ function updateActivityFleetFilter(select, note, fleets, selectedFleet) {
   select.disabled = options.length === 0;
   if (note) {
     note.textContent = options.length
-      ? `${options.length} active ${options.length === 1 ? 'fleet' : 'fleets'} in last 14 days`
-      : 'No fleet activity in last 14 days';
+      ? `${options.length} active ${options.length === 1 ? 'fleet' : 'fleets'} in last 30 days`
+      : 'No fleet activity in last 30 days';
   }
   return nextSelected;
 }
@@ -1376,7 +1376,7 @@ function updateSelectOptions(select, options, selectedValue, allLabel) {
     const option = document.createElement('option');
     option.value = item.value;
     option.textContent = item.label || item.value;
-    option.title = `${item.label || item.value}: ${formatWholeNumber(item.total)} over 14 days`;
+    option.title = `${item.label || item.value}: ${formatWholeNumber(item.total)} over 30 days`;
     select.appendChild(option);
   }
 
@@ -1567,7 +1567,7 @@ function renderMiningCharts(result) {
 
     const bars = document.createElement('div');
     bars.className = 'resource-chart-bars';
-    bars.setAttribute('aria-label', `${material.resource} mined over the last 14 days`);
+    bars.setAttribute('aria-label', `${material.resource} mined over the last 30 days`);
     bars.appendChild(createYAxis(maxValue));
     for (const day of material.days) {
       const value = Number(day.value) || 0;
@@ -1651,7 +1651,7 @@ function createCraftingBarCard(step, index) {
 
   const bars = document.createElement('div');
   bars.className = 'resource-chart-bars';
-  bars.setAttribute('aria-label', `${step.label} crafted over the last 14 days`);
+  bars.setAttribute('aria-label', `${step.label} crafted over the last 30 days`);
   bars.appendChild(createYAxis(maxValue));
   for (const day of step.days) {
     const value = Number(day.value) || 0;
@@ -1867,7 +1867,7 @@ function renderProductionCharts(result) {
   setText(productionCountNote, 'Produced outputs');
   setText(
     productionFilterNote,
-    `${result.starbaseCount || 0} active ${(result.starbaseCount || 0) === 1 ? 'starbase' : 'starbases'} in last 14 days${
+    `${result.starbaseCount || 0} active ${(result.starbaseCount || 0) === 1 ? 'starbase' : 'starbases'} in last 30 days${
       result.sduStarbaseTagged === false ? ' · SDU starbase tag missing' : ''
     }`
   );
@@ -2674,7 +2674,7 @@ function pcrCategorySummary(bucket) {
 // day in the window where every relevant production + consumption
 // source has started reporting. If the latest first-day across sources
 // is the window's first day (all sources have been collecting for the
-// full 14 days), we return null to mean "no trimming needed" and show
+// full 30 days), we return null to mean "no trimming needed" and show
 // the full window. If a source started mid-window, we trim to the day
 // after its first day (so we only show days where every source has
 // full coverage, not the partial first day).
@@ -2835,7 +2835,7 @@ function pcrCreateLineChart(category, days, assets) {
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.setAttribute('preserveAspectRatio', 'none');
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', `${category.label} production to consumption ratio over the last 14 days`);
+  svg.setAttribute('aria-label', `${category.label} production to consumption ratio over the last 30 days`);
 
   // Balance line as part of the SVG so it stays anchored to the data
   // (CSS pixel lines would jitter on resize; the SVG is laid out once
@@ -3032,7 +3032,7 @@ function pcrRenderCategory(category, assets) {
 }
 
 function pcrRenderEmpty(message) {
-  if (pcrFactionNote) pcrFactionNote.textContent = `Last 14 days · production ÷ consumption · ${message}`;
+  if (pcrFactionNote) pcrFactionNote.textContent = `Last 30 days · production ÷ consumption · ${message}`;
   for (const category of PCR_CATEGORIES) {
     const refs = pcrCategoryRefs[category.id];
     if (!refs) continue;
@@ -3059,7 +3059,7 @@ function renderPcrCharts(result) {
 
   if (pcrFactionNote) {
     const faction = normalizeFaction(latestSettings?.faction);
-    const parts = ['Last 14 days', `Faction ${faction}`, 'production ÷ consumption'];
+    const parts = ['Last 30 days', `Faction ${faction}`, 'production ÷ consumption'];
     if (result.productionError) parts.push(`production: ${result.productionError}`);
     if (result.consumptionError) parts.push(`consumption: ${result.consumptionError}`);
     pcrFactionNote.textContent = parts.join(' · ');
@@ -3249,7 +3249,7 @@ function invRenderEmpty(message) {
   if (invRefs.wideCard.legend) invRefs.wideCard.legend.textContent = '';
   if (invRefs.bars.consumables) invRefs.bars.consumables.textContent = '';
   if (invRefs.bars.other) invRefs.bars.other.textContent = '';
-  if (invRefs.factionNote) invRefs.factionNote.textContent = `Last 14 days · inventory at starbase · ${message}`;
+  if (invRefs.factionNote) invRefs.factionNote.textContent = `Last 30 days · inventory at starbase · ${message}`;
   if (invRefs.debugStrip) invRefs.debugStrip.textContent = `wide card: ${message} (empty state)`;
 }
 
@@ -3704,7 +3704,7 @@ function renderInventory(result) {
     const viewLabel = result.isAggregate
       ? `${result.faction} · all starbases`
       : `${result.faction} · ${result.starbase}`;
-    invRefs.factionNote.textContent = `Last 14 days · ${viewLabel}`;
+    invRefs.factionNote.textContent = `Last 30 days · ${viewLabel}`;
   }
 
   // Filter to the selected starbase if the user picked one.
@@ -3824,13 +3824,13 @@ function createConsumptionBarCard(asset, fallbackIndex, options = {}) {
   total.textContent = options.headerRight || formatWholeNumber(asset.total);
   total.title = options.headerRight
     ? String(options.headerRightTitle || options.headerRight)
-    : `${formatWholeNumber(asset.total)} over 14 days`;
+    : `${formatWholeNumber(asset.total)} over 30 days`;
   header.appendChild(title);
   header.appendChild(total);
 
   const bars = document.createElement('div');
   bars.className = 'resource-chart-bars';
-  bars.setAttribute('aria-label', `${asset.label} ${actionLabel} over the last 14 days`);
+  bars.setAttribute('aria-label', `${asset.label} ${actionLabel} over the last 30 days`);
   bars.appendChild(createYAxis(maxValue));
   for (const day of asset.days) {
     const value = Number(day.value) || 0;
@@ -5390,7 +5390,7 @@ function renderEarnings(result) {
     cell.colSpan = getEarningsTableColSpan('scanning');
     cell.textContent = rows.length
       ? `No ${normalizeFaction(latestSettings?.faction)} rows match the current filters`
-      : `No ${normalizeFaction(latestSettings?.faction)} fleets scanned in the last 14 days`;
+      : `No ${normalizeFaction(latestSettings?.faction)} fleets scanned in the last 30 days`;
     row.appendChild(cell);
     earningsTableBody.appendChild(row);
     renderEarningsMining(result);
@@ -5516,7 +5516,7 @@ function renderEarningsMining(result) {
     cell.colSpan = getEarningsTableColSpan('mining');
     cell.textContent = rows.length
       ? `No ${normalizeFaction(latestSettings?.faction)} rows match the current filters`
-      : `No ${normalizeFaction(latestSettings?.faction)} fleets mined in the last 14 days`;
+      : `No ${normalizeFaction(latestSettings?.faction)} fleets mined in the last 30 days`;
     row.appendChild(cell);
     earningsMiningTableBody.appendChild(row);
     return;
@@ -5628,7 +5628,7 @@ function renderEarningsCrafting(result) {
     cell.colSpan = getEarningsTableColSpan('crafting');
     cell.textContent = rows.length
       ? `No ${normalizeFaction(latestSettings?.faction)} rows match the current filters`
-      : `No ${normalizeFaction(latestSettings?.faction)} crafting data in the last 14 days`;
+      : `No ${normalizeFaction(latestSettings?.faction)} crafting data in the last 30 days`;
     row.appendChild(cell);
     earningsCraftingTableBody.appendChild(row);
     return;
@@ -5744,7 +5744,7 @@ function renderEarningsUpgrading(result) {
   if (!earningsUpgradingTableBody) return;
   const sortedRows = sortEarningsRows('upgrading', getFilteredEarningsRows('upgrading', rows));
   earningsUpgradingTableBody.textContent = '';
-  if (!sortedRows.length) return renderEarningsUpgradingEmpty(rows.length ? 'No rows match the current filters' : 'No upgrading data in the last 14 completed days');
+  if (!sortedRows.length) return renderEarningsUpgradingEmpty(rows.length ? 'No rows match the current filters' : 'No upgrading data in the last 30 completed days');
   const columns = getVisibleEarningsColumns('upgrading');
   for (const entry of sortedRows) {
     const tr = document.createElement('tr');
@@ -5796,7 +5796,7 @@ function renderEarningsCargo(result) {
     cell.colSpan = getEarningsTableColSpan('cargo');
     cell.textContent = rows.length
       ? `No ${normalizeFaction(latestSettings?.faction)} rows match the current filters`
-      : `No ${normalizeFaction(latestSettings?.faction)} cargo fleets moved in the last 14 days`;
+      : `No ${normalizeFaction(latestSettings?.faction)} cargo fleets moved in the last 30 days`;
     row.appendChild(cell);
     earningsCargoTableBody.appendChild(row);
     return;
@@ -5846,7 +5846,7 @@ function renderEarningsCargoAllocations(result) {
     tr.className = 'empty-row';
     const td = document.createElement('td');
     td.colSpan = 5 + visibleColumns.length;
-    td.textContent = rows.length ? 'No rows match the current filters' : 'No cargo cost allocation data in the last 14 days';
+    td.textContent = rows.length ? 'No rows match the current filters' : 'No cargo cost allocation data in the last 30 days';
     tr.appendChild(td);
     earningsCargoAllocationTableBody.appendChild(tr);
     return;

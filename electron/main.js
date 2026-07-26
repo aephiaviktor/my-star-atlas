@@ -857,7 +857,7 @@ function getLastUtcDays(dayCount) {
   });
 }
 
-function createDayTemplates(dayCount = 14) {
+function createDayTemplates(dayCount = 30) {
   return getLastUtcDays(dayCount).map((date) => ({
     isoDate: getUtcDateKey(date),
     label: formatShortUtcDate(date),
@@ -948,7 +948,7 @@ async function fetchDailySdu(payload) {
 
   async function queryProduction() {
     const productionFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu")
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
@@ -993,7 +993,7 @@ ${scopeFilterFlux}
 
   async function queryConsumption() {
     const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
   |> filter(fn: (r) =>
@@ -1014,7 +1014,7 @@ ${scopeFilterFlux}
       const key = getUtcDateKey(date);
       valuesByDay.set(key, (valuesByDay.get(key) || 0) + value);
     }
-    const days = getLastUtcDays(14).map((date) => {
+    const days = getLastUtcDays(30).map((date) => {
       const key = getUtcDateKey(date);
       return { isoDate: key, label: formatShortUtcDate(date), value: valuesByDay.get(key) || 0 };
     });
@@ -1082,7 +1082,7 @@ async function fetchDailyCrafting(payload) {
   const requestedStarbase = normalizeStarbaseFilter(payload);
   const requestedRecipe = normalizeRecipeFilter(payload);
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "crafting")
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
@@ -1257,7 +1257,7 @@ async function fetchDailyMining(payload) {
   const requestedFleet = normalizeFleetFilter(payload);
   const requestedStarbase = normalizeStarbaseFilter(payload);
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "mining")
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
@@ -1418,7 +1418,7 @@ async function fetchProductionRows(settings, bucket, measurement, tagColumn, ext
   const groupColumns = tagColumn === 'starbase' ? '"starbase"' : `"starbase", "${tagColumn}"`;
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "${measurement}")
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
@@ -1436,7 +1436,7 @@ ${extraFilterFlux}
 async function fetchProductionDailyRows(settings, bucket, measurement, tagColumn, starbase, extraFilterFlux = '') {
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "${measurement}")
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
@@ -1455,7 +1455,7 @@ ${extraFilterFlux}
 async function fetchSduProductionRowsByFleet(settings, bucket) {
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu")
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
@@ -1471,7 +1471,7 @@ ${scopeFilterFlux}
 async function fetchSduProductionDailyByFleet(settings, bucket, fleet) {
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu")
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
@@ -1490,7 +1490,7 @@ ${scopeFilterFlux}
 async function fetchProductionDailyByStarbaseRows(settings, bucket) {
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._field == "amount")
   |> filter(fn: (r) =>
     (r._measurement == "mining" and exists r.rss) or
@@ -1510,7 +1510,7 @@ ${scopeFilterFlux}
 async function fetchSduProductionDailyAll(settings, bucket) {
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu")
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
@@ -1742,7 +1742,7 @@ async function fetchConsumptionMining(payload) {
   const requestedFleet = normalizeFleetFilter(payload);
 
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "mining")
   |> filter(fn: (r) => r._field == "burnedFuel" or r._field == "burnedFood" or r._field == "burnedAmmo")
 ${scopeFilterFlux}
@@ -1893,7 +1893,7 @@ async function fetchConsumptionCrafting(payload) {
   const requestedRecipe = normalizeRecipeFilter(payload);
 
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "crafting")
   |> filter(fn: (r) => r._field == "amount")
   |> filter(fn: (r) => exists r.type and r.type == "Input")
@@ -2058,7 +2058,7 @@ async function fetchConsumptionUpgrading(payload) {
   const requestedComponent = normalizeComponentFilter(payload);
 
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "upgrade")
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
@@ -2222,7 +2222,7 @@ async function fetchConsumptionScanning(payload) {
   const requestedFleet = normalizeFleetFilter(payload);
 
   const sduFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu")
   |> filter(fn: (r) => r._field == "burnedFood")
 ${scopeFilterFlux}
@@ -2234,7 +2234,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["starbase", "sectorX", "sectorY", "fleet", "_time", "_value"])`;
 
   const movementFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement")
   |> filter(fn: (r) => r._field == "burnedFuel")
   |> filter(fn: (r) => exists r.assignment and r.assignment == "Scan")
@@ -2395,7 +2395,7 @@ async function fetchConsumptionCargo(payload) {
   const requestedFleet = normalizeFleetFilter(payload);
 
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement")
   |> filter(fn: (r) => r._field == "burnedFuel")
   |> filter(fn: (r) => exists r.assignment and r.assignment == "Transport")
@@ -2539,7 +2539,7 @@ async function fetchConsumptionTotal(payload) {
   const requestedAsset = normalizeAssetFilter(payload);
 
   const sduFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu")
   |> filter(fn: (r) => r._field == "burnedFood")
 ${scopeFilterFlux}
@@ -2551,7 +2551,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["starbase", "sectorX", "sectorY", "_time", "_value"])`;
 
   const movementScanFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement")
   |> filter(fn: (r) => r._field == "burnedFuel")
   |> filter(fn: (r) => exists r.assignment and r.assignment == "Scan")
@@ -2564,7 +2564,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["starbase", "_time", "_value"])`;
 
   const movementTransportFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement")
   |> filter(fn: (r) => r._field == "burnedFuel")
   |> filter(fn: (r) => exists r.assignment and r.assignment == "Transport")
@@ -2577,7 +2577,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["starbase", "_time", "_value"])`;
 
   const miningFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "mining")
   |> filter(fn: (r) => r._field == "burnedFuel" or r._field == "burnedFood" or r._field == "burnedAmmo")
 ${scopeFilterFlux}
@@ -2589,7 +2589,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["_field", "starbase", "sectorX", "sectorY", "_time", "_value"])`;
 
   const craftingFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "crafting")
   |> filter(fn: (r) => r._field == "amount")
   |> filter(fn: (r) => exists r.type and r.type == "Input")
@@ -2602,7 +2602,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["input", "starbase", "_time", "_value"])`;
 
   const upgradeFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "upgrade")
   |> filter(fn: (r) => r._field == "amount")
 ${scopeFilterFlux}
@@ -2853,7 +2853,7 @@ async function fetchPcrCharts(payload) {
   //   - sdu     : _field == "amount"      → asset = "Survey Data Unit"
   // sdu rows may or may not carry r.starbase, so we don't require it for sdu.
   const productionFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._field == "amount")
   |> filter(fn: (r) =>
     (r._measurement == "mining" and exists r.rss) or
@@ -2874,7 +2874,7 @@ ${scopeFilterFlux}
   // single _field filter per query, so we run three narrower queries and
   // merge the per-day totals on the JS side.
   const miningConsumptionFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "mining")
   |> filter(fn: (r) => r._field == "burnedFuel" or r._field == "burnedFood" or r._field == "burnedAmmo")
 ${scopeFilterFlux}
@@ -2887,7 +2887,7 @@ ${scopeFilterFlux}
   |> sort(columns: ["_field", "_time"])`;
 
   const craftUpgradeConsumptionFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._field == "amount")
   |> filter(fn: (r) =>
     (r._measurement == "crafting" and (exists r.type) and r.type == "Input" and exists r.input) or
@@ -2903,7 +2903,7 @@ ${scopeFilterFlux}
   |> sort(columns: ["_measurement", "input", "_time"])`;
 
   const sduMovementConsumptionFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) =>
     (r._measurement == "sdu" and r._field == "burnedFood") or
     (r._measurement == "movement" and r._field == "burnedFuel")
@@ -2934,7 +2934,7 @@ ${scopeFilterFlux}
   const dayTemplates = createDayTemplates();
   const dayKeySet = new Set(dayTemplates.map((day) => day.isoDate));
 
-  // Track the first day (in the 14-day window) where each data source
+  // Track the first day (in the 30-day window) where each data source
   // has any data. The renderer uses this to find the first "complete
   // day" per category — i.e. the first day where every relevant
   // production + consumption source has at least started reporting.
@@ -3149,7 +3149,7 @@ async function fetchInventory(payload) {
     .map((name) => `r.starbase == "${escapeFluxString(name)}"`)
     .join(' or ');
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "starbase")
   |> filter(fn: (r) => r._field == "curAmount")
   |> filter(fn: (r) => ${starbaseOrClause})
@@ -4203,12 +4203,12 @@ async function fetchScanningEarningsRows(settings) {
     return [];
   }
 
-  const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
+  const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
   const sduCostsFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu")
   |> filter(fn: (r) => r._field == "amount" or r._field == "burnedFood" or r._field == "txCostSol")
 ${scopeFilterFlux}
@@ -4221,7 +4221,7 @@ ${scopeFilterFlux}
   |> sort(columns: ["_time", "fleet"])`;
 
   const sduProductionByStarbaseFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu" and r._field == "amount")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet and exists r.starbase)
@@ -4233,7 +4233,7 @@ ${scopeFilterFlux}
   |> sort(columns: ["_time", "fleet", "starbase"])`;
 
   const movementCostsFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement" and r._field == "burnedFuel")
   |> filter(fn: (r) => exists r.assignment and r.assignment == "Scan")
 ${scopeFilterFlux}
@@ -4246,7 +4246,7 @@ ${scopeFilterFlux}
   |> sort(columns: ["_time", "fleet"])`;
 
   const chanceSumFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu" and r._field == "chance")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
@@ -4259,7 +4259,7 @@ ${scopeFilterFlux}
   |> sort(columns: ["_time", "fleet"])`;
 
   const chanceCountFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu" and r._field == "chance")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
@@ -4271,7 +4271,7 @@ ${scopeFilterFlux}
   |> sort(columns: ["_time", "fleet"])`;
 
   const successfulCountFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu" and r._field == "amount" and float(v: r._value) > 0.0)
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
@@ -4370,12 +4370,12 @@ async function fetchMiningEarningsRows(settings) {
     return [];
   }
 
-  const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
+  const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
   const totalsFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "mining")
   |> filter(fn: (r) => r._field == "amount" or r._field == "burnedAmmo" or r._field == "burnedFood" or r._field == "burnedFuel" or r._field == "txCostSol")
 ${scopeFilterFlux}
@@ -4389,7 +4389,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["fleet", "starbase", "rss", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "starbase", "rss"])`;
   const txDailyFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "mining" and r._field == "txCostSol")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
@@ -4470,7 +4470,7 @@ async function fetchCraftingEarningsRows(settings) {
     return [];
   }
 
-  const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
+  const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
@@ -4479,7 +4479,7 @@ async function fetchCraftingEarningsRows(settings) {
   // locally. The previous implementation scanned the same 15-day range six
   // times, including a duplicate Output query used only for event counts.
   const craftingFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "crafting")
   |> filter(fn: (r) => r._field == "amount" or r._field == "fee" or r._field == "txCostSol" or r._field == "crew")
 ${scopeFilterFlux}
@@ -4690,12 +4690,12 @@ async function fetchCargoEarningsRows(settings) {
     return [];
   }
 
-  const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
+  const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
   const cargoFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement")
   |> filter(fn: (r) => r._field == "burnedFuel")
 ${scopeFilterFlux}
@@ -4709,7 +4709,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["fleet", "assignment", "starbase", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "assignment", "starbase"])`;
   const typeFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement")
   |> filter(fn: (r) => r._field == "type")
 ${scopeFilterFlux}
@@ -4718,7 +4718,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "assignment"])`;
   const moveTimeFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement")
   |> filter(fn: (r) => r._field == "moveTime")
 ${scopeFilterFlux}
@@ -4727,7 +4727,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["fleet", "assignment", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "assignment"])`;
   const txDailyFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement" and r._field == "txCostSol")
   |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
 ${scopeFilterFlux}
@@ -4739,7 +4739,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["fleet", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
   const completedCycleFlux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "cargo_cycle_completed" and r._field == "legCount")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet and exists r.assignment and exists r.cycleId)
@@ -4874,12 +4874,12 @@ async function fetchCargoAllocationEarningsRows(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
   const bucket = escapeFluxString(settings.influxBucket);
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -15d)
+  |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
   |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
   |> keep(columns: ["_time", "_field", "_value", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex"])
   |> sort(columns: ["_time"])`;
-  const includedDays = new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)));
+  const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
   const grouped = new Map();
   const fieldRows = dedupeCargoAllocationFieldRows(parseInfluxCsv(await queryInfluxFlux(settings, flux)));
   for (const row of fieldRows) {
@@ -5281,7 +5281,7 @@ async function fetchEarningsSnapshot(payload) {
     fetchFleetSignatureDailyCounts(
       connection,
       mining.map((row) => row.fleetAccount).filter(Boolean),
-      new Set(getLastUtcDays(14).map((date) => getUtcDateKey(date)))
+      new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)))
     ),
     new Promise((resolve) => setTimeout(() => resolve(new Map()), 5000)),
   ]);
