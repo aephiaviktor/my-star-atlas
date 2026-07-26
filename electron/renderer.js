@@ -857,6 +857,7 @@ const PCR_RATIO_REFERENCE = 1.0;
 
 // Per-faction caching for instant switching and per-filter caching
 const factionCache = new Map();
+let factionPrefetchGeneration = 0;
 
 function getCachedFactionResult(faction, key) {
   const cache = factionCache.get(faction);
@@ -868,6 +869,68 @@ function setCachedFactionResult(faction, key, value) {
     factionCache.set(faction, {});
   }
   factionCache.get(faction)[key] = value;
+}
+
+function cachePrefetchedFilterResult(faction, section, result, ...filters) {
+  if (!result?.ok) return;
+  setCachedFactionResult(faction, section, result);
+  setCachedFactionResult(faction, getFilterCacheKey(faction, section, ...filters), result);
+}
+
+async function runFactionBackgroundPrefetch(generation, faction) {
+  if (!hasInfluxSettings(latestSettings || getFormPayload())) return;
+  const settings = {
+    ...(latestSettings || getFormPayload()),
+    faction,
+    playerProfiles: { ...((latestSettings || getFormPayload()).playerProfiles || {}) },
+  };
+  const tasks = [
+    {
+      key: 'fleet',
+      cached: () => Boolean(getCachedFactionResult(faction, 'fleet')) || !getActivePlayerProfile(settings),
+      load: async () => {
+        const result = await api.getFleets(settings);
+        if (result?.ok) setCachedFactionResult(faction, 'fleet', result);
+      },
+    },
+    { key: 'scanning', cached: () => Boolean(getCachedFilterResult(faction, 'sdu', '')), load: async () => cachePrefetchedFilterResult(faction, 'sdu', await api.getDailySdu({ ...settings, fleetFilter: '' }), '') },
+    { key: 'mining', cached: () => Boolean(getCachedFilterResult(faction, 'mining', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'mining', await api.getDailyMining({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
+    { key: 'crafting', cached: () => Boolean(getCachedFilterResult(faction, 'crafting', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'crafting', await api.getDailyCrafting({ ...settings, starbaseFilter: '', recipeFilter: '' }), '', '') },
+    { key: 'production', cached: () => Boolean(getCachedFilterResult(faction, 'production', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'production', await api.getDailyProduction({ ...settings, starbaseFilter: '', assetFilter: '' }), '', '') },
+    { key: 'consumption-scanning', cached: () => Boolean(getCachedFilterResult(faction, 'consScanning', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consScanning', await api.getDailyConsumptionScanning({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
+    { key: 'consumption-mining', cached: () => Boolean(getCachedFilterResult(faction, 'consMining', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consMining', await api.getDailyConsumptionMining({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
+    { key: 'consumption-cargo', cached: () => Boolean(getCachedFilterResult(faction, 'consCargo', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consCargo', await api.getDailyConsumptionCargo({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
+    { key: 'consumption-crafting', cached: () => Boolean(getCachedFilterResult(faction, 'consCrafting', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consCrafting', await api.getDailyConsumptionCrafting({ ...settings, starbaseFilter: '', recipeFilter: '' }), '', '') },
+    { key: 'consumption-upgrading', cached: () => Boolean(getCachedFilterResult(faction, 'consUpgrading', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consUpgrading', await api.getDailyConsumptionUpgrading({ ...settings, starbaseFilter: '', componentFilter: '' }), '', '') },
+    { key: 'consumption-total', cached: () => Boolean(getCachedFilterResult(faction, 'consTotal', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consTotal', await api.getDailyConsumptionTotal({ ...settings, starbaseFilter: '', assetFilter: '' }), '', '') },
+    { key: 'pcr', cached: () => Boolean(getCachedFactionResult(faction, 'pcr')), load: async () => { const result = await api.getPcrCharts(settings); if (result?.ok) setCachedFactionResult(faction, 'pcr', result); } },
+    { key: 'inventory', cached: () => Boolean(getCachedFactionResult(faction, 'inventory::__all__')), load: async () => { const result = await api.getInventory({ ...settings, starbaseFilter: '__all__' }); if (result?.ok) setCachedFactionResult(faction, 'inventory::__all__', result); } },
+    { key: 'earnings', cached: () => Boolean(getCachedFactionResult(faction, 'earnings')) || !getActivePlayerProfile(settings), load: async () => { const result = await api.getEarningsSnapshot(settings); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
+    { key: 'optimization-scanning', cached: () => Boolean(getCachedFilterResult(faction, 'optimizationScanning', '', '', '__all__', '__all__', '__all__', '__all__')), load: async () => { const result = await api.getScanningOptimization({ faction, start: null, stop: null, fleet: '__all__', eventType: '__all__', operation: '__all__', status: '__all__', offset: 0, limit: 500 }); if (result?.ok) setCachedFilterResult(faction, 'optimizationScanning', result, '', '', '__all__', '__all__', '__all__', '__all__'); } },
+    { key: 'optimization-upgrading', cached: () => Boolean(getCachedFilterResult(faction, 'optimizationUpgrading', '', '', '__all__')), load: async () => { const result = await api.getUpgradingOptimization({ faction, start: null, stop: null, instance: '__all__' }); if (result?.ok) setCachedFilterResult(faction, 'optimizationUpgrading', result, '', '', '__all__'); } },
+  ];
+
+  for (const task of tasks) {
+    if (generation !== factionPrefetchGeneration) return;
+    if (task.cached()) continue;
+    try {
+      await task.load();
+    } catch (error) {
+      console.warn(`[MSA] Background prefetch failed for ${faction}/${task.key}:`, error);
+    }
+  }
+}
+
+function loadVisibleThenPrefetch(loader) {
+  const generation = ++factionPrefetchGeneration;
+  const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
+  return Promise.resolve()
+    .then(loader)
+    .finally(() => {
+      if (generation === factionPrefetchGeneration && faction === normalizeFaction((latestSettings || getFormPayload()).faction)) {
+        void runFactionBackgroundPrefetch(generation, faction);
+      }
+    });
 }
 
 // Per-filter cache: stores results keyed by faction + filter combination
@@ -4112,6 +4175,7 @@ function renderFleets(result) {
 
 async function refreshFleets() {
   const settings = latestSettings || getFormPayload();
+  const faction = normalizeFaction(settings.faction);
   if (!getActivePlayerProfile(settings)) {
     latestFleetResult = null;
     renderFleetEmpty(`No ${normalizeFaction(settings.faction)} player profile configured`);
@@ -4119,12 +4183,21 @@ async function refreshFleets() {
     return;
   }
 
+  const cached = getCachedFactionResult(faction, 'fleet');
+  if (cached) renderFleets(cached);
   setFleetStatus('Loading fleets from blockchain...');
   try {
     const result = await api.getFleets(settings);
+    if (faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return;
     renderFleets(result);
   } catch (error) {
     console.error(error);
+    if (faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return;
+    if (cached) {
+      renderFleets(cached);
+      setFleetStatus(`Showing cached blockchain data from ${formatCheckedAt(cached.checkedAt)}`);
+      return;
+    }
     renderFleetEmpty('Fleet sync failed');
     setFleetStatus('Blockchain sync failed');
   }
@@ -6174,26 +6247,50 @@ function populateOptimizationFilter(select, rows, key, allLabel) {
   if (values.includes(selected)) select.value = selected;
 }
 
-async function refreshScanningOptimization({ append = false } = {}) {
+async function refreshScanningOptimization({ append = false, force = false } = {}) {
   if (!api.getScanningOptimization) return;
+  const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
+  const start = optimizationFilterIso(optimizationStartFilter);
+  const stop = optimizationFilterIso(optimizationStopFilter);
+  const fleet = optimizationFleetFilter.value;
+  const eventType = optimizationEventFilter.value;
+  const operation = optimizationOperationFilter.value;
+  const status = optimizationStatusFilter.value;
+  const cached = !append && !force
+    ? getCachedFilterResult(faction, 'optimizationScanning', start || '', stop || '', fleet, eventType, operation, status)
+    : null;
+  if (cached) {
+    latestOptimizationResult = cached;
+    optimizationRows = cached.rows || [];
+    optimizationColumns = getOrderedOptimizationColumns(new Set([...optimizationColumns, ...(cached.columns || [])]));
+    renderOptimizationColumnControls();
+    renderOptimizationTable();
+    populateOptimizationFilter(optimizationFleetFilter, optimizationRows, 'fleet', 'All fleets');
+    populateOptimizationFilter(optimizationOperationFilter, optimizationRows, 'operation', 'All operations');
+    optimizationLoadMore.hidden = !cached.hasMore;
+    optimizationSyncStatus.textContent = `${optimizationRows.length.toLocaleString()} cached rows · ${cached.bucket} · ${faction}`;
+    return;
+  }
   optimizationSyncStatus.textContent = append ? 'Loading more optimization rows...' : 'Loading optimization rows...';
   const result = await api.getScanningOptimization({
-    faction: normalizeFaction((latestSettings || getFormPayload()).faction),
-    start: optimizationFilterIso(optimizationStartFilter),
-    stop: optimizationFilterIso(optimizationStopFilter),
-    fleet: optimizationFleetFilter.value,
-    eventType: optimizationEventFilter.value,
-    operation: optimizationOperationFilter.value,
-    status: optimizationStatusFilter.value,
+    faction,
+    start,
+    stop,
+    fleet,
+    eventType,
+    operation,
+    status,
     offset: append ? optimizationRows.length : 0,
     limit: 500,
   });
+  if (faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return;
   if (!result?.ok) {
     optimizationSyncStatus.textContent = `Optimization sync failed: ${result?.error || 'unknown error'}`;
     if (!append) { optimizationRows = []; renderOptimizationTable(); }
     return;
   }
   latestOptimizationResult = result;
+  if (!append) setCachedFilterResult(faction, 'optimizationScanning', result, start || '', stop || '', fleet, eventType, operation, status);
   optimizationRows = append ? [...optimizationRows, ...result.rows] : result.rows;
   const discovered = getOrderedOptimizationColumns(new Set([...optimizationColumns, ...(result.columns || [])]));
   for (const column of discovered) if (!optimizationColumns.includes(column)) optimizationSelectedColumns.add(column);
@@ -6251,17 +6348,32 @@ function renderUpgradingOptimizationTable() {
   }
 }
 
-async function refreshUpgradingOptimization() {
+async function refreshUpgradingOptimization({ force = false } = {}) {
   if (!api.getUpgradingOptimization) return;
+  const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
+  const start = optimizationFilterIso(optimizationUpgradingStartFilter);
+  const stop = optimizationFilterIso(optimizationUpgradingStopFilter);
+  const instance = optimizationUpgradingInstanceFilter.value;
+  const cached = force ? null : getCachedFilterResult(faction, 'optimizationUpgrading', start || '', stop || '', instance);
+  if (cached) {
+    latestUpgradingOptimizationResult = cached;
+    optimizationUpgradingRows = cached.rows || [];
+    populateOptimizationFilter(optimizationUpgradingInstanceFilter, optimizationUpgradingRows, 'instance', 'All instances');
+    renderUpgradingOptimizationTable();
+    optimizationUpgradingSyncStatus.textContent = `${optimizationUpgradingRows.length.toLocaleString()} cached rows · ${cached.bucket} · ${faction}`;
+    return;
+  }
   optimizationUpgradingSyncStatus.textContent = 'Loading upgrading optimization rows...';
   const result = await api.getUpgradingOptimization({
-    faction: normalizeFaction((latestSettings || getFormPayload()).faction),
-    start: optimizationFilterIso(optimizationUpgradingStartFilter),
-    stop: optimizationFilterIso(optimizationUpgradingStopFilter),
-    instance: optimizationUpgradingInstanceFilter.value,
+    faction,
+    start,
+    stop,
+    instance,
   });
+  if (faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return;
   if (!result?.ok) { optimizationUpgradingSyncStatus.textContent = `Upgrading optimization sync failed: ${result?.error || 'unknown error'}`; return; }
   latestUpgradingOptimizationResult = result;
+  setCachedFilterResult(faction, 'optimizationUpgrading', result, start || '', stop || '', instance);
   optimizationUpgradingRows = result.rows || [];
   populateOptimizationFilter(optimizationUpgradingInstanceFilter, optimizationUpgradingRows, 'instance', 'All instances');
   renderUpgradingOptimizationTable();
@@ -6335,7 +6447,7 @@ function refreshVisibleFactionViews() {
 function refreshCurrentVisibleData() {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') return refreshEarnings();
-  if (currentSection === 'optimization') return currentOptimizationSubtab === 'upgrading' ? refreshUpgradingOptimization() : refreshScanningOptimization();
+  if (currentSection === 'optimization') return currentOptimizationSubtab === 'upgrading' ? refreshUpgradingOptimization({ force: true }) : refreshScanningOptimization({ force: true });
   if (currentSection !== 'production') return Promise.resolve();
   if (currentSubtab === 'scanning') return refreshDailySdu();
   if (currentSubtab === 'mining') return refreshDailyMining();
@@ -6447,7 +6559,7 @@ async function loadInitialState() {
   updateSettingsStatus(settings);
   void checkForUpdates();
   initInventory();
-  await refreshVisibleFactionViews();
+  await loadVisibleThenPrefetch(refreshVisibleFactionViews);
 }
 
 document.querySelectorAll('.nav-button').forEach((button) => {
@@ -6595,7 +6707,7 @@ factionButtons.forEach((button) => {
       latestSettings = saved;
       setFormValues(saved);
       updateSettingsStatus(saved);
-      await refreshVisibleFactionViews();
+      await loadVisibleThenPrefetch(refreshVisibleFactionViews);
       saveStatus.textContent = `${clickedFaction} selected`;
       setTimeout(() => {
         if (saveStatus.textContent === `${clickedFaction} selected`) {
