@@ -313,3 +313,9 @@ test('production Breakeven rows are restricted to starbases in the selected fact
     /const factionStarbases = await fetchFactionStarbases\(settings\);[\s\S]*?breakevenRows = buildBreakevenRows\([\s\S]*?\)\s*\.filter\(\(row\) => isStarbaseIncluded\(row\.starbase, factionStarbases, faction\)\);/,
   );
 });
+
+test('Breakeven falls back to safe faction filtering when the starbase tag lookup is unavailable', () => {
+  const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  assert.doesNotMatch(main, /if \(!factionStarbases\) throw new Error\('breakeven_faction_starbases_unavailable'\)/);
+  assert.match(main, /isStarbaseIncluded\(row\.starbase, factionStarbases, faction\)/);
+});

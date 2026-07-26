@@ -189,7 +189,12 @@ select:focus {
 }
 
 .optimization-panel { display: none; }
-.optimization-panel.active { display: block; }
+.optimization-panel.active {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
 
 #optimization-column-list {
   display: grid;
