@@ -56,6 +56,15 @@ test('Cargo table views use the same fixed table height as other Earnings tables
   assert.match(css, /\.cargo-table-view\s*>\s*\.fleet-table-wrap\s*\{[^}]*height:\s*560px/s);
 });
 
+test('Cargo filters offer calculated Total views for fleets and assets', () => {
+  assert.match(js, /subtab === 'scanning' \|\| subtab === 'mining' \|\| subtab === 'cargo' \|\| subtab === 'cargoAllocation'/);
+  assert.match(js, /filters\.asset[\s\S]*EARNINGS_TOTAL_ASSETS_FILTER/);
+  assert.match(js, /function aggregateTotalCargoRows\(/);
+  assert.match(js, /function aggregateTotalCargoAllocationRows\(/);
+  assert.match(js, /earningsFilters\.cargo\.fleet === EARNINGS_TOTAL_FLEETS_FILTER/);
+  assert.match(js, /earningsFilters\.cargoAllocation\.asset === EARNINGS_TOTAL_ASSETS_FILTER/);
+});
+
 test('Earnings chart titles omit their tab-name prefixes', () => {
   for (const prefix of ['Scanning:', 'Mining:', 'Cargo:']) {
     assert.doesNotMatch(html, new RegExp(`<span>${prefix.replace(':', '\\:')}`));

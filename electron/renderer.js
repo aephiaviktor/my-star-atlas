@@ -635,6 +635,7 @@ const earningsSort = {
 };
 
 const EARNINGS_TOTAL_FLEETS_FILTER = '__total__';
+const EARNINGS_TOTAL_ASSETS_FILTER = '__total__';
 
 // Chart mode state: 'total' (NP in ATLAS) or 'perCrew' (NP / crew). One
 // shared value per earnings subtab, so all Net Profit chart panels in
@@ -4933,7 +4934,7 @@ function populateEarningsFilterOptions(subtab, rows) {
   };
   fillSelect(filters.date, sortedDates, 'All Dates');
   fillSelect(filters.fleet, sortedFleets, 'All Fleets');
-  if ((subtab === 'scanning' || subtab === 'mining') && filters.fleet) {
+  if ((subtab === 'scanning' || subtab === 'mining' || subtab === 'cargo' || subtab === 'cargoAllocation') && filters.fleet) {
     const totalOption = document.createElement('option');
     totalOption.value = EARNINGS_TOTAL_FLEETS_FILTER;
     totalOption.textContent = 'Total';
@@ -4943,6 +4944,13 @@ function populateEarningsFilterOptions(subtab, rows) {
   fillSelect(filters.rawMaterial, sortedMaterials, 'All Materials');
   fillSelect(filters.starbase, sortedStarbases, 'All Starbases');
   fillSelect(filters.asset, sortedAssets, 'All Assets');
+  if (subtab === 'cargoAllocation' && filters.asset) {
+    const totalOption = document.createElement('option');
+    totalOption.value = EARNINGS_TOTAL_ASSETS_FILTER;
+    totalOption.textContent = 'Total';
+    filters.asset.insertBefore(totalOption, filters.asset.options[1] || null);
+    if (earningsFilters[subtab].asset === EARNINGS_TOTAL_ASSETS_FILTER) filters.asset.value = EARNINGS_TOTAL_ASSETS_FILTER;
+  }
   fillSelect(filters.assignment, sortedAssignments, 'All Assignments');
   fillSelect(filters.source, sortedSources, 'All Sources');
 }
@@ -4955,7 +4963,7 @@ function getFilteredEarningsRows(subtab, rows) {
     if (filterState.fleet && filterState.fleet !== EARNINGS_TOTAL_FLEETS_FILTER && fleet !== filterState.fleet) return false;
     if (filterState.rawMaterial && row.rawMaterial !== filterState.rawMaterial) return false;
     if (filterState.starbase && row.starbase !== filterState.starbase) return false;
-    if (filterState.asset && (row.output || row.asset) !== filterState.asset) return false;
+    if (filterState.asset && filterState.asset !== EARNINGS_TOTAL_ASSETS_FILTER && (row.output || row.asset) !== filterState.asset) return false;
     if (filterState.assignment && row.assignment !== filterState.assignment) return false;
     if (filterState.source && row.source !== filterState.source) return false;
     if (subtab === 'breakeven' && filterState.hideLowInventory && Number(row.inventory) <= 2) return false;
@@ -5022,6 +5030,81 @@ function aggregateTotalFleetRows(subtab, rows) {
       : null;
     total.profitMarginPercent = total.revenueAtlasPerDay !== 0 && Number.isFinite(total.revenueAtlasPerDay) && Number.isFinite(total.netProfitAtlas)
       ? (total.netProfitAtlas / total.revenueAtlasPerDay) * 100
+      : null;
+    return total;
+  });
+}
+
+function aggregateTotalCargoRows(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!groups.has(row.isoDate)) groups.set(row.isoDate, []);
+    groups.get(row.isoDate).push(row);
+  }
+  return Array.from(groups.values()).map((groupRows) => {
+    const first = groupRows[0];
+    const total = {
+      ...first,
+      isFleetTotal: true,
+      fleet: 'Total',
+      fleetName: 'Total',
+      fleetAccount: '',
+      ownership: '',
+      relationship: 'total',
+      ships: [],
+      shipTypes: 0,
+      assignment: new Set(groupRows.map((row) => row.assignment).filter(Boolean)).size === 1 ? first.assignment : 'Mixed',
+      travelModeTime: null,
+      travelModeWarpPercent: null,
+      starbases: Array.from(new Set(groupRows.flatMap((row) => row.starbases || []))).sort(),
+    };
+    total.starbaseLabel = total.starbases.length ? total.starbases.join(', ') : '--';
+    sumFiniteEarningsFields(total, groupRows, [
+      'txsDaily', 'cargoCycles', 'cargoLegs', 'fuelCostsAtlas', 'txsCostsAtlas',
+      'totalCostsAtlas', 'cargoVolume', 'cargoCapacity',
+    ]);
+    total.txsCostsPercent = total.totalCostsAtlas > 0 && Number.isFinite(total.txsCostsAtlas)
+      ? (total.txsCostsAtlas / total.totalCostsAtlas) * 100
+      : null;
+    total.cargoEfficiencyPercent = total.cargoCapacity > 0 && Number.isFinite(total.cargoVolume)
+      ? (total.cargoVolume / total.cargoCapacity) * 100
+      : null;
+    return total;
+  });
+}
+
+function aggregateTotalCargoAllocationRows(rows, { totalFleet = false, totalAsset = false } = {}) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = [row.isoDate, totalFleet ? '' : (row.fleetName || row.fleet), totalAsset ? '' : row.asset].join('\n');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return Array.from(groups.values()).map((groupRows) => {
+    const first = groupRows[0];
+    const uniqueValue = (field, fallback = 'Mixed') => {
+      const values = Array.from(new Set(groupRows.map((row) => row[field]).filter(Boolean)));
+      return values.length === 1 ? values[0] : fallback;
+    };
+    const total = {
+      ...first,
+      fleet: totalFleet ? 'Total' : first.fleet,
+      fleetName: totalFleet ? 'Total' : (first.fleetName || first.fleet),
+      fleetAccount: totalFleet ? '' : first.fleetAccount,
+      asset: totalAsset ? 'Total' : first.asset,
+      origin: uniqueValue('origin'),
+      destination: uniqueValue('destination'),
+      assignment: uniqueValue('assignment'),
+      ownership: totalFleet ? '' : first.ownership,
+      relationship: totalFleet ? 'total' : first.relationship,
+      ships: totalFleet ? [] : first.ships,
+      shipTypes: totalFleet ? 0 : first.shipTypes,
+    };
+    sumFiniteEarningsFields(total, groupRows, [
+      'amount', 'cargoVolume', 'allocatedFuel', 'fuelCostsAtlas', 'txsCostsAtlas', 'totalCostsAtlas',
+    ]);
+    total.costsPerUnitAtlas = total.amount > 0 && Number.isFinite(total.totalCostsAtlas)
+      ? total.totalCostsAtlas / total.amount
       : null;
     return total;
   });
@@ -5787,7 +5870,10 @@ function renderEarningsCargo(result) {
 
   if (!earningsCargoTableBody) return;
   const filteredRows = getFilteredEarningsRows('cargo', rows);
-  const sortedRows = sortEarningsRows('cargo', filteredRows);
+  const displayRows = earningsFilters.cargo.fleet === EARNINGS_TOTAL_FLEETS_FILTER
+    ? aggregateTotalCargoRows(filteredRows)
+    : filteredRows;
+  const sortedRows = sortEarningsRows('cargo', displayRows);
   earningsCargoTableBody.textContent = '';
   if (!sortedRows.length) {
     const row = document.createElement('tr');
@@ -5822,6 +5908,11 @@ function renderEarningsCargoAllocations(result) {
   const rows = Array.isArray(result?.cargoAllocationRows) ? result.cargoAllocationRows : [];
   populateEarningsFilterOptions('cargoAllocation', rows);
   const filteredRows = getFilteredEarningsRows('cargoAllocation', rows);
+  const totalFleet = earningsFilters.cargoAllocation.fleet === EARNINGS_TOTAL_FLEETS_FILTER;
+  const totalAsset = earningsFilters.cargoAllocation.asset === EARNINGS_TOTAL_ASSETS_FILTER;
+  const displayRows = totalFleet || totalAsset
+    ? aggregateTotalCargoAllocationRows(filteredRows, { totalFleet, totalAsset })
+    : filteredRows;
   const visibleColumns = getVisibleEarningsColumns('cargoAllocation');
   const fleetDetailIds = new Set(['color', 'ownership', 'ships', 'requiredCrew']);
   const fleetDetailColumns = visibleColumns.filter((column) => fleetDetailIds.has(column.id));
@@ -5851,7 +5942,7 @@ function renderEarningsCargoAllocations(result) {
     earningsCargoAllocationTableBody.appendChild(tr);
     return;
   }
-  for (const entry of filteredRows) {
+  for (const entry of displayRows) {
     const tr = document.createElement('tr');
     tr.appendChild(createTextCell(entry.label || entry.isoDate));
     tr.appendChild(createEarningsFleetCell(entry));
