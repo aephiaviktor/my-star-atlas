@@ -6121,8 +6121,11 @@ async function refreshEarnings() {
   return refreshPromise;
 }
 
-function optimizationFilterIso(input) {
-  return input?.value ? new Date(input.value).toISOString() : '';
+function optimizationFilterIso(input, includeWholeDay = false) {
+  if (!input?.value) return '';
+  const date = new Date(`${input.value}T00:00:00`);
+  if (includeWholeDay) date.setDate(date.getDate() + 1);
+  return date.toISOString();
 }
 
 function optimizationCellValue(value) {
@@ -6251,7 +6254,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
   if (!api.getScanningOptimization) return;
   const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
   const start = optimizationFilterIso(optimizationStartFilter);
-  const stop = optimizationFilterIso(optimizationStopFilter);
+  const stop = optimizationFilterIso(optimizationStopFilter, true);
   const fleet = optimizationFleetFilter.value;
   const eventType = optimizationEventFilter.value;
   const operation = optimizationOperationFilter.value;
@@ -6352,7 +6355,7 @@ async function refreshUpgradingOptimization({ force = false } = {}) {
   if (!api.getUpgradingOptimization) return;
   const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
   const start = optimizationFilterIso(optimizationUpgradingStartFilter);
-  const stop = optimizationFilterIso(optimizationUpgradingStopFilter);
+  const stop = optimizationFilterIso(optimizationUpgradingStopFilter, true);
   const instance = optimizationUpgradingInstanceFilter.value;
   const cached = force ? null : getCachedFilterResult(faction, 'optimizationUpgrading', start || '', stop || '', instance);
   if (cached) {
