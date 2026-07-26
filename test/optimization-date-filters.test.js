@@ -19,10 +19,19 @@ test('Optimization date filters select dates without times', () => {
   assert.doesNotMatch(html, /id="optimization-(?:upgrading-)?(?:start|stop)-filter" type="datetime-local"/);
 });
 
-test('Optimization From starts at UTC midnight and To includes the whole UTC day', () => {
+test('Optimization From starts at midnight and To includes the whole selected day', () => {
   assert.match(renderer, /function optimizationFilterIso\(input, includeWholeDay = false\)/);
-  assert.match(renderer, /new Date\(`\$\{input\.value\}T00:00:00Z`\)/);
-  assert.match(renderer, /if \(includeWholeDay\) date\.setUTCDate\(date\.getUTCDate\(\) \+ 1\)/);
+  assert.match(renderer, /new Date\(`\$\{input\.value\}T00:00:00`\)/);
+  assert.match(renderer, /if \(includeWholeDay\) date\.setDate\(date\.getDate\(\) \+ 1\)/);
   assert.match(renderer, /optimizationFilterIso\(optimizationStopFilter, true\)/);
   assert.match(renderer, /optimizationFilterIso\(optimizationUpgradingStopFilter, true\)/);
+});
+
+test('Optimization time columns are rendered in UTC rather than local time', () => {
+  assert.match(renderer, /function formatOptimizationUtcDateTime\(value\)/);
+  assert.match(renderer, /timeZone: 'UTC'/);
+  assert.match(renderer, /timeZoneName: 'short'/);
+  assert.match(renderer, /optimizationCellValue\(column, row\[column\]\)/);
+  assert.match(renderer, /if \(column === 'time'\) return formatOptimizationUtcDateTime\(value\)/);
+  assert.match(renderer, /if \(column\.key === 'time'\) return formatOptimizationUtcDateTime\(value\)/);
 });

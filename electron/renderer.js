@@ -6118,13 +6118,30 @@ async function refreshEarnings() {
 
 function optimizationFilterIso(input, includeWholeDay = false) {
   if (!input?.value) return '';
-  const date = new Date(`${input.value}T00:00:00Z`);
-  if (includeWholeDay) date.setUTCDate(date.getUTCDate() + 1);
+  const date = new Date(`${input.value}T00:00:00`);
+  if (includeWholeDay) date.setDate(date.getDate() + 1);
   return date.toISOString();
 }
 
-function optimizationCellValue(value) {
+function formatOptimizationUtcDateTime(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value);
+  return date.toLocaleString(undefined, {
+    timeZone: 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZoneName: 'short',
+  });
+}
+
+function optimizationCellValue(column, value) {
   if (value === null || value === undefined || value === '') return '--';
+  if (column === 'time') return formatOptimizationUtcDateTime(value);
   return String(value);
 }
 
@@ -6230,7 +6247,7 @@ function renderOptimizationTable() {
     const tr = document.createElement('tr');
     for (const column of visible) {
       const td = document.createElement('td');
-      td.textContent = optimizationCellValue(row[column]);
+      td.textContent = optimizationCellValue(column, row[column]);
       tr.append(td);
     }
     optimizationTableBody?.append(tr);
@@ -6303,7 +6320,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
 
 function upgradingOptimizationCell(column, value) {
   if (value === null || value === undefined || value === '') return '--';
-  if (column.key === 'time') return new Date(value).toLocaleString();
+  if (column.key === 'time') return formatOptimizationUtcDateTime(value);
   if (column.key === 'oldest_uninstalled_not_automated_age_seconds') {
     const hours = Number(value) / 3600;
     return hours >= 48 ? `${(hours / 24).toFixed(1)}d` : `${hours.toFixed(1)}h`;
