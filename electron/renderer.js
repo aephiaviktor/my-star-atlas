@@ -300,6 +300,32 @@ let latestOptimizationResult = null;
 let optimizationRows = [];
 let optimizationColumns = [];
 let optimizationSelectedColumns = new Set();
+let optimizationKnownColumns = new Set();
+const OPTIMIZATION_COLUMN_STORAGE_KEY = 'my-star-atlas:optimization-scanning-columns:v1';
+
+function restoreOptimizationColumnState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPTIMIZATION_COLUMN_STORAGE_KEY) || '{}');
+    if (Array.isArray(saved.selected)) optimizationSelectedColumns = new Set(saved.selected.map(String));
+    if (Array.isArray(saved.known)) optimizationKnownColumns = new Set(saved.known.map(String));
+  } catch (_error) {
+    // Invalid or unavailable local storage leaves new columns enabled by default.
+  }
+}
+
+function persistOptimizationColumnState() {
+  try {
+    localStorage.setItem(OPTIMIZATION_COLUMN_STORAGE_KEY, JSON.stringify({
+      selected: Array.from(optimizationSelectedColumns),
+      known: Array.from(optimizationKnownColumns),
+    }));
+  } catch (_error) {
+    // Column controls remain functional when local storage is unavailable.
+  }
+}
+
+restoreOptimizationColumnState();
+
 let optimizationSort = { key: 'time', direction: 'desc' };
 let currentOptimizationSubtab = 'scanning';
 let latestUpgradingOptimizationResult = null;
@@ -6253,6 +6279,7 @@ function renderOptimizationColumnControls() {
     input.addEventListener('change', () => {
       if (input.checked) optimizationSelectedColumns.add(column);
       else optimizationSelectedColumns.delete(column);
+      persistOptimizationColumnState();
       renderOptimizationTable();
     });
     label.append(input, document.createTextNode(` ${column}`));
@@ -6365,7 +6392,14 @@ async function refreshScanningOptimization({ append = false, force = false } = {
   if (!append) setCachedFilterResult(faction, 'optimizationScanning', result, start || '', stop || '', fleet, eventType, operation, status);
   optimizationRows = append ? [...optimizationRows, ...result.rows] : result.rows;
   const discovered = getOrderedOptimizationColumns(new Set([...optimizationColumns, ...(result.columns || [])]));
-  for (const column of discovered) if (!optimizationColumns.includes(column)) optimizationSelectedColumns.add(column);
+  let discoveredNewColumn = false;
+  for (const column of discovered) {
+    if (optimizationKnownColumns.has(column)) continue;
+    optimizationKnownColumns.add(column);
+    optimizationSelectedColumns.add(column);
+    discoveredNewColumn = true;
+  }
+  if (discoveredNewColumn) persistOptimizationColumnState();
   optimizationColumns = discovered;
   renderOptimizationColumnControls();
   renderOptimizationTable();
