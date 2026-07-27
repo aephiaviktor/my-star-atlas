@@ -6,6 +6,7 @@ const {
   buildProductionLedger,
   buildCargoTransferEvents,
   buildCraftingEvents,
+  buildUpgradingConsumptionEvents,
   buildCostLedgerResult,
 } = require('../electron/production-ledger-events');
 
@@ -93,6 +94,39 @@ test('crafting adapter rejects incomplete telemetry rather than inventing ingred
     { isoDate: '2026-07-25', starbase: 'UST-1', output: 'Framework', crafted: 2, ingredients: [], feeCostsAtlas: 1, txsCostsAtlas: 2 },
     { isoDate: '2026-07-25', starbase: 'UST-1', output: 'Framework', crafted: 2, ingredients: [{ input: 'Carbon', amount: 10 }], feeCostsAtlas: 1, txsCostsAtlas: null },
   ]), []);
+});
+
+test('upgrading consumes installed components at their local weighted cost basis', () => {
+  const result = buildCostLedgerResult({
+    miningRows: [{ isoDate: '2026-07-24', starbase: 'UST-1', rawMaterial: 'Framework', mined: 10, totalCostsAtlas: 5 }],
+    upgradingRows: [{ timestamp: '2026-07-24T12:30:00Z', starbase: 'UST-1', asset: 'Framework', installed: 4 }],
+  });
+
+  assert.equal(result.rejectedEvents.length, 0);
+  assert.deepEqual(buildUpgradingConsumptionEvents([
+    { timestamp: '2026-07-24T12:30:00Z', starbase: 'UST-1', asset: 'Framework', installed: 4 },
+  ]), [{ type: 'consume', timestamp: '2026-07-24T12:30:00.000Z', location: 'UST-1', asset: 'Framework', quantity: 4, purpose: 'upgrading' }]);
+  assert.equal(result.ledger.get('UST-1', 'Framework').quantity, 6);
+  assert.equal(result.ledger.get('UST-1', 'Framework').costs.mining, 3);
+  const appliedUpgrade = result.appliedEventResults.find(({ event }) => event.purpose === 'upgrading');
+  assert.equal(appliedUpgrade.result.quantity, 4);
+  assert.equal(appliedUpgrade.result.costs.mining, 2);
+  assert.equal(appliedUpgrade.result.cargoCost, 0);
+});
+
+test('upgrading rejects incomplete component telemetry and overdrafts without mutating inventory', () => {
+  assert.deepEqual(buildUpgradingConsumptionEvents([
+    { timestamp: 'invalid', starbase: 'UST-1', asset: 'Framework', installed: 1 },
+    { timestamp: '2026-07-24T12:30:00Z', starbase: '', asset: 'Framework', installed: 1 },
+    { timestamp: '2026-07-24T12:30:00Z', starbase: 'UST-1', asset: 'Framework', installed: 0 },
+  ]), []);
+  const result = buildCostLedgerResult({
+    miningRows: [{ isoDate: '2026-07-24', starbase: 'UST-1', rawMaterial: 'Framework', mined: 2, totalCostsAtlas: 1 }],
+    upgradingRows: [{ timestamp: '2026-07-24T12:30:00Z', starbase: 'UST-1', asset: 'Framework', installed: 3 }],
+  });
+  assert.equal(result.rejectedEvents.length, 1);
+  assert.match(result.rejectedEvents[0].error, /insufficient inventory/);
+  assert.equal(result.ledger.get('UST-1', 'Framework').quantity, 2);
 });
 
 test('an overdraft cargo event fails closed without corrupting earlier ledger state', () => {

@@ -108,27 +108,43 @@ function buildCraftingEvents(rows) {
   return events;
 }
 
-function buildCostLedgerResult({ scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [] } = {}) {
+function buildUpgradingConsumptionEvents(rows) {
+  const events = [];
+  for (const row of rows || []) {
+    const timestamp = normalizeTimestamp(row.timestamp, row.isoDate);
+    const location = String(row.starbase || '').trim();
+    const asset = String(row.asset || '').trim();
+    const quantity = Number(row.installed);
+    if (!timestamp || !location || !asset || !Number.isFinite(quantity) || quantity <= 0) continue;
+    events.push({ type: 'consume', timestamp, location, asset, quantity, purpose: 'upgrading' });
+  }
+  return events;
+}
+
+function buildCostLedgerResult({ scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [] } = {}) {
   const ledger = new InventoryCostLedger();
   const events = [
     ...buildScanningAcquisitionEvents(scanningRows),
     ...buildMiningAcquisitionEvents(miningRows),
     ...buildCargoTransferEvents(cargoRows),
     ...buildCraftingEvents(craftingRows),
+    ...buildUpgradingConsumptionEvents(upgradingRows),
   ].map((event, index) => ({ event, index }))
     .sort((left, right) => Date.parse(left.event.timestamp) - Date.parse(right.event.timestamp) || left.index - right.index)
     .map(({ event }) => event);
   const appliedEvents = [];
+  const appliedEventResults = [];
   const rejectedEvents = [];
   for (const event of events) {
     try {
-      ledger.applyEvent(event);
+      const result = ledger.applyEvent(event);
       appliedEvents.push(event);
+      appliedEventResults.push({ event, result });
     } catch (error) {
       rejectedEvents.push({ event, error: String(error?.message || error) });
     }
   }
-  return { ledger, events, appliedEvents, rejectedEvents };
+  return { ledger, events, appliedEvents, appliedEventResults, rejectedEvents };
 }
 
 function buildProductionLedger(options = {}) {
@@ -140,6 +156,7 @@ module.exports = {
   buildMiningAcquisitionEvents,
   buildCargoTransferEvents,
   buildCraftingEvents,
+  buildUpgradingConsumptionEvents,
   buildCostLedgerResult,
   buildProductionLedger,
 };

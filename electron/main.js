@@ -4655,6 +4655,7 @@ ${scopeFilterFlux}
   |> sort(columns: ["_time"])`;
   const rows = new Map();
   const crewObservations = new Map();
+  const ledgerEvents = [];
   for (const raw of parseInfluxCsv(await queryInfluxFlux(settings, flux))) {
     const starbase = resolveStarbaseName(raw, coordinateMap);
     const asset = String(raw.input || '').trim();
@@ -4662,6 +4663,9 @@ ${scopeFilterFlux}
     const value = Number(raw._value);
     if (!starbase || !asset || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
     const groupKey = `${starbase}\n${asset}`;
+    if (raw._field === 'amount' && value > 0) {
+      ledgerEvents.push({ timestamp: date.toISOString(), starbase, asset, installed: value });
+    }
     if (raw._field === 'crew') {
       if (!crewObservations.has(groupKey)) crewObservations.set(groupKey, []);
       crewObservations.get(groupKey).push({ time: date.getTime(), value });
@@ -4701,7 +4705,9 @@ ${asset}`;
     crewMilliseconds += current * Math.max(0, dayEnd - cursor);
     row.crew = crewMilliseconds / (dayEnd - dayStart);
   }
-  return Array.from(rows.values()).filter((row) => row.installed > 0 || row.crew > 0 || row.txCostSol > 0);
+  const result = Array.from(rows.values()).filter((row) => row.installed > 0 || row.crew > 0 || row.txCostSol > 0);
+  result.ledgerEvents = ledgerEvents;
+  return result;
 }
 
 async function fetchCargoEarningsRows(settings) {
@@ -5431,8 +5437,10 @@ async function fetchEarningsSnapshot(payload) {
     miningRows: mining,
     cargoRows: ledgerCargoAllocations,
     craftingRows: ledgerCraftingRows,
+    upgradingRows: upgradingRows.ledgerEvents || [],
   });
   const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
+  const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
   const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
   const inventoryCostLedgerRejectedEvents = inventoryCostLedgerResult.rejectedEvents;
 
@@ -5806,6 +5814,7 @@ async function fetchEarningsSnapshot(payload) {
     breakevenRows,
     breakevenError,
     inventoryCostLedgerEvents,
+    inventoryCostLedgerAppliedEventResults,
     inventoryCostLedgerRows,
     inventoryCostLedgerRejectedEvents,
   };
