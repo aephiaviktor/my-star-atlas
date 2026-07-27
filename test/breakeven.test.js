@@ -257,11 +257,13 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(html, /id="earnings-breakeven-table-body"/);
   assert.match(html, /id="earnings-breakeven-starbase-filter"/);
   assert.match(html, /id="earnings-breakeven-asset-filter"/);
-  assert.match(html, /id="earnings-breakeven-source-filter"/);
+  assert.doesNotMatch(html, /id="earnings-breakeven-source-filter"/);
   assert.match(html, /id="earnings-breakeven-hide-low-inventory"[^>]*> Hide Inventory ≤ 2/);
   assert.match(html, /class="breakeven-inventory-toggle"/);
   assert.doesNotMatch(html, /activity-filter-note">Landed cost =/);
-  assert.match(html, /<th>Inventory Value<\/th>/);
+  assert.match(html, /<th>Scanning C\/U<\/th>.*<th>Mining C\/U<\/th>.*<th>Crafting C\/U<\/th>.*<th>LM C\/U<\/th>.*<th>GM C\/U<\/th>/s);
+  assert.match(html, /<th>Inventory Cost Basis<\/th>/);
+  assert.doesNotMatch(html, /<th>Source<\/th>/);
   assert.match(html, /<th>GM Price \/ Unit<\/th>/);
   assert.match(js, /function renderEarningsBreakeven\(/);
   for (const name of [
@@ -270,7 +272,6 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
     'earningsBreakevenSyncStatus',
     'earningsBreakevenStarbaseFilter',
     'earningsBreakevenAssetFilter',
-    'earningsBreakevenSourceFilter',
   ]) {
     assert.match(js, new RegExp(`const ${name} = document\\.querySelector`), `${name} must be declared before use`);
   }
@@ -278,8 +279,8 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(js, /breakeven: \(\) => earningsBreakevenTableHead/);
   assert.match(js, /const breakevenEarningsOptionalColumns/);
   assert.match(js, /breakeven: breakevenEarningsOptionalColumns/);
-  assert.match(js, /breakeven: new Set\(\['source'\]\)/);
-  assert.match(js, /breakeven: \{ starbase: '', asset: '', source: '', hideLowInventory: false \}/);
+  assert.match(js, /breakeven: new Set\(\)/);
+  assert.match(js, /breakeven: \{ starbase: '', asset: '', hideLowInventory: false \}/);
   const css = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.css'), 'utf8');
   assert.match(css, /\.breakeven-inventory-toggle\s*\{[^}]*font-size:\s*0\.72rem/s);
   assert.match(js, /handle\(earningsBreakevenTableHead, 'breakeven'\)/);
@@ -287,10 +288,11 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(js, /renderEarningsUpgrading\(result\);\s+renderEarningsBreakeven\(result\);/);
 });
 
-test('production breakeven inventory loop does not shadow its source row', () => {
+test('production Breakeven reconciles current inventory against ledger quantity', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /for \(const inventoryRow of inventoryRows\)/);
-  assert.doesNotMatch(main, /for \(const inventory of inventoryRows\)[\s\S]*?const inventory = Number\(inventory\.quantity\)/);
+  assert.match(main, /function buildLedgerBreakevenRows/);
+  assert.match(main, /const unreconciledQuantity = Math\.max\(0, inventory - ledgerQuantity\);/);
+  assert.match(main, /Math\.abs\(ledgerQuantity - inventory\) <= 1e-9/);
 });
 
 test('earnings snapshot declares the optional Breakeven error before returning it', () => {
@@ -298,19 +300,29 @@ test('earnings snapshot declares the optional Breakeven error before returning i
   assert.match(main, /let breakevenRows = \[\];\s+let breakevenError = '';/);
 });
 
-test('production Breakeven cost basis uses enriched Atlas fields and the fresh cutoff', () => {
+test('production Breakeven derives source columns and totals from the weighted ledger', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /const BREAKEVEN_COST_BASIS_START_ISO = '2026-07-24';/);
-  assert.match(main, /const costsPerUnit = Number\(row\.costsPerUnitAtlas\);/);
-  assert.match(main, /row\.fuelCostsAtlas/);
-  assert.match(main, /row\.txsCostsAtlas/);
+  for (const source of ['scanning', 'mining', 'crafting', 'lm', 'gm']) {
+    assert.match(main, new RegExp(`const ${source}CostPerUnit = perUnit\\(ledger\\?\\.costs\\?\\.${source}\\)`));
+  }
+  assert.match(main, /const baseCostPerUnit = fullyCosted \? scanningCostPerUnit \+ miningCostPerUnit \+ craftingCostPerUnit \+ lmCostPerUnit \+ gmCostPerUnit : null;/);
+  assert.match(main, /const landedCostPerUnit = fullyCosted \? baseCostPerUnit \+ cargoCostPerUnit : null;/);
+});
+
+test('Crafting and Upgrading use consumed ledger basis instead of current GM prices', () => {
+  const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /const craftingBasis = craftingBasisByDay\.get/);
+  assert.match(main, /const ingCostsAtlas = craftingBasis && !craftingBasis\.uncosted \? craftingBasis\.basis : null;/);
+  assert.match(main, /const componentBasis = upgradingBasisByDay\.get/);
+  assert.match(main, /const upgradingCostsAtlas = componentBasis && !componentBasis\.uncosted \? componentBasis\.basis : null;/);
+  assert.doesNotMatch(main, /const upgradingCostsAtlas = componentPriceAtl/);
 });
 
 test('production Breakeven rows are restricted to starbases in the selected faction', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   assert.match(
     main,
-    /const factionStarbases = await fetchFactionStarbases\(settings\);[\s\S]*?breakevenRows = buildBreakevenRows\([\s\S]*?\)\s*\.filter\(\(row\) => isStarbaseIncluded\(row\.starbase, factionStarbases, faction\)\);/,
+    /const factionStarbases = await fetchFactionStarbases\(settings\);[\s\S]*?breakevenRows = buildLedgerBreakevenRows\([\s\S]*?\)\s*\.filter\(\(row\) => isStarbaseIncluded\(row\.starbase, factionStarbases, faction\)\);/,
   );
 });
 

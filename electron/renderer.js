@@ -119,7 +119,6 @@ const earningsBreakevenTableBody = document.querySelector('#earnings-breakeven-t
 const earningsBreakevenSyncStatus = document.querySelector('#earnings-breakeven-sync-status');
 const earningsBreakevenStarbaseFilter = document.querySelector('#earnings-breakeven-starbase-filter');
 const earningsBreakevenAssetFilter = document.querySelector('#earnings-breakeven-asset-filter');
-const earningsBreakevenSourceFilter = document.querySelector('#earnings-breakeven-source-filter');
 const earningsBreakevenHideLowInventory = document.querySelector('#earnings-breakeven-hide-low-inventory');
 const earningsScanningDateFilter = document.querySelector('#earnings-scanning-date-filter');
 const earningsScanningFleetFilter = document.querySelector('#earnings-scanning-fleet-filter');
@@ -458,7 +457,7 @@ const craftingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'crafted', label: 'Crafted' }),
   Object.freeze({ id: 'crew', label: 'Avg Crew' }),
   Object.freeze({ id: 'revenue', label: 'Revenue' }),
-  Object.freeze({ id: 'ingCosts', label: 'Ing Costs' }),
+  Object.freeze({ id: 'ingCosts', label: 'Ingredient Cost Basis' }),
   Object.freeze({ id: 'feeCosts', label: 'Crafting Fee Costs' }),
   Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
@@ -473,7 +472,7 @@ const upgradingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'lpRedemption', label: 'LP Redemption' }),
   Object.freeze({ id: 'crew', label: 'Avg Crew' }),
   Object.freeze({ id: 'revenue', label: 'Revenue' }),
-  Object.freeze({ id: 'upgCosts', label: 'UPG Costs' }),
+  Object.freeze({ id: 'upgCosts', label: 'Component Cost Basis' }),
   Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
@@ -485,21 +484,19 @@ const breakevenEarningsBaseColumns = Object.freeze([
   Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
   Object.freeze({ id: 'inventory', label: 'Inventory' }),
+  Object.freeze({ id: 'scanningCost', label: 'Scanning C/U' }),
+  Object.freeze({ id: 'miningCost', label: 'Mining C/U' }),
+  Object.freeze({ id: 'craftingCost', label: 'Crafting C/U' }),
+  Object.freeze({ id: 'lmCost', label: 'LM C/U' }),
+  Object.freeze({ id: 'gmCost', label: 'GM C/U' }),
   Object.freeze({ id: 'baseCost', label: 'Base Cost / Unit' }),
   Object.freeze({ id: 'cargoCost', label: 'Cargo Cost / Unit' }),
   Object.freeze({ id: 'landedCost', label: 'Total Cost / Unit' }),
-  Object.freeze({ id: 'inventoryValue', label: 'Inventory Value' }),
+  Object.freeze({ id: 'inventoryValue', label: 'Inventory Cost Basis' }),
   Object.freeze({ id: 'gmPrice', label: 'GM Price / Unit' }),
 ]);
 
-const breakevenEarningsOptionalColumns = Object.freeze([
-  Object.freeze({ id: 'source', label: 'Source' }),
-  Object.freeze({ id: 'ammoCost', label: 'Ammo Cost / Unit' }),
-  Object.freeze({ id: 'foodCost', label: 'Food Cost / Unit' }),
-  Object.freeze({ id: 'fuelCost', label: 'Fuel Cost / Unit' }),
-  Object.freeze({ id: 'rentalCost', label: 'Rental Cost / Unit' }),
-  Object.freeze({ id: 'txsCost', label: 'Txs Cost / Unit' }),
-]);
+const breakevenEarningsOptionalColumns = Object.freeze([]);
 
 const earningsColumnsBySubtab = Object.freeze({
   scanning: scanningEarningsOptionalColumns,
@@ -518,7 +515,7 @@ const earningsColumnState = {
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin', 'costsPerUnit']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
-  breakeven: new Set(['source']),
+  breakeven: new Set(),
 };
 
 const earningsMetricGuideCommon = Object.freeze({
@@ -584,33 +581,27 @@ const earningsMetricGuideBySubtab = Object.freeze({
   }),
   crafting: Object.freeze({
     crafted: ['Total output units crafted during the UTC day.', 'Σ crafted output quantity.', 'Use with unit prices and costs to understand production scale.'],
-    ingCosts: ['Current ATLAS value of ingredients consumed.', 'Σ(ingredient quantity × current ingredient price).', 'This is a current-price opportunity-cost estimate, not necessarily the price originally paid.'],
+    ingCosts: ['Weighted inventory cost basis of ingredients consumed.', 'Σ consumed ingredient basis from the chronological ledger.', 'Includes upstream production and cargo basis; direct crafting fees remain separate.'],
     feeCosts: ['ATLAS crafting fees recorded for the activity.', 'Σ recorded crafting fee amount.', 'A direct crafting expense included in Total Costs.'],
-    totalCosts: ['Estimated cost of the crafted output.', 'Ingredient Costs + Crafting Fee Costs + Txs Costs.', 'Missing ingredient prices can make this estimate incomplete.'],
-    costsPerUnit: ['Estimated cost for each crafted output unit.', 'Total Costs ÷ Crafted.', 'This becomes the base cost per unit when crafted assets are added to inventory.'],
+    totalCosts: ['Cost basis of the crafted output.', 'Ingredient Cost Basis + Crafting Fee Costs + Txs Costs.', 'A dash means consumed ingredient basis is incomplete or explicitly uncosted.'],
+    costsPerUnit: ['Cost basis for each crafted output unit.', 'Total Costs ÷ Crafted.', 'This is carried forward in the weighted inventory ledger.'],
   }),
   upgrading: Object.freeze({
     installed: ['Components installed during the completed UTC day.', 'Σ installed component quantity.', 'This is the output quantity used for both estimated reward value and component cost.'],
     lpRedemption: ['Faction-wide LP redeemed on that date.', 'Daily redeemed LP from the faction summary.', 'Higher faction redemption lowers ATLAS value per LP because the daily ATLAS pool is shared.'],
     revenue: ['Estimated ATLAS value of the LP generated by installed components.', 'Installed × LP per component × (Faction ATLAS pool ÷ Faction LP redeemed).', 'This is a pool-share estimate; it changes with faction-wide LP redemption.'],
-    upgCosts: ['Current ATLAS value of components installed.', 'Installed × current component price.', 'A current-price opportunity-cost estimate, not necessarily acquisition cost.'],
-    totalCosts: ['Estimated upgrading cost represented by available data.', 'UPG Costs + Txs Costs.', 'Compare with Revenue to judge whether the upgrade activity covered component and transaction costs.'],
+    upgCosts: ['Weighted inventory cost basis of components installed.', 'Σ consumed component basis from the chronological ledger.', 'Upgrade transaction costs remain separate.'],
+    totalCosts: ['Upgrading cost represented by available data.', 'Component Cost Basis + Txs Costs.', 'Compare with Revenue to judge whether the upgrade activity covered component and transaction costs.'],
   }),
   breakeven: Object.freeze({
     starbase: ['Starbase where the asset inventory is currently recorded.', 'Latest non-zero inventory point per starbase and asset.', 'Costs only join when the mining or delivery destination matches this starbase.'],
     asset: ['Resource held at the starbase.', 'Recorded inventory resource name.', 'Each starbase and asset combination has its own cost basis.'],
     inventory: ['Current recorded units at this starbase.', 'Latest non-zero curAmount during the inventory lookback.', 'Use Hide inventory ≤ 2 to suppress dust balances without deleting data.'],
-    source: ['Cost telemetry available for this row.', 'Inventory only, Mining, Cargo, or Mining + Cargo.', 'Inventory only means no qualifying cost telemetry exists after the cutoff.'],
-    baseCost: ['Weighted mining production cost per unit.', 'Σ daily mining costs ÷ Σ units mined since 2026-07-24 00:00 UTC.', 'Includes represented ammo, food, fuel, rental, and transaction costs.'],
-    cargoCost: ['Weighted inbound delivery cost per unit.', 'Σ allocated inbound cargo costs ÷ Σ units delivered since 2026-07-24 00:00 UTC.', 'Uses the corrected delivery starbase as the destination.'],
+    baseCost: ['Weighted production and acquisition cost per unit.', 'Scanning + Mining + Crafting + LM + GM C/U.', 'A dash means some or all current inventory is explicitly uncosted.'],
+    cargoCost: ['Weighted accumulated delivery cost per unit.', 'Cargo basis carried by current ledger inventory ÷ represented units.', 'Includes every represented transfer in the supply chain.'],
     landedCost: ['Combined represented cost per unit at this starbase.', 'Base Cost / Unit + Cargo Cost / Unit.', 'This is the estimated breakeven price before any unrepresented costs or sale fees.'],
-    inventoryValue: ['Estimated represented cost basis of current inventory.', 'Inventory × Total Cost / Unit.', 'A dash means no qualifying base or cargo cost exists yet.'],
+    inventoryValue: ['Weighted cost basis of current inventory.', 'Inventory × Total Cost / Unit.', 'A dash means some or all inventory is explicitly uncosted.'],
     gmPrice: ['Current Galactic Marketplace reference price.', 'Aephia /gm/resource pricingATL.priceATL.', 'Compare with Total Cost; it is a current market reference, not guaranteed sale proceeds.'],
-    ammoCost: ['Mining ammunition cost per produced unit.', 'Σ ammunition cost ÷ Σ units mined.', 'One optional component of Base Cost / Unit.'],
-    foodCost: ['Mining food cost per produced unit.', 'Σ food cost ÷ Σ units mined.', 'One optional component of Base Cost / Unit.'],
-    fuelCost: ['Mining and inbound cargo fuel cost per unit.', 'Mining fuel per mined unit + allocated cargo fuel per delivered unit.', 'Shows represented fuel across both cost layers.'],
-    rentalCost: ['Mining fleet rental cost per produced unit.', 'Σ represented rental cost ÷ Σ units mined.', 'Only present for managed fleets with a mapped rental rate.'],
-    txsCost: ['Mining and inbound cargo transaction cost per unit.', 'Mining transaction cost per mined unit + allocated cargo transaction cost per delivered unit.', 'Shows represented transaction fees across both cost layers.'],
   }),
 });
 
@@ -621,7 +612,7 @@ const earningsFilters = {
   cargoAllocation: { date: '', fleet: '', asset: '' },
   crafting: { date: '', starbase: '', asset: '' },
   upgrading: { date: '', starbase: '', asset: '' },
-  breakeven: { starbase: '', asset: '', source: '', hideLowInventory: false },
+  breakeven: { starbase: '', asset: '', hideLowInventory: false },
 };
 
 const earningsSort = {
@@ -694,6 +685,11 @@ const earningsSortKeyByColumnId = Object.freeze({
   cargoCapacity: 'cargoCapacity',
   cargoEfficiency: 'cargoEfficiencyPercent',
   account: 'fleetAccount',
+  scanningCost: 'scanningCostPerUnit',
+  miningCost: 'miningCostPerUnit',
+  craftingCost: 'craftingCostPerUnit',
+  lmCost: 'lmCostPerUnit',
+  gmCost: 'gmCostPerUnit',
   baseCost: 'baseCostPerUnit',
   cargoCost: 'cargoCostPerUnit',
   landedCost: 'landedCostPerUnit',
@@ -715,7 +711,7 @@ const earningsFilterBarBySubtab = Object.freeze({
   cargoAllocation: () => ({ date: earningsCargoAllocationDateFilter, fleet: earningsCargoAllocationFleetFilter, asset: earningsCargoAllocationAssetFilter }),
   crafting: () => ({ date: earningsCraftingDateFilter, starbase: earningsCraftingStarbaseFilter, asset: earningsCraftingAssetFilter }),
   upgrading: () => ({ date: earningsUpgradingDateFilter, starbase: earningsUpgradingStarbaseFilter, asset: earningsUpgradingAssetFilter }),
-  breakeven: () => ({ starbase: earningsBreakevenStarbaseFilter, asset: earningsBreakevenAssetFilter, source: earningsBreakevenSourceFilter }),
+  breakeven: () => ({ starbase: earningsBreakevenStarbaseFilter, asset: earningsBreakevenAssetFilter }),
 });
 
 const earningsTableHeadBySubtab = Object.freeze({
@@ -5229,7 +5225,6 @@ function setupEarningsFilterHandlers() {
   wire('upgrading', earningsUpgradingAssetFilter, 'asset');
   wire('breakeven', earningsBreakevenStarbaseFilter, 'starbase');
   wire('breakeven', earningsBreakevenAssetFilter, 'asset');
-  wire('breakeven', earningsBreakevenSourceFilter, 'source');
   earningsBreakevenHideLowInventory?.addEventListener('change', () => {
     earningsFilters.breakeven.hideLowInventory = earningsBreakevenHideLowInventory.checked;
     renderEarningsBreakeven(latestEarningsResult);
@@ -5823,25 +5818,9 @@ function renderEarningsBreakevenHeader() {
   earningsBreakevenTableHead.appendChild(headRow);
 }
 
-function createBreakevenOptionalCell(entry, columnId) {
-  if (columnId === 'source') return createTextCell(entry.source || '--');
-  if (columnId === 'ammoCost') return createTextCell(entry.baseAmmoCostPerUnit == null ? '--' : formatAtlasNumber(entry.baseAmmoCostPerUnit, 6));
-  if (columnId === 'foodCost') return createTextCell(entry.baseFoodCostPerUnit == null ? '--' : formatAtlasNumber(entry.baseFoodCostPerUnit, 6));
-  if (columnId === 'fuelCost') {
-    const values = [entry.baseFuelCostPerUnit, entry.cargoFuelCostPerUnit].filter((value) => value != null && Number.isFinite(Number(value)));
-    return createTextCell(values.length ? formatAtlasNumber(values.reduce((sum, value) => sum + Number(value), 0), 6) : '--');
-  }
-  if (columnId === 'rentalCost') return createTextCell(entry.baseRentalCostPerUnit == null ? '--' : formatAtlasNumber(entry.baseRentalCostPerUnit, 6));
-  if (columnId === 'txsCost') {
-    const values = [entry.baseTxsCostPerUnit, entry.cargoTxsCostPerUnit].filter((value) => value != null && Number.isFinite(Number(value)));
-    return createTextCell(values.length ? formatAtlasNumber(values.reduce((sum, value) => sum + Number(value), 0), 6) : '--');
-  }
-  return createTextCell('--');
-}
-
 function renderEarningsBreakeven(result) {
   const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
-  const syncMessage = `${formatWholeNumber(rows.length)} breakeven rows at ${formatCheckedAt(result?.checkedAt)} · cost basis from 2026-07-24 UTC${result?.breakevenError ? ' · ' + result.breakevenError : ''}`;
+  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${result?.breakevenError ? ' · ' + result.breakevenError : ''}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
   populateEarningsFilterOptions('breakeven', rows);
   if (earningsBreakevenHideLowInventory) earningsBreakevenHideLowInventory.checked = earningsFilters.breakeven.hideLowInventory;
@@ -5860,12 +5839,17 @@ function renderEarningsBreakeven(result) {
     tr.appendChild(createTextCell(entry.starbase || '--'));
     tr.appendChild(createTextCell(entry.asset || '--'));
     tr.appendChild(createTextCell(formatWholeNumber(entry.inventory || 0)));
+    tr.appendChild(createTextCell(entry.scanningCostPerUnit == null ? '--' : formatAtlasNumber(entry.scanningCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.miningCostPerUnit == null ? '--' : formatAtlasNumber(entry.miningCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.craftingCostPerUnit == null ? '--' : formatAtlasNumber(entry.craftingCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.lmCostPerUnit == null ? '--' : formatAtlasNumber(entry.lmCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.gmCostPerUnit == null ? '--' : formatAtlasNumber(entry.gmCostPerUnit, 6)));
     tr.appendChild(createTextCell(entry.baseCostPerUnit == null ? '--' : formatAtlasNumber(entry.baseCostPerUnit, 6)));
     tr.appendChild(createTextCell(entry.cargoCostPerUnit == null ? '--' : formatAtlasNumber(entry.cargoCostPerUnit, 6)));
     tr.appendChild(createTextCell(entry.landedCostPerUnit == null ? '--' : formatAtlasNumber(entry.landedCostPerUnit, 6)));
     tr.appendChild(createTextCell(entry.inventoryValue == null ? '--' : formatAtlasWhole(entry.inventoryValue)));
     tr.appendChild(createTextCell(entry.gmPricePerUnit == null ? '--' : formatAtlasNumber(entry.gmPricePerUnit, 6)));
-    for (const column of optionalColumns) tr.appendChild(createBreakevenOptionalCell(entry, column.id));
+    for (const column of optionalColumns) tr.appendChild(createTextCell(entry[column.id] ?? '--'));
     earningsBreakevenTableBody.appendChild(tr);
   }
 }

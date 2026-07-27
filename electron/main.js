@@ -3629,191 +3629,41 @@ function getCurrentResourcePriceAtl(prices, resourceName) {
 // cost comes from weighted mining `costsPerUnit` for that starbase and
 // material; the cargo cost comes from weighted cargo allocation
 // `costsPerUnit` where the destination matches the starbase. Both
-// values stay `null` if there is no telemetry for the row. Mining and
-// cargo coverage are tracked independently so the UI can label the
-// provenance accurately.
-const BREAKEVEN_COST_BASIS_START_ISO = '2026-07-24';
-
-function buildBreakevenRows({ miningRows = [], cargoAllocations = [], inventoryRows = [], prices = null } = {}) {
+// Reconcile the chronological weighted ledger against current inventory.
+// Any quantity not represented by the ledger remains explicitly uncosted,
+// so the UI never presents partial history as a complete cost basis.
+function buildLedgerBreakevenRows({ ledgerRows = [], inventoryRows = [], prices = null } = {}) {
   const resourcePriceByName = (prices && prices.resourcePricesAtlByName) || {};
-
-  // Mining base cost: weighted average costsPerUnit per (starbase, rawMaterial).
-  // Units come from `mined` so a single high-cost day does not dominate.
-  const baseAggregator = new Map();
-  for (const row of miningRows) {
-    if (String(row.isoDate || '') < BREAKEVEN_COST_BASIS_START_ISO) continue;
-    const starbase = String(row.starbase || '').trim();
-    const asset = String(row.rawMaterial || '').trim();
-    if (!starbase || !asset) continue;
-    const mined = Number(row.mined);
-    const costsPerUnit = Number(row.costsPerUnitAtlas);
-    if (!Number.isFinite(mined) || mined <= 0) continue;
-    if (!Number.isFinite(costsPerUnit) || costsPerUnit < 0) continue;
-    const key = `${starbase}\n${asset}`;
-    const entry = baseAggregator.get(key) || { starbase, asset, totalCost: 0, totalUnits: 0, ammoCost: 0, foodCost: 0, fuelCost: 0, rentalCost: 0, txsCost: 0 };
-    entry.totalCost += costsPerUnit * mined;
-    entry.totalUnits += mined;
-    if (Number.isFinite(Number(row.ammoCostsAtlas))) entry.ammoCost += Number(row.ammoCostsAtlas);
-    if (Number.isFinite(Number(row.foodCostsAtlas))) entry.foodCost += Number(row.foodCostsAtlas);
-    if (Number.isFinite(Number(row.fuelCostsAtlas))) entry.fuelCost += Number(row.fuelCostsAtlas);
-    if (Number.isFinite(Number(row.rentalAtlasPerDay))) entry.rentalCost += Number(row.rentalAtlasPerDay);
-    if (Number.isFinite(Number(row.txsCostsAtlas))) entry.txsCost += Number(row.txsCostsAtlas);
-    baseAggregator.set(key, entry);
-  }
-  const baseByKey = new Map();
-  for (const [key, entry] of baseAggregator.entries()) {
-    if (entry.totalUnits > 0) {
-      const baseCostPerUnit = entry.totalCost / entry.totalUnits;
-      baseByKey.set(key, {
-        starbase: entry.starbase,
-        asset: entry.asset,
-        baseCostPerUnit,
-        baseTotalCost: entry.totalCost,
-        baseAmmoCostPerUnit: entry.ammoCost / entry.totalUnits,
-        baseFoodCostPerUnit: entry.foodCost / entry.totalUnits,
-        baseFuelCostPerUnit: entry.fuelCost / entry.totalUnits,
-        baseRentalCostPerUnit: entry.rentalCost / entry.totalUnits,
-        baseTxsCostPerUnit: entry.txsCost / entry.totalUnits,
-      });
-    }
-  }
-
-  // Cargo cost: weighted average costsPerUnit per (destination, asset).
-  // Units come from `amount` so empty legs do not dilute the result.
-  const cargoAggregator = new Map();
-  for (const row of cargoAllocations) {
-    if (String(row.isoDate || '') < BREAKEVEN_COST_BASIS_START_ISO) continue;
-    const starbase = String(row.destination || '').trim();
-    const asset = String(row.asset || '').trim();
-    if (!starbase || !asset) continue;
-    const amount = Number(row.amount);
-    const costsPerUnit = Number(row.costsPerUnitAtlas);
-    if (!Number.isFinite(amount) || amount <= 0) continue;
-    if (!Number.isFinite(costsPerUnit) || costsPerUnit < 0) continue;
-    const key = `${starbase}\n${asset}`;
-    const entry = cargoAggregator.get(key) || { starbase, asset, totalCost: 0, totalUnits: 0, fuelCost: 0, txsCost: 0 };
-    entry.totalCost += costsPerUnit * amount;
-    entry.totalUnits += amount;
-    if (Number.isFinite(Number(row.fuelCostsAtlas))) entry.fuelCost += Number(row.fuelCostsAtlas);
-    if (Number.isFinite(Number(row.txsCostsAtlas))) entry.txsCost += Number(row.txsCostsAtlas);
-    cargoAggregator.set(key, entry);
-  }
-  const cargoByKey = new Map();
-  for (const [key, entry] of cargoAggregator.entries()) {
-    if (entry.totalUnits > 0) {
-      cargoByKey.set(key, {
-        starbase: entry.starbase,
-        asset: entry.asset,
-        cargoCostPerUnit: entry.totalCost / entry.totalUnits,
-        cargoTotalCost: entry.totalCost,
-        cargoFuelCostPerUnit: entry.fuelCost / entry.totalUnits,
-        cargoTxsCostPerUnit: entry.txsCost / entry.totalUnits,
-      });
-    }
-  }
-
-  // Inventory rows: [{ starbase, asset, quantity, lastDate }].
-  const rows = [];
-  const seen = new Set();
-  for (const inventoryRow of inventoryRows) {
+  const ledgerByKey = new Map((ledgerRows || []).map((row) => [`${String(row.location || '').trim()}\n${String(row.asset || '').trim()}`, row]));
+  return (inventoryRows || []).map((inventoryRow) => {
     const starbase = String(inventoryRow.starbase || '').trim();
     const asset = String(inventoryRow.asset || '').trim();
-    if (!starbase || !asset) continue;
-    const key = `${starbase}\n${asset}`;
-    const base = baseByKey.get(key);
-    const cargo = cargoByKey.get(key);
-    const baseCostPerUnit = base?.baseCostPerUnit ?? null;
-    const cargoCostPerUnit = cargo?.cargoCostPerUnit ?? null;
-    const landedCostPerUnit = (baseCostPerUnit != null || cargoCostPerUnit != null)
-      ? (baseCostPerUnit || 0) + (cargoCostPerUnit || 0)
-      : null;
     const inventory = Number(inventoryRow.quantity) || 0;
-    const inventoryValue = landedCostPerUnit != null ? inventory * landedCostPerUnit : null;
-    const gmPricePerUnit = Number(resourcePriceByName[normalizeShipName(asset)]) || null;
-    const source = !base && !cargo
-      ? 'Inventory only'
-      : base && cargo
-        ? 'Mining + Cargo'
-        : base
-          ? 'Mining'
-          : 'Cargo';
-    rows.push({
-      starbase,
-      asset,
-      inventory,
-      baseCostPerUnit,
-      cargoCostPerUnit,
-      landedCostPerUnit,
-      inventoryValue,
-      gmPricePerUnit,
-      source,
-      baseAmmoCostPerUnit: base?.baseAmmoCostPerUnit ?? null,
-      baseFoodCostPerUnit: base?.baseFoodCostPerUnit ?? null,
-      baseFuelCostPerUnit: base?.baseFuelCostPerUnit ?? null,
-      baseRentalCostPerUnit: base?.baseRentalCostPerUnit ?? null,
-      baseTxsCostPerUnit: base?.baseTxsCostPerUnit ?? null,
-      cargoFuelCostPerUnit: cargo?.cargoFuelCostPerUnit ?? null,
-      cargoTxsCostPerUnit: cargo?.cargoTxsCostPerUnit ?? null,
+    const ledger = ledgerByKey.get(`${starbase}\n${asset}`);
+    const ledgerQuantity = Number(ledger?.quantity || 0);
+    const unreconciledQuantity = Math.max(0, inventory - ledgerQuantity);
+    const uncostedQuantity = Number(ledger?.uncostedQuantity || 0) + unreconciledQuantity;
+    const fullyCosted = ledgerQuantity > 0 && Math.abs(ledgerQuantity - inventory) <= 1e-9 && uncostedQuantity <= 1e-9;
+    const perUnit = (value) => fullyCosted ? Number(value || 0) / Number(ledger.quantity) : null;
+    const scanningCostPerUnit = perUnit(ledger?.costs?.scanning);
+    const miningCostPerUnit = perUnit(ledger?.costs?.mining);
+    const craftingCostPerUnit = perUnit(ledger?.costs?.crafting);
+    const lmCostPerUnit = perUnit(ledger?.costs?.lm);
+    const gmCostPerUnit = perUnit(ledger?.costs?.gm);
+    const baseCostPerUnit = fullyCosted ? scanningCostPerUnit + miningCostPerUnit + craftingCostPerUnit + lmCostPerUnit + gmCostPerUnit : null;
+    const cargoCostPerUnit = perUnit(ledger?.cargoCost);
+    const landedCostPerUnit = fullyCosted ? baseCostPerUnit + cargoCostPerUnit : null;
+    return {
+      starbase, asset, inventory,
+      scanningCostPerUnit, miningCostPerUnit, craftingCostPerUnit, lmCostPerUnit, gmCostPerUnit,
+      baseCostPerUnit, cargoCostPerUnit, landedCostPerUnit,
+      inventoryValue: landedCostPerUnit == null ? null : inventory * landedCostPerUnit,
+      gmPricePerUnit: Number(resourcePriceByName[normalizeShipName(asset)]) || null,
+      uncostedQuantity,
       lastInventoryDate: inventoryRow.lastDate || null,
-    });
-    seen.add(key);
-  }
-
-  // Mining/cargo-only rows (no current inventory) are still useful as
-  // landed-cost reference, but the v1 table is anchored to inventory.
-  for (const [key, base] of baseByKey.entries()) {
-    if (seen.has(key)) continue;
-    const cargo = cargoByKey.get(key);
-    const cargoCostPerUnit = cargo?.cargoCostPerUnit ?? null;
-    const baseCostPerUnit = base.baseCostPerUnit;
-    const landedCostPerUnit = (baseCostPerUnit || 0) + (cargoCostPerUnit || 0) || null;
-    const gmPricePerUnit = Number(resourcePriceByName[normalizeShipName(base.asset)]) || null;
-    rows.push({
-      starbase: base.starbase,
-      asset: base.asset,
-      inventory: 0,
-      baseCostPerUnit,
-      cargoCostPerUnit,
-      landedCostPerUnit,
-      inventoryValue: 0,
-      gmPricePerUnit,
-      source: cargo ? 'Mining + Cargo' : 'Mining',
-      baseAmmoCostPerUnit: base.baseAmmoCostPerUnit,
-      baseFoodCostPerUnit: base.baseFoodCostPerUnit,
-      baseFuelCostPerUnit: base.baseFuelCostPerUnit,
-      baseRentalCostPerUnit: base.baseRentalCostPerUnit,
-      baseTxsCostPerUnit: base.baseTxsCostPerUnit,
-      cargoFuelCostPerUnit: cargo?.cargoFuelCostPerUnit ?? null,
-      cargoTxsCostPerUnit: cargo?.cargoTxsCostPerUnit ?? null,
-      lastInventoryDate: null,
-    });
-  }
-  for (const [key, cargo] of cargoByKey.entries()) {
-    if (seen.has(key)) continue;
-    const gmPricePerUnit = Number(resourcePriceByName[normalizeShipName(cargo.asset)]) || null;
-    rows.push({
-      starbase: cargo.starbase,
-      asset: cargo.asset,
-      inventory: 0,
-      baseCostPerUnit: null,
-      cargoCostPerUnit: cargo.cargoCostPerUnit,
-      landedCostPerUnit: cargo.cargoCostPerUnit,
-      inventoryValue: 0,
-      gmPricePerUnit,
-      source: 'Cargo',
-      baseAmmoCostPerUnit: null,
-      baseFoodCostPerUnit: null,
-      baseFuelCostPerUnit: null,
-      baseRentalCostPerUnit: null,
-      baseTxsCostPerUnit: null,
-      cargoFuelCostPerUnit: cargo.cargoFuelCostPerUnit,
-      cargoTxsCostPerUnit: cargo.cargoTxsCostPerUnit,
-      lastInventoryDate: null,
-    });
-  }
-
-  rows.sort((a, b) => a.starbase.localeCompare(b.starbase) || a.asset.localeCompare(b.asset));
-  return rows;
+    };
+  }).filter((row) => row.starbase && row.asset)
+    .sort((a, b) => a.starbase.localeCompare(b.starbase) || a.asset.localeCompare(b.asset));
 }
 
 async function fetchCurrentPerStarbaseInventory(settings) {
@@ -5444,6 +5294,28 @@ async function fetchEarningsSnapshot(payload) {
   const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
   const inventoryCostLedgerRejectedEvents = inventoryCostLedgerResult.rejectedEvents;
 
+  const craftingBasisByDay = new Map();
+  const upgradingBasisByDay = new Map();
+  const totalLotBasis = (lot) => Object.values(lot?.costs || {}).reduce((sum, value) => sum + Number(value || 0), 0) + Number(lot?.cargoCost || 0);
+  for (const applied of inventoryCostLedgerAppliedEventResults) {
+    const event = applied.event;
+    const lot = applied.result;
+    const isoDate = getUtcDateKey(new Date(event.timestamp));
+    if (event.type === 'craft') {
+      const key = `${isoDate}\n${event.location}\n${event.outputAsset}`;
+      const entry = craftingBasisByDay.get(key) || { basis: 0, uncosted: false };
+      entry.basis += Math.max(0, totalLotBasis(lot) - Number(event.craftingCost || 0));
+      entry.uncosted ||= Number(lot?.uncostedQuantity || 0) > 0;
+      craftingBasisByDay.set(key, entry);
+    } else if (event.type === 'consume' && event.purpose === 'upgrading') {
+      const key = `${isoDate}\n${event.location}\n${event.asset}`;
+      const entry = upgradingBasisByDay.get(key) || { basis: 0, uncosted: false };
+      entry.basis += totalLotBasis(lot);
+      entry.uncosted ||= Number(lot?.uncostedQuantity || 0) > 0;
+      upgradingBasisByDay.set(key, entry);
+    }
+  }
+
   // Breakeven analysis: combine per-starbase mining production cost and
   // per-destination cargo allocation cost with current inventory and the
   // current GM price. The inventory fetch is best-effort: a failure here
@@ -5455,7 +5327,7 @@ async function fetchEarningsSnapshot(payload) {
     const inventoryRows = await fetchCurrentPerStarbaseInventory(settings);
     const factionStarbases = await fetchFactionStarbases(settings);
     const faction = normalizeFaction(settings.faction);
-    breakevenRows = buildBreakevenRows({ miningRows: mining, cargoAllocations, inventoryRows, prices })
+    breakevenRows = buildLedgerBreakevenRows({ ledgerRows: inventoryCostLedgerRows, inventoryRows, prices })
       .filter((row) => isStarbaseIncluded(row.starbase, factionStarbases, faction));
   } catch (error) {
     breakevenError = String(error?.message || error || 'breakeven_unavailable');
@@ -5472,18 +5344,13 @@ async function fetchEarningsSnapshot(payload) {
   const crafting = craftingRows.map((craftingRow) => {
     const outputPriceAtl = getCurrentResourcePriceAtl(prices, craftingRow.output);
     const revenueAtlasPerDay = outputPriceAtl != null ? craftingRow.crafted * outputPriceAtl : null;
-    let ingCostsAtlas = 0;
-    let ingCostsMissing = false;
-    for (const ingredient of craftingRow.ingredients) {
-      const ingredientPriceAtl = getCurrentResourcePriceAtl(prices, ingredient.input);
-      if (ingredientPriceAtl == null) { ingCostsMissing = true; continue; }
-      ingCostsAtlas += ingredient.amount * ingredientPriceAtl;
-    }
-    if (ingCostsMissing && ingCostsAtlas === 0) ingCostsAtlas = null;
+    const craftingBasis = craftingBasisByDay.get(`${craftingRow.isoDate}\n${craftingRow.starbase}\n${craftingRow.output}`);
+    const ingCostsAtlas = craftingBasis && !craftingBasis.uncosted ? craftingBasis.basis : null;
     const feeCostsAtlas = Number.isFinite(Number(craftingRow.feeAmount)) ? Number(craftingRow.feeAmount) : 0;
     const txsCostsAtlas = atlasPerSol != null ? craftingRow.txCostSol * atlasPerSol : null;
-    const costParts = [ingCostsAtlas, feeCostsAtlas, txsCostsAtlas].filter((value) => Number.isFinite(value));
-    const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
+    const totalCostsAtlas = Number.isFinite(ingCostsAtlas) && Number.isFinite(feeCostsAtlas) && Number.isFinite(txsCostsAtlas)
+      ? ingCostsAtlas + feeCostsAtlas + txsCostsAtlas
+      : null;
     const costsPerUnitAtlas = Number.isFinite(totalCostsAtlas) && craftingRow.crafted > 0
       ? totalCostsAtlas / craftingRow.crafted
       : null;
@@ -5530,13 +5397,13 @@ async function fetchEarningsSnapshot(payload) {
     const componentKey = normalizeShipName(row.asset);
     const lpPerComponent = UPGRADE_LP_BY_COMPONENT[componentKey] ?? null;
     const lpValuePerComponentAtl = atlasPerLp != null && lpPerComponent != null ? atlasPerLp * lpPerComponent : null;
-    const componentPriceAtl = getCurrentResourcePriceAtl(prices, row.asset);
     const revenueAtlasPerDay = lpValuePerComponentAtl != null ? row.installed * lpValuePerComponentAtl : null;
-    const upgradingCostsAtlas = componentPriceAtl != null ? row.installed * componentPriceAtl : null;
+    const componentBasis = upgradingBasisByDay.get(`${row.isoDate}\n${row.starbase}\n${row.asset}`);
+    const upgradingCostsAtlas = componentBasis && !componentBasis.uncosted ? componentBasis.basis : null;
     const txsCostsAtlas = atlasPerSol != null ? row.txCostSol * atlasPerSol : null;
     const totalCostsAtlas = Number.isFinite(upgradingCostsAtlas) && Number.isFinite(txsCostsAtlas) ? upgradingCostsAtlas + txsCostsAtlas : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas) ? revenueAtlasPerDay - totalCostsAtlas : null;
-    return { ...row, output: row.asset, assetName: row.asset, factionRedeemedLp: Number.isFinite(factionRedeemedLp) ? factionRedeemedLp : null, lpPerComponent, lpValuePerComponentAtl, componentPriceAtl, revenueAtlasPerDay, upgradingCostsAtlas, txsCostsAtlas, totalCostsAtlas, netProfitAtlas, netProfitPerCrew: Number.isFinite(netProfitAtlas) && row.crew > 0 ? netProfitAtlas / row.crew : null, profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (netProfitAtlas / revenueAtlasPerDay) * 100 : null };
+    return { ...row, output: row.asset, assetName: row.asset, factionRedeemedLp: Number.isFinite(factionRedeemedLp) ? factionRedeemedLp : null, lpPerComponent, lpValuePerComponentAtl, revenueAtlasPerDay, upgradingCostsAtlas, txsCostsAtlas, totalCostsAtlas, netProfitAtlas, netProfitPerCrew: Number.isFinite(netProfitAtlas) && row.crew > 0 ? netProfitAtlas / row.crew : null, profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (netProfitAtlas / revenueAtlasPerDay) * 100 : null };
   }).sort((a,b) => String(b.isoDate).localeCompare(String(a.isoDate)) || a.starbase.localeCompare(b.starbase) || a.asset.localeCompare(b.asset));
 
   crafting.sort((a, b) => {
