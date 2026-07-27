@@ -960,7 +960,8 @@ ${scopeFilterFlux}
   |> keep(columns: ["fleet", "_time", "_value"])
   |> sort(columns: ["fleet", "_time"])`;
     const productionRows = parseInfluxCsv(await queryInfluxFlux(settings, productionFlux));
-    const productionDays = createDayTemplates();
+    const allFleetDays = createDayTemplates();
+    const fleetDaysByName = new Map();
     const fleetTotals = new Map();
 
     for (const row of productionRows) {
@@ -969,22 +970,19 @@ ${scopeFilterFlux}
       const value = Number(row._value || 0);
       if (!fleet || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
       fleetTotals.set(fleet, (fleetTotals.get(fleet) || 0) + value);
-      if (!requestedFleet || requestedFleet === fleet) addValueToDay(productionDays, date, value);
+      if (!fleetDaysByName.has(fleet)) fleetDaysByName.set(fleet, createDayTemplates());
+      addValueToDay(allFleetDays, date, value);
+      addValueToDay(fleetDaysByName.get(fleet), date, value);
     }
 
     const fleets = summarizeFleetOptions(fleetTotals);
     const selectedFleet = fleets.some((fleet) => fleet.value === requestedFleet) ? requestedFleet : '';
-    if (requestedFleet && !selectedFleet) {
-      for (const day of productionDays) day.value = 0;
-      for (const row of productionRows) {
-        const date = new Date(row._time);
-        const value = Number(row._value || 0);
-        if (!Number.isNaN(date.getTime()) && Number.isFinite(value)) addValueToDay(productionDays, date, value);
-      }
-    }
+    const productionDays = selectedFleet ? fleetDaysByName.get(selectedFleet) : allFleetDays;
 
     return {
       days: productionDays,
+      allFleetDays,
+      fleetDays: Object.fromEntries(fleetDaysByName),
       total: productionDays.reduce((sum, day) => sum + day.value, 0),
       fleets,
       selectedFleet,

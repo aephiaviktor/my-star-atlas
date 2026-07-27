@@ -1495,6 +1495,25 @@ function renderSduEmpty(message) {
   sduChartBars.appendChild(empty);
 }
 
+function selectCachedSduFleet(result, fleet) {
+  if (!result?.fleetDays || !Array.isArray(result.allFleetDays)) return false;
+  const selectedFleet = String(fleet || '');
+  const days = selectedFleet ? result.fleetDays[selectedFleet] : result.allFleetDays;
+  if (!Array.isArray(days)) return false;
+
+  requestGuard.begin('scanning:daily', getRefreshContext({ fleetFilter: selectedFleet }));
+  renderSduChart({
+    ...result,
+    days,
+    total: days.reduce((sum, day) => sum + (Number(day.value) || 0), 0),
+    selectedFleet,
+    surplus: selectedFleet || !result.consumption
+      ? null
+      : days.reduce((sum, day) => sum + (Number(day.value) || 0), 0) - (Number(result.consumption.total) || 0),
+  });
+  return true;
+}
+
 function renderSduChart(result) {
   latestSduResult = result;
   if (!result?.ok) {
@@ -4058,6 +4077,8 @@ async function refreshDailySdu() {
   }
 
   const faction = normalizeFaction(latestSettings?.faction);
+  const context = getRefreshContext({ fleetFilter: selectedScanningFleet });
+  const request = requestGuard.begin('scanning:daily', context);
   const cached = getCachedFilterResult(faction, 'sdu', selectedScanningFleet);
   if (cached) {
     renderSduChart(cached);
@@ -4067,8 +4088,9 @@ async function refreshDailySdu() {
   try {
     const result = await api.getDailySdu({
       ...(latestSettings || getFormPayload()),
-      fleetFilter: selectedScanningFleet,
+      fleetFilter: context.fleetFilter,
     });
+    if (!requestGuard.isCurrent(request, getRefreshContext({ fleetFilter: selectedScanningFleet }))) return;
     if (!result?.ok && cached) {
       renderSduChart(cached);
       const failure = formatInfluxFailure(result.error);
@@ -4079,6 +4101,7 @@ async function refreshDailySdu() {
     renderSduChart(result);
   } catch (error) {
     console.error(error);
+    if (!requestGuard.isCurrent(request, getRefreshContext({ fleetFilter: selectedScanningFleet }))) return;
     if (cached) {
       renderSduChart(cached);
       const failure = formatInfluxFailure(error?.message || error);
@@ -6772,6 +6795,7 @@ factionButtons.forEach((button) => {
 
 scanningFleetFilter.addEventListener('change', () => {
   selectedScanningFleet = scanningFleetFilter.value;
+  if (selectCachedSduFleet(latestSduResult, selectedScanningFleet)) return;
   refreshDailySdu();
 });
 
