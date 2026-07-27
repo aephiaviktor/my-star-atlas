@@ -588,7 +588,8 @@ async function fetchScanningOptimization(payload = {}) {
   const requestedStopMs = Date.parse(String(payload.stop || ''));
   const stop = Number.isFinite(requestedStopMs) && requestedStopMs > Date.parse(start) ? new Date(requestedStopMs).toISOString() : '';
   const offset = Math.max(0, Number.parseInt(payload.offset, 10) || 0);
-  const pageSize = Math.min(500, Math.max(1, Number.parseInt(payload.limit, 10) || 500));
+  const pageSizeCap = payload.analytics === true ? 5000 : 500;
+  const pageSize = Math.min(pageSizeCap, Math.max(1, Number.parseInt(payload.limit, 10) || 500));
   const filters = [
     `r._measurement == "optimization_event"`,
     `r.optimization_type == "scanning"`,

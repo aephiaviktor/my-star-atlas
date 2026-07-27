@@ -55,6 +55,13 @@ const optimizationUpgradingTableHead = document.querySelector('#optimization-upg
 const optimizationUpgradingTableBody = document.querySelector('#optimization-upgrading-table-body');
 const optimizationUpgradingStartFilter = document.querySelector('#optimization-upgrading-start-filter');
 const optimizationUpgradingStopFilter = document.querySelector('#optimization-upgrading-stop-filter');
+const optimizationAnalyticsExperiment = document.querySelector('#optimization-analytics-experiment');
+const optimizationAnalyticsMetric = document.querySelector('#optimization-analytics-metric');
+const optimizationAnalyticsStatus = document.querySelector('#optimization-analytics-status');
+const optimizationAnalyticsSummary = document.querySelector('#optimization-analytics-summary');
+const optimizationAnalyticsValueChart = document.querySelector('#optimization-analytics-value-chart');
+const optimizationAnalyticsSectorChart = document.querySelector('#optimization-analytics-sector-chart');
+const optimizationAnalyticsRanking = document.querySelector('#optimization-analytics-ranking');
 const earningsSyncStatus = document.querySelector('#earnings-sync-status');
 const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
@@ -298,6 +305,8 @@ let latestFleetResult = null;
 let latestEarningsResult = null;
 let latestOptimizationResult = null;
 let optimizationRows = [];
+let optimizationAnalyticsRows = [];
+let optimizationAnalyticsLoadedFaction = '';
 let optimizationColumns = [];
 let optimizationSelectedColumns = new Set();
 let optimizationKnownColumns = new Set();
@@ -327,6 +336,7 @@ function persistOptimizationColumnState() {
 restoreOptimizationColumnState();
 
 let optimizationSort = { key: 'time', direction: 'desc' };
+let currentOptimizationView = 'data';
 let currentOptimizationSubtab = 'scanning';
 let latestUpgradingOptimizationResult = null;
 let optimizationUpgradingRows = [];
@@ -1267,6 +1277,8 @@ function resetFactionScopedState() {
   latestEarningsResult = null;
   latestOptimizationResult = null;
   optimizationRows = [];
+  optimizationAnalyticsRows = [];
+  optimizationAnalyticsLoadedFaction = '';
   latestUpgradingOptimizationResult = null;
   optimizationUpgradingRows = [];
   latestSduResult = null;
@@ -6346,6 +6358,226 @@ function populateOptimizationFilter(select, rows, key, allLabel) {
   if (values.includes(selected)) select.value = selected;
 }
 
+function parseScanningOptimizationValues(row) {
+  try {
+    const parsed = typeof row?.optimizationValues === 'string' ? JSON.parse(row.optimizationValues) : row?.optimizationValues;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).length) return parsed;
+  } catch (_error) {}
+  const parameter = String(row?.optimizationParameter || '').trim();
+  const value = Number(row?.optimizationValue);
+  return parameter && Number.isFinite(value) ? { [parameter]: value } : {};
+}
+
+function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest__') {
+  const scanRows = (Array.isArray(rows) ? rows : []).filter((row) => String(row?.event_type || row?.eventType || '') === 'scan_result');
+  const experimentTimes = new Map();
+  for (const row of scanRows) {
+    const experimentId = String(row?.experimentId || row?.experiment_id || '').trim();
+    const time = Date.parse(String(row?.time || ''));
+    if(experimentId && Number.isFinite(time)) experimentTimes.set(experimentId, Math.max(time, experimentTimes.get(experimentId) || 0));
+  }
+  const experiments = [...experimentTimes.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+  const experimentId = selectedExperiment === '__latest__' ? (experiments[0] || '') : String(selectedExperiment || '');
+  const selectedRows = scanRows.filter((row) => String(row?.experimentId || row?.experiment_id || '') === experimentId)
+    .sort((a, b) => Date.parse(String(a.time || '')) - Date.parse(String(b.time || '')));
+  const previousByFleet = new Map();
+  const samples = [];
+  for (const row of selectedRows) {
+    const timeMs = Date.parse(String(row?.time || ''));
+    if(!Number.isFinite(timeMs)) continue;
+    const fleet = String(row?.fleet || 'unknown');
+    const previous = previousByFleet.get(fleet);
+    previousByFleet.set(fleet, timeMs);
+    const cycleHours = Number.isFinite(previous) && timeMs > previous ? (timeMs - previous) / 3600000 : null;
+    const values = parseScanningOptimizationValues(row);
+    const entries = Object.entries(values).filter(([, value]) => Number.isFinite(Number(value)));
+    if(!entries.length) continue;
+    const combination = entries.map(([parameter, value]) => `${parameter}=${Number(value)}`).join(' × ');
+    samples.push({
+      timeMs, fleet, combination,
+      parameter: entries.length === 1 ? entries[0][0] : 'Combined',
+      value: entries.length === 1 ? Number(entries[0][1]) : combination,
+      sdu: Number(row?.sduFound || 0),
+      success: row?.success === true || String(row?.success).toLowerCase() === 'true',
+      cycleHours,
+      sectorX: Number(row?.resultSectorX),
+      sectorY: Number(row?.resultSectorY),
+    });
+  }
+  const grouped = new Map();
+  for (const sample of samples) {
+    const key = `${sample.parameter}\u0000${sample.value}`;
+    if(!grouped.has(key)) grouped.set(key, { parameter: sample.parameter, value: sample.value, samples: [] });
+    grouped.get(key).samples.push(sample);
+  }
+  const groups = [...grouped.values()].map((group) => {
+    const scans = group.samples.length;
+    const successful = group.samples.filter((sample) => sample.success).length;
+    const totalSdu = group.samples.reduce((sum, sample) => sum + sample.sdu, 0);
+    const timed = group.samples.filter((sample) => Number.isFinite(sample.cycleHours) && sample.cycleHours > 0);
+    const observedHours = timed.reduce((sum, sample) => sum + sample.cycleHours, 0);
+    const estimatedHours = timed.length ? observedHours / timed.length * scans : 0;
+    return {
+      ...group,
+      scans,
+      totalSdu,
+      sduPerScan: scans ? totalSdu / scans : 0,
+      sduPerHour: estimatedHours > 0 ? totalSdu / estimatedHours : 0,
+      successRate: scans ? successful / scans * 100 : 0,
+    };
+  }).sort((a, b) => a.parameter.localeCompare(b.parameter) || Number(a.value) - Number(b.value) || String(a.value).localeCompare(String(b.value)));
+  return {
+    experimentId,
+    experiments,
+    samples,
+    groups,
+    fleets: [...new Set(samples.map((sample) => sample.fleet))],
+    startedAt: selectedRows[0]?.time || null,
+    endedAt: selectedRows[selectedRows.length - 1]?.time || null,
+  };
+}
+
+function optimizationAnalyticsColor(index) {
+  return ['#22d3ee','#45d6c1','#f59e0b','#a78bfa','#fb7185','#84cc16','#60a5fa','#f97316'][index % 8];
+}
+
+function createOptimizationAnalyticsSvg(container, width = 760, height = 280) {
+  container?.replaceChildren();
+  if(!container) return null;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('role', 'img');
+  container.append(svg);
+  return svg;
+}
+
+function appendOptimizationSvg(svg, tag, attributes = {}, text = '') {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for(const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+  if(text) node.textContent = text;
+  svg.append(node);
+  return node;
+}
+
+function renderScanningOptimizationValueChart(analytics, metric) {
+  const svg = createOptimizationAnalyticsSvg(optimizationAnalyticsValueChart);
+  if(!svg || !analytics.groups.length) return;
+  const left = 48, right = 16, top = 15, bottom = 65, width = 760, height = 280;
+  const values = analytics.groups.flatMap((group) => group.samples.map((sample) => {
+    if(metric === 'sduPerScan') return sample.sdu;
+    if(metric === 'successRate') return sample.success ? 100 : 0;
+    return sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour;
+  })).filter(Number.isFinite);
+  const maxY = Math.max(1, ...values) * 1.08;
+  for(let tick = 0; tick <= 4; tick++) {
+    const y = top + (height - top - bottom) * tick / 4;
+    appendOptimizationSvg(svg, 'line', { x1: left, x2: width - right, y1: y, y2: y, class: 'grid-line' });
+    appendOptimizationSvg(svg, 'text', { x: left - 6, y: y + 3, 'text-anchor': 'end', class: 'axis-label' }, (maxY * (1 - tick / 4)).toFixed(metric === 'successRate' ? 0 : 1));
+  }
+  analytics.groups.forEach((group, index) => {
+    const x = analytics.groups.length === 1 ? (left + width - right) / 2 : left + index * (width - left - right) / (analytics.groups.length - 1);
+    const color = optimizationAnalyticsColor(index);
+    group.samples.forEach((sample, sampleIndex) => {
+      const raw = metric === 'sduPerScan' ? sample.sdu : metric === 'successRate' ? (sample.success ? 100 : 0) : (sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour);
+      const y = top + (height - top - bottom) * (1 - Math.min(maxY, raw) / maxY);
+      const jitter = ((sampleIndex % 7) - 3) * 2.2;
+      const dot = appendOptimizationSvg(svg, 'circle', { cx: x + jitter, cy: y, r: 3, fill: color, opacity: 0.55 });
+      appendOptimizationSvg(dot, 'title', {}, `${group.parameter} ${group.value} · ${raw.toFixed(2)} · ${sample.sdu} SDU`);
+    });
+    const mean = Number(group[metric] || 0);
+    const meanY = top + (height - top - bottom) * (1 - Math.min(maxY, mean) / maxY);
+    appendOptimizationSvg(svg, 'circle', { cx: x, cy: meanY, r: 6, fill: color, class: 'mean-marker' });
+    appendOptimizationSvg(svg, 'text', { x, y: height - bottom + 14, transform: `rotate(38 ${x} ${height - bottom + 14})`, 'text-anchor': 'start', class: 'axis-label' }, `${group.parameter} ${group.value}`);
+  });
+}
+
+function renderScanningOptimizationSectorChart(analytics) {
+  const svg = createOptimizationAnalyticsSvg(optimizationAnalyticsSectorChart);
+  const points = analytics.samples.filter((sample) => Number.isFinite(sample.sectorX) && Number.isFinite(sample.sectorY));
+  if(!svg || !points.length) return;
+  const width = 760, height = 280, pad = 30;
+  const minX = Math.min(...points.map((point) => point.sectorX)), maxX = Math.max(...points.map((point) => point.sectorX));
+  const minY = Math.min(...points.map((point) => point.sectorY)), maxY = Math.max(...points.map((point) => point.sectorY));
+  const groupIndex = new Map(analytics.groups.map((group, index) => [`${group.parameter}\u0000${group.value}`, index]));
+  for(const point of points) {
+    const x = pad + (point.sectorX - minX) / Math.max(1, maxX - minX) * (width - pad * 2);
+    const y = height - pad - (point.sectorY - minY) / Math.max(1, maxY - minY) * (height - pad * 2);
+    const index = groupIndex.get(`${point.parameter}\u0000${point.value}`) || 0;
+    const dot = appendOptimizationSvg(svg, 'circle', { cx: x, cy: y, r: point.sdu > 0 ? 5 : 3, fill: optimizationAnalyticsColor(index), opacity: point.sdu > 0 ? 0.9 : 0.4 });
+    appendOptimizationSvg(dot, 'title', {}, `${point.sectorX},${point.sectorY} · ${point.combination} · ${point.sdu} SDU`);
+  }
+  appendOptimizationSvg(svg, 'text', { x: pad, y: 14, class: 'axis-label' }, `X ${minX}…${maxX} · Y ${minY}…${maxY} · larger dots found SDU`);
+}
+
+function renderScanningOptimizationAnalytics() {
+  const selected = optimizationAnalyticsExperiment?.value || '__latest__';
+  const analytics = buildScanningOptimizationAnalytics(optimizationAnalyticsRows.length ? optimizationAnalyticsRows : optimizationRows, selected);
+  if(optimizationAnalyticsExperiment) {
+    const prior = selected;
+    optimizationAnalyticsExperiment.replaceChildren(new Option('Latest experiment', '__latest__'), ...analytics.experiments.map((id) => new Option(id, id)));
+    optimizationAnalyticsExperiment.value = analytics.experiments.includes(prior) ? prior : '__latest__';
+  }
+  optimizationAnalyticsSummary?.replaceChildren();
+  optimizationAnalyticsRanking?.replaceChildren();
+  if(!analytics.experimentId || !analytics.samples.length) {
+    if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = 'No scan_result rows with optimization values are loaded for this experiment';
+    optimizationAnalyticsValueChart?.replaceChildren();
+    optimizationAnalyticsSectorChart?.replaceChildren();
+    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 7; td.textContent = 'Awaiting scan results'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
+    return;
+  }
+  const metric = optimizationAnalyticsMetric?.value || 'sduPerHour';
+  const best = [...analytics.groups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))[0];
+  const elapsedHours = analytics.startedAt && analytics.endedAt ? Math.max(0, (Date.parse(analytics.endedAt) - Date.parse(analytics.startedAt)) / 3600000) : 0;
+  const metrics = [
+    ['Experiment', analytics.experimentId.slice(-12)], ['Scans', analytics.samples.length.toLocaleString()],
+    ['Tests', analytics.groups.length.toLocaleString()], ['Fleets', analytics.fleets.length.toLocaleString()],
+    ['Elapsed', `${elapsedHours.toFixed(1)} h`], ['Current leader', best ? `${best.parameter} ${best.value}` : '--'],
+  ];
+  for(const [label, value] of metrics) {
+    const div = document.createElement('div'); div.className = 'optimization-analytics-metric';
+    const span = document.createElement('span'); span.textContent = label; const strong = document.createElement('strong'); strong.textContent = value;
+    div.append(span, strong); optimizationAnalyticsSummary?.append(div);
+  }
+  if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} scans analyzed · ${analytics.experimentId} · rates use observed time between fleet scan results`;
+  for(const group of [...analytics.groups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))) {
+    const tr = document.createElement('tr');
+    const delta = best && Number(best[metric]) ? (Number(group[metric]) / Number(best[metric]) - 1) * 100 : 0;
+    for(const value of [group.parameter, group.value, group.scans, group.sduPerScan.toFixed(2), group.sduPerHour.toFixed(2), `${group.successRate.toFixed(1)}%`, group === best ? 'Best' : `${delta.toFixed(1)}%`]) {
+      const td = document.createElement('td'); td.textContent = String(value); tr.append(td);
+    }
+    optimizationAnalyticsRanking?.append(tr);
+  }
+  renderScanningOptimizationValueChart(analytics, metric);
+  renderScanningOptimizationSectorChart(analytics);
+}
+
+async function refreshScanningOptimizationAnalyticsData({ force = false } = {}) {
+  if(!api.getScanningOptimization) return;
+  const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
+  if(!force && optimizationAnalyticsLoadedFaction === faction && optimizationAnalyticsRows.length) {
+    renderScanningOptimizationAnalytics();
+    return;
+  }
+  if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = 'Loading complete scan-result history for analytics...';
+  const result = await api.getScanningOptimization({
+    faction,
+    start: optimizationFilterIso(optimizationStartFilter),
+    stop: optimizationFilterIso(optimizationStopFilter, true),
+    fleet: '__all__', eventType: 'scan_result', operation: '__all__', status: '__all__',
+    offset: 0, limit: 5000, analytics: true,
+  });
+  if(faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return;
+  if(!result?.ok) {
+    if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = `Analytics sync failed: ${result?.error || 'unknown error'}`;
+    return;
+  }
+  optimizationAnalyticsRows = result.rows || [];
+  optimizationAnalyticsLoadedFaction = faction;
+  renderScanningOptimizationAnalytics();
+  if(result.hasMore && optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent += ' · showing newest 5,000 scan results';
+}
+
 async function refreshScanningOptimization({ append = false, force = false } = {}) {
   if (!api.getScanningOptimization) return;
   const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
@@ -6368,6 +6600,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
     populateOptimizationFilter(optimizationOperationFilter, optimizationRows, 'operation', 'All operations');
     optimizationLoadMore.hidden = !cached.hasMore;
     optimizationSyncStatus.textContent = `${optimizationRows.length.toLocaleString()} cached rows · ${cached.bucket} · ${faction}`;
+    renderScanningOptimizationAnalytics();
     return;
   }
   optimizationSyncStatus.textContent = append ? 'Loading more optimization rows...' : 'Loading optimization rows...';
@@ -6407,6 +6640,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
   populateOptimizationFilter(optimizationOperationFilter, optimizationRows, 'operation', 'All operations');
   optimizationLoadMore.hidden = !result.hasMore;
   optimizationSyncStatus.textContent = `${optimizationRows.length.toLocaleString()} rows · ${result.bucket} · ${normalizeFaction((latestSettings || getFormPayload()).faction)}`;
+  renderScanningOptimizationAnalytics();
 }
 
 function upgradingOptimizationCell(column, value) {
@@ -6488,10 +6722,21 @@ function setActiveOptimizationSubtab(subtab) {
     const active = button.dataset.optimizationSubtab === subtab;
     button.classList.toggle('active', active); button.setAttribute('aria-selected', String(active));
   });
-  document.querySelectorAll('[data-optimization-panel]').forEach((panel) => panel.classList.toggle('active', panel.dataset.optimizationPanel === subtab));
+  document.querySelectorAll('[data-optimization-panel]').forEach((panel) => panel.classList.toggle('active', panel.dataset.optimizationPanel === subtab && panel.dataset.optimizationViewPanel === currentOptimizationView));
   renderOptimizationColumnControls();
   if (subtab === 'upgrading' && !latestUpgradingOptimizationResult) refreshUpgradingOptimization();
   if (subtab === 'scanning' && !latestOptimizationResult) refreshScanningOptimization();
+  if (subtab === 'scanning' && currentOptimizationView === 'analytics') refreshScanningOptimizationAnalyticsData();
+}
+
+function setActiveOptimizationView(view) {
+  currentOptimizationView = view === 'analytics' ? 'analytics' : 'data';
+  appShell?.classList.toggle('optimization-analytics-active', currentOptimizationView === 'analytics');
+  document.querySelectorAll('.optimization-view-button').forEach((button) => {
+    const active = button.dataset.optimizationView === currentOptimizationView;
+    button.classList.toggle('active', active); button.setAttribute('aria-selected', String(active));
+  });
+  setActiveOptimizationSubtab(currentOptimizationSubtab);
 }
 
 function setActiveSection(section) {
@@ -6541,7 +6786,10 @@ function refreshVisibleProductionSubtab() {
 function refreshVisibleFactionViews() {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') return refreshEarnings();
-  if (currentSection === 'optimization') return currentOptimizationSubtab === 'upgrading' ? refreshUpgradingOptimization() : refreshScanningOptimization();
+  if (currentSection === 'optimization') {
+    if(currentOptimizationSubtab === 'upgrading') return refreshUpgradingOptimization();
+    return currentOptimizationView === 'analytics' ? refreshScanningOptimizationAnalyticsData() : refreshScanningOptimization();
+  }
   if (currentSection === 'production') return refreshVisibleProductionSubtab();
   return Promise.resolve();
 }
@@ -6549,7 +6797,10 @@ function refreshVisibleFactionViews() {
 function refreshCurrentVisibleData() {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') return refreshEarnings();
-  if (currentSection === 'optimization') return currentOptimizationSubtab === 'upgrading' ? refreshUpgradingOptimization({ force: true }) : refreshScanningOptimization({ force: true });
+  if (currentSection === 'optimization') {
+    if(currentOptimizationSubtab === 'upgrading') return refreshUpgradingOptimization({ force: true });
+    return currentOptimizationView === 'analytics' ? refreshScanningOptimizationAnalyticsData({ force: true }) : refreshScanningOptimization({ force: true });
+  }
   if (currentSection !== 'production') return Promise.resolve();
   if (currentSubtab === 'scanning') return refreshDailySdu();
   if (currentSubtab === 'mining') return refreshDailyMining();
@@ -6679,6 +6930,13 @@ document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
 document.querySelectorAll('.optimization-subtab-button').forEach((button) => {
   button.addEventListener('click', () => setActiveOptimizationSubtab(button.dataset.optimizationSubtab));
 });
+
+document.querySelectorAll('.optimization-view-button').forEach((button) => {
+  button.addEventListener('click', () => setActiveOptimizationView(button.dataset.optimizationView));
+});
+
+optimizationAnalyticsExperiment?.addEventListener('change', renderScanningOptimizationAnalytics);
+optimizationAnalyticsMetric?.addEventListener('change', renderScanningOptimizationAnalytics);
 
 renderEarningsColumnControls();
 setupEarningsFilterHandlers();
@@ -7087,6 +7345,13 @@ fleetSearchInput.addEventListener('input', renderFleetSearch);
 
 for (const filter of [optimizationStartFilter, optimizationStopFilter, optimizationFleetFilter, optimizationEventFilter, optimizationOperationFilter, optimizationStatusFilter]) {
   filter?.addEventListener('change', () => refreshScanningOptimization());
+}
+for (const filter of [optimizationStartFilter, optimizationStopFilter]) {
+  filter?.addEventListener('change', () => {
+    optimizationAnalyticsRows = [];
+    optimizationAnalyticsLoadedFaction = '';
+    if(currentOptimizationView === 'analytics' && currentOptimizationSubtab === 'scanning') refreshScanningOptimizationAnalyticsData({ force: true });
+  });
 }
 for (const filter of [optimizationUpgradingStartFilter, optimizationUpgradingStopFilter]) {
   filter?.addEventListener('change', () => refreshUpgradingOptimization());

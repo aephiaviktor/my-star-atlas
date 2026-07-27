@@ -97,6 +97,9 @@
               <button class="subtab-button active" type="button" aria-selected="true">My Fleet</button>
             </div>
             <div class="subtab-bar toolbar-tab-group" data-toolbar-section="optimization" role="tablist" aria-label="Optimization views" hidden>
+              <button class="optimization-view-button subtab-button active" type="button" data-optimization-view="data" aria-selected="true">Data</button>
+              <button class="optimization-view-button subtab-button" type="button" data-optimization-view="analytics" aria-selected="false">Analytics</button>
+              <span class="optimization-tab-divider" aria-hidden="true"></span>
               <button class="optimization-subtab-button subtab-button active" type="button" data-optimization-subtab="scanning" aria-selected="true">Scanning</button>
               <button class="optimization-subtab-button subtab-button" type="button" data-optimization-subtab="upgrading" aria-selected="false">Upgrading</button>
             </div>
@@ -768,7 +771,7 @@
         </section>
 
         <section class="section-view" data-section-panel="optimization">
-          <div class="optimization-panel active" data-optimization-panel="scanning">
+          <div class="optimization-panel active" data-optimization-view-panel="data" data-optimization-panel="scanning">
           <section class="work-surface optimization-surface">
             <div class="activity-filter-bar optimization-filter-bar">
               <label class="activity-filter">From
@@ -800,7 +803,7 @@
             <button id="optimization-load-more" class="secondary-btn" type="button" hidden>Load more</button>
           </section>
           </div>
-          <div class="optimization-panel" data-optimization-panel="upgrading">
+          <div class="optimization-panel" data-optimization-view-panel="data" data-optimization-panel="upgrading">
             <section class="work-surface optimization-surface">
               <div class="activity-filter-bar optimization-filter-bar">
                 <label class="activity-filter">From <input id="optimization-upgrading-start-filter" type="date" value="2026-07-25" /></label>
@@ -813,6 +816,50 @@
                   <tbody id="optimization-upgrading-table-body"><tr class="empty-row"><td>Awaiting upgrading optimization data</td></tr></tbody>
                 </table>
               </div>
+            </section>
+          </div>
+          <div class="optimization-panel" data-optimization-view-panel="analytics" data-optimization-panel="scanning">
+            <section class="work-surface optimization-surface optimization-analytics-surface">
+              <div class="activity-filter-bar optimization-filter-bar">
+                <label class="activity-filter">Experiment
+                  <select id="optimization-analytics-experiment"><option value="__latest__">Latest experiment</option></select>
+                </label>
+                <label class="activity-filter">Metric
+                  <select id="optimization-analytics-metric"><option value="sduPerHour">SDU / hour</option><option value="sduPerScan">SDU / scan</option><option value="successRate">Success rate</option></select>
+                </label>
+              </div>
+              <div class="fleet-sync-status" id="optimization-analytics-status">Load scanning optimization data to calculate analytics</div>
+              <div class="optimization-analytics-grid">
+                <section class="optimization-analytics-card optimization-analytics-summary-card">
+                  <h3>Experiment summary</h3>
+                  <div id="optimization-analytics-summary" class="optimization-analytics-metrics"></div>
+                </section>
+                <section class="optimization-analytics-card">
+                  <h3>Value distribution</h3>
+                  <p class="optimization-analytics-note">Individual scan outcomes reveal spread and lucky clusters; the larger marker is the group mean.</p>
+                  <div id="optimization-analytics-value-chart" class="optimization-analytics-chart"></div>
+                </section>
+                <section class="optimization-analytics-card">
+                  <h3>Sector clusters</h3>
+                  <p class="optimization-analytics-note">Scan sectors are colored by tested parameter value.</p>
+                  <div id="optimization-analytics-sector-chart" class="optimization-analytics-chart"></div>
+                </section>
+                <section class="optimization-analytics-card optimization-analytics-ranking-card">
+                  <h3>Parameter ranking</h3>
+                  <div class="fleet-table-wrap">
+                    <table class="fleet-table optimization-table">
+                      <thead><tr><th>Parameter</th><th>Value</th><th>Scans</th><th>SDU / scan</th><th>SDU / hour</th><th>Success</th><th>Δ best</th></tr></thead>
+                      <tbody id="optimization-analytics-ranking"><tr class="empty-row"><td colspan="7">Awaiting scan results</td></tr></tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+            </section>
+          </div>
+          <div class="optimization-panel" data-optimization-view-panel="analytics" data-optimization-panel="upgrading">
+            <section class="work-surface optimization-surface optimization-analytics-empty">
+              <h2>Upgrading Analytics</h2>
+              <p>The Analytics hierarchy is ready. LP/hour, reliability, resource cost, and transaction-cost analysis will be added in the next slice.</p>
             </section>
           </div>
         </section>
