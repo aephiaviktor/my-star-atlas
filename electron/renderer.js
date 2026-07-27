@@ -5825,8 +5825,13 @@ function renderEarningsBreakeven(result) {
   const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
   const baselineStatus = result?.openingInventoryError
     ? ` · opening baseline unavailable: ${result.openingInventoryError}`
-    : ` · ${formatWholeNumber(result?.openingInventoryCount || 0)} opening lots`;
-  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${baselineStatus}${result?.breakevenError ? ' · ' + result.breakevenError : ''}`;
+    : Number(result?.openingInventoryCount || 0) > 0
+      ? ` · ${formatWholeNumber(result.openingInventoryCount)} opening lots`
+      : '';
+  const checkpointStatus = result?.ledgerCheckpointStatus
+    ? ` · checkpoint ${result.ledgerCheckpointStatus}${result?.ledgerCheckpointError ? ': ' + result.ledgerCheckpointError : ''}`
+    : '';
+  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${baselineStatus}${checkpointStatus}${result?.breakevenError ? ' · ' + result.breakevenError : ''}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
   populateEarningsFilterOptions('breakeven', rows);
   if (earningsBreakevenHideLowInventory) earningsBreakevenHideLowInventory.checked = earningsFilters.breakeven.hideLowInventory;

@@ -39,6 +39,25 @@ class InventoryCostLedger {
     this.entries = new Map();
   }
 
+  static fromSnapshot(rows) {
+    if (!Array.isArray(rows)) throw new Error('ledger snapshot must be an array');
+    const ledger = new InventoryCostLedger();
+    for (const row of rows) {
+      const location = requireText(row?.location, 'location');
+      const asset = requireText(row?.asset, 'asset');
+      const quantity = requireNonNegative(row?.quantity, 'quantity');
+      const uncostedQuantity = requireNonNegative(row?.uncostedQuantity ?? 0, 'uncostedQuantity');
+      if (uncostedQuantity > quantity + EPSILON) throw new Error('uncostedQuantity cannot exceed quantity');
+      const costs = emptyCosts();
+      for (const source of COST_SOURCES) costs[source] = requireNonNegative(row?.costs?.[source] ?? 0, `${source} cost`);
+      const cargoCost = requireNonNegative(row?.cargoCost ?? 0, 'cargoCost');
+      const key = ledger.key(location, asset);
+      if (ledger.entries.has(key)) throw new Error(`duplicate ledger row: ${asset} at ${location}`);
+      ledger.entries.set(key, { location, asset, quantity, uncostedQuantity, costs, cargoCost });
+    }
+    return ledger;
+  }
+
   key(location, asset) {
     return `${requireText(location, 'location')}\n${requireText(asset, 'asset')}`;
   }

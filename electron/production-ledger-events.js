@@ -1,6 +1,19 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function eventFingerprint(event) {
+  return crypto.createHash('sha256').update(stableJson(event)).digest('hex');
+}
 
 function eventTimestamp(isoDate) {
   const value = String(isoDate || '').trim();
@@ -137,8 +150,14 @@ function buildUpgradingConsumptionEvents(rows) {
   return events;
 }
 
-function buildCostLedgerResult({ openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [] } = {}) {
-  const ledger = new InventoryCostLedger();
+function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [] } = {}) {
+  const ledger = initialLedger || new InventoryCostLedger();
+  const previousCounts = { ...(eventFingerprintCounts || {}) };
+  for (const fingerprint of seenEventFingerprints || []) previousCounts[fingerprint] = Math.max(1, Number(previousCounts[fingerprint] || 0));
+  const previousResults = { ...(eventResultsByFingerprint || {}) };
+  for (const [fingerprint, result] of Object.entries(eventResultByFingerprint || {})) {
+    if (!previousResults[fingerprint]) previousResults[fingerprint] = [result];
+  }
   const events = [
     ...buildOpeningInventoryEvents(openingInventoryRows),
     ...buildScanningAcquisitionEvents(scanningRows),
@@ -152,16 +171,49 @@ function buildCostLedgerResult({ openingInventoryRows = [], scanningRows = [], m
   const appliedEvents = [];
   const appliedEventResults = [];
   const rejectedEvents = [];
+  const skippedDuplicateEvents = [];
+  const currentCounts = {};
+  const currentResults = {};
   for (const event of events) {
+    const fingerprint = eventFingerprint(event);
+    const occurrence = (currentCounts[fingerprint] || 0) + 1;
+    currentCounts[fingerprint] = occurrence;
+    if (occurrence <= Number(previousCounts[fingerprint] || 0)) {
+      skippedDuplicateEvents.push(event);
+      const storedResult = previousResults[fingerprint]?.[occurrence - 1];
+      if (storedResult) {
+        if (!currentResults[fingerprint]) currentResults[fingerprint] = [];
+        currentResults[fingerprint][occurrence - 1] = storedResult;
+        appliedEventResults.push({ event, result: storedResult, fromCheckpoint: true });
+      }
+      continue;
+    }
     try {
       const result = ledger.applyEvent(event);
+      if (event.type === 'craft' || (event.type === 'consume' && event.purpose === 'upgrading')) {
+        if (!currentResults[fingerprint]) currentResults[fingerprint] = [];
+        currentResults[fingerprint][occurrence - 1] = result;
+      }
       appliedEvents.push(event);
       appliedEventResults.push({ event, result });
     } catch (error) {
+      currentCounts[fingerprint] -= 1;
+      if (currentCounts[fingerprint] === 0) delete currentCounts[fingerprint];
       rejectedEvents.push({ event, error: String(error?.message || error) });
     }
   }
-  return { ledger, events, appliedEvents, appliedEventResults, rejectedEvents };
+  return {
+    ledger,
+    events,
+    appliedEvents,
+    appliedEventResults,
+    rejectedEvents,
+    skippedDuplicateEvents,
+    eventFingerprintCounts: currentCounts,
+    eventResultsByFingerprint: currentResults,
+    seenEventFingerprints: Object.keys(currentCounts).sort(),
+    eventResultByFingerprint: Object.fromEntries(Object.entries(currentResults).map(([fingerprint, results]) => [fingerprint, results[0]])),
+  };
 }
 
 function buildProductionLedger(options = {}) {
@@ -169,6 +221,7 @@ function buildProductionLedger(options = {}) {
 }
 
 module.exports = {
+  eventFingerprint,
   buildOpeningInventoryEvents,
   buildScanningAcquisitionEvents,
   buildMiningAcquisitionEvents,

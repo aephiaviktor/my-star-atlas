@@ -9,7 +9,48 @@ const {
   buildCraftingEvents,
   buildUpgradingConsumptionEvents,
   buildCostLedgerResult,
+  eventFingerprint,
 } = require('../electron/production-ledger-events');
+
+test('event fingerprints are deterministic across object key order', () => {
+  const left = { type: 'acquire', timestamp: '2026-07-01T00:00:00.000Z', location: 'MUD-1', asset: 'Carbon', quantity: 2, source: 'mining', totalCost: 1 };
+  const right = { totalCost: 1, source: 'mining', quantity: 2, asset: 'Carbon', location: 'MUD-1', timestamp: '2026-07-01T00:00:00.000Z', type: 'acquire' };
+  assert.equal(eventFingerprint(left), eventFingerprint(right));
+});
+
+test('checkpoint fingerprints prevent overlapping events from being applied twice', () => {
+  const first = buildCostLedgerResult({
+    miningRows: [{ isoDate: '2026-07-01', starbase: 'MUD-1', rawMaterial: 'Carbon', mined: 5, totalCostsAtlas: 2 }],
+  });
+  const second = buildCostLedgerResult({
+    initialLedger: first.ledger,
+    seenEventFingerprints: first.seenEventFingerprints,
+    miningRows: [
+      { isoDate: '2026-07-01', starbase: 'MUD-1', rawMaterial: 'Carbon', mined: 5, totalCostsAtlas: 2 },
+      { isoDate: '2026-07-02', starbase: 'MUD-1', rawMaterial: 'Carbon', mined: 3, totalCostsAtlas: 1.5 },
+    ],
+  });
+  assert.equal(second.skippedDuplicateEvents.length, 1);
+  assert.equal(second.ledger.get('MUD-1', 'Carbon').quantity, 8);
+  assert.equal(second.ledger.get('MUD-1', 'Carbon').costs.mining, 3.5);
+});
+
+test('checkpointed consumption results remain available to historical earnings rows', () => {
+  const first = buildCostLedgerResult({
+    openingInventoryRows: [{ timestamp: '2026-06-30T23:59:59Z', starbase: 'UST-1', asset: 'Framework', quantity: 10 }],
+    upgradingRows: [{ timestamp: '2026-07-01T12:00:00Z', starbase: 'UST-1', asset: 'Framework', installed: 2 }],
+  });
+  const second = buildCostLedgerResult({
+    initialLedger: first.ledger,
+    seenEventFingerprints: first.seenEventFingerprints,
+    eventResultByFingerprint: first.eventResultByFingerprint,
+    upgradingRows: [{ timestamp: '2026-07-01T12:00:00Z', starbase: 'UST-1', asset: 'Framework', installed: 2 }],
+  });
+  assert.equal(second.skippedDuplicateEvents.length, 1);
+  assert.equal(second.appliedEventResults.length, 1);
+  assert.equal(second.appliedEventResults[0].fromCheckpoint, true);
+  assert.equal(second.appliedEventResults[0].result.uncostedQuantity, 2);
+});
 
 test('opening inventory becomes chronological explicitly uncosted acquisition events', () => {
   assert.deepEqual(buildOpeningInventoryEvents([

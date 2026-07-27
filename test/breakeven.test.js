@@ -288,6 +288,16 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(js, /else if \(subtab === 'breakeven'\) renderEarningsBreakeven\(latestEarningsResult\);/);
   assert.match(js, /renderEarningsUpgrading\(result\);\s+renderEarningsBreakeven\(result\);/);
   assert.match(js, /result\?\.openingInventoryError/);
+  assert.match(js, /result\?\.ledgerCheckpointStatus/);
+});
+
+test('production ledger loads and atomically saves a per-faction checkpoint', () => {
+  const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /loadLedgerCheckpoint\(checkpointPath, \{ faction: ledgerFaction, profile: profileName \}\)/);
+  assert.match(main, /initialLedger: checkpoint\.status === 'loaded' \? checkpoint\.ledger : null/);
+  assert.match(main, /seenEventFingerprints: checkpoint\.seenEventFingerprints/);
+  assert.match(main, /await saveLedgerCheckpoint\(checkpointPath,/);
+  assert.match(main, /ledgerCheckpointStatus/);
 });
 
 test('production ledger seeds opening inventory from the last snapshot before its event window', () => {

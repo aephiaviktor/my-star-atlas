@@ -118,6 +118,19 @@ test('events are applied chronologically rather than in input order', () => {
   close(ledger.get('MUD-2', 'Fuel').totalCostPerUnit, 2.2);
 });
 
+test('ledger snapshots restore exact quantities and weighted basis', () => {
+  const original = new InventoryCostLedger();
+  original.acquire({ location: 'MUD-1', asset: 'Carbon', quantity: 8 });
+  original.acquire({ location: 'MUD-1', asset: 'Carbon', quantity: 2, source: 'mining', totalCost: 3, cargoCost: 1 });
+  const restored = InventoryCostLedger.fromSnapshot(original.snapshot());
+  assert.deepEqual(restored.snapshot(), original.snapshot());
+});
+
+test('ledger snapshot restore rejects malformed or inconsistent rows', () => {
+  assert.throws(() => InventoryCostLedger.fromSnapshot([{ location: 'MUD-1', asset: 'Carbon', quantity: -1, uncostedQuantity: 0, costs: {}, cargoCost: 0 }]), /quantity/);
+  assert.throws(() => InventoryCostLedger.fromSnapshot([{ location: 'MUD-1', asset: 'Carbon', quantity: 1, uncostedQuantity: 2, costs: {}, cargoCost: 0 }]), /uncostedQuantity/);
+});
+
 test('invalid sources and overdrafts fail instead of silently corrupting the ledger', () => {
   const ledger = new InventoryCostLedger();
   assert.deepEqual(COST_SOURCES, ['scanning', 'mining', 'crafting', 'lm', 'gm']);

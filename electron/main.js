@@ -25,6 +25,7 @@ const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
+const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -171,6 +172,10 @@ let shipStatsCache = null;
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function ledgerCheckpointPath(faction) {
+  return path.join(app.getPath('userData'), 'inventory-cost-ledger', `${sanitizeProfileName(faction)}.json`);
 }
 
 function normalizeFaction(value) {
@@ -5330,15 +5335,24 @@ async function fetchEarningsSnapshot(payload) {
   }));
   const ledgerFaction = normalizeFaction(settings.faction);
   const ledgerFactionStarbases = await fetchFactionStarbases(settings);
+  const checkpointPath = ledgerCheckpointPath(ledgerFaction);
+  const checkpoint = await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName });
   let openingInventoryRows = [];
   let openingInventoryError = '';
-  try {
-    openingInventoryRows = (await fetchOpeningPerStarbaseInventory(settings))
-      .filter((row) => isStarbaseIncluded(row.starbase, ledgerFactionStarbases, ledgerFaction));
-  } catch (error) {
-    openingInventoryError = String(error?.message || error || 'opening_inventory_unavailable');
+  if (checkpoint.status !== 'loaded') {
+    try {
+      openingInventoryRows = (await fetchOpeningPerStarbaseInventory(settings))
+        .filter((row) => isStarbaseIncluded(row.starbase, ledgerFactionStarbases, ledgerFaction));
+    } catch (error) {
+      openingInventoryError = String(error?.message || error || 'opening_inventory_unavailable');
+    }
   }
   const inventoryCostLedgerResult = buildCostLedgerResult({
+    initialLedger: checkpoint.status === 'loaded' ? checkpoint.ledger : null,
+    seenEventFingerprints: checkpoint.seenEventFingerprints,
+    eventResultByFingerprint: checkpoint.eventResultByFingerprint,
+    eventFingerprintCounts: checkpoint.eventFingerprintCounts,
+    eventResultsByFingerprint: checkpoint.eventResultsByFingerprint,
     openingInventoryRows,
     scanningRows: rows,
     miningRows: mining,
@@ -5350,6 +5364,28 @@ async function fetchEarningsSnapshot(payload) {
   const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
   const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
   const inventoryCostLedgerRejectedEvents = inventoryCostLedgerResult.rejectedEvents;
+  let ledgerCheckpointStatus = checkpoint.status === 'loaded' ? 'updated' : 'created';
+  let ledgerCheckpointError = checkpoint.status === 'invalid' ? checkpoint.error : '';
+  let ledgerCheckpointSavedAt = checkpoint.savedAt;
+  if (checkpoint.status !== 'loaded' && openingInventoryError) {
+    ledgerCheckpointStatus = 'baseline-unavailable';
+  } else {
+    try {
+      await saveLedgerCheckpoint(checkpointPath, {
+        faction: ledgerFaction,
+        profile: profileName,
+        ledger: inventoryCostLedgerResult.ledger,
+        seenEventFingerprints: inventoryCostLedgerResult.seenEventFingerprints,
+        eventResultByFingerprint: inventoryCostLedgerResult.eventResultByFingerprint,
+        eventFingerprintCounts: inventoryCostLedgerResult.eventFingerprintCounts,
+        eventResultsByFingerprint: inventoryCostLedgerResult.eventResultsByFingerprint,
+      });
+      ledgerCheckpointSavedAt = new Date().toISOString();
+    } catch (error) {
+      ledgerCheckpointStatus = 'save-failed';
+      ledgerCheckpointError = String(error?.message || error || 'checkpoint_save_failed');
+    }
+  }
 
   const craftingBasisByDay = new Map();
   const upgradingBasisByDay = new Map();
@@ -5743,6 +5779,9 @@ async function fetchEarningsSnapshot(payload) {
     inventoryCostLedgerRejectedEvents,
     openingInventoryCount: openingInventoryRows.length,
     openingInventoryError,
+    ledgerCheckpointStatus,
+    ledgerCheckpointError,
+    ledgerCheckpointSavedAt,
   };
 }
 
