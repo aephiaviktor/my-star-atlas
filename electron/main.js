@@ -819,23 +819,17 @@ function resolveStarbaseName(row, coordinateMap) {
 }
 
 function isStarbaseIncluded(entryStarbase, factionStarbases, faction) {
-  // When no faction tag exists, apply ONI exclusion for MUD
   if (!factionStarbases) {
-    if (faction === 'MUD' && ONI_STARBASE_EXCLUSIONS.includes(entryStarbase)) {
-      return false;
-    }
-    return true;
+    const fallbackStarbases = new Set(FACTION_STARBASES[faction] || []);
+    return fallbackStarbases.has(entryStarbase);
   }
   return factionStarbases.has(entryStarbase);
 }
 
 function filterStarbasesByFaction(starbases, factionStarbases, faction) {
   if (!factionStarbases) {
-    // When no faction tag exists, filter by faction context
-    if (faction === 'MUD') {
-      return starbases.filter((s) => !ONI_STARBASE_EXCLUSIONS.includes(s.value));
-    }
-    return starbases;
+    const fallbackStarbases = new Set(FACTION_STARBASES[faction] || []);
+    return starbases.filter((s) => fallbackStarbases.has(s.value));
   }
   return starbases.filter((s) => factionStarbases.has(s.value));
 }

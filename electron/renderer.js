@@ -520,6 +520,34 @@ const earningsColumnState = {
   breakeven: new Set(),
 };
 
+const EARNINGS_COLUMN_STORAGE_KEY = 'my-star-atlas:earnings-columns:v1';
+
+function restoreEarningsColumnState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EARNINGS_COLUMN_STORAGE_KEY) || '{}');
+    for (const subtab of Object.keys(earningsColumnState)) {
+      if (!Array.isArray(saved[subtab])) continue;
+      const validIds = new Set(getEarningsColumns(subtab).map((column) => column.id));
+      earningsColumnState[subtab] = new Set(saved[subtab].filter((id) => validIds.has(id)));
+    }
+  } catch (_error) {
+    // Invalid or unavailable local storage should leave the built-in defaults intact.
+  }
+}
+
+function persistEarningsColumnState() {
+  try {
+    const serialized = Object.fromEntries(
+      Object.entries(earningsColumnState).map(([subtab, selected]) => [subtab, Array.from(selected)]),
+    );
+    localStorage.setItem(EARNINGS_COLUMN_STORAGE_KEY, JSON.stringify(serialized));
+  } catch (_error) {
+    // Column controls remain functional when local storage is unavailable.
+  }
+}
+
+restoreEarningsColumnState();
+
 const earningsMetricGuideCommon = Object.freeze({
   color: ['Fleet chart color.', 'Assigned display color for this fleet.', 'Use it to match the row to the same fleet in charts.'],
   ownership: ['Whether the fleet is owned or managed/rented.', 'Fleet relationship from the connected profile.', 'Managed fleets can include rental cost and contract constraints.'],
@@ -4916,6 +4944,7 @@ function renderEarningsColumnControls() {
     input.addEventListener('change', () => {
       if (input.checked) selected.add(column.id);
       else selected.delete(column.id);
+      persistEarningsColumnState();
       renderEarningsMetricGuide(subtab);
       if (subtab === 'mining') {
         renderEarningsMining(latestEarningsResult);

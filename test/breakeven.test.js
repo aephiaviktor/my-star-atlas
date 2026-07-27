@@ -354,8 +354,26 @@ test('production Breakeven rows are restricted to starbases in the selected fact
   );
 });
 
-test('Breakeven falls back to safe faction filtering when the starbase tag lookup is unavailable', () => {
+test('Breakeven falls back to the explicit faction map when the starbase tag lookup is unavailable', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   assert.doesNotMatch(main, /if \(!factionStarbases\) throw new Error\('breakeven_faction_starbases_unavailable'\)/);
-  assert.match(main, /isStarbaseIncluded\(row\.starbase, factionStarbases, faction\)/);
+  assert.match(main, /const fallbackStarbases = new Set\(FACTION_STARBASES\[faction\] \|\| \[\]\);/);
+  assert.match(main, /return fallbackStarbases\.has\(entryStarbase\);/);
+});
+
+test('earnings column selections persist per subtab in local storage', () => {
+  const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+  assert.match(renderer, /const EARNINGS_COLUMN_STORAGE_KEY = 'my-star-atlas:earnings-columns:v1';/);
+  assert.match(renderer, /function restoreEarningsColumnState\(\)/);
+  assert.match(renderer, /localStorage\.getItem\(EARNINGS_COLUMN_STORAGE_KEY\)/);
+  assert.match(renderer, /function persistEarningsColumnState\(\)/);
+  assert.match(renderer, /localStorage\.setItem\(EARNINGS_COLUMN_STORAGE_KEY, JSON\.stringify\(serialized\)\)/);
+  assert.match(renderer, /restoreEarningsColumnState\(\);/);
+  assert.match(renderer, /persistEarningsColumnState\(\);/);
+});
+
+test('fully tracked Cost Coverage never renders as zero percent estimated', () => {
+  const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+  assert.match(renderer, /entry\.fullyTracked \? '100% tracked' : `\$\{formatWholeNumber\(entry\.estimatedPercent \?\? 100\)\}% estimated`/);
+  assert.doesNotMatch(renderer, /`0% estimated`/);
 });
