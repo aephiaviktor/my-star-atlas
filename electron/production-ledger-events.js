@@ -20,6 +20,22 @@ function acquisition({ timestamp, location, asset, quantity, source, totalCost }
   return event;
 }
 
+function buildOpeningInventoryEvents(rows) {
+  const events = [];
+  for (const row of rows || []) {
+    const event = acquisition({
+      timestamp: normalizeTimestamp(row.timestamp),
+      location: row.starbase,
+      asset: row.asset,
+      quantity: row.quantity,
+      source: null,
+      totalCost: null,
+    });
+    if (event) events.push(event);
+  }
+  return events;
+}
+
 function buildScanningAcquisitionEvents(rows) {
   const events = [];
   for (const row of rows || []) {
@@ -121,9 +137,10 @@ function buildUpgradingConsumptionEvents(rows) {
   return events;
 }
 
-function buildCostLedgerResult({ scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [] } = {}) {
+function buildCostLedgerResult({ openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [] } = {}) {
   const ledger = new InventoryCostLedger();
   const events = [
+    ...buildOpeningInventoryEvents(openingInventoryRows),
     ...buildScanningAcquisitionEvents(scanningRows),
     ...buildMiningAcquisitionEvents(miningRows),
     ...buildCargoTransferEvents(cargoRows),
@@ -152,6 +169,7 @@ function buildProductionLedger(options = {}) {
 }
 
 module.exports = {
+  buildOpeningInventoryEvents,
   buildScanningAcquisitionEvents,
   buildMiningAcquisitionEvents,
   buildCargoTransferEvents,

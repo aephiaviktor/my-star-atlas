@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  buildOpeningInventoryEvents,
   buildScanningAcquisitionEvents,
   buildMiningAcquisitionEvents,
   buildProductionLedger,
@@ -9,6 +10,41 @@ const {
   buildUpgradingConsumptionEvents,
   buildCostLedgerResult,
 } = require('../electron/production-ledger-events');
+
+test('opening inventory becomes chronological explicitly uncosted acquisition events', () => {
+  assert.deepEqual(buildOpeningInventoryEvents([
+    { timestamp: '2026-06-25T23:55:00Z', starbase: 'MUD-1', asset: 'Carbon', quantity: 12 },
+    { timestamp: 'invalid', starbase: 'MUD-1', asset: 'Food', quantity: 3 },
+    { timestamp: '2026-06-25T23:55:00Z', starbase: '', asset: 'Fuel', quantity: 4 },
+  ]), [{
+    type: 'acquire', timestamp: '2026-06-25T23:55:00.000Z', location: 'MUD-1', asset: 'Carbon', quantity: 12,
+  }]);
+});
+
+test('opening inventory prevents valid later consumption from overdrafting while preserving uncosted basis', () => {
+  const result = buildCostLedgerResult({
+    openingInventoryRows: [{ timestamp: '2026-06-25T23:55:00Z', starbase: 'UST-1', asset: 'Framework', quantity: 10 }],
+    upgradingRows: [{ timestamp: '2026-06-26T12:30:00Z', starbase: 'UST-1', asset: 'Framework', installed: 4 }],
+  });
+
+  assert.equal(result.rejectedEvents.length, 0);
+  assert.equal(result.ledger.get('UST-1', 'Framework').quantity, 6);
+  assert.equal(result.ledger.get('UST-1', 'Framework').uncostedQuantity, 6);
+  const consumed = result.appliedEventResults.find(({ event }) => event.purpose === 'upgrading').result;
+  assert.equal(consumed.quantity, 4);
+  assert.equal(consumed.uncostedQuantity, 4);
+});
+
+test('opening inventory is applied before later events even when supplied after production inputs', () => {
+  const result = buildCostLedgerResult({
+    openingInventoryRows: [{ timestamp: '2026-06-25T23:55:00Z', starbase: 'ONI-1', asset: 'Carbon', quantity: 5 }],
+    miningRows: [{ isoDate: '2026-06-26', starbase: 'ONI-1', rawMaterial: 'Carbon', mined: 5, totalCostsAtlas: 2 }],
+  });
+  const row = result.ledger.get('ONI-1', 'Carbon');
+  assert.equal(row.quantity, 10);
+  assert.equal(row.uncostedQuantity, 5);
+  assert.equal(row.costs.mining, 2);
+});
 
 test('scanning acquisitions are split across deposit starbases without duplicating daily costs', () => {
   const events = buildScanningAcquisitionEvents([{

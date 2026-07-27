@@ -263,6 +263,7 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.doesNotMatch(html, /activity-filter-note">Landed cost =/);
   assert.match(html, /<th>Scanning C\/U<\/th>.*<th>Mining C\/U<\/th>.*<th>Crafting C\/U<\/th>.*<th>LM C\/U<\/th>.*<th>GM C\/U<\/th>/s);
   assert.match(html, /<th>Inventory Cost Basis<\/th>/);
+  assert.match(html, /<th>Ledger Status<\/th>/);
   assert.doesNotMatch(html, /<th>Source<\/th>/);
   assert.match(html, /<th>GM Price \/ Unit<\/th>/);
   assert.match(js, /function renderEarningsBreakeven\(/);
@@ -286,13 +287,27 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(js, /handle\(earningsBreakevenTableHead, 'breakeven'\)/);
   assert.match(js, /else if \(subtab === 'breakeven'\) renderEarningsBreakeven\(latestEarningsResult\);/);
   assert.match(js, /renderEarningsUpgrading\(result\);\s+renderEarningsBreakeven\(result\);/);
+  assert.match(js, /result\?\.openingInventoryError/);
+});
+
+test('production ledger seeds opening inventory from the last snapshot before its event window', () => {
+  const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /async function fetchOpeningPerStarbaseInventory\(settings\)/);
+  assert.match(main, /range\(start: -38d, stop: -31d\)/);
+  assert.match(main, /group\(columns: \["rss", "starbase"\]\)[\s\S]*?last\(\)[\s\S]*?filter\(fn: \(r\) => r\._value > 0\)/);
+  assert.match(main, /openingInventoryRows = \(await fetchOpeningPerStarbaseInventory\(settings\)\)/);
+  assert.match(main, /buildCostLedgerResult\(\{[\s\S]*?openingInventoryRows,/);
 });
 
 test('production Breakeven reconciles current inventory against ledger quantity', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   assert.match(main, /function buildLedgerBreakevenRows/);
-  assert.match(main, /const unreconciledQuantity = Math\.max\(0, inventory - ledgerQuantity\);/);
+  assert.match(main, /const quantityVariance = inventory - ledgerQuantity;/);
+  assert.match(main, /const reconciliationStatus = Math\.abs\(quantityVariance\) <= 1e-9/);
+  assert.match(main, /quantityVariance > 0 \? 'surplus' : 'shortfall'/);
   assert.match(main, /Math\.abs\(ledgerQuantity - inventory\) <= 1e-9/);
+  assert.match(main, /for \(const ledgerRow of ledgerRows \|\| \[\]\)/);
+  assert.match(main, /inventoryEntries\.push\(\{ starbase: ledgerRow\.location, asset: ledgerRow\.asset, quantity: 0 \}\)/);
 });
 
 test('earnings snapshot declares the optional Breakeven error before returning it', () => {

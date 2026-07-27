@@ -3635,13 +3635,23 @@ function getCurrentResourcePriceAtl(prices, resourceName) {
 function buildLedgerBreakevenRows({ ledgerRows = [], inventoryRows = [], prices = null } = {}) {
   const resourcePriceByName = (prices && prices.resourcePricesAtlByName) || {};
   const ledgerByKey = new Map((ledgerRows || []).map((row) => [`${String(row.location || '').trim()}\n${String(row.asset || '').trim()}`, row]));
-  return (inventoryRows || []).map((inventoryRow) => {
+  const inventoryEntries = Array.from(inventoryRows || []);
+  const inventoryKeys = new Set(inventoryEntries.map((row) => `${String(row.starbase || '').trim()}\n${String(row.asset || '').trim()}`));
+  for (const ledgerRow of ledgerRows || []) {
+    const key = `${String(ledgerRow.location || '').trim()}\n${String(ledgerRow.asset || '').trim()}`;
+    if (!inventoryKeys.has(key)) inventoryEntries.push({ starbase: ledgerRow.location, asset: ledgerRow.asset, quantity: 0 });
+  }
+  return inventoryEntries.map((inventoryRow) => {
     const starbase = String(inventoryRow.starbase || '').trim();
     const asset = String(inventoryRow.asset || '').trim();
     const inventory = Number(inventoryRow.quantity) || 0;
     const ledger = ledgerByKey.get(`${starbase}\n${asset}`);
     const ledgerQuantity = Number(ledger?.quantity || 0);
-    const unreconciledQuantity = Math.max(0, inventory - ledgerQuantity);
+    const quantityVariance = inventory - ledgerQuantity;
+    const reconciliationStatus = Math.abs(quantityVariance) <= 1e-9
+      ? 'reconciled'
+      : quantityVariance > 0 ? 'surplus' : 'shortfall';
+    const unreconciledQuantity = Math.max(0, quantityVariance);
     const uncostedQuantity = Number(ledger?.uncostedQuantity || 0) + unreconciledQuantity;
     const fullyCosted = ledgerQuantity > 0 && Math.abs(ledgerQuantity - inventory) <= 1e-9 && uncostedQuantity <= 1e-9;
     const perUnit = (value) => fullyCosted ? Number(value || 0) / Number(ledger.quantity) : null;
@@ -3660,6 +3670,9 @@ function buildLedgerBreakevenRows({ ledgerRows = [], inventoryRows = [], prices 
       inventoryValue: landedCostPerUnit == null ? null : inventory * landedCostPerUnit,
       gmPricePerUnit: Number(resourcePriceByName[normalizeShipName(asset)]) || null,
       uncostedQuantity,
+      ledgerQuantity,
+      quantityVariance,
+      reconciliationStatus,
       lastInventoryDate: inventoryRow.lastDate || null,
     };
   }).filter((row) => row.starbase && row.asset)
@@ -3676,9 +3689,10 @@ async function fetchCurrentPerStarbaseInventory(settings) {
   |> range(start: -7d)
   |> filter(fn: (r) => r._measurement == "starbase")
   |> filter(fn: (r) => r._field == "curAmount")
-  |> filter(fn: (r) => exists r.rss and r._value > 0)
+  |> filter(fn: (r) => exists r.rss)
   |> group(columns: ["rss", "starbase"])
   |> last()
+  |> filter(fn: (r) => r._value > 0)
   |> keep(columns: ["rss", "starbase", "_value", "_time"])
   |> sort(columns: ["starbase", "rss"])`;
   const csv = await queryInfluxFlux(settings, flux).catch(() => '');
@@ -3696,6 +3710,38 @@ async function fetchCurrentPerStarbaseInventory(settings) {
       quantity,
       lastDate: row._time ? new Date(row._time).toISOString() : null,
     });
+  }
+  return result;
+}
+
+async function fetchOpeningPerStarbaseInventory(settings) {
+  // Seed the rebuild from the last known inventory snapshot before the
+  // 31-day event window. These quantities are deliberately uncosted: the
+  // snapshot proves quantity and location, but not historical acquisition cost.
+  const bucket = escapeFluxString(settings.influxBucket);
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -38d, stop: -31d)
+  |> filter(fn: (r) => r._measurement == "starbase")
+  |> filter(fn: (r) => r._field == "curAmount")
+  |> filter(fn: (r) => exists r.rss)
+  |> group(columns: ["rss", "starbase"])
+  |> last()
+  |> filter(fn: (r) => r._value > 0)
+  |> keep(columns: ["rss", "starbase", "_value", "_time"])
+  |> sort(columns: ["starbase", "rss"])`;
+  const rows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
+  const result = [];
+  for (const row of rows) {
+    const starbase = String(row.starbase || '').trim();
+    const asset = String(row.rss || '').trim();
+    const quantity = Number(row._value);
+    const timestamp = row._time ? new Date(row._time) : null;
+    if (!starbase || !asset || !Number.isFinite(quantity) || quantity <= 0
+      || !timestamp || Number.isNaN(timestamp.getTime())) continue;
+    const baselineTimestamp = new Date(Date.UTC(
+      timestamp.getUTCFullYear(), timestamp.getUTCMonth(), timestamp.getUTCDate(),
+    ) - 1).toISOString();
+    result.push({ starbase, asset, quantity, timestamp: baselineTimestamp });
   }
   return result;
 }
@@ -5282,7 +5328,18 @@ async function fetchEarningsSnapshot(payload) {
     feeCostsAtlas: Number.isFinite(Number(row.feeAmount)) ? Number(row.feeAmount) : null,
     txsCostsAtlas: atlasPerSol != null && Number.isFinite(Number(row.txCostSol)) ? Number(row.txCostSol) * atlasPerSol : null,
   }));
+  const ledgerFaction = normalizeFaction(settings.faction);
+  const ledgerFactionStarbases = await fetchFactionStarbases(settings);
+  let openingInventoryRows = [];
+  let openingInventoryError = '';
+  try {
+    openingInventoryRows = (await fetchOpeningPerStarbaseInventory(settings))
+      .filter((row) => isStarbaseIncluded(row.starbase, ledgerFactionStarbases, ledgerFaction));
+  } catch (error) {
+    openingInventoryError = String(error?.message || error || 'opening_inventory_unavailable');
+  }
   const inventoryCostLedgerResult = buildCostLedgerResult({
+    openingInventoryRows,
     scanningRows: rows,
     miningRows: mining,
     cargoRows: ledgerCargoAllocations,
@@ -5325,8 +5382,8 @@ async function fetchEarningsSnapshot(payload) {
   let breakevenError = '';
   try {
     const inventoryRows = await fetchCurrentPerStarbaseInventory(settings);
-    const factionStarbases = await fetchFactionStarbases(settings);
-    const faction = normalizeFaction(settings.faction);
+    const factionStarbases = ledgerFactionStarbases;
+    const faction = ledgerFaction;
     breakevenRows = buildLedgerBreakevenRows({ ledgerRows: inventoryCostLedgerRows, inventoryRows, prices })
       .filter((row) => isStarbaseIncluded(row.starbase, factionStarbases, faction));
   } catch (error) {
@@ -5684,6 +5741,8 @@ async function fetchEarningsSnapshot(payload) {
     inventoryCostLedgerAppliedEventResults,
     inventoryCostLedgerRows,
     inventoryCostLedgerRejectedEvents,
+    openingInventoryCount: openingInventoryRows.length,
+    openingInventoryError,
   };
 }
 

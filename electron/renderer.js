@@ -494,6 +494,7 @@ const breakevenEarningsBaseColumns = Object.freeze([
   Object.freeze({ id: 'landedCost', label: 'Total Cost / Unit' }),
   Object.freeze({ id: 'inventoryValue', label: 'Inventory Cost Basis' }),
   Object.freeze({ id: 'gmPrice', label: 'GM Price / Unit' }),
+  Object.freeze({ id: 'ledgerStatus', label: 'Ledger Status' }),
 ]);
 
 const breakevenEarningsOptionalColumns = Object.freeze([]);
@@ -602,6 +603,7 @@ const earningsMetricGuideBySubtab = Object.freeze({
     landedCost: ['Combined represented cost per unit at this starbase.', 'Base Cost / Unit + Cargo Cost / Unit.', 'This is the estimated breakeven price before any unrepresented costs or sale fees.'],
     inventoryValue: ['Weighted cost basis of current inventory.', 'Inventory × Total Cost / Unit.', 'A dash means some or all inventory is explicitly uncosted.'],
     gmPrice: ['Current Galactic Marketplace reference price.', 'Aephia /gm/resource pricingATL.priceATL.', 'Compare with Total Cost; it is a current market reference, not guaranteed sale proceeds.'],
+    ledgerStatus: ['Quantity reconciliation between current inventory and the event ledger.', 'Current Inventory − Ledger Quantity.', 'Reconciled can still include explicitly uncosted opening stock; surplus or shortfall identifies telemetry drift.'],
   }),
 });
 
@@ -695,6 +697,7 @@ const earningsSortKeyByColumnId = Object.freeze({
   landedCost: 'landedCostPerUnit',
   inventoryValue: 'inventoryValue',
   gmPrice: 'gmPricePerUnit',
+  ledgerStatus: 'reconciliationStatus',
   inventory: 'inventory',
   ammoCost: 'baseAmmoCostPerUnit',
   foodCost: 'baseFoodCostPerUnit',
@@ -5820,7 +5823,10 @@ function renderEarningsBreakevenHeader() {
 
 function renderEarningsBreakeven(result) {
   const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
-  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${result?.breakevenError ? ' · ' + result.breakevenError : ''}`;
+  const baselineStatus = result?.openingInventoryError
+    ? ` · opening baseline unavailable: ${result.openingInventoryError}`
+    : ` · ${formatWholeNumber(result?.openingInventoryCount || 0)} opening lots`;
+  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${baselineStatus}${result?.breakevenError ? ' · ' + result.breakevenError : ''}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
   populateEarningsFilterOptions('breakeven', rows);
   if (earningsBreakevenHideLowInventory) earningsBreakevenHideLowInventory.checked = earningsFilters.breakeven.hideLowInventory;
@@ -5849,6 +5855,12 @@ function renderEarningsBreakeven(result) {
     tr.appendChild(createTextCell(entry.landedCostPerUnit == null ? '--' : formatAtlasNumber(entry.landedCostPerUnit, 6)));
     tr.appendChild(createTextCell(entry.inventoryValue == null ? '--' : formatAtlasWhole(entry.inventoryValue)));
     tr.appendChild(createTextCell(entry.gmPricePerUnit == null ? '--' : formatAtlasNumber(entry.gmPricePerUnit, 6)));
+    const status = entry.reconciliationStatus === 'reconciled'
+      ? (Number(entry.uncostedQuantity || 0) > 1e-9 ? `Reconciled · ${formatWholeNumber(entry.uncostedQuantity)} uncosted` : 'Reconciled')
+      : entry.reconciliationStatus === 'surplus'
+        ? `Surplus +${formatWholeNumber(entry.quantityVariance)}`
+        : `Shortfall ${formatWholeNumber(Math.abs(Number(entry.quantityVariance || 0)))}`;
+    tr.appendChild(createTextCell(status));
     for (const column of optionalColumns) tr.appendChild(createTextCell(entry[column.id] ?? '--'));
     earningsBreakevenTableBody.appendChild(tr);
   }
