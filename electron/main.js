@@ -26,6 +26,7 @@ const { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAll
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
+const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -3625,63 +3626,6 @@ function getCurrentResourcePriceAtl(prices, resourceName) {
   const key = normalizeShipName(resourceName);
   const price = Number(prices?.resourcePricesAtlByName?.[key]);
   return Number.isFinite(price) ? price : null;
-}
-
-// Breakeven analysis: combine per-starbase mining production cost and
-// per-destination cargo allocation cost with current inventory and the
-// current GM price. The output is one row per (starbase, asset) with
-// `landedCostPerUnit` (= base + cargo) and `inventoryValue`. The base
-// cost comes from weighted mining `costsPerUnit` for that starbase and
-// material; the cargo cost comes from weighted cargo allocation
-// `costsPerUnit` where the destination matches the starbase. Both
-// Reconcile the chronological weighted ledger against current inventory.
-// Any quantity not represented by the ledger remains explicitly uncosted,
-// so the UI never presents partial history as a complete cost basis.
-function buildLedgerBreakevenRows({ ledgerRows = [], inventoryRows = [], prices = null } = {}) {
-  const resourcePriceByName = (prices && prices.resourcePricesAtlByName) || {};
-  const ledgerByKey = new Map((ledgerRows || []).map((row) => [`${String(row.location || '').trim()}\n${String(row.asset || '').trim()}`, row]));
-  const inventoryEntries = Array.from(inventoryRows || []);
-  const inventoryKeys = new Set(inventoryEntries.map((row) => `${String(row.starbase || '').trim()}\n${String(row.asset || '').trim()}`));
-  for (const ledgerRow of ledgerRows || []) {
-    const key = `${String(ledgerRow.location || '').trim()}\n${String(ledgerRow.asset || '').trim()}`;
-    if (!inventoryKeys.has(key)) inventoryEntries.push({ starbase: ledgerRow.location, asset: ledgerRow.asset, quantity: 0 });
-  }
-  return inventoryEntries.map((inventoryRow) => {
-    const starbase = String(inventoryRow.starbase || '').trim();
-    const asset = String(inventoryRow.asset || '').trim();
-    const inventory = Number(inventoryRow.quantity) || 0;
-    const ledger = ledgerByKey.get(`${starbase}\n${asset}`);
-    const ledgerQuantity = Number(ledger?.quantity || 0);
-    const quantityVariance = inventory - ledgerQuantity;
-    const reconciliationStatus = Math.abs(quantityVariance) <= 1e-9
-      ? 'reconciled'
-      : quantityVariance > 0 ? 'surplus' : 'shortfall';
-    const unreconciledQuantity = Math.max(0, quantityVariance);
-    const uncostedQuantity = Number(ledger?.uncostedQuantity || 0) + unreconciledQuantity;
-    const fullyCosted = ledgerQuantity > 0 && Math.abs(ledgerQuantity - inventory) <= 1e-9 && uncostedQuantity <= 1e-9;
-    const perUnit = (value) => fullyCosted ? Number(value || 0) / Number(ledger.quantity) : null;
-    const scanningCostPerUnit = perUnit(ledger?.costs?.scanning);
-    const miningCostPerUnit = perUnit(ledger?.costs?.mining);
-    const craftingCostPerUnit = perUnit(ledger?.costs?.crafting);
-    const lmCostPerUnit = perUnit(ledger?.costs?.lm);
-    const gmCostPerUnit = perUnit(ledger?.costs?.gm);
-    const baseCostPerUnit = fullyCosted ? scanningCostPerUnit + miningCostPerUnit + craftingCostPerUnit + lmCostPerUnit + gmCostPerUnit : null;
-    const cargoCostPerUnit = perUnit(ledger?.cargoCost);
-    const landedCostPerUnit = fullyCosted ? baseCostPerUnit + cargoCostPerUnit : null;
-    return {
-      starbase, asset, inventory,
-      scanningCostPerUnit, miningCostPerUnit, craftingCostPerUnit, lmCostPerUnit, gmCostPerUnit,
-      baseCostPerUnit, cargoCostPerUnit, landedCostPerUnit,
-      inventoryValue: landedCostPerUnit == null ? null : inventory * landedCostPerUnit,
-      gmPricePerUnit: Number(resourcePriceByName[normalizeShipName(asset)]) || null,
-      uncostedQuantity,
-      ledgerQuantity,
-      quantityVariance,
-      reconciliationStatus,
-      lastInventoryDate: inventoryRow.lastDate || null,
-    };
-  }).filter((row) => row.starbase && row.asset)
-    .sort((a, b) => a.starbase.localeCompare(b.starbase) || a.asset.localeCompare(b.asset));
 }
 
 async function fetchCurrentPerStarbaseInventory(settings) {

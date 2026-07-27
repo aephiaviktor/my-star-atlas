@@ -263,6 +263,7 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.doesNotMatch(html, /activity-filter-note">Landed cost =/);
   assert.match(html, /<th>Scanning C\/U<\/th>.*<th>Mining C\/U<\/th>.*<th>Crafting C\/U<\/th>.*<th>LM C\/U<\/th>.*<th>GM C\/U<\/th>/s);
   assert.match(html, /<th>Inventory Cost Basis<\/th>/);
+  assert.match(html, /<th>Cost Coverage<\/th>/);
   assert.match(html, /<th>Ledger Status<\/th>/);
   assert.doesNotMatch(html, /<th>Source<\/th>/);
   assert.match(html, /<th>GM Price \/ Unit<\/th>/);
@@ -311,13 +312,13 @@ test('production ledger seeds opening inventory from the last snapshot before it
 
 test('production Breakeven reconciles current inventory against ledger quantity', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /function buildLedgerBreakevenRows/);
-  assert.match(main, /const quantityVariance = inventory - ledgerQuantity;/);
-  assert.match(main, /const reconciliationStatus = Math\.abs\(quantityVariance\) <= 1e-9/);
-  assert.match(main, /quantityVariance > 0 \? 'surplus' : 'shortfall'/);
-  assert.match(main, /Math\.abs\(ledgerQuantity - inventory\) <= 1e-9/);
-  assert.match(main, /for \(const ledgerRow of ledgerRows \|\| \[\]\)/);
-  assert.match(main, /inventoryEntries\.push\(\{ starbase: ledgerRow\.location, asset: ledgerRow\.asset, quantity: 0 \}\)/);
+  const ledgerBreakeven = readFileSync(path.join(__dirname, '..', 'electron', 'ledger-breakeven.js'), 'utf8');
+  assert.match(main, /const \{ buildLedgerBreakevenRows \} = require\('\.\/ledger-breakeven'\)/);
+  assert.match(ledgerBreakeven, /const quantityVariance = inventory - ledgerQuantity;/);
+  assert.match(ledgerBreakeven, /const reconciliationStatus = Math\.abs\(quantityVariance\) <= 1e-9/);
+  assert.match(ledgerBreakeven, /quantityVariance > 0 \? 'surplus' : 'shortfall'/);
+  assert.match(ledgerBreakeven, /for \(const ledgerRow of ledgerRows \|\| \[\]\)/);
+  assert.match(ledgerBreakeven, /inventoryEntries\.push\(\{ starbase: ledgerRow\.location, asset: ledgerRow\.asset, quantity: 0 \}\)/);
 });
 
 test('earnings snapshot declares the optional Breakeven error before returning it', () => {
@@ -325,13 +326,15 @@ test('earnings snapshot declares the optional Breakeven error before returning i
   assert.match(main, /let breakevenRows = \[\];\s+let breakevenError = '';/);
 });
 
-test('production Breakeven derives source columns and totals from the weighted ledger', () => {
-  const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+test('production Breakeven derives source columns and extrapolated totals from known-cost quantity', () => {
+  const ledgerBreakeven = readFileSync(path.join(__dirname, '..', 'electron', 'ledger-breakeven.js'), 'utf8');
   for (const source of ['scanning', 'mining', 'crafting', 'lm', 'gm']) {
-    assert.match(main, new RegExp(`const ${source}CostPerUnit = perUnit\\(ledger\\?\\.costs\\?\\.${source}\\)`));
+    assert.match(ledgerBreakeven, new RegExp(`const ${source}CostPerUnit = perUnit\\(ledger\\?\\.costs\\?\\.${source}\\)`));
   }
-  assert.match(main, /const baseCostPerUnit = fullyCosted \? scanningCostPerUnit \+ miningCostPerUnit \+ craftingCostPerUnit \+ lmCostPerUnit \+ gmCostPerUnit : null;/);
-  assert.match(main, /const landedCostPerUnit = fullyCosted \? baseCostPerUnit \+ cargoCostPerUnit : null;/);
+  assert.match(ledgerBreakeven, /const knownCostQuantity = Math\.max\(0, ledgerQuantity - Number\(ledger\?\.uncostedQuantity \|\| 0\)\);/);
+  assert.match(ledgerBreakeven, /const baseCostPerUnit = knownCostQuantity > 0/);
+  assert.match(ledgerBreakeven, /const landedCostPerUnit = knownCostQuantity > 0 \? baseCostPerUnit \+ cargoCostPerUnit : null;/);
+  assert.match(ledgerBreakeven, /inventory \* landedCostPerUnit/);
 });
 
 test('Crafting and Upgrading use consumed ledger basis instead of current GM prices', () => {

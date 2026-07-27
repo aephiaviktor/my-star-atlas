@@ -493,6 +493,7 @@ const breakevenEarningsBaseColumns = Object.freeze([
   Object.freeze({ id: 'cargoCost', label: 'Cargo Cost / Unit' }),
   Object.freeze({ id: 'landedCost', label: 'Total Cost / Unit' }),
   Object.freeze({ id: 'inventoryValue', label: 'Inventory Cost Basis' }),
+  Object.freeze({ id: 'costCoverage', label: 'Cost Coverage' }),
   Object.freeze({ id: 'gmPrice', label: 'GM Price / Unit' }),
   Object.freeze({ id: 'ledgerStatus', label: 'Ledger Status' }),
 ]);
@@ -598,10 +599,11 @@ const earningsMetricGuideBySubtab = Object.freeze({
     starbase: ['Starbase where the asset inventory is currently recorded.', 'Latest non-zero inventory point per starbase and asset.', 'Costs only join when the mining or delivery destination matches this starbase.'],
     asset: ['Resource held at the starbase.', 'Recorded inventory resource name.', 'Each starbase and asset combination has its own cost basis.'],
     inventory: ['Current recorded units at this starbase.', 'Latest non-zero curAmount during the inventory lookback.', 'Use Hide inventory ≤ 2 to suppress dust balances without deleting data.'],
-    baseCost: ['Weighted production and acquisition cost per unit.', 'Scanning + Mining + Crafting + LM + GM C/U.', 'A dash means some or all current inventory is explicitly uncosted.'],
-    cargoCost: ['Weighted accumulated delivery cost per unit.', 'Cargo basis carried by current ledger inventory ÷ represented units.', 'Includes every represented transfer in the supply chain.'],
-    landedCost: ['Combined represented cost per unit at this starbase.', 'Base Cost / Unit + Cargo Cost / Unit.', 'This is the estimated breakeven price before any unrepresented costs or sale fees.'],
-    inventoryValue: ['Weighted cost basis of current inventory.', 'Inventory × Total Cost / Unit.', 'A dash means some or all inventory is explicitly uncosted.'],
+    baseCost: ['Estimated weighted production and acquisition cost per unit.', 'Known Scanning + Mining + Crafting + LM + GM basis ÷ known-cost quantity.', 'The known weighted average is extrapolated across inventory without direct basis; Cost Coverage discloses that estimated share.'],
+    cargoCost: ['Estimated weighted accumulated delivery cost per unit.', 'Known cargo basis ÷ known-cost quantity.', 'Includes represented transfers and extrapolates their weighted average to inventory without direct basis.'],
+    landedCost: ['Estimated combined cost per unit at this starbase.', 'Base Cost / Unit + Cargo Cost / Unit.', 'This is the estimated breakeven price before unrepresented costs or sale fees; see Cost Coverage for confidence.'],
+    inventoryValue: ['Estimated cost basis of current inventory.', 'Inventory × Total Cost / Unit.', 'The known weighted average is applied to the whole current inventory.'],
+    costCoverage: ['Share of current inventory whose cost basis is estimated rather than directly represented.', '100% − known-cost coverage, rounded to a whole percent.', '100% tracked requires exact quantity reconciliation and no uncosted inventory; low coverage is still shown but should be treated as a rough estimate.'],
     gmPrice: ['Current Galactic Marketplace reference price.', 'Aephia /gm/resource pricingATL.priceATL.', 'Compare with Total Cost; it is a current market reference, not guaranteed sale proceeds.'],
     ledgerStatus: ['Quantity reconciliation between current inventory and the event ledger.', 'Current Inventory − Ledger Quantity.', 'Reconciled can still include explicitly uncosted opening stock; surplus or shortfall identifies telemetry drift.'],
   }),
@@ -696,6 +698,7 @@ const earningsSortKeyByColumnId = Object.freeze({
   cargoCost: 'cargoCostPerUnit',
   landedCost: 'landedCostPerUnit',
   inventoryValue: 'inventoryValue',
+  costCoverage: 'estimatedPercent',
   gmPrice: 'gmPricePerUnit',
   ledgerStatus: 'reconciliationStatus',
   inventory: 'inventory',
@@ -5859,6 +5862,7 @@ function renderEarningsBreakeven(result) {
     tr.appendChild(createTextCell(entry.cargoCostPerUnit == null ? '--' : formatAtlasNumber(entry.cargoCostPerUnit, 6)));
     tr.appendChild(createTextCell(entry.landedCostPerUnit == null ? '--' : formatAtlasNumber(entry.landedCostPerUnit, 6)));
     tr.appendChild(createTextCell(entry.inventoryValue == null ? '--' : formatAtlasWhole(entry.inventoryValue)));
+    tr.appendChild(createTextCell(entry.fullyTracked ? '100% tracked' : `${formatWholeNumber(entry.estimatedPercent ?? 100)}% estimated`));
     tr.appendChild(createTextCell(entry.gmPricePerUnit == null ? '--' : formatAtlasNumber(entry.gmPricePerUnit, 6)));
     const status = entry.reconciliationStatus === 'reconciled'
       ? (Number(entry.uncostedQuantity || 0) > 1e-9 ? `Reconciled · ${formatWholeNumber(entry.uncostedQuantity)} uncosted` : 'Reconciled')
