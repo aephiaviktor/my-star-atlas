@@ -923,7 +923,8 @@
                     <div><strong>Forecast error by snapshot hour</strong><span>The center line is median signed error: above zero means overestimation and below zero means underestimation. The band contains the middle 50% of observed errors.</span></div>
                     <div><strong>Process automation evidence</strong><span>Hourly snapshots are deduplicated by process ID. A predecessor link requires the same profile, starbase, recipe, quantity, and duration, with the next process starting after the prior one ends.</span></div>
                     <div><strong>Restart percentiles</strong><span>p80 means 80% of matched restart gaps are at or below that value. The ≤120 sec and ≤300 sec rows show direct shares and are evidence of fast repetition—not proof that the player used automation.</span></div>
-                    <div><strong>Interpretation boundary</strong><span>Fast restarts are likely automated; slower restarts are unconfirmed, not automatically manual. More history and repeated predecessor chains will strengthen the classification.</span></div>
+                    <div><strong>Detected restart gap</strong><span>The page finds the largest relative jump between adjacent restart times in the central 20–90% of each faction’s observations. The lower edge becomes that faction’s provisional probable-automation threshold.</span></div>
+                    <div><strong>Interpretation boundary</strong><span>“Probably automated” means the restart is at or below the detected threshold. Slower restarts are unconfirmed, not automatically manual. More history and repeated predecessor chains will strengthen the classification.</span></div>
                   </div>
                 </details>
               </div>

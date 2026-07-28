@@ -6938,6 +6938,9 @@ function renderUpgradingProcessEvidence(evidence) {
     ['Restart gap p75', formatProcessEvidenceDuration(evidence.restartGapP75Seconds)],
     ['Restart gap p80', formatProcessEvidenceDuration(evidence.restartGapP80Seconds)],
     ['Restart gap p90', formatProcessEvidenceDuration(evidence.restartGapP90Seconds)],
+    ['Detected restart gap', Number.isFinite(Number(evidence.automationGapLowerSeconds)) && Number.isFinite(Number(evidence.automationGapUpperSeconds)) ? `${formatProcessEvidenceDuration(evidence.automationGapLowerSeconds)} → ${formatProcessEvidenceDuration(evidence.automationGapUpperSeconds)}` : '--'],
+    ['Probable automation threshold', Number.isFinite(Number(evidence.automationThresholdSeconds)) ? `≤ ${formatProcessEvidenceDuration(evidence.automationThresholdSeconds)}` : '--'],
+    ['Probably automated', formatProcessEvidenceShare(evidence.probablyAutomatedCount, evidence.probablyAutomatedPercent)],
     ['Restarts within 120 sec', formatProcessEvidenceShare(evidence.restartWithin120, evidence.restartWithin120Percent)],
     ['Restarts within 300 sec', formatProcessEvidenceShare(evidence.restartWithin300, evidence.restartWithin300Percent)],
   ];

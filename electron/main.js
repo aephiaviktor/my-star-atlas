@@ -656,6 +656,28 @@ function optimizationNumberQuantile(values, fraction) {
   return lower === upper ? sorted[lower] : sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
 }
 
+function detectUpgradingRestartGap(values) {
+  const sorted = (values || []).filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length < 2) return null;
+  const first = Math.max(1, Math.floor(sorted.length * 0.2));
+  const last = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.9));
+  let best = null;
+  for (let index = first; index <= last; index += 1) {
+    const lower = sorted[index - 1];
+    const upper = sorted[index];
+    const ratio = (upper + 1) / (lower + 1);
+    const width = upper - lower;
+    if (!best || ratio > best.ratio || (ratio === best.ratio && width > best.width)) best = { index, lower, upper, ratio, width };
+  }
+  return best ? {
+    lowerSeconds: best.lower,
+    upperSeconds: best.upper,
+    thresholdSeconds: best.lower,
+    belowCount: best.index,
+    belowPercent: best.index / sorted.length * 100,
+  } : null;
+}
+
 function summarizeUpgradingProcessHistory(rows) {
   const validRows = (rows || []).filter((row) => row?.process && row?.profile);
   const byProcess = new Map();
@@ -683,6 +705,7 @@ function summarizeUpgradingProcessHistory(rows) {
     }
   }
   const times = validRows.map((row) => Date.parse(String(row._time || row.time || ''))).filter(Number.isFinite);
+  const automationGap = detectUpgradingRestartGap(restartGaps);
   return {
     snapshotRows: validRows.length,
     uniqueProcesses: processes.length,
@@ -699,6 +722,11 @@ function summarizeUpgradingProcessHistory(rows) {
     restartWithin300: restartGaps.filter((gap) => gap <= 300).length,
     restartWithin120Percent: restartGaps.length ? restartGaps.filter((gap) => gap <= 120).length / restartGaps.length * 100 : null,
     restartWithin300Percent: restartGaps.length ? restartGaps.filter((gap) => gap <= 300).length / restartGaps.length * 100 : null,
+    automationGapLowerSeconds: automationGap?.lowerSeconds ?? null,
+    automationGapUpperSeconds: automationGap?.upperSeconds ?? null,
+    automationThresholdSeconds: automationGap?.thresholdSeconds ?? null,
+    probablyAutomatedCount: automationGap?.belowCount ?? 0,
+    probablyAutomatedPercent: automationGap?.belowPercent ?? null,
     historyStart: times.length ? new Date(Math.min(...times)).toISOString() : null,
     historyEnd: times.length ? new Date(Math.max(...times)).toISOString() : null,
   };

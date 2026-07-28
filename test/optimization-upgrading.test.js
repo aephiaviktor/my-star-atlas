@@ -47,6 +47,7 @@ test('process automation evidence deduplicates snapshots and summarizes exact re
   vm.createContext(context);
   vm.runInContext([
     extractFunction(main, 'optimizationNumberQuantile'),
+    extractFunction(main, 'detectUpgradingRestartGap'),
     extractFunction(main, 'summarizeUpgradingProcessHistory'),
     'this.summarize = summarizeUpgradingProcessHistory;',
   ].join('\n'), context);
@@ -71,6 +72,9 @@ test('process automation evidence deduplicates snapshots and summarizes exact re
   assert.equal(result.restartGapP80Seconds, 78.8);
   assert.equal(result.restartWithin120, 2);
   assert.equal(result.restartWithin120Percent, 100);
+  assert.equal(result.automationGapLowerSeconds, 74);
+  assert.equal(result.automationGapUpperSeconds, 80);
+  assert.equal(result.probablyAutomatedPercent, 50);
 });
 
 test('upgrading redemption scatter normalizes player LP by average hourly phantom crew', () => {
