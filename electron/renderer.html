@@ -915,6 +915,17 @@
                     </table>
                   </div>
                 </section>
+                <details class="earnings-metric-guide optimization-upgrading-page-guide" open>
+                  <summary>How to read this page</summary>
+                  <div class="earnings-metric-guide-list">
+                    <div><strong>Faction LP redemption vs player LP per upgrading crew</strong><span>Each dot is one completed UTC day. It compares total faction redemption with this player’s LP per average hourly phantom crew; correlation describes how strongly those values move together.</span></div>
+                    <div><strong>Expected Total LP by EOD vs actual</strong><span>Each line follows one day’s hourly forecast. The final dot is the actual faction LP redemption, so distance from the line shows forecast error at each hour.</span></div>
+                    <div><strong>Forecast error by snapshot hour</strong><span>The center line is median signed error: above zero means overestimation and below zero means underestimation. The band contains the middle 50% of observed errors.</span></div>
+                    <div><strong>Process automation evidence</strong><span>Hourly snapshots are deduplicated by process ID. A predecessor link requires the same profile, starbase, recipe, quantity, and duration, with the next process starting after the prior one ends.</span></div>
+                    <div><strong>Restart percentiles</strong><span>p80 means 80% of matched restart gaps are at or below that value. The ≤120 sec and ≤300 sec rows show direct shares and are evidence of fast repetition—not proof that the player used automation.</span></div>
+                    <div><strong>Interpretation boundary</strong><span>Fast restarts are likely automated; slower restarts are unconfirmed, not automatically manual. More history and repeated predecessor chains will strengthen the classification.</span></div>
+                  </div>
+                </details>
               </div>
             </section>
           </div>

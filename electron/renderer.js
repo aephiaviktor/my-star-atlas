@@ -6913,6 +6913,11 @@ function formatProcessEvidenceDuration(seconds) {
   return Number.isFinite(Number(seconds)) ? `${Math.round(Number(seconds)).toLocaleString()} sec` : '--';
 }
 
+function formatProcessEvidenceShare(count, percent) {
+  if (!Number.isFinite(Number(percent))) return Number(count || 0).toLocaleString();
+  return `${Number(count || 0).toLocaleString()} (${Number(percent).toFixed(1)}%)`;
+}
+
 function renderUpgradingProcessEvidence(evidence) {
   if (!optimizationUpgradingProcessEvidenceBody) return;
   optimizationUpgradingProcessEvidenceBody.replaceChildren();
@@ -6931,9 +6936,10 @@ function renderUpgradingProcessEvidence(evidence) {
     ['Restart gap p25', formatProcessEvidenceDuration(evidence.restartGapP25Seconds)],
     ['Restart gap median', formatProcessEvidenceDuration(evidence.restartGapMedianSeconds)],
     ['Restart gap p75', formatProcessEvidenceDuration(evidence.restartGapP75Seconds)],
+    ['Restart gap p80', formatProcessEvidenceDuration(evidence.restartGapP80Seconds)],
     ['Restart gap p90', formatProcessEvidenceDuration(evidence.restartGapP90Seconds)],
-    ['Restarts within 120 sec', Number(evidence.restartWithin120).toLocaleString()],
-    ['Restarts within 300 sec', Number(evidence.restartWithin300).toLocaleString()],
+    ['Restarts within 120 sec', formatProcessEvidenceShare(evidence.restartWithin120, evidence.restartWithin120Percent)],
+    ['Restarts within 300 sec', formatProcessEvidenceShare(evidence.restartWithin300, evidence.restartWithin300Percent)],
   ];
   for (const [label, value] of rows) { const tr=document.createElement('tr'); const name=document.createElement('td'); const amount=document.createElement('td'); name.textContent=label; amount.textContent=value; amount.className='numeric-cell'; tr.append(name,amount); optimizationUpgradingProcessEvidenceBody.append(tr); }
 }

@@ -68,7 +68,9 @@ test('process automation evidence deduplicates snapshots and summarizes exact re
   assert.equal(result.predecessorLinks, 2);
   assert.equal(result.longestChain, 3);
   assert.equal(result.restartGapMedianSeconds, 77);
+  assert.equal(result.restartGapP80Seconds, 78.8);
   assert.equal(result.restartWithin120, 2);
+  assert.equal(result.restartWithin120Percent, 100);
 });
 
 test('upgrading redemption scatter normalizes player LP by average hourly phantom crew', () => {
@@ -99,6 +101,7 @@ test('Optimization exposes Upgrading after Scanning with date filters, table, an
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
   for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-process-evidence-body']) assert.match(html, new RegExp(`id="${id}"`));
   assert.match(html, /Process automation evidence/);
+  assert.match(html, /How to read this page/);
   assert.ok(html.indexOf('id="optimization-analytics-tooltip"') > html.indexOf('data-optimization-panel="upgrading"'), 'shared tooltip must live outside hidden analytics panels');
   assert.doesNotMatch(html, /id="optimization-upgrading-instance-filter"/);
   assert.doesNotMatch(renderer, /optimizationUpgradingInstanceFilter/);

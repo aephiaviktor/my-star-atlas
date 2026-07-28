@@ -693,9 +693,12 @@ function summarizeUpgradingProcessHistory(rows) {
     restartGapP25Seconds: optimizationNumberQuantile(restartGaps, 0.25),
     restartGapMedianSeconds: optimizationNumberQuantile(restartGaps, 0.5),
     restartGapP75Seconds: optimizationNumberQuantile(restartGaps, 0.75),
+    restartGapP80Seconds: optimizationNumberQuantile(restartGaps, 0.8),
     restartGapP90Seconds: optimizationNumberQuantile(restartGaps, 0.9),
     restartWithin120: restartGaps.filter((gap) => gap <= 120).length,
     restartWithin300: restartGaps.filter((gap) => gap <= 300).length,
+    restartWithin120Percent: restartGaps.length ? restartGaps.filter((gap) => gap <= 120).length / restartGaps.length * 100 : null,
+    restartWithin300Percent: restartGaps.length ? restartGaps.filter((gap) => gap <= 300).length / restartGaps.length * 100 : null,
     historyStart: times.length ? new Date(Math.min(...times)).toISOString() : null,
     historyEnd: times.length ? new Date(Math.max(...times)).toISOString() : null,
   };

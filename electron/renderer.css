@@ -224,7 +224,11 @@ select:focus {
   font-size: inherit;
 }
 
-.optimization-analytics-surface { overflow: auto; }
+.optimization-analytics-surface { overflow-x: hidden; overflow-y: scroll; scrollbar-color: rgba(69, 214, 193, 0.72) rgba(8, 25, 34, 0.72); scrollbar-width: thin; }
+.optimization-analytics-surface::-webkit-scrollbar { width: 11px; }
+.optimization-analytics-surface::-webkit-scrollbar-track { background: rgba(8, 25, 34, 0.72); border-radius: 8px; }
+.optimization-analytics-surface::-webkit-scrollbar-thumb { background: rgba(69, 214, 193, 0.72); border: 2px solid rgba(8, 25, 34, 0.72); border-radius: 8px; }
+.optimization-upgrading-page-guide { grid-column: 1 / -1; }
 .optimization-analytics-filter-bar { align-items: flex-end; overflow: visible; }
 .optimization-analytics-only-filter { flex-direction: row !important; align-items: center; gap: 7px; min-height: 31px; }
 .optimization-analytics-calendar-filter { position: relative; }
