@@ -85,6 +85,9 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(renderer, /points\.sort\(\(a,b\) => a\.hour-b\.hour\)\.slice\(1\)/);
   assert.match(renderer, /bindOptimizationAnalyticsTooltip\(snapshot/);
   assert.match(renderer, /bindOptimizationAnalyticsTooltip\(hitArea/);
+  assert.match(renderer, /optimizationAnalyticsTooltip\.getBoundingClientRect\(\)/);
+  assert.match(renderer, /window\.innerWidth - bounds\.width - margin/);
+  assert.match(renderer, /window\.innerHeight - bounds\.height - margin/);
   assert.match(renderer, /final \$\{factionLabel\} faction LP redemption/);
   assert.match(renderer, /optimization-line-hit/);
   assert.match(renderer, /rgba\(69, 214, 193/);

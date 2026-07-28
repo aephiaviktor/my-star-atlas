@@ -6557,10 +6557,17 @@ function appendOptimizationSvg(svg, tag, attributes = {}, text = '') {
 
 function showOptimizationAnalyticsTooltip(event, text) {
   if(!optimizationAnalyticsTooltip) return;
+  const margin = 8;
+  const offset = 12;
   optimizationAnalyticsTooltip.textContent = text;
   optimizationAnalyticsTooltip.hidden = false;
-  optimizationAnalyticsTooltip.style.left = `${event.clientX + 12}px`;
-  optimizationAnalyticsTooltip.style.top = `${event.clientY + 12}px`;
+  const bounds = optimizationAnalyticsTooltip.getBoundingClientRect();
+  const left = Math.max(margin, Math.min(event.clientX + offset, window.innerWidth - bounds.width - margin));
+  const preferredTop = event.clientY + offset;
+  const fallbackTop = event.clientY - bounds.height - offset;
+  const top = Math.max(margin, Math.min(preferredTop + bounds.height <= window.innerHeight - margin ? preferredTop : fallbackTop, window.innerHeight - bounds.height - margin));
+  optimizationAnalyticsTooltip.style.left = `${left}px`;
+  optimizationAnalyticsTooltip.style.top = `${top}px`;
 }
 
 function hideOptimizationAnalyticsTooltip() {
