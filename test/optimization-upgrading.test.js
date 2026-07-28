@@ -24,10 +24,12 @@ function extractFunction(source, name) {
   throw new Error(`${name} is incomplete`);
 }
 
-test('upgrading optimization backend joins snapshots and analytics history', () => {
+test('upgrading optimization backend joins snapshots, process evidence, and analytics history', () => {
   assert.match(main, /async function fetchUpgradingOptimization\(/);
   assert.match(main, /base\('optimization_upgrading'\)/);
   assert.match(main, /optimization_upgrading_component/);
+  assert.match(main, /lp_upgrade_process_history/);
+  assert.match(main, /summarizeUpgradingProcessHistory/);
   assert.doesNotMatch(main, /r\._measurement == "lp_per_profile" and r\._field == "lp"/);
   assert.match(main, /fetchRedeemedLpSummaryByDate\(settings\)/);
   assert.match(main, /const aephiaFaction = normalizeFaction\(/);
@@ -38,6 +40,35 @@ test('upgrading optimization backend joins snapshots and analytics history', () 
   assert.match(main, /mergeUpgradingOptimizationRows\(/);
   assert.match(main, /handleTrustedIpc\('optimization:upgrading'/);
   assert.match(preload, /getUpgradingOptimization:.*optimization:upgrading/);
+});
+
+test('process automation evidence deduplicates snapshots and summarizes exact repeat chains', () => {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext([
+    extractFunction(main, 'optimizationNumberQuantile'),
+    extractFunction(main, 'summarizeUpgradingProcessHistory'),
+    'this.summarize = summarizeUpgradingProcessHistory;',
+  ].join('\n'), context);
+  const process = (id, profile, start, end) => ({
+    process: id, profile, starbase: '0,-24', recipeKey: 'framework', quantity: 100,
+    durationSeconds: 3600, startTime: start, endTime: end,
+    _time: new Date(start * 1000).toISOString(),
+  });
+  const rows = [
+    process('a', 'p1', 1000, 4600), process('a', 'p1', 1000, 4600),
+    process('b', 'p1', 4674, 8274), process('c', 'p1', 8354, 11954),
+    process('d', 'p2', 2000, 5600),
+  ];
+  const result = context.summarize(rows);
+  assert.equal(result.snapshotRows, 5);
+  assert.equal(result.uniqueProcesses, 4);
+  assert.equal(result.profiles, 2);
+  assert.equal(result.repeatGroups, 1);
+  assert.equal(result.predecessorLinks, 2);
+  assert.equal(result.longestChain, 3);
+  assert.equal(result.restartGapMedianSeconds, 77);
+  assert.equal(result.restartWithin120, 2);
 });
 
 test('upgrading redemption scatter normalizes player LP by average hourly phantom crew', () => {
@@ -66,7 +97,8 @@ test('Optimization exposes Upgrading after Scanning with date filters, table, an
   assert.match(html, /data-optimization-subtab="scanning"[^>]*>Scanning</);
   assert.match(html, /data-optimization-subtab="upgrading"[^>]*>Upgrading</);
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
-  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-process-evidence-body']) assert.match(html, new RegExp(`id="${id}"`));
+  assert.match(html, /Process automation evidence/);
   assert.ok(html.indexOf('id="optimization-analytics-tooltip"') > html.indexOf('data-optimization-panel="upgrading"'), 'shared tooltip must live outside hidden analytics panels');
   assert.doesNotMatch(html, /id="optimization-upgrading-instance-filter"/);
   assert.doesNotMatch(renderer, /optimizationUpgradingInstanceFilter/);

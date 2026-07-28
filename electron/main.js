@@ -647,6 +647,60 @@ function mergeUpgradingOptimizationRows(aggregateRows, componentRows) {
   return [...byTime.values()];
 }
 
+function optimizationNumberQuantile(values, fraction) {
+  const sorted = (values || []).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const index = (sorted.length - 1) * fraction;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  return lower === upper ? sorted[lower] : sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+}
+
+function summarizeUpgradingProcessHistory(rows) {
+  const validRows = (rows || []).filter((row) => row?.process && row?.profile);
+  const byProcess = new Map();
+  for (const row of validRows) if (!byProcess.has(String(row.process))) byProcess.set(String(row.process), row);
+  const processes = [...byProcess.values()];
+  const groups = new Map();
+  for (const row of processes) {
+    const key = [row.profile, row.starbase, row.recipeKey || row.recipe || row.component, Number(row.quantity), Number(row.durationSeconds)].join('|');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const restartGaps = [];
+  let predecessorLinks = 0;
+  let repeatGroups = 0;
+  let longestChain = processes.length ? 1 : 0;
+  for (const group of groups.values()) {
+    group.sort((a, b) => Number(a.startTime) - Number(b.startTime));
+    if (group.length > 1) repeatGroups += 1;
+    longestChain = Math.max(longestChain, group.length);
+    for (let index = 1; index < group.length; index += 1) {
+      const gap = Number(group[index].startTime) - Number(group[index - 1].endTime);
+      if (!Number.isFinite(gap) || gap < -5) continue;
+      predecessorLinks += 1;
+      restartGaps.push(gap);
+    }
+  }
+  const times = validRows.map((row) => Date.parse(String(row._time || row.time || ''))).filter(Number.isFinite);
+  return {
+    snapshotRows: validRows.length,
+    uniqueProcesses: processes.length,
+    profiles: new Set(processes.map((row) => String(row.profile))).size,
+    repeatGroups,
+    predecessorLinks,
+    longestChain,
+    restartGapP25Seconds: optimizationNumberQuantile(restartGaps, 0.25),
+    restartGapMedianSeconds: optimizationNumberQuantile(restartGaps, 0.5),
+    restartGapP75Seconds: optimizationNumberQuantile(restartGaps, 0.75),
+    restartGapP90Seconds: optimizationNumberQuantile(restartGaps, 0.9),
+    restartWithin120: restartGaps.filter((gap) => gap <= 120).length,
+    restartWithin300: restartGaps.filter((gap) => gap <= 300).length,
+    historyStart: times.length ? new Date(Math.min(...times)).toISOString() : null,
+    historyEnd: times.length ? new Date(Math.max(...times)).toISOString() : null,
+  };
+}
+
 async function fetchUpgradingOptimization(payload = {}) {
   const settings = await readSettings();
   const bucket = String(settings.influxOptimizationBucket || 'optimization').trim();
@@ -664,18 +718,26 @@ async function fetchUpgradingOptimization(payload = {}) {
   |> filter(fn: (r) => r._measurement == "${measurement}" and r.faction == "${escapeFluxString(faction)}"${instanceFilter})
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
-  const [aggregateCsv, componentCsv, redeemedLpSummary] = await Promise.all([
+  const processBucket = String(settings.influxBucket || bucket).trim();
+  const processFactionAliases = factionInfluxAliases[aephiaFaction]?.faction || [faction];
+  const processFactionFilter = processFactionAliases.map((value) => `r.faction == "${escapeFluxString(value)}"`).join(' or ');
+  const [aggregateCsv, componentCsv, processCsv, redeemedLpSummary] = await Promise.all([
     queryInfluxFlux(querySettings, base('optimization_upgrading')),
     queryInfluxFlux(querySettings, `from(bucket: "${escapeFluxString(bucket)}")
   |> ${range}
   |> filter(fn: (r) => r._measurement == "optimization_upgrading_component" and r.faction == "${escapeFluxString(faction)}"${instanceFilter})
   |> pivot(rowKey: ["_time", "component"], columnKey: ["_field"], valueColumn: "_value")`),
+    queryInfluxFlux(settings, `from(bucket: "${escapeFluxString(processBucket)}")
+  |> ${range}
+  |> filter(fn: (r) => r._measurement == "lp_upgrade_process_history" and (${processFactionFilter}))
+  |> pivot(rowKey: ["_time", "faction", "instance", "profile", "process", "starbase", "component", "recipe", "recipeKey"], columnKey: ["_field"], valueColumn: "_value")`).catch(() => ''),
     fetchRedeemedLpSummaryByDate(settings).catch(() => ({ factionDaily: {}, playerDaily: {} })),
   ]);
   const rows = mergeUpgradingOptimizationRows(parseInfluxCsv(aggregateCsv), parseInfluxCsv(componentCsv));
   const playerDaily = Object.entries(redeemedLpSummary.playerDaily?.[aephiaFaction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
   const factionDaily = Object.entries(redeemedLpSummary.factionDaily?.[aephiaFaction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
-  return { ok: true, rows, playerDaily, factionDaily, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
+  const processEvidence = summarizeUpgradingProcessHistory(parseInfluxCsv(processCsv));
+  return { ok: true, rows, playerDaily, factionDaily, processEvidence, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 
 function getInfluxScopeNote(settings) {
