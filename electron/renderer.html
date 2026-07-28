@@ -96,12 +96,15 @@
             <div class="subtab-bar toolbar-tab-group" data-toolbar-section="fleet" role="tablist" aria-label="Fleet views" hidden>
               <button class="subtab-button active" type="button" aria-selected="true">My Fleet</button>
             </div>
-            <div class="subtab-bar toolbar-tab-group" data-toolbar-section="optimization" role="tablist" aria-label="Optimization views" hidden>
-              <button class="optimization-view-button subtab-button active" type="button" data-optimization-view="data" aria-selected="true">Data</button>
-              <button class="optimization-view-button subtab-button" type="button" data-optimization-view="analytics" aria-selected="false">Analytics</button>
-              <span class="optimization-tab-divider" aria-hidden="true"></span>
-              <button class="optimization-subtab-button subtab-button active" type="button" data-optimization-subtab="scanning" aria-selected="true">Scanning</button>
-              <button class="optimization-subtab-button subtab-button" type="button" data-optimization-subtab="upgrading" aria-selected="false">Upgrading</button>
+            <div class="optimization-toolbar-tabs toolbar-tab-group" data-toolbar-section="optimization" aria-label="Optimization views" hidden>
+              <div class="optimization-tab-row optimization-primary-tabs" role="tablist" aria-label="Optimization categories">
+                <button class="optimization-subtab-button subtab-button active" type="button" data-optimization-subtab="scanning" aria-selected="true">Scanning</button>
+                <button class="optimization-subtab-button subtab-button" type="button" data-optimization-subtab="upgrading" aria-selected="false">Upgrading</button>
+              </div>
+              <div class="optimization-tab-row optimization-secondary-tabs" role="tablist" aria-label="Optimization views">
+                <button class="optimization-view-button subtab-button active" type="button" data-optimization-view="data" aria-selected="true">Data</button>
+                <button class="optimization-view-button subtab-button" type="button" data-optimization-view="analytics" aria-selected="false">Analytics</button>
+              </div>
             </div>
             <div class="subtab-bar toolbar-tab-group" data-toolbar-section="earnings" role="tablist" aria-label="Earnings views" hidden>
               <button class="earnings-subtab-button subtab-button active" type="button" data-earnings-subtab="scanning" aria-selected="true">Scanning</button>

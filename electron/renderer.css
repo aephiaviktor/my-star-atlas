@@ -196,11 +196,32 @@ select:focus {
   min-width: 0;
 }
 
-.optimization-tab-divider {
-  align-self: stretch;
-  width: 1px;
-  margin: 3px 5px;
-  background: rgba(69, 214, 193, 0.28);
+.optimization-toolbar-tabs {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.optimization-tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.optimization-primary-tabs .subtab-button {
+  min-height: 32px;
+}
+
+.optimization-secondary-tabs {
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.optimization-secondary-tabs .subtab-button {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: inherit;
 }
 
 .optimization-analytics-surface { overflow: auto; }

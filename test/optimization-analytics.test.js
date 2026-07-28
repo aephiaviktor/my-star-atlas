@@ -71,7 +71,7 @@ test('scanning analytics keeps two-parameter combinations as distinct tests', ()
   assert.match(String(result.groups[0].value), /scanMin=/);
 });
 
-test('Optimization exposes Data and Analytics above Scanning and Upgrading', () => {
+test('Optimization exposes Data and Analytics for Scanning and Upgrading', () => {
   const html = fs.readFileSync(htmlPath, 'utf8');
   const css = fs.readFileSync(cssPath, 'utf8');
   assert.match(html, /data-optimization-view="data"[^>]*>Data/);
