@@ -1574,6 +1574,19 @@ select:focus {
   overflow: hidden;
 }
 
+.optimization-surface.optimization-analytics-surface {
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
+.optimization-process-evidence-wrap {
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow: visible;
+  scrollbar-gutter: auto;
+}
+
 .optimization-surface > .fleet-table-wrap {
   flex: 1 1 0;
   height: 0;
