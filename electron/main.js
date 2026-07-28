@@ -660,15 +660,28 @@ async function fetchUpgradingOptimization(payload = {}) {
   |> filter(fn: (r) => r._measurement == "${measurement}" and r.faction == "${escapeFluxString(faction)}"${instanceFilter})
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
-  const [aggregateCsv, componentCsv] = await Promise.all([
+  const sourceBucket = String(settings.influxBucket || '').trim();
+  const playerFlux = sourceBucket ? `from(bucket: "${escapeFluxString(sourceBucket)}")
+  |> ${range}
+  |> filter(fn: (r) => r._measurement == "lp_per_profile" and r._field == "lp")
+  |> filter(fn: (r) => r.faction == "${escapeFluxString(faction)}" and r.source == "redeemed"${instanceFilter})
+  |> group()
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> keep(columns: ["_time", "_value"])
+  |> sort(columns: ["_time"])` : '';
+  const [aggregateCsv, componentCsv, playerCsv, factionLpByDate] = await Promise.all([
     queryInfluxFlux(querySettings, base('optimization_upgrading')),
     queryInfluxFlux(querySettings, `from(bucket: "${escapeFluxString(bucket)}")
   |> ${range}
   |> filter(fn: (r) => r._measurement == "optimization_upgrading_component" and r.faction == "${escapeFluxString(faction)}"${instanceFilter})
   |> pivot(rowKey: ["_time", "component"], columnKey: ["_field"], valueColumn: "_value")`),
+    playerFlux ? queryInfluxFlux(settings, playerFlux).catch(() => '') : Promise.resolve(''),
+    fetchFactionRedeemedLpByDate(settings).catch(() => ({})),
   ]);
   const rows = mergeUpgradingOptimizationRows(parseInfluxCsv(aggregateCsv), parseInfluxCsv(componentCsv));
-  return { ok: true, rows, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
+  const playerDaily = parseInfluxCsv(playerCsv).map((row) => ({ date: String(row._time || '').slice(0, 10), lp: Number(row._value || 0) })).filter((row) => row.date && Number.isFinite(row.lp));
+  const factionDaily = Object.entries(factionLpByDate[faction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
+  return { ok: true, rows, playerDaily, factionDaily, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 
 function getInfluxScopeNote(settings) {

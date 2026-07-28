@@ -10,20 +10,23 @@ const html = fs.readFileSync('electron/renderer.html', 'utf8');
 
 const components = ['Framework', 'Electronics', 'Power Source', 'Electromagnet', 'Field Stabilizer', 'Particle Accelerator', 'Radiation Absorber', 'Survey Data Unit'];
 
-test('upgrading optimization backend joins aggregate and component snapshots', () => {
+test('upgrading optimization backend joins snapshots and analytics history', () => {
   assert.match(main, /async function fetchUpgradingOptimization\(/);
   assert.match(main, /base\('optimization_upgrading'\)/);
   assert.match(main, /optimization_upgrading_component/);
+  assert.match(main, /r\._measurement == "lp_per_profile" and r\._field == "lp"/);
+  assert.match(main, /r\.source == "redeemed"/);
+  assert.match(main, /fetchFactionRedeemedLpByDate\(settings\)/);
   assert.match(main, /mergeUpgradingOptimizationRows\(/);
   assert.match(main, /handleTrustedIpc\('optimization:upgrading'/);
   assert.match(preload, /getUpgradingOptimization:.*optimization:upgrading/);
 });
 
-test('Optimization exposes Upgrading after Scanning with date filters and a table', () => {
+test('Optimization exposes Upgrading after Scanning with date filters, table, and analytics charts', () => {
   assert.match(html, /data-optimization-subtab="scanning"[^>]*>Scanning</);
   assert.match(html, /data-optimization-subtab="upgrading"[^>]*>Upgrading</);
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
-  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart']) assert.match(html, new RegExp(`id="${id}"`));
   assert.doesNotMatch(html, /id="optimization-upgrading-instance-filter"/);
   assert.doesNotMatch(renderer, /optimizationUpgradingInstanceFilter/);
 });
@@ -34,4 +37,8 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(renderer, /label: `\$\{label\} Installed`/);
   assert.match(renderer, /function refreshUpgradingOptimization\(/);
   assert.match(renderer, /api\.getUpgradingOptimization/);
+  assert.match(renderer, /function buildUpgradingOptimizationAnalytics\(/);
+  assert.match(renderer, /function renderUpgradingOptimizationAnalytics\(/);
+  assert.match(renderer, /correlation/);
+  assert.match(renderer, /expected_total_lp_eod/);
 });

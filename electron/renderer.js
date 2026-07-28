@@ -62,6 +62,10 @@ const optimizationAnalyticsSummary = document.querySelector('#optimization-analy
 const optimizationAnalyticsValueChart = document.querySelector('#optimization-analytics-value-chart');
 const optimizationAnalyticsSectorChart = document.querySelector('#optimization-analytics-sector-chart');
 const optimizationAnalyticsRanking = document.querySelector('#optimization-analytics-ranking');
+const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
+const optimizationUpgradingRedemptionChart = document.querySelector('#optimization-upgrading-redemption-chart');
+const optimizationUpgradingForecastChart = document.querySelector('#optimization-upgrading-forecast-chart');
+const optimizationUpgradingErrorChart = document.querySelector('#optimization-upgrading-error-chart');
 const earningsSyncStatus = document.querySelector('#earnings-sync-status');
 const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
@@ -6552,6 +6556,65 @@ function renderScanningOptimizationAnalytics() {
   renderScanningOptimizationSectorChart(analytics);
 }
 
+function optimizationQuantile(values, fraction) {
+  const sorted = values.map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  if(!sorted.length) return null;
+  const index = (sorted.length - 1) * fraction;
+  const lower = Math.floor(index); const upper = Math.ceil(index);
+  return lower === upper ? sorted[lower] : sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+}
+
+function buildUpgradingOptimizationAnalytics(result, now = new Date()) {
+  const today = now.toISOString().slice(0, 10);
+  const factionByDay = new Map((result?.factionDaily || []).map((row) => [String(row.date), Number(row.lp)]));
+  const playerByDay = new Map((result?.playerDaily || []).map((row) => [String(row.date), Number(row.lp)]));
+  const scatter = [...factionByDay].filter(([date]) => date < today && playerByDay.has(date))
+    .map(([date, factionLp]) => ({ date, factionLp, playerLp: playerByDay.get(date) }))
+    .sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
+  const latestByHour = new Map();
+  for(const row of result?.rows || []) {
+    const time = String(row.time || row._time || ''); const ms = Date.parse(time); const value = Number(row.expected_total_lp_eod);
+    if(!Number.isFinite(ms) || !Number.isFinite(value)) continue;
+    const date = new Date(ms); const day = date.toISOString().slice(0, 10); const hour = date.getUTCHours(); const key = `${day}|${hour}`;
+    if(!latestByHour.has(key) || ms > latestByHour.get(key).ms) latestByHour.set(key, { day, hour, value, ms });
+  }
+  const byDay = new Map();
+  for(const point of latestByHour.values()) { if(!byDay.has(point.day)) byDay.set(point.day, []); byDay.get(point.day).push(point); }
+  const forecasts = [...byDay].map(([day, points]) => ({ day, points: points.sort((a,b) => a.hour-b.hour), actual: day < today ? factionByDay.get(day) ?? null : null, today: day === today }))
+    .sort((a,b) => a.day.localeCompare(b.day)).slice(-30);
+  const errors = new Map();
+  for(const day of forecasts) if(Number.isFinite(day.actual)) for(const point of day.points) {
+    if(!errors.has(point.hour)) errors.set(point.hour, []); errors.get(point.hour).push(point.value - day.actual);
+  }
+  const errorByHour = [...errors].sort((a,b) => a[0]-b[0]).map(([hour, values]) => ({ hour, median: optimizationQuantile(values,.5), q25: optimizationQuantile(values,.25), q75: optimizationQuantile(values,.75), count: values.length }));
+  return { scatter, forecasts, errorByHour };
+}
+
+function renderUpgradingChartAxes(svg, { minY = 0, maxY = 1, xMax = 24, xTicks = [0,6,12,18,24] } = {}) {
+  const width=760,height=280,left=62,right=16,top=12,bottom=35;
+  const x=(value)=>left+value/xMax*(width-left-right); const y=(value)=>top+(maxY-value)/Math.max(1,maxY-minY)*(height-top-bottom);
+  for(let tick=0;tick<=4;tick++){ const value=minY+(maxY-minY)*(4-tick)/4; const yy=top+(height-top-bottom)*tick/4; appendOptimizationSvg(svg,'line',{x1:left,x2:width-right,y1:yy,y2:yy,class:'grid-line'}); appendOptimizationSvg(svg,'text',{x:left-6,y:yy+3,'text-anchor':'end',class:'axis-label'},formatCompactNumber(value)); }
+  for(const value of xTicks) appendOptimizationSvg(svg,'text',{x:x(value),y:height-10,'text-anchor':'middle',class:'axis-label'},Math.abs(value) >= 1000 ? formatCompactNumber(value) : String(Math.round(value)));
+  return { x, y, width, height, left, right, top, bottom };
+}
+
+function renderUpgradingOptimizationAnalytics() {
+  const analytics = buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {});
+  if(optimizationUpgradingAnalyticsStatus) optimizationUpgradingAnalyticsStatus.textContent = `${analytics.scatter.length} completed comparison days · ${analytics.forecasts.length} forecast days · rolling 30 days · UTC`;
+  let svg=createOptimizationAnalyticsSvg(optimizationUpgradingRedemptionChart);
+  if(svg && analytics.scatter.length){ const maxX=Math.max(1,...analytics.scatter.map(r=>r.factionLp))*1.08,maxY=Math.max(1,...analytics.scatter.map(r=>r.playerLp))*1.08; const axes=renderUpgradingChartAxes(svg,{maxY,xMax:maxX,xTicks:[0,maxX/4,maxX/2,maxX*3/4,maxX]});
+    const meanX=analytics.scatter.reduce((s,r)=>s+r.factionLp,0)/analytics.scatter.length,meanY=analytics.scatter.reduce((s,r)=>s+r.playerLp,0)/analytics.scatter.length; const cov=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)*(r.playerLp-meanY),0),vx=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)**2,0),vy=analytics.scatter.reduce((s,r)=>s+(r.playerLp-meanY)**2,0); const correlation=vx&&vy?cov/Math.sqrt(vx*vy):null;
+    if(vx){ const slope=cov/vx,intercept=meanY-slope*meanX; const startY=Math.max(0,Math.min(maxY,intercept)),endY=Math.max(0,Math.min(maxY,intercept+slope*maxX)); appendOptimizationSvg(svg,'line',{x1:axes.x(0),y1:axes.y(startY),x2:axes.x(maxX),y2:axes.y(endY),class:'optimization-trend-line'}); }
+    analytics.scatter.forEach((row,index)=>{const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(row.factionLp),cy:axes.y(row.playerLp),r:5,fill:optimizationAnalyticsColor(index),class:'mean-marker'}); appendOptimizationSvg(dot,'title',{},`${row.date} · faction ${row.factionLp.toLocaleString()} LP · player ${row.playerLp.toLocaleString()} LP`);});
+    appendOptimizationSvg(svg,'text',{x:axes.left+4,y:axes.top+12,class:'axis-label'},`correlation ${correlation==null?'--':correlation.toFixed(2)}`);
+  }
+  svg=createOptimizationAnalyticsSvg(optimizationUpgradingForecastChart);
+  const forecastValues=analytics.forecasts.flatMap(d=>[...d.points.map(p=>p.value),...(Number.isFinite(d.actual)?[d.actual]:[])]);
+  if(svg&&forecastValues.length){const min=Math.min(...forecastValues),max=Math.max(...forecastValues),pad=Math.max(1,(max-min)*.08),axes=renderUpgradingChartAxes(svg,{minY:Math.max(0,min-pad),maxY:max+pad}); analytics.forecasts.forEach((day,index)=>{const color=day.today?'#45d6c1':optimizationAnalyticsColor(index); const line=appendOptimizationSvg(svg,'polyline',{points:day.points.map(p=>`${axes.x(p.hour)},${axes.y(p.value)}`).join(' '),fill:'none',stroke:color,'stroke-width':day.today?3:1.5,opacity:day.today?1:.7}); appendOptimizationSvg(line,'title',{},`${day.day} forecast`); for(const point of day.points){const snapshot=appendOptimizationSvg(svg,'circle',{cx:axes.x(point.hour),cy:axes.y(point.value),r:2.2,fill:color});appendOptimizationSvg(snapshot,'title',{},`${day.day} ${String(point.hour).padStart(2,'0')}:00 · expected ${point.value.toLocaleString()} LP`);} if(Number.isFinite(day.actual)){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(24),cy:axes.y(day.actual),r:4,fill:color,class:'mean-marker'});appendOptimizationSvg(dot,'title',{},`${day.day} actual ${day.actual.toLocaleString()} LP`);}});}
+  svg=createOptimizationAnalyticsSvg(optimizationUpgradingErrorChart);
+  if(svg&&analytics.errorByHour.length){const bound=Math.max(1,...analytics.errorByHour.flatMap(r=>[Math.abs(r.q25),Math.abs(r.q75)]))*1.1,axes=renderUpgradingChartAxes(svg,{minY:-bound,maxY:bound,xMax:23,xTicks:[0,6,12,18,23]}); appendOptimizationSvg(svg,'line',{x1:axes.left,x2:axes.width-axes.right,y1:axes.y(0),y2:axes.y(0),class:'optimization-zero-line'}); const polygon=[...analytics.errorByHour.map(r=>`${axes.x(r.hour)},${axes.y(r.q75)}`),...analytics.errorByHour.slice().reverse().map(r=>`${axes.x(r.hour)},${axes.y(r.q25)}`)].join(' '); appendOptimizationSvg(svg,'polygon',{points:polygon,class:'optimization-error-band'}); appendOptimizationSvg(svg,'polyline',{points:analytics.errorByHour.map(r=>`${axes.x(r.hour)},${axes.y(r.median)}`).join(' '),fill:'none',class:'optimization-error-line'}); for(const row of analytics.errorByHour){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(row.hour),cy:axes.y(row.median),r:3,fill:'#45d6c1'});appendOptimizationSvg(dot,'title',{},`${String(row.hour).padStart(2,'0')}:00 · median ${row.median.toLocaleString()} LP · middle 50% ${row.q25.toLocaleString()} to ${row.q75.toLocaleString()} · n=${row.count}`);}}
+}
+
 async function refreshScanningOptimizationAnalyticsData({ force = false } = {}) {
   if(!api.getScanningOptimization) return;
   const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
@@ -6698,6 +6761,7 @@ async function refreshUpgradingOptimization({ force = false } = {}) {
     latestUpgradingOptimizationResult = cached;
     optimizationUpgradingRows = cached.rows || [];
     renderUpgradingOptimizationTable();
+    renderUpgradingOptimizationAnalytics();
     optimizationUpgradingSyncStatus.textContent = `${optimizationUpgradingRows.length.toLocaleString()} cached rows · ${cached.bucket} · ${faction}`;
     return;
   }
@@ -6713,6 +6777,7 @@ async function refreshUpgradingOptimization({ force = false } = {}) {
   setCachedFilterResult(faction, 'optimizationUpgrading', result, start || '', stop || '');
   optimizationUpgradingRows = result.rows || [];
   renderUpgradingOptimizationTable();
+  renderUpgradingOptimizationAnalytics();
   optimizationUpgradingSyncStatus.textContent = `${optimizationUpgradingRows.length.toLocaleString()} rows · ${result.bucket} · ${normalizeFaction((latestSettings || getFormPayload()).faction)}`;
 }
 
@@ -6725,6 +6790,7 @@ function setActiveOptimizationSubtab(subtab) {
   document.querySelectorAll('[data-optimization-panel]').forEach((panel) => panel.classList.toggle('active', panel.dataset.optimizationPanel === subtab && panel.dataset.optimizationViewPanel === currentOptimizationView));
   renderOptimizationColumnControls();
   if (subtab === 'upgrading' && !latestUpgradingOptimizationResult) refreshUpgradingOptimization();
+  if (subtab === 'upgrading' && currentOptimizationView === 'analytics') renderUpgradingOptimizationAnalytics();
   if (subtab === 'scanning' && !latestOptimizationResult) refreshScanningOptimization();
   if (subtab === 'scanning' && currentOptimizationView === 'analytics') refreshScanningOptimizationAnalyticsData();
 }
