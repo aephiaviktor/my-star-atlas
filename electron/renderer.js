@@ -472,6 +472,7 @@ const cargoEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'travelModeTime', label: 'Travel Mode (time)' }),
   Object.freeze({ id: 'starbases', label: 'Starbase' }),
   Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
+  Object.freeze({ id: 'rental', label: 'Rental Costs' }),
   Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
   Object.freeze({ id: 'txsCostsPct', label: 'Txs Costs Pct' }),
@@ -539,6 +540,7 @@ const breakevenEarningsBaseColumns = Object.freeze([
   Object.freeze({ id: 'inventoryValue', label: 'Inventory Cost Basis' }),
   Object.freeze({ id: 'costCoverage', label: 'Cost Coverage' }),
   Object.freeze({ id: 'gmPrice', label: 'GM Price / Unit' }),
+  Object.freeze({ id: 'inventoryExternalValue', label: 'Inventory External Value' }),
   Object.freeze({ id: 'ledgerStatus', label: 'Ledger Status' }),
 ]);
 
@@ -557,7 +559,7 @@ const earningsColumnsBySubtab = Object.freeze({
 const earningsColumnState = {
   scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
-  cargo: new Set(['txsDaily', 'cargoCycles', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
+  cargo: new Set(['txsDaily', 'cargoCycles', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin', 'costsPerUnit']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
@@ -637,7 +639,8 @@ const earningsMetricGuideBySubtab = Object.freeze({
     travelModeTime: ['Share of recorded movement time spent in each travel mode.', 'Mode moveTime ÷ total movement moveTime, rounded to whole percentages totaling 100%.', 'Time-weighting represents long legs more accurately than counting movement transactions.'],
     starbases: ['Starbases touched by the fleet’s cargo activity.', 'Distinct recorded starbases joined into one row.', 'More locations can indicate a broader or more complex route.'],
     fuelCosts: ['ATLAS value of fuel consumed by cargo movement.', 'Fuel burned × current fuel price.', 'The main operating-resource cost represented in Cargo.'],
-    totalCosts: ['Estimated cargo operating cost represented by available data.', 'Fuel Costs + Txs Costs.', 'Cargo revenue is not tracked here, so this is a cost-efficiency view rather than profit.'],
+    rental: ['Daily rental rate for a managed cargo fleet.', 'Current rental contract rate in ATLAS per day.', 'Included in Total Costs for each UTC day represented by the fleet row.'],
+    totalCosts: ['Estimated cargo operating cost represented by available data.', 'Fuel Costs + Rental Costs + Txs Costs.', 'Cargo revenue is not tracked here, so this is a cost-efficiency view rather than profit.'],
     txsCostsPct: ['Transaction fees as a share of represented cargo costs.', '(Txs Costs ÷ Total Costs) × 100.', 'A high value means fees dominate fuel; reduce unnecessary transactions where practical.'],
     cargoVolume: ['Total cargo-space volume delivered by the fleet during the UTC day.', 'Σ delivered cargo volume from cargo-allocation telemetry.', 'Compare it with Cargo Capacity to see how much available hold space was used.'],
     cargoCapacity: ['Total cargo-space opportunity across completed cargo routes that day.', 'Fleet cargo capacity × sum of completed-cycle leg counts.', 'Transport contributes 2 legs per completed cycle; Supply Chain contributes targets + 1 legs. Warp jumps within a leg do not add capacity.'],
@@ -677,6 +680,7 @@ const earningsMetricGuideBySubtab = Object.freeze({
     inventoryValue: ['Estimated cost basis of current inventory.', 'Inventory × Total Cost / Unit.', 'The known weighted average is applied to the whole current inventory.'],
     costCoverage: ['Share of current inventory whose cost basis is estimated rather than directly represented.', '100% − known-cost coverage, rounded to a whole percent.', '100% tracked requires exact quantity reconciliation and no uncosted inventory; low coverage is still shown but should be treated as a rough estimate.'],
     gmPrice: ['Current Galactic Marketplace reference price.', 'Aephia /gm/resource pricingATL.priceATL.', 'Compare with Total Cost; it is a current market reference, not guaranteed sale proceeds.'],
+    inventoryExternalValue: ['Current external value of recorded inventory.', 'Inventory × GM Price / Unit.', 'This is a mark-to-market reference before marketplace fees, not guaranteed sale proceeds.'],
     ledgerStatus: ['Quantity reconciliation between current inventory and the event ledger.', 'Current Inventory − Ledger Quantity.', 'Reconciled can still include explicitly uncosted opening stock; surplus or shortfall identifies telemetry drift.'],
   }),
 });
@@ -713,6 +717,17 @@ const earningsChartMode = {
   crafting: 'total',
   upgrading: 'total',
 };
+
+const earningsCostBasisMode = {
+  crafting: 'internal',
+  upgrading: 'internal',
+};
+
+function applyEarningsCostBasis(row, subtab) {
+  if (earningsCostBasisMode[subtab] !== 'external') return row;
+  const basisValue = subtab === 'crafting' ? row.ingredientExternalValueAtlas : row.componentExternalValueAtlas;
+  return { ...row, ingCostsAtlas: basisValue, upgradingCostsAtlas: basisValue, totalCostsAtlas: row.externalTotalCostsAtlas, netProfitAtlas: row.externalNetProfitAtlas, netProfitPerCrew: row.externalNetProfitPerCrew, profitMarginPercent: row.externalProfitMarginPercent, costsPerUnitAtlas: row.externalCostsPerUnitAtlas };
+}
 
 const earningsSortKeyByColumnId = Object.freeze({
   date: 'isoDate',
@@ -5465,7 +5480,10 @@ function renderEarningsHeader(subtab = 'scanning') {
     appendEarningsHeaderCell(row, 'fleet', 'Fleet', sortState);
   }
   for (const column of visibleColumns.filter((column) => column.id !== 'color')) {
-    appendEarningsHeaderCell(row, column.id, column.label, sortState);
+    let label = column.label;
+    if (earningsCostBasisMode[subtab] === 'external' && column.id === 'ingCosts') label = 'Ingredient External Value';
+    if (earningsCostBasisMode[subtab] === 'external' && column.id === 'upgCosts') label = 'Component External Value';
+    appendEarningsHeaderCell(row, column.id, label, sortState);
   }
   tableHead.textContent = '';
   tableHead.appendChild(row);
@@ -5582,6 +5600,7 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'travelModeTime') return createTextCell(entry.travelModeTime?.label || '--');
   if (columnId === 'starbases') return createTextCell(entry.starbaseLabel || '--');
   if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas));
+  if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
   if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
   if (columnId === 'txsCostsPct') return createTextCell(formatPercentNumber(entry.txsCostsPercent, 0));
@@ -5817,7 +5836,7 @@ function renderEarningsCrafting(result) {
     return;
   }
 
-  const rows = Array.isArray(result.craftingRows) ? result.craftingRows : [];
+  const rows = Array.isArray(result.craftingRows) ? result.craftingRows.map((row) => applyEarningsCostBasis(row, 'crafting')) : [];
   populateEarningsFilterOptions('crafting', rows);
   renderEarningsHeader('crafting');
   const craftingMode = earningsChartMode.crafting;
@@ -5985,6 +6004,7 @@ function renderEarningsBreakeven(result) {
     tr.appendChild(createTextCell(entry.inventoryValue == null ? '--' : formatAtlasWhole(entry.inventoryValue)));
     tr.appendChild(createTextCell(entry.fullyTracked ? '100% tracked' : `${formatWholeNumber(entry.estimatedPercent ?? 100)}% estimated`));
     tr.appendChild(createTextCell(entry.gmPricePerUnit == null ? '--' : formatAtlasNumber(entry.gmPricePerUnit, 6)));
+    tr.appendChild(createTextCell(entry.inventoryExternalValue == null ? '--' : formatAtlasWhole(entry.inventoryExternalValue)));
     const status = entry.reconciliationStatus === 'reconciled'
       ? (Number(entry.uncostedQuantity || 0) > 1e-9 ? `Reconciled · ${formatWholeNumber(entry.uncostedQuantity)} uncosted` : 'Reconciled')
       : entry.reconciliationStatus === 'surplus'
@@ -6012,7 +6032,7 @@ function renderEarningsUpgradingEmpty(message) {
 }
 
 function renderEarningsUpgrading(result) {
-  const rows = Array.isArray(result?.upgradingRows) ? result.upgradingRows : [];
+  const rows = Array.isArray(result?.upgradingRows) ? result.upgradingRows.map((row) => applyEarningsCostBasis(row, 'upgrading')) : [];
   populateEarningsFilterOptions('upgrading', rows);
   renderEarningsHeader('upgrading');
   const colorMap = buildEarningsAssetColorMap(rows, (row) => row.asset || 'Unknown asset');
@@ -7576,6 +7596,22 @@ for (const filter of [optimizationUpgradingStartFilter, optimizationUpgradingSto
   filter?.addEventListener('change', () => refreshUpgradingOptimization());
 }
 optimizationLoadMore?.addEventListener('click', () => refreshScanningOptimization({ append: true }));
+
+for (const button of document.querySelectorAll('[data-earnings-cost-basis]')) {
+  button.addEventListener('click', () => {
+    const subtab = button.dataset.earningsCostBasis;
+    const mode = button.dataset.costBasisMode;
+    if (!(subtab in earningsCostBasisMode) || !['internal', 'external'].includes(mode)) return;
+    earningsCostBasisMode[subtab] = mode;
+    for (const sibling of document.querySelectorAll(`[data-earnings-cost-basis="${subtab}"]`)) {
+      const active = sibling.dataset.costBasisMode === mode;
+      sibling.classList.toggle('active', active);
+      sibling.setAttribute('aria-pressed', String(active));
+    }
+    if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
+    else renderEarningsUpgrading(latestEarningsResult);
+  });
+}
 
 loadInitialState().catch((error) => {
   console.error(error);

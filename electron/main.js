@@ -5188,7 +5188,8 @@ async function fetchEarningsSnapshot(payload) {
     if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
     const fuelCostsAtlas = fuelPriceAtl != null ? cargoRow.burnedFuel * fuelPriceAtl : null;
     const txsCostsAtlas = atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null;
-    const costParts = [fuelCostsAtlas, txsCostsAtlas].filter((value) => Number.isFinite(value));
+    const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
+    const costParts = [fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const netProfitAtlas = Number.isFinite(totalCostsAtlas) ? -totalCostsAtlas : null;
     return {
@@ -5207,6 +5208,7 @@ async function fetchEarningsSnapshot(payload) {
       cargoLegs: Number(cargoRow.cargoLegs) || 0,
       starbaseLabel: Array.isArray(cargoRow.starbases) && cargoRow.starbases.length ? cargoRow.starbases.join(', ') : '--',
       fuelCostsAtlas,
+      rentalRateAtlasPerDay,
       txsCostsAtlas,
       totalCostsAtlas,
       netProfitAtlas,
@@ -5401,6 +5403,13 @@ async function fetchEarningsSnapshot(payload) {
     const revenueAtlasPerDay = outputPriceAtl != null ? craftingRow.crafted * outputPriceAtl : null;
     const craftingBasis = craftingBasisByDay.get(`${craftingRow.isoDate}\n${craftingRow.starbase}\n${craftingRow.output}`);
     const ingCostsAtlas = craftingBasis && !craftingBasis.uncosted ? craftingBasis.basis : null;
+    const ingredientExternalValues = craftingRow.ingredients.map(({ input, amount }) => {
+      const price = getCurrentResourcePriceAtl(prices, input);
+      return price == null ? null : Number(amount) * price;
+    });
+    const ingredientExternalValueAtlas = ingredientExternalValues.length > 0 && ingredientExternalValues.every(Number.isFinite)
+      ? ingredientExternalValues.reduce((sum, value) => sum + value, 0)
+      : null;
     const feeCostsAtlas = Number.isFinite(Number(craftingRow.feeAmount)) ? Number(craftingRow.feeAmount) : 0;
     const txsCostsAtlas = atlasPerSol != null ? craftingRow.txCostSol * atlasPerSol : null;
     const totalCostsAtlas = Number.isFinite(ingCostsAtlas) && Number.isFinite(feeCostsAtlas) && Number.isFinite(txsCostsAtlas)
@@ -5416,12 +5425,21 @@ async function fetchEarningsSnapshot(payload) {
     const netProfitPerCrew = Number.isFinite(netProfitAtlas) && crew > 0
       ? netProfitAtlas / crew
       : null;
+    const externalTotalCostsAtlas = Number.isFinite(ingredientExternalValueAtlas) && Number.isFinite(feeCostsAtlas) && Number.isFinite(txsCostsAtlas)
+      ? ingredientExternalValueAtlas + feeCostsAtlas + txsCostsAtlas : null;
+    const externalNetProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(externalTotalCostsAtlas) ? revenueAtlasPerDay - externalTotalCostsAtlas : null;
     return {
       ...craftingRow,
       assetName: craftingRow.output,
       outputPriceAtl,
       revenueAtlasPerDay,
       ingCostsAtlas: Number.isFinite(ingCostsAtlas) ? ingCostsAtlas : null,
+      ingredientExternalValueAtlas,
+      externalTotalCostsAtlas,
+      externalNetProfitAtlas,
+      externalNetProfitPerCrew: Number.isFinite(externalNetProfitAtlas) && crew > 0 ? externalNetProfitAtlas / crew : null,
+      externalProfitMarginPercent: Number.isFinite(externalNetProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (externalNetProfitAtlas / revenueAtlasPerDay) * 100 : null,
+      externalCostsPerUnitAtlas: Number.isFinite(externalTotalCostsAtlas) && craftingRow.crafted > 0 ? externalTotalCostsAtlas / craftingRow.crafted : null,
       feeCostsAtlas,
       txsCostsAtlas,
       totalCostsAtlas,
@@ -5455,10 +5473,14 @@ async function fetchEarningsSnapshot(payload) {
     const revenueAtlasPerDay = lpValuePerComponentAtl != null ? row.installed * lpValuePerComponentAtl : null;
     const componentBasis = upgradingBasisByDay.get(`${row.isoDate}\n${row.starbase}\n${row.asset}`);
     const upgradingCostsAtlas = componentBasis && !componentBasis.uncosted ? componentBasis.basis : null;
+    const componentPriceAtl = getCurrentResourcePriceAtl(prices, row.asset);
+    const componentExternalValueAtlas = componentPriceAtl == null ? null : row.installed * componentPriceAtl;
     const txsCostsAtlas = atlasPerSol != null ? row.txCostSol * atlasPerSol : null;
     const totalCostsAtlas = Number.isFinite(upgradingCostsAtlas) && Number.isFinite(txsCostsAtlas) ? upgradingCostsAtlas + txsCostsAtlas : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas) ? revenueAtlasPerDay - totalCostsAtlas : null;
-    return { ...row, output: row.asset, assetName: row.asset, factionRedeemedLp: Number.isFinite(factionRedeemedLp) ? factionRedeemedLp : null, lpPerComponent, lpValuePerComponentAtl, revenueAtlasPerDay, upgradingCostsAtlas, txsCostsAtlas, totalCostsAtlas, netProfitAtlas, netProfitPerCrew: Number.isFinite(netProfitAtlas) && row.crew > 0 ? netProfitAtlas / row.crew : null, profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (netProfitAtlas / revenueAtlasPerDay) * 100 : null };
+    const externalTotalCostsAtlas = Number.isFinite(componentExternalValueAtlas) && Number.isFinite(txsCostsAtlas) ? componentExternalValueAtlas + txsCostsAtlas : null;
+    const externalNetProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(externalTotalCostsAtlas) ? revenueAtlasPerDay - externalTotalCostsAtlas : null;
+    return { ...row, output: row.asset, assetName: row.asset, factionRedeemedLp: Number.isFinite(factionRedeemedLp) ? factionRedeemedLp : null, lpPerComponent, lpValuePerComponentAtl, revenueAtlasPerDay, upgradingCostsAtlas, componentExternalValueAtlas, txsCostsAtlas, totalCostsAtlas, netProfitAtlas, netProfitPerCrew: Number.isFinite(netProfitAtlas) && row.crew > 0 ? netProfitAtlas / row.crew : null, profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (netProfitAtlas / revenueAtlasPerDay) * 100 : null, externalTotalCostsAtlas, externalNetProfitAtlas, externalNetProfitPerCrew: Number.isFinite(externalNetProfitAtlas) && row.crew > 0 ? externalNetProfitAtlas / row.crew : null, externalProfitMarginPercent: Number.isFinite(externalNetProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (externalNetProfitAtlas / revenueAtlasPerDay) * 100 : null };
   }).sort((a,b) => String(b.isoDate).localeCompare(String(a.isoDate)) || a.starbase.localeCompare(b.starbase) || a.asset.localeCompare(b.asset));
 
   crafting.sort((a, b) => {

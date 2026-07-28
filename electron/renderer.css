@@ -1281,6 +1281,15 @@ select:focus {
   overflow: hidden;
 }
 
+.earnings-cost-basis-switch {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(11, 27, 36, 0.6);
+  overflow: hidden;
+}
+
 .earnings-chart-mode-btn {
   appearance: none;
   border: 0;

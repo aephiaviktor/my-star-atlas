@@ -58,6 +58,9 @@ function buildLedgerBreakevenRows({ ledgerRows = [], inventoryRows = [], prices 
       baseCostPerUnit, cargoCostPerUnit, landedCostPerUnit,
       inventoryValue: landedCostPerUnit == null ? null : inventory * landedCostPerUnit,
       gmPricePerUnit: Number(resourcePriceByName[normalizeAssetName(asset)]) || null,
+      inventoryExternalValue: Number(resourcePriceByName[normalizeAssetName(asset)]) > 0
+        ? inventory * Number(resourcePriceByName[normalizeAssetName(asset)])
+        : null,
       knownCostQuantity,
       estimatedPercent,
       fullyTracked,

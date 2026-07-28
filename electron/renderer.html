@@ -1169,6 +1169,7 @@
                       <th scope="col">Travel Mode (time)</th>
                       <th scope="col">Starbase</th>
                       <th scope="col">Fuel Costs</th>
+                      <th scope="col">Rental Costs</th>
                       <th scope="col">Txs Costs</th>
                       <th scope="col">Total Costs</th>
                       <th scope="col">Txs Costs Pct</th>
@@ -1306,6 +1307,10 @@
                   </select>
                 </label>
                 <span class="activity-filter-note">Filters combine with AND</span>
+                <div class="earnings-cost-basis-switch" role="group" aria-label="Crafting valuation basis" title="Internal cost basis values ingredients using your actual internal acquisition costs. External cost basis values ingredients using current Galactic Marketplace prices.">
+                  <button class="earnings-chart-mode-btn active" type="button" data-earnings-cost-basis="crafting" data-cost-basis-mode="internal" aria-pressed="true">Internal Cost Basis</button>
+                  <button class="earnings-chart-mode-btn" type="button" data-earnings-cost-basis="crafting" data-cost-basis-mode="external" aria-pressed="false">External Cost Basis</button>
+                </div>
               </div>
               <div id="earnings-crafting-sync-status" class="fleet-sync-status" role="status">Awaiting crafting data</div>
               <div class="fleet-table-wrap">
@@ -1356,6 +1361,7 @@
                 <label class="activity-filter"><span>Starbase</span><select id="earnings-upgrading-starbase-filter"><option value="">All Starbases</option></select></label>
                 <label class="activity-filter"><span>Asset</span><select id="earnings-upgrading-asset-filter"><option value="">All Assets</option></select></label>
                 <span class="activity-filter-note">Filters combine with AND · Today excluded</span>
+                <div class="earnings-cost-basis-switch" role="group" aria-label="Upgrading valuation basis" title="Internal cost basis values components using your actual internal acquisition costs. External cost basis values components using current Galactic Marketplace prices."><button class="earnings-chart-mode-btn active" type="button" data-earnings-cost-basis="upgrading" data-cost-basis-mode="internal" aria-pressed="true">Internal Cost Basis</button><button class="earnings-chart-mode-btn" type="button" data-earnings-cost-basis="upgrading" data-cost-basis-mode="external" aria-pressed="false">External Cost Basis</button></div>
               </div>
               <div id="earnings-upgrading-sync-status" class="fleet-sync-status" role="status">Awaiting upgrading data</div>
               <div class="fleet-table-wrap"><table class="fleet-table earnings-table"><thead id="earnings-upgrading-table-head"><tr><th>Date</th><th>Starbase</th><th>Asset</th><th>Installed</th><th>Avg Crew</th><th>Revenue</th><th>Component Cost Basis</th><th>Txs Costs</th><th>Total Costs</th><th>Net Profit</th><th>Net Profit per Crew</th><th>Profit Margin</th></tr></thead><tbody id="earnings-upgrading-table-body"><tr class="empty-row"><td colspan="12">No upgrading data loaded</td></tr></tbody></table></div>
@@ -1370,7 +1376,7 @@
                 <label class="breakeven-inventory-toggle"><input id="earnings-breakeven-hide-low-inventory" type="checkbox"> Hide Inventory ≤ 2</label>
               </div>
               <div id="earnings-breakeven-sync-status" class="fleet-sync-status" role="status">Awaiting breakeven data</div>
-              <div class="fleet-table-wrap"><table class="fleet-table earnings-table"><thead id="earnings-breakeven-table-head"><tr><th>Starbase</th><th>Asset</th><th>Inventory</th><th>Scanning C/U</th><th>Mining C/U</th><th>Crafting C/U</th><th>LM C/U</th><th>GM C/U</th><th>Base Cost / Unit</th><th>Cargo Cost / Unit</th><th>Total Cost / Unit</th><th>Inventory Cost Basis</th><th>Cost Coverage</th><th>GM Price / Unit</th><th>Ledger Status</th></tr></thead><tbody id="earnings-breakeven-table-body"><tr class="empty-row"><td colspan="15">No breakeven data loaded</td></tr></tbody></table></div>
+              <div class="fleet-table-wrap"><table class="fleet-table earnings-table"><thead id="earnings-breakeven-table-head"><tr><th>Starbase</th><th>Asset</th><th>Inventory</th><th>Scanning C/U</th><th>Mining C/U</th><th>Crafting C/U</th><th>LM C/U</th><th>GM C/U</th><th>Base Cost / Unit</th><th>Cargo Cost / Unit</th><th>Total Cost / Unit</th><th>Inventory Cost Basis</th><th>Cost Coverage</th><th>GM Price / Unit</th><th>Inventory External Value</th><th>Ledger Status</th></tr></thead><tbody id="earnings-breakeven-table-body"><tr class="empty-row"><td colspan="16">No breakeven data loaded</td></tr></tbody></table></div>
               <details class="earnings-metric-guide" open><summary>How to read this table</summary><div id="earnings-breakeven-metric-guide" class="earnings-metric-guide-list"></div></details>
             </section>
           </div>
