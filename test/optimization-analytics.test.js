@@ -156,6 +156,18 @@ test('Optimization exposes Data and Analytics for Scanning and Upgrading', () =>
   assert.match(css, /optimization-analytics-grid/);
 });
 
+test('Scanning Data filters by optimization parameter instead of status', () => {
+  const html = fs.readFileSync(htmlPath, 'utf8');
+  const renderer = fs.readFileSync(rendererPath, 'utf8');
+  const main = fs.readFileSync(mainPath, 'utf8');
+  assert.match(html, /id="optimization-parameter-filter"/);
+  assert.doesNotMatch(html, /id="optimization-status-filter"/);
+  assert.match(renderer, /optimizationParameterFilter/);
+  assert.doesNotMatch(renderer, /optimizationStatusFilter/);
+  assert.match(main, /payload\.optimizationParameter/);
+  assert.match(main, /r\.optimizationParameter ==/);
+});
+
 test('analytics requests may load complete scan history without enlarging Data pages', () => {
   const main = fs.readFileSync(mainPath, 'utf8');
   assert.match(main, /payload\.analytics === true \? 5000 : 500/);
@@ -165,5 +177,5 @@ test('analytics requests may load complete scan history without enlarging Data p
   assert.match(main, /pivot[\s\S]*\$\{experimentFilter\}/);
   assert.match(main, /r\.experimentId ==/);
   assert.match(renderer, /experimentId,\n    offset/);
-  assert.match(renderer, /fleet, experimentId, eventType, operation, status/);
+  assert.match(renderer, /fleet, experimentId, eventType, operation, optimizationParameter/);
 });

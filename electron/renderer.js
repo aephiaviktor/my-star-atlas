@@ -50,7 +50,7 @@ const optimizationFleetFilter = document.querySelector('#optimization-fleet-filt
 const optimizationExperimentFilter = document.querySelector('#optimization-experiment-filter');
 const optimizationEventFilter = document.querySelector('#optimization-event-filter');
 const optimizationOperationFilter = document.querySelector('#optimization-operation-filter');
-const optimizationStatusFilter = document.querySelector('#optimization-status-filter');
+const optimizationParameterFilter = document.querySelector('#optimization-parameter-filter');
 const optimizationUpgradingSyncStatus = document.querySelector('#optimization-upgrading-sync-status');
 const optimizationUpgradingTableHead = document.querySelector('#optimization-upgrading-table-head');
 const optimizationUpgradingTableBody = document.querySelector('#optimization-upgrading-table-body');
@@ -6982,9 +6982,9 @@ async function refreshScanningOptimization({ append = false, force = false } = {
   const experimentId = optimizationExperimentFilter?.value || '__all__';
   const eventType = optimizationEventFilter.value;
   const operation = optimizationOperationFilter.value;
-  const status = optimizationStatusFilter.value;
+  const optimizationParameter = optimizationParameterFilter?.value || '__all__';
   const cached = !append && !force
-    ? getCachedFilterResult(faction, 'optimizationScanning', start || '', stop || '', fleet, experimentId, eventType, operation, status)
+    ? getCachedFilterResult(faction, 'optimizationScanning', start || '', stop || '', fleet, experimentId, eventType, operation, optimizationParameter)
     : null;
   if (cached) {
     latestOptimizationResult = cached;
@@ -6995,6 +6995,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
     populateOptimizationFilter(optimizationFleetFilter, optimizationRows, 'fleet', 'All fleets');
     populateOptimizationFilter(optimizationExperimentFilter, optimizationRows, 'experimentId', 'All experiments');
     populateOptimizationFilter(optimizationOperationFilter, optimizationRows, 'operation', 'All operations');
+    populateOptimizationFilter(optimizationParameterFilter, optimizationRows, 'optimizationParameter', 'All optimization parameters');
     optimizationLoadMore.hidden = !cached.hasMore;
     optimizationSyncStatus.textContent = `${optimizationRows.length.toLocaleString()} cached rows · ${cached.bucket} · ${faction}`;
     renderScanningOptimizationAnalytics();
@@ -7008,7 +7009,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
     fleet,
     eventType,
     operation,
-    status,
+    optimizationParameter,
     experimentId,
     offset: append ? optimizationRows.length : 0,
     limit: 500,
@@ -7020,7 +7021,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
     return;
   }
   latestOptimizationResult = result;
-  if (!append) setCachedFilterResult(faction, 'optimizationScanning', result, start || '', stop || '', fleet, experimentId, eventType, operation, status);
+  if (!append) setCachedFilterResult(faction, 'optimizationScanning', result, start || '', stop || '', fleet, experimentId, eventType, operation, optimizationParameter);
   optimizationRows = append ? [...optimizationRows, ...result.rows] : result.rows;
   const discovered = getOrderedOptimizationColumns(new Set([...optimizationColumns, ...(result.columns || [])]));
   let discoveredNewColumn = false;
@@ -7037,6 +7038,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
   populateOptimizationFilter(optimizationFleetFilter, optimizationRows, 'fleet', 'All fleets');
   populateOptimizationFilter(optimizationExperimentFilter, optimizationRows, 'experimentId', 'All experiments');
   populateOptimizationFilter(optimizationOperationFilter, optimizationRows, 'operation', 'All operations');
+  populateOptimizationFilter(optimizationParameterFilter, optimizationRows, 'optimizationParameter', 'All optimization parameters');
   optimizationLoadMore.hidden = !result.hasMore;
   optimizationSyncStatus.textContent = `${optimizationRows.length.toLocaleString()} rows · ${result.bucket} · ${normalizeFaction((latestSettings || getFormPayload()).faction)}`;
   renderScanningOptimizationAnalytics();
@@ -7754,7 +7756,7 @@ form.addEventListener('input', () => {
 
 fleetSearchInput.addEventListener('input', renderFleetSearch);
 
-for (const filter of [optimizationStartFilter, optimizationStopFilter, optimizationFleetFilter, optimizationExperimentFilter, optimizationEventFilter, optimizationOperationFilter, optimizationStatusFilter]) {
+for (const filter of [optimizationStartFilter, optimizationStopFilter, optimizationFleetFilter, optimizationExperimentFilter, optimizationEventFilter, optimizationOperationFilter, optimizationParameterFilter]) {
   filter?.addEventListener('change', () => refreshScanningOptimization());
 }
 for (const filter of [optimizationStartFilter, optimizationStopFilter]) {
