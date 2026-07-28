@@ -87,6 +87,8 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(renderer, /bindOptimizationAnalyticsTooltip\(hitArea/);
   assert.match(renderer, /optimization-line-hit/);
   assert.match(renderer, /rgba\(69, 214, 193/);
+  assert.match(renderer, /analytics\.scatter\.forEach.*?fill:'#45d6c1'/);
+  assert.doesNotMatch(renderer, /analytics\.scatter\.forEach.*?optimizationAnalyticsColor/);
   assert.match(renderer, /#f59e0b.*?isToday\?/);
   assert.match(renderer, /actual final/);
   assert.match(renderer, /forecast error/);
