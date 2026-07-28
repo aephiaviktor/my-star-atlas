@@ -34,25 +34,27 @@ function loadAnalytics() {
     extractFunction(source, 'parseScanningOptimizationValues'),
     "const scanningOptimizationParameterNames = Object.freeze({ scanMin: 'minProb', scanMin2: 'instantStrikeoutProb', scanMin3: 'successStrikeoutProb' });",
     extractFunction(source, 'normalizeScanningOptimizationParameter'),
+    extractFunction(source, 'buildScanningOptimizationExperimentCatalog'),
     extractFunction(source, 'buildScanningOptimizationAnalytics'),
+    'this.catalog = buildScanningOptimizationExperimentCatalog;',
     'this.build = buildScanningOptimizationAnalytics;'
   ].join('\n'), context);
-  return context.build;
+  return { build: context.build, catalog: context.catalog };
 }
 
 test('scanning analytics selects the latest experiment and ranks value groups', () => {
-  const build = loadAnalytics();
+  const { build } = loadAnalytics();
   const rows = [
-    { time: '2026-07-27T10:00:00Z', event_type: 'scan_result', experimentId: 'old', optimizationValues: '{"scanMin":8}', fleet: 'A', success: true, sduFound: 1 },
-    { time: '2026-07-27T11:00:00Z', event_type: 'scan_result', experimentId: 'new', optimizationValues: '{"scanMin":8}', fleet: 'A', success: true, sduFound: 0, resultSectorX: 1, resultSectorY: 2 },
-    { time: '2026-07-27T11:10:00Z', event_type: 'scan_result', experimentId: 'new', optimizationValues: '{"scanMin":8}', fleet: 'A', success: true, sduFound: 2, resultSectorX: 2, resultSectorY: 2 },
-    { time: '2026-07-27T11:20:00Z', event_type: 'scan_result', experimentId: 'new', optimizationValues: '{"scanMin":12}', fleet: 'A', success: false, sduFound: 0, resultSectorX: 3, resultSectorY: 2 },
-    { time: '2026-07-27T11:30:00Z', event_type: 'transaction', experimentId: 'new', optimizationValues: '{"scanMin":12}', fleet: 'A', success: true, sduFound: 99 }
+    { time: '2026-07-26T10:00:00Z', event_type: 'scan_result', experimentId: 'scan-20260726-old-10', optimizationValues: '{"scanMin":8}', fleet: 'A', success: true, sduFound: 1 },
+    { time: '2026-07-27T11:00:00Z', event_type: 'scan_result', experimentId: 'scan-20260727-new-10', optimizationValues: '{"scanMin":8}', fleet: 'A', success: true, sduFound: 0, resultSectorX: 1, resultSectorY: 2 },
+    { time: '2026-07-27T11:10:00Z', event_type: 'scan_result', experimentId: 'scan-20260727-new-10', optimizationValues: '{"scanMin":8}', fleet: 'A', success: true, sduFound: 2, resultSectorX: 2, resultSectorY: 2 },
+    { time: '2026-07-27T11:20:00Z', event_type: 'scan_result', experimentId: 'scan-20260727-new-10', optimizationValues: '{"scanMin":12}', fleet: 'A', success: false, sduFound: 0, resultSectorX: 3, resultSectorY: 2 },
+    { time: '2026-07-27T11:30:00Z', event_type: 'transaction', experimentId: 'scan-20260727-new-10', optimizationValues: '{"scanMin":12}', fleet: 'A', success: true, sduFound: 99 }
   ];
   const result = build(rows);
-  assert.equal(result.experimentId, 'new');
+  assert.equal(result.experimentId, 'scan-20260727-new-10');
   assert.equal(result.samples.length, 3);
-  assert.deepEqual(Array.from(result.experiments), ['new', 'old']);
+  assert.deepEqual(Array.from(result.experiments), ['scan-20260727-new-10', 'scan-20260726-old-10']);
   assert.equal(result.groups.length, 2);
   const eight = result.groups.find((group) => group.value === 8);
   assert.equal(eight.scans, 2);
@@ -67,7 +69,7 @@ test('scanning analytics selects the latest experiment and ranks value groups', 
 
 
 test('scanning analytics merges legacy experiment ids through previousExperimentId aliases', () => {
-  const build = loadAnalytics();
+  const { build } = loadAnalytics();
   const result = build([
     { time: '2026-07-27T11:00:00Z', event_type: 'scan_result', experimentId: 'scan-ms3j1zln-2j0r7l', optimizationValues: '{"scanMin":8}', fleet: 'SF01-OPOD', success: true, sduFound: 1 },
     { time: '2026-07-27T11:10:00Z', event_type: 'scan_result', experimentId: 'scan-20260728-SF01_OPOD-290', previousExperimentId: 'scan-ms3j1zln-2j0r7l', optimizationValues: '{"scanMin":8}', fleet: 'SF01-OPOD', success: true, sduFound: 2 }
@@ -78,10 +80,10 @@ test('scanning analytics merges legacy experiment ids through previousExperiment
 });
 
 test('scanning analytics distinguishes telemetry samples from persisted runtime progress', () => {
-  const build = loadAnalytics();
+  const { build } = loadAnalytics();
   const result = build([
-    { time: '2026-07-27T11:00:00Z', event_type: 'scan_result', experimentId: 'run', optimizationValues: '{"scanMin":8}', optimizationCompletedScans: 172, optimizationTotalScans: 290, fleet: 'A', success: true, sduFound: 1 },
-    { time: '2026-07-27T11:10:00Z', event_type: 'scan_result', experimentId: 'run', optimizationValues: '{"scanMin":8}', optimizationCompletedScans: 173, optimizationTotalScans: 290, fleet: 'A', success: true, sduFound: 2 }
+    { time: '2026-07-27T11:00:00Z', event_type: 'scan_result', experimentId: 'scan-20260727-run-290', optimizationValues: '{"scanMin":8}', optimizationCompletedScans: 172, optimizationTotalScans: 290, fleet: 'A', success: true, sduFound: 1 },
+    { time: '2026-07-27T11:10:00Z', event_type: 'scan_result', experimentId: 'scan-20260727-run-290', optimizationValues: '{"scanMin":8}', optimizationCompletedScans: 173, optimizationTotalScans: 290, fleet: 'A', success: true, sduFound: 2 }
   ]);
   assert.equal(result.samples.length, 2);
   assert.equal(result.runtimeCompletedScans, 173);
@@ -90,15 +92,35 @@ test('scanning analytics distinguishes telemetry samples from persisted runtime 
 });
 
 test('scanning analytics keeps two-parameter combinations as distinct tests', () => {
-  const build = loadAnalytics();
+  const { build } = loadAnalytics();
   const result = build([
-    { time: '2026-07-27T11:00:00Z', event_type: 'scan_result', experimentId: 'combo', optimizationValues: '{"scanMin":8,"scanMin2":3}', fleet: 'A', success: true, sduFound: 1 },
-    { time: '2026-07-27T11:10:00Z', event_type: 'scan_result', experimentId: 'combo', optimizationValues: '{"scanMin":12,"scanMin2":3}', fleet: 'A', success: true, sduFound: 0 }
+    { time: '2026-07-27T11:00:00Z', event_type: 'scan_result', experimentId: 'scan-20260727-combo-20', optimizationValues: '{"scanMin":8,"scanMin2":3}', fleet: 'A', success: true, sduFound: 1 },
+    { time: '2026-07-27T11:10:00Z', event_type: 'scan_result', experimentId: 'scan-20260727-combo-20', optimizationValues: '{"scanMin":12,"scanMin2":3}', fleet: 'A', success: true, sduFound: 0 }
   ]);
   assert.equal(result.groups.length, 2);
   assert.ok(result.groups.every((group) => group.parameter === 'Combined'));
   assert.match(String(result.groups[0].value), /minProb=/);
   assert.match(String(result.groups[0].value), /instantStrikeoutProb=/);
+});
+
+test('scanning analytics catalogs experiment start dates and defaults to optimization-only data', () => {
+  const { build, catalog } = loadAnalytics();
+  const rows = [
+    { time: '2026-07-28T08:00:00Z', event_type: 'scan_result', experimentId: 'scan-20260728-SF01_OPOD-290', optimizationValues: '{"scanMin":8}' },
+    { time: '2026-07-29T08:00:00Z', event_type: 'scan_result', experimentId: 'record-20260729-SF02_RANGER', optimizationValues: '{"scanMin":12}' },
+    { time: '2026-07-27T08:00:00Z', event_type: 'scan_result', experimentId: 'scan-ms3j1zln-2j0r7l', optimizationValues: '{"scanMin":16}' }
+  ];
+  const optimizationCatalog = catalog(rows, true);
+  assert.deepEqual(Array.from(optimizationCatalog.dates, entry => entry.date), ['2026-07-28', '2026-07-27']);
+  assert.equal(optimizationCatalog.dates[0].hasOptimization, true);
+  assert.equal(optimizationCatalog.dates[0].hasRecording, false);
+  assert.equal(build(rows).experimentId, 'scan-20260728-SF01_OPOD-290');
+
+  const completeCatalog = catalog(rows, false);
+  assert.deepEqual(Array.from(completeCatalog.dates, entry => entry.date), ['2026-07-29', '2026-07-28', '2026-07-27']);
+  assert.equal(completeCatalog.dates[0].hasRecording, true);
+  assert.equal(build(rows, '__latest__', { onlyOptimization: false, startDate: '2026-07-29' }).experimentId, 'record-20260729-SF02_RANGER');
+  assert.equal(build(rows, 'record-20260729-SF02_RANGER', { onlyOptimization: false, startDate: '2026-07-28' }).experimentId, 'scan-20260728-SF01_OPOD-290');
 });
 
 test('scanning analytics ranks one selected parameter and charts all its values', () => {
@@ -115,6 +137,12 @@ test('scanning analytics ranks one selected parameter and charts all its values'
   assert.match(html, />Scan success</);
   assert.match(css, /optimization-analytics-ranking-wrap/);
   assert.match(css, /optimization-route-line/);
+  assert.match(html, /id="optimization-analytics-date-calendar"/);
+  assert.match(html, /id="optimization-analytics-only-optimization"[^>]*checked/);
+  assert.match(html, /Only Optimization data/);
+  assert.match(renderer, /renderScanningOptimizationDateCalendar/);
+  assert.match(renderer, /optimization-calendar-day--optimization/);
+  assert.match(renderer, /optimization-calendar-day--recording/);
 });
 
 test('Optimization exposes Data and Analytics for Scanning and Upgrading', () => {

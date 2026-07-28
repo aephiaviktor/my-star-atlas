@@ -826,7 +826,23 @@
           </div>
           <div class="optimization-panel" data-optimization-view-panel="analytics" data-optimization-panel="scanning">
             <section class="work-surface optimization-surface optimization-analytics-surface">
-              <div class="activity-filter-bar optimization-filter-bar">
+              <div class="activity-filter-bar optimization-filter-bar optimization-analytics-filter-bar">
+                <div class="activity-filter optimization-analytics-calendar-filter">Start date
+                  <details id="optimization-analytics-date-picker" class="optimization-calendar-picker">
+                    <summary id="optimization-analytics-date-summary">Latest optimization date</summary>
+                    <div class="optimization-calendar-popover">
+                      <div class="optimization-calendar-header">
+                        <button id="optimization-analytics-calendar-previous" type="button" aria-label="Previous month">‹</button>
+                        <strong id="optimization-analytics-calendar-month"></strong>
+                        <button id="optimization-analytics-calendar-next" type="button" aria-label="Next month">›</button>
+                      </div>
+                      <div class="optimization-calendar-weekdays" aria-hidden="true"><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span></div>
+                      <div id="optimization-analytics-date-calendar" class="optimization-calendar-grid" role="grid" aria-label="Experiment start dates"></div>
+                      <div class="optimization-calendar-legend"><span><i class="optimization-calendar-dot optimization-calendar-dot--optimization"></i>Optimization</span><span><i class="optimization-calendar-dot optimization-calendar-dot--recording"></i>Record only</span></div>
+                    </div>
+                  </details>
+                </div>
+                <label class="activity-filter optimization-analytics-only-filter"><input id="optimization-analytics-only-optimization" type="checkbox" checked /> Only Optimization data</label>
                 <label class="activity-filter">Experiment
                   <select id="optimization-analytics-experiment"><option value="__latest__">Latest experiment</option></select>
                 </label>

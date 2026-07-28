@@ -56,6 +56,13 @@ const optimizationUpgradingTableHead = document.querySelector('#optimization-upg
 const optimizationUpgradingTableBody = document.querySelector('#optimization-upgrading-table-body');
 const optimizationUpgradingStartFilter = document.querySelector('#optimization-upgrading-start-filter');
 const optimizationUpgradingStopFilter = document.querySelector('#optimization-upgrading-stop-filter');
+const optimizationAnalyticsDatePicker = document.querySelector('#optimization-analytics-date-picker');
+const optimizationAnalyticsDateSummary = document.querySelector('#optimization-analytics-date-summary');
+const optimizationAnalyticsCalendarPrevious = document.querySelector('#optimization-analytics-calendar-previous');
+const optimizationAnalyticsCalendarNext = document.querySelector('#optimization-analytics-calendar-next');
+const optimizationAnalyticsCalendarMonth = document.querySelector('#optimization-analytics-calendar-month');
+const optimizationAnalyticsDateCalendar = document.querySelector('#optimization-analytics-date-calendar');
+const optimizationAnalyticsOnlyOptimization = document.querySelector('#optimization-analytics-only-optimization');
 const optimizationAnalyticsExperiment = document.querySelector('#optimization-analytics-experiment');
 const optimizationAnalyticsMetric = document.querySelector('#optimization-analytics-metric');
 const optimizationAnalyticsParameter = document.querySelector('#optimization-analytics-parameter');
@@ -314,6 +321,8 @@ let latestOptimizationResult = null;
 let optimizationRows = [];
 let optimizationAnalyticsRows = [];
 let optimizationAnalyticsLoadedFaction = '';
+let selectedScanningOptimizationDate = '';
+let scanningOptimizationCalendarMonth = '';
 let selectedScanningOptimizationParameter = '';
 let optimizationColumns = [];
 let optimizationSelectedColumns = new Set();
@@ -6433,7 +6442,7 @@ function normalizeScanningOptimizationParameter(parameter) {
   return scanningOptimizationParameterNames[String(parameter || '')] || String(parameter || '').replace(/^scan/, '').replace(/^./, character => character.toLowerCase());
 }
 
-function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest__') {
+function buildScanningOptimizationExperimentCatalog(rows, onlyOptimization = true) {
   const scanRows = (Array.isArray(rows) ? rows : []).filter((row) => String(row?.event_type || row?.eventType || '') === 'scan_result');
   const experimentAliases = new Map();
   for (const row of scanRows) {
@@ -6450,15 +6459,65 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
     }
     return current;
   };
-  const experimentTimes = new Map();
+  const experimentMetadata = new Map();
   for (const row of scanRows) {
     const experimentId = canonicalExperimentId(getOptimizationExperimentId(row));
     const time = Date.parse(String(row?.time || ''));
-    if(experimentId && Number.isFinite(time)) experimentTimes.set(experimentId, Math.max(time, experimentTimes.get(experimentId) || 0));
+    if(!experimentId || !Number.isFinite(time)) continue;
+    const existing = experimentMetadata.get(experimentId) || { experimentId, earliest: time, latest: time };
+    existing.earliest = Math.min(existing.earliest, time);
+    existing.latest = Math.max(existing.latest, time);
+    experimentMetadata.set(experimentId, existing);
   }
-  const experiments = [...experimentTimes.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
-  const requestedExperimentId = String(selectedExperiment || '');
-  const experimentId = selectedExperiment === '__latest__' ? (experiments[0] || '') : canonicalExperimentId(requestedExperimentId);
+  const experiments = [...experimentMetadata.values()].map((metadata) => {
+    const readableDate = metadata.experimentId.match(/^(?:scan|record)-(\d\d\d\d)(\d\d)(\d\d)-/);
+    const type = metadata.experimentId.startsWith('record-') ? 'recording' : 'optimization';
+    return {
+      ...metadata,
+      type,
+      date: readableDate ? `${readableDate[1]}-${readableDate[2]}-${readableDate[3]}` : new Date(metadata.earliest).toISOString().slice(0, 10),
+    };
+  }).filter((metadata) => !onlyOptimization || metadata.type === 'optimization')
+    .sort((a, b) => b.latest - a.latest || b.experimentId.localeCompare(a.experimentId));
+  const dateMap = new Map();
+  for(const metadata of experiments) {
+    if(!dateMap.has(metadata.date)) dateMap.set(metadata.date, { date: metadata.date, hasOptimization: false, hasRecording: false, experiments: [] });
+    const entry = dateMap.get(metadata.date);
+    entry.hasOptimization ||= metadata.type === 'optimization';
+    entry.hasRecording ||= metadata.type === 'recording';
+    entry.experiments.push(metadata.experimentId);
+  }
+  return {
+    experiments: experiments.map((metadata) => metadata.experimentId),
+    dates: [...dateMap.values()].sort((a, b) => b.date.localeCompare(a.date)),
+    metadata: experiments,
+  };
+}
+
+function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest__', options = null) {
+  const scanRows = (Array.isArray(rows) ? rows : []).filter((row) => String(row?.event_type || row?.eventType || '') === 'scan_result');
+  const experimentAliases = new Map();
+  for (const row of scanRows) {
+    const experimentId = getOptimizationExperimentId(row);
+    const previousExperimentId = String(row?.previousExperimentId || row?.previous_experiment_id || '').trim();
+    if(experimentId && previousExperimentId && previousExperimentId !== experimentId) experimentAliases.set(previousExperimentId, experimentId);
+  }
+  const canonicalExperimentId = (id) => {
+    let current = String(id || '').trim();
+    const seen = new Set();
+    while(experimentAliases.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = experimentAliases.get(current);
+    }
+    return current;
+  };
+  const onlyOptimization = options?.onlyOptimization !== false;
+  const catalog = buildScanningOptimizationExperimentCatalog(scanRows, onlyOptimization);
+  const selectedDate = String(options?.startDate || '');
+  const experimentDate = new Map(catalog.metadata.map((metadata) => [metadata.experimentId, metadata.date]));
+  const experiments = catalog.experiments.filter((id) => !selectedDate || experimentDate.get(id) === selectedDate);
+  const requestedExperimentId = canonicalExperimentId(String(selectedExperiment || ''));
+  const experimentId = selectedExperiment === '__latest__' || !experiments.includes(requestedExperimentId) ? (experiments[0] || '') : requestedExperimentId;
   const selectedRows = scanRows.filter((row) => canonicalExperimentId(getOptimizationExperimentId(row)) === experimentId)
     .sort((a, b) => Date.parse(String(a.time || '')) - Date.parse(String(b.time || '')));
   const runtimeCompletedScans = selectedRows.reduce((maximum, row) => {
@@ -6522,6 +6581,7 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
   return {
     experimentId,
     experiments,
+    catalog,
     samples,
     groups,
     runtimeCompletedScans,
@@ -6578,6 +6638,53 @@ function bindOptimizationAnalyticsTooltip(node, text) {
   node?.addEventListener('pointerenter', event => showOptimizationAnalyticsTooltip(event, text));
   node?.addEventListener('pointermove', event => showOptimizationAnalyticsTooltip(event, text));
   node?.addEventListener('pointerleave', hideOptimizationAnalyticsTooltip);
+}
+
+function renderScanningOptimizationDateCalendar(catalog) {
+  const dates = Array.isArray(catalog?.dates) ? catalog.dates : [];
+  const availableDates = new Map(dates.map((entry) => [entry.date, entry]));
+  if(!availableDates.has(selectedScanningOptimizationDate)) selectedScanningOptimizationDate = dates[0]?.date || '';
+  if(!scanningOptimizationCalendarMonth) scanningOptimizationCalendarMonth = selectedScanningOptimizationDate.slice(0, 7) || new Date().toISOString().slice(0, 7);
+  if(optimizationAnalyticsDateSummary) optimizationAnalyticsDateSummary.textContent = selectedScanningOptimizationDate || 'No experiment dates';
+  if(!optimizationAnalyticsDateCalendar) return;
+  const [year, month] = scanningOptimizationCalendarMonth.split('-').map(Number);
+  const monthStart = new Date(Date.UTC(year, month - 1, 1));
+  if(!Number.isFinite(monthStart.getTime())) return;
+  const monthLabel = monthStart.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  if(optimizationAnalyticsCalendarMonth) optimizationAnalyticsCalendarMonth.textContent = monthLabel;
+  optimizationAnalyticsDateCalendar.replaceChildren();
+  const leadingDays = (monthStart.getUTCDay() + 6) % 7;
+  for(let index = 0; index < leadingDays; index += 1) {
+    const spacer = document.createElement('span'); spacer.className = 'optimization-calendar-day-spacer'; optimizationAnalyticsDateCalendar.append(spacer);
+  }
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  for(let day = 1; day <= daysInMonth; day += 1) {
+    const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const entry = availableDates.get(date);
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'optimization-calendar-day'; button.textContent = String(day); button.disabled = !entry;
+    if(entry?.hasOptimization) button.classList.add('optimization-calendar-day--optimization');
+    if(entry?.hasRecording) button.classList.add('optimization-calendar-day--recording');
+    if(date === selectedScanningOptimizationDate) button.classList.add('optimization-calendar-day--selected');
+    if(entry) {
+      button.title = `${entry.experiments.length} experiment${entry.experiments.length === 1 ? '' : 's'} started`;
+      button.addEventListener('click', () => {
+        selectedScanningOptimizationDate = date;
+        if(optimizationAnalyticsExperiment) optimizationAnalyticsExperiment.value = '__latest__';
+        optimizationAnalyticsDatePicker?.removeAttribute('open');
+        renderScanningOptimizationAnalytics();
+      });
+    }
+    optimizationAnalyticsDateCalendar.append(button);
+  }
+}
+
+function moveScanningOptimizationCalendarMonth(offset) {
+  const [year, month] = scanningOptimizationCalendarMonth.split('-').map(Number);
+  const next = new Date(Date.UTC(year, month - 1 + offset, 1));
+  scanningOptimizationCalendarMonth = Number.isFinite(next.getTime()) ? next.toISOString().slice(0, 7) : new Date().toISOString().slice(0, 7);
+  const rows = optimizationAnalyticsRows.length ? optimizationAnalyticsRows : optimizationRows;
+  renderScanningOptimizationDateCalendar(buildScanningOptimizationExperimentCatalog(rows, optimizationAnalyticsOnlyOptimization?.checked !== false));
 }
 
 function renderScanningOptimizationValueChart(analytics, metric, selectedParameter) {
@@ -6657,7 +6764,15 @@ function renderScanningOptimizationSectorChart(analytics, selectedParameter) {
 
 function renderScanningOptimizationAnalytics() {
   const selected = optimizationAnalyticsExperiment?.value || '__latest__';
-  const analytics = buildScanningOptimizationAnalytics(optimizationAnalyticsRows.length ? optimizationAnalyticsRows : optimizationRows, selected);
+  const rows = optimizationAnalyticsRows.length ? optimizationAnalyticsRows : optimizationRows;
+  const onlyOptimization = optimizationAnalyticsOnlyOptimization?.checked !== false;
+  const catalog = buildScanningOptimizationExperimentCatalog(rows, onlyOptimization);
+  if(!catalog.dates.some((entry) => entry.date === selectedScanningOptimizationDate)) {
+    selectedScanningOptimizationDate = catalog.dates[0]?.date || '';
+    scanningOptimizationCalendarMonth = selectedScanningOptimizationDate.slice(0, 7);
+  }
+  renderScanningOptimizationDateCalendar(catalog);
+  const analytics = buildScanningOptimizationAnalytics(rows, selected, { onlyOptimization, startDate: selectedScanningOptimizationDate });
   if(optimizationAnalyticsExperiment) {
     const prior = selected;
     optimizationAnalyticsExperiment.replaceChildren(new Option('Latest experiment', '__latest__'), ...analytics.experiments.map((id) => new Option(id, id)));
@@ -7185,6 +7300,14 @@ document.querySelectorAll('.optimization-view-button').forEach((button) => {
 optimizationAnalyticsExperiment?.addEventListener('change', renderScanningOptimizationAnalytics);
 optimizationAnalyticsMetric?.addEventListener('change', renderScanningOptimizationAnalytics);
 optimizationAnalyticsParameter?.addEventListener('change', () => { selectedScanningOptimizationParameter = optimizationAnalyticsParameter.value; renderScanningOptimizationAnalytics(); });
+optimizationAnalyticsOnlyOptimization?.addEventListener('change', () => {
+  selectedScanningOptimizationDate = '';
+  scanningOptimizationCalendarMonth = '';
+  if(optimizationAnalyticsExperiment) optimizationAnalyticsExperiment.value = '__latest__';
+  renderScanningOptimizationAnalytics();
+});
+optimizationAnalyticsCalendarPrevious?.addEventListener('click', () => moveScanningOptimizationCalendarMonth(-1));
+optimizationAnalyticsCalendarNext?.addEventListener('click', () => moveScanningOptimizationCalendarMonth(1));
 
 renderEarningsColumnControls();
 setupEarningsFilterHandlers();
