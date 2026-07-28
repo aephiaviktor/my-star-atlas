@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getEarningsSnapshot: (payload) => ipcRenderer.invoke('earnings:snapshot', payload),
   testInflux: (payload) => ipcRenderer.invoke('influx:test', payload),
   getDailySdu: (payload) => ipcRenderer.invoke('sdu:daily', payload),
+  getDailySduConsumption: (payload) => ipcRenderer.invoke('sdu:consumption', payload),
   getDailyMining: (payload) => ipcRenderer.invoke('mining:daily', payload),
   getDailyCrafting: (payload) => ipcRenderer.invoke('crafting:daily', payload),
   getDailyProduction: (payload) => ipcRenderer.invoke('production:daily', payload),

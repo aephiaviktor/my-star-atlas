@@ -35,6 +35,31 @@ async function fetchWithInfluxRetry(fetchAttempt, options = {}) {
   throw lastError || new Error('influx_request_failed');
 }
 
+function createAsyncTtlCache(options = {}) {
+  const ttlMs = Number.isFinite(options.ttlMs) ? options.ttlMs : 60_000;
+  const now = typeof options.now === 'function' ? options.now : Date.now;
+  const values = new Map();
+  const pending = new Map();
+
+  async function get(key, loader) {
+    const cached = values.get(key);
+    if (cached && now() - cached.storedAt <= ttlMs) return cached.value;
+    if (pending.has(key)) return pending.get(key);
+
+    const request = Promise.resolve()
+      .then(loader)
+      .then((value) => {
+        values.set(key, { value, storedAt: now() });
+        return value;
+      })
+      .finally(() => pending.delete(key));
+    pending.set(key, request);
+    return request;
+  }
+
+  return { get };
+}
+
 async function timedSource(name, task) {
   const startedAt = Date.now();
   try {
@@ -59,6 +84,7 @@ async function loadSduSources({ production, consumption }) {
 }
 
 module.exports = {
+  createAsyncTtlCache,
   fetchWithInfluxRetry,
   isTransientStatus,
   loadSduSources,

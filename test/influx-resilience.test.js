@@ -2,9 +2,44 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  createAsyncTtlCache,
   fetchWithInfluxRetry,
   loadSduSources,
 } = require('../electron/influx-resilience');
+
+
+test('createAsyncTtlCache deduplicates concurrent loads and reuses a fresh result', async () => {
+  let calls = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const cache = createAsyncTtlCache({ ttlMs: 1_000 });
+  const loader = async () => {
+    calls += 1;
+    await gate;
+    return { total: 42 };
+  };
+
+  const first = cache.get('USTUR', loader);
+  const second = cache.get('USTUR', loader);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  release();
+  assert.deepEqual(await first, { total: 42 });
+  assert.deepEqual(await second, { total: 42 });
+  assert.deepEqual(await cache.get('USTUR', loader), { total: 42 });
+  assert.equal(calls, 1);
+});
+
+test('createAsyncTtlCache reloads expired results', async () => {
+  let now = 100;
+  let calls = 0;
+  const cache = createAsyncTtlCache({ ttlMs: 50, now: () => now });
+  const loader = async () => ({ call: ++calls });
+
+  assert.deepEqual(await cache.get('MUD', loader), { call: 1 });
+  now = 151;
+  assert.deepEqual(await cache.get('MUD', loader), { call: 2 });
+});
 
 test('loadSduSources starts production and consumption concurrently', async () => {
   let release;
