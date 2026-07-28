@@ -14,11 +14,13 @@ test('upgrading optimization backend joins snapshots and analytics history', () 
   assert.match(main, /async function fetchUpgradingOptimization\(/);
   assert.match(main, /base\('optimization_upgrading'\)/);
   assert.match(main, /optimization_upgrading_component/);
-  assert.match(main, /r\._measurement == "lp_per_profile" and r\._field == "lp"/);
-  assert.match(main, /r\.source == "redeemed"/);
-  assert.match(main, /fetchFactionRedeemedLpByDate\(settings\)/);
+  assert.doesNotMatch(main, /r\._measurement == "lp_per_profile" and r\._field == "lp"/);
+  assert.match(main, /fetchRedeemedLpSummaryByDate\(settings\)/);
   assert.match(main, /const aephiaFaction = normalizeFaction\(/);
-  assert.match(main, /factionLpByDate\[aephiaFaction\]/);
+  assert.match(main, /playerProfiles/);
+  assert.match(main, /playerRow\?\.contribution/);
+  assert.match(main, /redeemedLpSummary\.playerDaily\?\.\[aephiaFaction\]/);
+  assert.match(main, /redeemedLpSummary\.factionDaily\?\.\[aephiaFaction\]/);
   assert.match(main, /mergeUpgradingOptimizationRows\(/);
   assert.match(main, /handleTrustedIpc\('optimization:upgrading'/);
   assert.match(preload, /getUpgradingOptimization:.*optimization:upgrading/);

@@ -661,27 +661,17 @@ async function fetchUpgradingOptimization(payload = {}) {
   |> filter(fn: (r) => r._measurement == "${measurement}" and r.faction == "${escapeFluxString(faction)}"${instanceFilter})
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
-  const sourceBucket = String(settings.influxBucket || '').trim();
-  const playerFlux = sourceBucket ? `from(bucket: "${escapeFluxString(sourceBucket)}")
-  |> ${range}
-  |> filter(fn: (r) => r._measurement == "lp_per_profile" and r._field == "lp")
-  |> filter(fn: (r) => r.faction == "${escapeFluxString(faction)}" and r.source == "redeemed"${instanceFilter})
-  |> group()
-  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> keep(columns: ["_time", "_value"])
-  |> sort(columns: ["_time"])` : '';
-  const [aggregateCsv, componentCsv, playerCsv, factionLpByDate] = await Promise.all([
+  const [aggregateCsv, componentCsv, redeemedLpSummary] = await Promise.all([
     queryInfluxFlux(querySettings, base('optimization_upgrading')),
     queryInfluxFlux(querySettings, `from(bucket: "${escapeFluxString(bucket)}")
   |> ${range}
   |> filter(fn: (r) => r._measurement == "optimization_upgrading_component" and r.faction == "${escapeFluxString(faction)}"${instanceFilter})
   |> pivot(rowKey: ["_time", "component"], columnKey: ["_field"], valueColumn: "_value")`),
-    playerFlux ? queryInfluxFlux(settings, playerFlux).catch(() => '') : Promise.resolve(''),
-    fetchFactionRedeemedLpByDate(settings).catch(() => ({})),
+    fetchRedeemedLpSummaryByDate(settings).catch(() => ({ factionDaily: {}, playerDaily: {} })),
   ]);
   const rows = mergeUpgradingOptimizationRows(parseInfluxCsv(aggregateCsv), parseInfluxCsv(componentCsv));
-  const playerDaily = parseInfluxCsv(playerCsv).map((row) => ({ date: String(row._time || '').slice(0, 10), lp: Number(row._value || 0) })).filter((row) => row.date && Number.isFinite(row.lp));
-  const factionDaily = Object.entries(factionLpByDate[aephiaFaction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
+  const playerDaily = Object.entries(redeemedLpSummary.playerDaily?.[aephiaFaction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
+  const factionDaily = Object.entries(redeemedLpSummary.factionDaily?.[aephiaFaction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
   return { ok: true, rows, playerDaily, factionDaily, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 
@@ -3527,7 +3517,7 @@ function extractExportedJsonObject(source, exportName) {
   return null;
 }
 
-async function fetchFactionRedeemedLpByDate(settings) {
+async function fetchRedeemedLpSummaryByDate(settings) {
   const now = Date.now();
   if (aephiaLpSummaryCache && aephiaLpSummaryCache.expiresAt > now) return aephiaLpSummaryCache.data;
   const apiKey = String(settings?.aephiaApiKey || '').trim();
@@ -3538,25 +3528,36 @@ async function fetchFactionRedeemedLpByDate(settings) {
   });
   if (!response.ok) throw new Error(`aephia_lp_summary_${response.status}`);
   const payload = await response.json();
-  const result = {};
+  const result = { factionDaily: {}, playerDaily: {} };
+  const normalizedProfiles = normalizePlayerProfiles(settings, normalizeFaction(settings.faction));
   const addRows = (factions, getDate) => {
     for (const [name, rows] of Object.entries(factions || {})) {
       const faction = normalizeFaction(name === 'Ustur' ? 'USTUR' : name);
-      if (!result[faction]) result[faction] = {};
+      const playerProfile = String(normalizedProfiles[faction] || '').trim();
+      if (!result.factionDaily[faction]) result.factionDaily[faction] = {};
+      if (!result.playerDaily[faction]) result.playerDaily[faction] = {};
       for (const row of Array.isArray(rows) ? rows : []) {
         const date = getDate(row);
         const redeemedLp = Number(row?.redeemedLp);
-        if (date && Number.isFinite(redeemedLp) && redeemedLp > 0) result[faction][date] = redeemedLp;
+        if (date && Number.isFinite(redeemedLp) && redeemedLp > 0) result.factionDaily[faction][date] = redeemedLp;
+        if (!date || !playerProfile) continue;
+        const playerRow = (Array.isArray(row?.playerProfiles) ? row.playerProfiles : []).find((profile) => String(profile?.profile || '').trim() === playerProfile);
+        const playerLp = Number(playerRow?.contribution);
+        if (Number.isFinite(playerLp) && playerLp > 0) result.playerDaily[faction][date] = playerLp;
       }
     }
   };
   // Interval snapshots cover the API's rolling window. Taking the last
-  // snapshot for each UTC date gives the daily faction redemption; finalized
-  // rows are applied afterwards so they remain authoritative when available.
+  // snapshot for each UTC date gives the daily faction/player redemption;
+  // finalized rows are applied afterwards so they remain authoritative.
   addRows(payload?.interval?.factions, (row) => String(row?.dateTime || '').slice(0, 10));
   addRows(payload?.dailyFinal?.factions, (row) => String(row?.date || '').slice(0, 10));
   aephiaLpSummaryCache = { data: result, expiresAt: now + 5 * 60 * 1000 };
   return result;
+}
+
+async function fetchFactionRedeemedLpByDate(settings) {
+  return (await fetchRedeemedLpSummaryByDate(settings)).factionDaily;
 }
 
 async function fetchAephiaResourceData() {
