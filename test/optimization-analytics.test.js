@@ -30,6 +30,7 @@ function loadAnalytics() {
   const context = {};
   vm.createContext(context);
   vm.runInContext([
+    extractFunction(source, 'getOptimizationExperimentId'),
     extractFunction(source, 'parseScanningOptimizationValues'),
     "const scanningOptimizationParameterNames = Object.freeze({ scanMin: 'minProb', scanMin2: 'instantStrikeoutProb', scanMin3: 'successStrikeoutProb' });",
     extractFunction(source, 'normalizeScanningOptimizationParameter'),
@@ -64,6 +65,18 @@ test('scanning analytics selects the latest experiment and ranks value groups', 
   assert.equal(eight.parameter, 'minProb');
 });
 
+
+test('scanning analytics merges legacy experiment ids through previousExperimentId aliases', () => {
+  const build = loadAnalytics();
+  const result = build([
+    { time: '2026-07-27T11:00:00Z', event_type: 'scan_result', experimentId: 'scan-ms3j1zln-2j0r7l', optimizationValues: '{"scanMin":8}', fleet: 'SF01-OPOD', success: true, sduFound: 1 },
+    { time: '2026-07-27T11:10:00Z', event_type: 'scan_result', experimentId: 'scan-20260728-SF01_OPOD-290', previousExperimentId: 'scan-ms3j1zln-2j0r7l', optimizationValues: '{"scanMin":8}', fleet: 'SF01-OPOD', success: true, sduFound: 2 }
+  ]);
+  assert.equal(result.experimentId, 'scan-20260728-SF01_OPOD-290');
+  assert.deepEqual(Array.from(result.experiments), ['scan-20260728-SF01_OPOD-290']);
+  assert.equal(result.samples.length, 2);
+});
+
 test('scanning analytics keeps two-parameter combinations as distinct tests', () => {
   const build = loadAnalytics();
   const result = build([
@@ -76,18 +89,20 @@ test('scanning analytics keeps two-parameter combinations as distinct tests', ()
   assert.match(String(result.groups[0].value), /instantStrikeoutProb=/);
 });
 
-test('scanning analytics ranking selects one parameter test for the distribution chart', () => {
+test('scanning analytics ranks one selected parameter and charts all its values', () => {
   const renderer = fs.readFileSync(rendererPath, 'utf8');
   const html = fs.readFileSync(htmlPath, 'utf8');
   const css = fs.readFileSync(cssPath, 'utf8');
-  assert.match(renderer, /selectedScanningOptimizationGroupKey/);
-  assert.match(renderer, /Select a parameter test in the table below to display its distribution/);
-  assert.match(renderer, /tr\.classList\.toggle\('selected'/);
-  assert.match(renderer, /showOptimizationAnalyticsTooltip/);
-  assert.match(html, /id="optimization-analytics-tooltip"/);
+  assert.match(renderer, /selectedScanningOptimizationParameter/);
+  assert.match(renderer, /optimizationAnalyticsParameter\?\.replaceChildren/);
+  assert.match(renderer, /parameterGroups = analytics\.groups\.filter/);
+  assert.match(renderer, /renderScanningOptimizationValueChart\(analytics, metric, selectedScanningOptimizationParameter\)/);
+  assert.match(renderer, /optimization-route-arrow/);
+  assert.match(html, /id="optimization-analytics-parameter"/);
+  assert.match(html, /id="optimization-experiment-filter"/);
   assert.match(html, />Scan success</);
-  assert.match(css, /\.optimization-analytics-tooltip/);
-  assert.match(css, /optimization-analytics-ranking.*tr\.selected/s);
+  assert.match(css, /optimization-analytics-ranking-wrap/);
+  assert.match(css, /optimization-route-line/);
 });
 
 test('Optimization exposes Data and Analytics for Scanning and Upgrading', () => {
@@ -107,4 +122,6 @@ test('analytics requests may load complete scan history without enlarging Data p
   const renderer = fs.readFileSync(rendererPath, 'utf8');
   assert.match(renderer, /eventType: 'scan_result'/);
   assert.match(renderer, /limit: 5000, analytics: true/);
+  assert.match(main, /\['experimentId', payload\.experimentId\]/);
+  assert.match(renderer, /experimentId,\n    offset/);
 });

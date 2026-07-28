@@ -263,6 +263,10 @@ select:focus {
 .optimization-analytics-chart .optimization-zero-line { stroke: rgba(248, 250, 252, 0.6); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .optimization-analytics-chart .optimization-error-band { fill: rgba(34, 211, 238, 0.18); }
 .optimization-analytics-chart .optimization-error-line { stroke: var(--accent); stroke-width: 2.5; }
+.optimization-analytics-chart .optimization-route-line { stroke: rgba(248, 250, 252, 0.45); stroke-width: 1.6; pointer-events: stroke; }
+.optimization-analytics-chart .optimization-route-arrow-head { fill: rgba(248, 250, 252, 0.65); }
+.optimization-analytics-chart .optimization-route-start { stroke: #22c55e; stroke-width: 2.5; }
+.optimization-analytics-chart .optimization-route-end { stroke: #f59e0b; stroke-width: 2.5; }
 .optimization-analytics-chart .optimization-hover-target { fill: transparent; stroke: none; pointer-events: all; cursor: crosshair; }
 .optimization-analytics-chart .optimization-line-hit { fill: none; stroke: transparent; pointer-events: stroke; cursor: crosshair; }
 .optimization-analytics-chart .optimization-forecast-line { stroke-linejoin: round; stroke-linecap: round; }
@@ -279,9 +283,10 @@ select:focus {
   line-height: 1.4;
   pointer-events: none;
 }
-.optimization-analytics-ranking tbody tr { cursor: pointer; }
-.optimization-analytics-ranking tbody tr:hover { background: rgba(69, 214, 193, 0.08); }
-.optimization-analytics-ranking tbody tr.selected { background: rgba(245, 158, 11, 0.18); outline: 1px solid rgba(245, 158, 11, 0.55); }
+.optimization-analytics-ranking-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.optimization-analytics-ranking-header h3 { margin: 0; }
+.optimization-analytics-ranking-wrap { max-height: 320px; overflow-y: auto; }
+.optimization-analytics-ranking-wrap table thead th { position: sticky; top: 0; z-index: 1; background: rgba(6, 19, 27, 0.98); }
 .optimization-analytics-chart-prompt { display: grid; place-items: center; height: 280px; color: var(--muted); font-size: 12px; text-align: center; }
 .optimization-analytics-empty { align-items: center; justify-content: center; padding: 32px; text-align: center; }
 .optimization-analytics-empty p { max-width: 650px; color: var(--muted); }

@@ -6415,15 +6415,31 @@ function normalizeScanningOptimizationParameter(parameter) {
 
 function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest__') {
   const scanRows = (Array.isArray(rows) ? rows : []).filter((row) => String(row?.event_type || row?.eventType || '') === 'scan_result');
+  const experimentAliases = new Map();
+  for (const row of scanRows) {
+    const experimentId = getOptimizationExperimentId(row);
+    const previousExperimentId = String(row?.previousExperimentId || row?.previous_experiment_id || '').trim();
+    if(experimentId && previousExperimentId && previousExperimentId !== experimentId) experimentAliases.set(previousExperimentId, experimentId);
+  }
+  const canonicalExperimentId = (id) => {
+    let current = String(id || '').trim();
+    const seen = new Set();
+    while(experimentAliases.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = experimentAliases.get(current);
+    }
+    return current;
+  };
   const experimentTimes = new Map();
   for (const row of scanRows) {
-    const experimentId = String(row?.experimentId || row?.experiment_id || '').trim();
+    const experimentId = canonicalExperimentId(getOptimizationExperimentId(row));
     const time = Date.parse(String(row?.time || ''));
     if(experimentId && Number.isFinite(time)) experimentTimes.set(experimentId, Math.max(time, experimentTimes.get(experimentId) || 0));
   }
   const experiments = [...experimentTimes.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
-  const experimentId = selectedExperiment === '__latest__' ? (experiments[0] || '') : String(selectedExperiment || '');
-  const selectedRows = scanRows.filter((row) => String(row?.experimentId || row?.experiment_id || '') === experimentId)
+  const requestedExperimentId = String(selectedExperiment || '');
+  const experimentId = selectedExperiment === '__latest__' ? (experiments[0] || '') : canonicalExperimentId(requestedExperimentId);
+  const selectedRows = scanRows.filter((row) => canonicalExperimentId(getOptimizationExperimentId(row)) === experimentId)
     .sort((a, b) => Date.parse(String(a.time || '')) - Date.parse(String(b.time || '')));
   const previousByFleet = new Map();
   const samples = [];
@@ -6604,7 +6620,6 @@ function renderScanningOptimizationSectorChart(analytics, selectedParameter) {
 function renderScanningOptimizationAnalytics() {
   const selected = optimizationAnalyticsExperiment?.value || '__latest__';
   const analytics = buildScanningOptimizationAnalytics(optimizationAnalyticsRows.length ? optimizationAnalyticsRows : optimizationRows, selected);
-  if(!analytics.groups.some(group => `${group.parameter}\u0000${group.value}` === selectedScanningOptimizationGroupKey)) selectedScanningOptimizationGroupKey = '';
   if(optimizationAnalyticsExperiment) {
     const prior = selected;
     optimizationAnalyticsExperiment.replaceChildren(new Option('Latest experiment', '__latest__'), ...analytics.experiments.map((id) => new Option(id, id)));
@@ -6616,39 +6631,47 @@ function renderScanningOptimizationAnalytics() {
     if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = 'No scan_result rows with optimization values are loaded for this experiment';
     optimizationAnalyticsValueChart?.replaceChildren();
     optimizationAnalyticsSectorChart?.replaceChildren();
-    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 7; td.textContent = 'Awaiting scan results'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
+    optimizationAnalyticsParameter?.replaceChildren();
+    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 6; td.textContent = 'Awaiting scan results'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
     return;
   }
   const metric = optimizationAnalyticsMetric?.value || 'sduPerHour';
-  const best = [...analytics.groups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))[0];
+  const parameters = [...new Set(analytics.groups.map((group) => group.parameter))].sort((a, b) => a.localeCompare(b));
+  if(!parameters.includes(selectedScanningOptimizationParameter)) selectedScanningOptimizationParameter = parameters[0] || '';
+  if(optimizationAnalyticsParameter) {
+    const prior = selectedScanningOptimizationParameter;
+    optimizationAnalyticsParameter.replaceChildren(...parameters.map((parameter) => new Option(parameter, parameter)));
+    optimizationAnalyticsParameter.value = parameters.includes(prior) ? prior : selectedScanningOptimizationParameter;
+    selectedScanningOptimizationParameter = optimizationAnalyticsParameter.value;
+  }
+  const parameterGroups = analytics.groups.filter((group) => group.parameter === selectedScanningOptimizationParameter);
+  const best = [...parameterGroups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))[0];
+  const globalBest = [...analytics.groups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))[0];
   const elapsedHours = analytics.startedAt && analytics.endedAt ? Math.max(0, (Date.parse(analytics.endedAt) - Date.parse(analytics.startedAt)) / 3600000) : 0;
   const metrics = [
     ['Experiment', analytics.experimentId.slice(-12)], ['Scans', analytics.samples.length.toLocaleString()],
-    ['Tests', analytics.groups.length.toLocaleString()], ['Fleets', analytics.fleets.length.toLocaleString()],
-    ['Elapsed', `${elapsedHours.toFixed(1)} h`], ['Current leader', best ? `${best.parameter} ${best.value}` : '--'],
+    ['Parameters', parameters.length.toLocaleString()], ['Tests', analytics.groups.length.toLocaleString()],
+    ['Elapsed', `${elapsedHours.toFixed(1)} h`], ['Leader', globalBest ? `${globalBest.parameter} ${globalBest.value}` : '--'],
   ];
   for(const [label, value] of metrics) {
     const div = document.createElement('div'); div.className = 'optimization-analytics-metric';
     const span = document.createElement('span'); span.textContent = label; const strong = document.createElement('strong'); strong.textContent = value;
     div.append(span, strong); optimizationAnalyticsSummary?.append(div);
   }
-  if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} scans analyzed · ${analytics.experimentId} · rates use observed time between fleet scan results`;
-  for(const group of [...analytics.groups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))) {
+  if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} scans analyzed · ${analytics.experimentId} · ranking ${selectedScanningOptimizationParameter || 'no parameter'} values`;
+  for(const group of [...parameterGroups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))) {
     const tr = document.createElement('tr');
-    const groupKey = `${group.parameter}\u0000${group.value}`;
-    tr.classList.toggle('selected', groupKey === selectedScanningOptimizationGroupKey);
-    tr.addEventListener('click', () => {
-      selectedScanningOptimizationGroupKey = selectedScanningOptimizationGroupKey === groupKey ? '' : groupKey;
-      renderScanningOptimizationAnalytics();
-    });
     const delta = best && Number(best[metric]) ? (Number(group[metric]) / Number(best[metric]) - 1) * 100 : 0;
-    for(const value of [group.parameter, group.value, group.scans, group.sduPerScan.toFixed(2), group.sduPerHour.toFixed(2), `${group.scanSuccessRate.toFixed(1)}%`, group === best ? 'Best' : `${delta.toFixed(1)}%`]) {
+    for(const value of [group.value, group.scans, group.sduPerScan.toFixed(2), group.sduPerHour.toFixed(2), `${group.scanSuccessRate.toFixed(1)}%`, group === best ? 'Best' : `${delta.toFixed(1)}%`]) {
       const td = document.createElement('td'); td.textContent = String(value); tr.append(td);
     }
     optimizationAnalyticsRanking?.append(tr);
   }
-  renderScanningOptimizationValueChart(analytics, metric);
-  renderScanningOptimizationSectorChart(analytics);
+  if(!parameterGroups.length) {
+    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 6; td.textContent = 'No values for this parameter'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
+  }
+  renderScanningOptimizationValueChart(analytics, metric, selectedScanningOptimizationParameter);
+  renderScanningOptimizationSectorChart(analytics, selectedScanningOptimizationParameter);
 }
 
 function optimizationQuantile(values, fraction) {
