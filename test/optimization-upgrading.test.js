@@ -3,12 +3,26 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
+const vm = require('node:vm');
 const main = fs.readFileSync('electron/main.js', 'utf8');
 const preload = fs.readFileSync('electron/preload.js', 'utf8');
 const renderer = fs.readFileSync('electron/renderer.js', 'utf8');
 const html = fs.readFileSync('electron/renderer.html', 'utf8');
 
 const components = ['Framework', 'Electronics', 'Power Source', 'Electromagnet', 'Field Stabilizer', 'Particle Accelerator', 'Radiation Absorber', 'Survey Data Unit'];
+
+function extractFunction(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `${name} not found`);
+  let depth = 0;
+  let opened = false;
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === '{') { depth += 1; opened = true; }
+    if (source[index] === '}') depth -= 1;
+    if (opened && depth === 0) return source.slice(start, index + 1);
+  }
+  throw new Error(`${name} is incomplete`);
+}
 
 test('upgrading optimization backend joins snapshots and analytics history', () => {
   assert.match(main, /async function fetchUpgradingOptimization\(/);
@@ -26,11 +40,34 @@ test('upgrading optimization backend joins snapshots and analytics history', () 
   assert.match(preload, /getUpgradingOptimization:.*optimization:upgrading/);
 });
 
+test('upgrading redemption scatter normalizes player LP by average hourly phantom crew', () => {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext([
+    extractFunction(renderer, 'optimizationQuantile'),
+    extractFunction(renderer, 'buildUpgradingOptimizationAnalytics'),
+    'this.build = buildUpgradingOptimizationAnalytics;',
+  ].join('\n'), context);
+  const result = context.build({
+    factionDaily: [{ date: '2026-07-27', lp: 1_000_000 }],
+    playerDaily: [{ date: '2026-07-27', lp: 10_000 }],
+    rows: [
+      { time: '2026-07-27T01:05:00Z', phantom_crew: 100, expected_total_lp_eod: 800_000 },
+      { time: '2026-07-27T01:55:00Z', phantom_crew: 200, expected_total_lp_eod: 850_000 },
+      { time: '2026-07-27T02:05:00Z', phantom_crew: 400, expected_total_lp_eod: 900_000 },
+    ],
+  }, new Date('2026-07-28T12:00:00Z'));
+  assert.equal(result.scatter.length, 1);
+  assert.equal(result.scatter[0].averageCrew, 300);
+  assert.equal(result.scatter[0].playerLpPerCrew, 10_000 / 300);
+});
+
 test('Optimization exposes Upgrading after Scanning with date filters, table, and analytics charts', () => {
   assert.match(html, /data-optimization-subtab="scanning"[^>]*>Scanning</);
   assert.match(html, /data-optimization-subtab="upgrading"[^>]*>Upgrading</);
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
   for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart']) assert.match(html, new RegExp(`id="${id}"`));
+  assert.ok(html.indexOf('id="optimization-analytics-tooltip"') > html.indexOf('data-optimization-panel="upgrading"'), 'shared tooltip must live outside hidden analytics panels');
   assert.doesNotMatch(html, /id="optimization-upgrading-instance-filter"/);
   assert.doesNotMatch(renderer, /optimizationUpgradingInstanceFilter/);
 });

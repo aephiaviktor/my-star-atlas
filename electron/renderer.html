@@ -844,7 +844,6 @@
                   <h3>Value distribution</h3>
                   <p class="optimization-analytics-note">Individual scan outcomes reveal spread and lucky clusters; the larger marker is the group mean.</p>
                   <div id="optimization-analytics-value-chart" class="optimization-analytics-chart"></div>
-                  <div id="optimization-analytics-tooltip" class="optimization-analytics-tooltip" hidden></div>
                 </section>
                 <section class="optimization-analytics-card">
                   <h3>Sector clusters</h3>
@@ -876,8 +875,8 @@
                   <p id="optimization-upgrading-analytics-status" class="optimization-analytics-note">Awaiting upgrading history</p>
                 </section>
                 <section class="optimization-analytics-card">
-                  <h3>Faction LP redemption vs player LP redemption</h3>
-                  <p class="optimization-analytics-note">One dot per completed UTC day, rolling 30 days.</p>
+                  <h3>Faction LP redemption vs player LP per upgrading crew</h3>
+                  <p class="optimization-analytics-note">One dot per completed UTC day; player LP is divided by average hourly phantom crew.</p>
                   <div id="optimization-upgrading-redemption-chart" class="optimization-analytics-chart"></div>
                 </section>
                 <section class="optimization-analytics-card">
@@ -893,6 +892,7 @@
               </div>
             </section>
           </div>
+          <div id="optimization-analytics-tooltip" class="optimization-analytics-tooltip" hidden></div>
         </section>
 
         <section class="section-view" data-section-panel="earnings">

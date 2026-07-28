@@ -6686,8 +6686,18 @@ function buildUpgradingOptimizationAnalytics(result, now = new Date()) {
   const today = now.toISOString().slice(0, 10);
   const factionByDay = new Map((result?.factionDaily || []).map((row) => [String(row.date), Number(row.lp)]));
   const playerByDay = new Map((result?.playerDaily || []).map((row) => [String(row.date), Number(row.lp)]));
-  const scatter = [...factionByDay].filter(([date]) => date < today && playerByDay.has(date))
-    .map(([date, factionLp]) => ({ date, factionLp, playerLp: playerByDay.get(date) }))
+  const latestCrewByHour = new Map();
+  for(const row of result?.rows || []) {
+    const time = String(row.time || row._time || ''); const ms = Date.parse(time); const crew = Number(row.phantom_crew ?? row.phantomCrew);
+    if(!Number.isFinite(ms) || !Number.isFinite(crew) || crew <= 0) continue;
+    const date = new Date(ms); const day = date.toISOString().slice(0, 10); const hour = date.getUTCHours(); const key = `${day}|${hour}`;
+    if(!latestCrewByHour.has(key) || ms > latestCrewByHour.get(key).ms) latestCrewByHour.set(key, { day, crew, ms });
+  }
+  const crewValuesByDay = new Map();
+  for(const point of latestCrewByHour.values()) { if(!crewValuesByDay.has(point.day)) crewValuesByDay.set(point.day, []); crewValuesByDay.get(point.day).push(point.crew); }
+  const averageCrewByDay = new Map([...crewValuesByDay].map(([day, values]) => [day, values.reduce((sum, value) => sum + value, 0) / values.length]));
+  const scatter = [...factionByDay].filter(([date]) => date < today && playerByDay.has(date) && Number(averageCrewByDay.get(date)) > 0)
+    .map(([date, factionLp]) => { const playerLp = playerByDay.get(date); const averageCrew = averageCrewByDay.get(date); return { date, factionLp, playerLp, averageCrew, playerLpPerCrew: playerLp / averageCrew }; })
     .sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
   const latestByHour = new Map();
   for(const row of result?.rows || []) {
@@ -6721,10 +6731,10 @@ function renderUpgradingOptimizationAnalytics() {
   const analytics = buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {});
   if(optimizationUpgradingAnalyticsStatus) optimizationUpgradingAnalyticsStatus.textContent = `${analytics.scatter.length} completed comparison days · ${analytics.forecasts.length} forecast days · rolling 30 days · UTC`;
   let svg=createOptimizationAnalyticsSvg(optimizationUpgradingRedemptionChart);
-  if(svg && analytics.scatter.length){ const maxX=Math.max(1,...analytics.scatter.map(r=>r.factionLp))*1.08,maxY=Math.max(1,...analytics.scatter.map(r=>r.playerLp))*1.08; const axes=renderUpgradingChartAxes(svg,{maxY,xMax:maxX,xTicks:[0,maxX/4,maxX/2,maxX*3/4,maxX]});
-    const meanX=analytics.scatter.reduce((s,r)=>s+r.factionLp,0)/analytics.scatter.length,meanY=analytics.scatter.reduce((s,r)=>s+r.playerLp,0)/analytics.scatter.length; const cov=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)*(r.playerLp-meanY),0),vx=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)**2,0),vy=analytics.scatter.reduce((s,r)=>s+(r.playerLp-meanY)**2,0); const correlation=vx&&vy?cov/Math.sqrt(vx*vy):null;
+  if(svg && analytics.scatter.length){ const maxX=Math.max(1,...analytics.scatter.map(r=>r.factionLp))*1.08,maxY=Math.max(1,...analytics.scatter.map(r=>r.playerLpPerCrew))*1.08; const axes=renderUpgradingChartAxes(svg,{maxY,xMax:maxX,xTicks:[0,maxX/4,maxX/2,maxX*3/4,maxX]});
+    const meanX=analytics.scatter.reduce((s,r)=>s+r.factionLp,0)/analytics.scatter.length,meanY=analytics.scatter.reduce((s,r)=>s+r.playerLpPerCrew,0)/analytics.scatter.length; const cov=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)*(r.playerLpPerCrew-meanY),0),vx=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)**2,0),vy=analytics.scatter.reduce((s,r)=>s+(r.playerLpPerCrew-meanY)**2,0); const correlation=vx&&vy?cov/Math.sqrt(vx*vy):null;
     if(vx){ const slope=cov/vx,intercept=meanY-slope*meanX; const startY=Math.max(0,Math.min(maxY,intercept)),endY=Math.max(0,Math.min(maxY,intercept+slope*maxX)); appendOptimizationSvg(svg,'line',{x1:axes.x(0),y1:axes.y(startY),x2:axes.x(maxX),y2:axes.y(endY),class:'optimization-trend-line'}); }
-    analytics.scatter.forEach((row,index)=>{const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(row.factionLp),cy:axes.y(row.playerLp),r:5,fill:optimizationAnalyticsColor(index),class:'mean-marker'}); appendOptimizationSvg(dot,'title',{},`${row.date} · faction ${row.factionLp.toLocaleString()} LP · player ${row.playerLp.toLocaleString()} LP`);});
+    analytics.scatter.forEach((row,index)=>{const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(row.factionLp),cy:axes.y(row.playerLpPerCrew),r:5,fill:optimizationAnalyticsColor(index),class:'mean-marker'}); bindOptimizationAnalyticsTooltip(dot,`${row.date} · faction ${row.factionLp.toLocaleString()} LP · player ${row.playerLp.toLocaleString()} LP · avg phantom crew ${row.averageCrew.toLocaleString(undefined,{maximumFractionDigits:1})} · ${row.playerLpPerCrew.toLocaleString(undefined,{maximumFractionDigits:1})} LP / crew`);});
     appendOptimizationSvg(svg,'text',{x:axes.left+4,y:axes.top+12,class:'axis-label'},`correlation ${correlation==null?'--':correlation.toFixed(2)}`);
   }
   svg=createOptimizationAnalyticsSvg(optimizationUpgradingForecastChart);
