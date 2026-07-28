@@ -77,6 +77,18 @@ test('scanning analytics merges legacy experiment ids through previousExperiment
   assert.equal(result.samples.length, 2);
 });
 
+test('scanning analytics distinguishes telemetry samples from persisted runtime progress', () => {
+  const build = loadAnalytics();
+  const result = build([
+    { time: '2026-07-27T11:00:00Z', event_type: 'scan_result', experimentId: 'run', optimizationValues: '{"scanMin":8}', optimizationCompletedScans: 172, optimizationTotalScans: 290, fleet: 'A', success: true, sduFound: 1 },
+    { time: '2026-07-27T11:10:00Z', event_type: 'scan_result', experimentId: 'run', optimizationValues: '{"scanMin":8}', optimizationCompletedScans: 173, optimizationTotalScans: 290, fleet: 'A', success: true, sduFound: 2 }
+  ]);
+  assert.equal(result.samples.length, 2);
+  assert.equal(result.runtimeCompletedScans, 173);
+  assert.equal(result.runtimeTotalScans, 290);
+  assert.equal(result.unavailableHistoricalScans, 171);
+});
+
 test('scanning analytics keeps two-parameter combinations as distinct tests', () => {
   const build = loadAnalytics();
   const result = build([
@@ -122,6 +134,8 @@ test('analytics requests may load complete scan history without enlarging Data p
   const renderer = fs.readFileSync(rendererPath, 'utf8');
   assert.match(renderer, /eventType: 'scan_result'/);
   assert.match(renderer, /limit: 5000, analytics: true/);
-  assert.match(main, /\['experimentId', payload\.experimentId\]/);
+  assert.match(main, /pivot[\s\S]*\$\{experimentFilter\}/);
+  assert.match(main, /r\.experimentId ==/);
   assert.match(renderer, /experimentId,\n    offset/);
+  assert.match(renderer, /fleet, experimentId, eventType, operation, status/);
 });

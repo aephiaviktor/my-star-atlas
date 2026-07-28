@@ -6441,6 +6441,14 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
   const experimentId = selectedExperiment === '__latest__' ? (experiments[0] || '') : canonicalExperimentId(requestedExperimentId);
   const selectedRows = scanRows.filter((row) => canonicalExperimentId(getOptimizationExperimentId(row)) === experimentId)
     .sort((a, b) => Date.parse(String(a.time || '')) - Date.parse(String(b.time || '')));
+  const runtimeCompletedScans = selectedRows.reduce((maximum, row) => {
+    const value = Number(row?.optimizationCompletedScans);
+    return Number.isFinite(value) ? Math.max(maximum, value) : maximum;
+  }, 0);
+  const runtimeTotalScans = selectedRows.reduce((maximum, row) => {
+    const value = Number(row?.optimizationTotalScans);
+    return Number.isFinite(value) ? Math.max(maximum, value) : maximum;
+  }, 0);
   const previousByFleet = new Map();
   const samples = [];
   for (const row of selectedRows) {
@@ -6496,6 +6504,9 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
     experiments,
     samples,
     groups,
+    runtimeCompletedScans,
+    runtimeTotalScans,
+    unavailableHistoricalScans: Math.max(0, runtimeCompletedScans - samples.length),
     fleets: [...new Set(samples.map((sample) => sample.fleet))],
     startedAt: selectedRows[0]?.time || null,
     endedAt: selectedRows[selectedRows.length - 1]?.time || null,
@@ -6658,7 +6669,15 @@ function renderScanningOptimizationAnalytics() {
     const span = document.createElement('span'); span.textContent = label; const strong = document.createElement('strong'); strong.textContent = value;
     div.append(span, strong); optimizationAnalyticsSummary?.append(div);
   }
-  if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} scans analyzed · ${analytics.experimentId} · ranking ${selectedScanningOptimizationParameter || 'no parameter'} values`;
+  if(optimizationAnalyticsStatus) {
+    const runtimeProgress = analytics.runtimeTotalScans > 0
+      ? ` · runtime progress ${analytics.runtimeCompletedScans.toLocaleString()}/${analytics.runtimeTotalScans.toLocaleString()}`
+      : '';
+    const unavailable = analytics.unavailableHistoricalScans > 0
+      ? ` · ${analytics.unavailableHistoricalScans.toLocaleString()} historical scans unavailable`
+      : '';
+    optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} telemetry scans analyzed${runtimeProgress}${unavailable} · ${analytics.experimentId} · ranking ${selectedScanningOptimizationParameter || 'no parameter'} values`;
+  }
   for(const group of [...parameterGroups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))) {
     const tr = document.createElement('tr');
     const delta = best && Number(best[metric]) ? (Number(group[metric]) / Number(best[metric]) - 1) * 100 : 0;
@@ -6817,7 +6836,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
     return;
   }
   latestOptimizationResult = result;
-  if (!append) setCachedFilterResult(faction, 'optimizationScanning', result, start || '', stop || '', fleet, eventType, operation, status);
+  if (!append) setCachedFilterResult(faction, 'optimizationScanning', result, start || '', stop || '', fleet, experimentId, eventType, operation, status);
   optimizationRows = append ? [...optimizationRows, ...result.rows] : result.rows;
   const discovered = getOrderedOptimizationColumns(new Set([...optimizationColumns, ...(result.columns || [])]));
   let discoveredNewColumn = false;

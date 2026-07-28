@@ -595,9 +595,12 @@ async function fetchScanningOptimization(payload = {}) {
     `r.optimization_type == "scanning"`,
     `r.faction == "${escapeFluxString(faction)}"`,
   ];
-  for (const [field, value] of [['fleet', payload.fleet], ['experimentId', payload.experimentId], ['event_type', payload.eventType], ['operation', payload.operation]]) {
+  for (const [field, value] of [['fleet', payload.fleet], ['event_type', payload.eventType], ['operation', payload.operation]]) {
     if (value && value !== '__all__') filters.push(`r.${field} == "${escapeFluxString(value)}"`);
   }
+  const experimentFilter = payload.experimentId && payload.experimentId !== '__all__'
+    ? `\n  |> filter(fn: (r) => r.experimentId == "${escapeFluxString(payload.experimentId)}")`
+    : '';
   const statusFilter = payload.status === 'successful'
     ? '\n  |> filter(fn: (r) => r.success == true)'
     : (payload.status === 'failed' ? '\n  |> filter(fn: (r) => r.success == false)' : '');
@@ -605,7 +608,7 @@ async function fetchScanningOptimization(payload = {}) {
   const flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> ${range}
   |> filter(fn: (r) => ${filters.join(' and ')})
-  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")${statusFilter}
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")${experimentFilter}${statusFilter}
   |> sort(columns: ["_time"], desc: true)
   |> limit(n: ${pageSize + 1}, offset: ${offset})`;
   const parsed = parseInfluxCsv(await queryInfluxFlux(querySettings, flux)).map(cleanOptimizationRow);
