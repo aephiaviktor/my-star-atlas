@@ -31,6 +31,8 @@ function loadAnalytics() {
   vm.createContext(context);
   vm.runInContext([
     extractFunction(source, 'parseScanningOptimizationValues'),
+    "const scanningOptimizationParameterNames = Object.freeze({ scanMin: 'minProb', scanMin2: 'instantStrikeoutProb', scanMin3: 'successStrikeoutProb' });",
+    extractFunction(source, 'normalizeScanningOptimizationParameter'),
     extractFunction(source, 'buildScanningOptimizationAnalytics'),
     'this.build = buildScanningOptimizationAnalytics;'
   ].join('\n'), context);
@@ -55,9 +57,11 @@ test('scanning analytics selects the latest experiment and ranks value groups', 
   assert.equal(eight.scans, 2);
   assert.equal(eight.sduPerScan, 1);
   assert.equal(Math.round(eight.sduPerHour), 6);
-  assert.equal(eight.successRate, 100);
   const twelve = result.groups.find((group) => group.value === 12);
-  assert.equal(twelve.successRate, 0);
+  assert.equal(twelve.scanSuccessRate, 0);
+  assert.equal(eight.scanSuccessRate, 50);
+  assert.equal(eight.txSuccessRate, 100);
+  assert.equal(eight.parameter, 'minProb');
 });
 
 test('scanning analytics keeps two-parameter combinations as distinct tests', () => {
@@ -68,7 +72,22 @@ test('scanning analytics keeps two-parameter combinations as distinct tests', ()
   ]);
   assert.equal(result.groups.length, 2);
   assert.ok(result.groups.every((group) => group.parameter === 'Combined'));
-  assert.match(String(result.groups[0].value), /scanMin=/);
+  assert.match(String(result.groups[0].value), /minProb=/);
+  assert.match(String(result.groups[0].value), /instantStrikeoutProb=/);
+});
+
+test('scanning analytics ranking selects one parameter test for the distribution chart', () => {
+  const renderer = fs.readFileSync(rendererPath, 'utf8');
+  const html = fs.readFileSync(htmlPath, 'utf8');
+  const css = fs.readFileSync(cssPath, 'utf8');
+  assert.match(renderer, /selectedScanningOptimizationGroupKey/);
+  assert.match(renderer, /Select a parameter test in the table below to display its distribution/);
+  assert.match(renderer, /tr\.classList\.toggle\('selected'/);
+  assert.match(renderer, /showOptimizationAnalyticsTooltip/);
+  assert.match(html, /id="optimization-analytics-tooltip"/);
+  assert.match(html, />Scan success</);
+  assert.match(css, /\.optimization-analytics-tooltip/);
+  assert.match(css, /optimization-analytics-ranking.*tr\.selected/s);
 });
 
 test('Optimization exposes Data and Analytics for Scanning and Upgrading', () => {

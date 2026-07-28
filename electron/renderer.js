@@ -62,6 +62,7 @@ const optimizationAnalyticsSummary = document.querySelector('#optimization-analy
 const optimizationAnalyticsValueChart = document.querySelector('#optimization-analytics-value-chart');
 const optimizationAnalyticsSectorChart = document.querySelector('#optimization-analytics-sector-chart');
 const optimizationAnalyticsRanking = document.querySelector('#optimization-analytics-ranking');
+const optimizationAnalyticsTooltip = document.querySelector('#optimization-analytics-tooltip');
 const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
 const optimizationUpgradingRedemptionChart = document.querySelector('#optimization-upgrading-redemption-chart');
 const optimizationUpgradingForecastChart = document.querySelector('#optimization-upgrading-forecast-chart');
@@ -311,6 +312,7 @@ let latestOptimizationResult = null;
 let optimizationRows = [];
 let optimizationAnalyticsRows = [];
 let optimizationAnalyticsLoadedFaction = '';
+let selectedScanningOptimizationGroupKey = '';
 let optimizationColumns = [];
 let optimizationSelectedColumns = new Set();
 let optimizationKnownColumns = new Set();
@@ -6372,6 +6374,16 @@ function parseScanningOptimizationValues(row) {
   return parameter && Number.isFinite(value) ? { [parameter]: value } : {};
 }
 
+const scanningOptimizationParameterNames = Object.freeze({
+  scanMin: 'minProb',
+  scanMin2: 'instantStrikeoutProb',
+  scanMin3: 'successStrikeoutProb',
+});
+
+function normalizeScanningOptimizationParameter(parameter) {
+  return scanningOptimizationParameterNames[String(parameter || '')] || String(parameter || '').replace(/^scan/, '').replace(/^./, character => character.toLowerCase());
+}
+
 function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest__') {
   const scanRows = (Array.isArray(rows) ? rows : []).filter((row) => String(row?.event_type || row?.eventType || '') === 'scan_result');
   const experimentTimes = new Map();
@@ -6394,7 +6406,8 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
     previousByFleet.set(fleet, timeMs);
     const cycleHours = Number.isFinite(previous) && timeMs > previous ? (timeMs - previous) / 3600000 : null;
     const values = parseScanningOptimizationValues(row);
-    const entries = Object.entries(values).filter(([, value]) => Number.isFinite(Number(value)));
+    const entries = Object.entries(values).filter(([, value]) => Number.isFinite(Number(value)))
+      .map(([parameter, value]) => [normalizeScanningOptimizationParameter(parameter), value]);
     if(!entries.length) continue;
     const combination = entries.map(([parameter, value]) => `${parameter}=${Number(value)}`).join(' × ');
     samples.push({
@@ -6402,7 +6415,8 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
       parameter: entries.length === 1 ? entries[0][0] : 'Combined',
       value: entries.length === 1 ? Number(entries[0][1]) : combination,
       sdu: Number(row?.sduFound || 0),
-      success: row?.success === true || String(row?.success).toLowerCase() === 'true',
+      txSuccess: row?.success === true || String(row?.success).toLowerCase() === 'true',
+      scanSuccess: Number(row?.sduFound || 0) > 0,
       cycleHours,
       sectorX: Number(row?.resultSectorX),
       sectorY: Number(row?.resultSectorY),
@@ -6416,7 +6430,8 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
   }
   const groups = [...grouped.values()].map((group) => {
     const scans = group.samples.length;
-    const successful = group.samples.filter((sample) => sample.success).length;
+    const successfulTransactions = group.samples.filter((sample) => sample.txSuccess).length;
+    const successfulScans = group.samples.filter((sample) => sample.txSuccess && sample.scanSuccess).length;
     const totalSdu = group.samples.reduce((sum, sample) => sum + sample.sdu, 0);
     const timed = group.samples.filter((sample) => Number.isFinite(sample.cycleHours) && sample.cycleHours > 0);
     const observedHours = timed.reduce((sum, sample) => sum + sample.cycleHours, 0);
@@ -6427,7 +6442,8 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
       totalSdu,
       sduPerScan: scans ? totalSdu / scans : 0,
       sduPerHour: estimatedHours > 0 ? totalSdu / estimatedHours : 0,
-      successRate: scans ? successful / scans * 100 : 0,
+      txSuccessRate: scans ? successfulTransactions / scans * 100 : 0,
+      scanSuccessRate: successfulTransactions ? successfulScans / successfulTransactions * 100 : 0,
     };
   }).sort((a, b) => a.parameter.localeCompare(b.parameter) || Number(a.value) - Number(b.value) || String(a.value).localeCompare(String(b.value)));
   return {
@@ -6463,13 +6479,41 @@ function appendOptimizationSvg(svg, tag, attributes = {}, text = '') {
   return node;
 }
 
+function showOptimizationAnalyticsTooltip(event, text) {
+  if(!optimizationAnalyticsTooltip) return;
+  optimizationAnalyticsTooltip.textContent = text;
+  optimizationAnalyticsTooltip.hidden = false;
+  optimizationAnalyticsTooltip.style.left = `${event.clientX + 12}px`;
+  optimizationAnalyticsTooltip.style.top = `${event.clientY + 12}px`;
+}
+
+function hideOptimizationAnalyticsTooltip() {
+  if(optimizationAnalyticsTooltip) optimizationAnalyticsTooltip.hidden = true;
+}
+
+function bindOptimizationAnalyticsTooltip(node, text) {
+  node?.addEventListener('pointerenter', event => showOptimizationAnalyticsTooltip(event, text));
+  node?.addEventListener('pointermove', event => showOptimizationAnalyticsTooltip(event, text));
+  node?.addEventListener('pointerleave', hideOptimizationAnalyticsTooltip);
+}
+
 function renderScanningOptimizationValueChart(analytics, metric) {
+  const selectedGroup = analytics.groups.find(group => `${group.parameter}\u0000${group.value}` === selectedScanningOptimizationGroupKey);
+  optimizationAnalyticsValueChart?.replaceChildren();
+  if(!selectedGroup) {
+    const prompt = document.createElement('div');
+    prompt.className = 'optimization-analytics-chart-prompt';
+    prompt.textContent = 'Select a parameter test in the table below to display its distribution';
+    optimizationAnalyticsValueChart?.append(prompt);
+    return;
+  }
+  const chartAnalytics = { ...analytics, groups: [selectedGroup] };
   const svg = createOptimizationAnalyticsSvg(optimizationAnalyticsValueChart);
-  if(!svg || !analytics.groups.length) return;
+  if(!svg) return;
   const left = 48, right = 16, top = 15, bottom = 65, width = 760, height = 280;
-  const values = analytics.groups.flatMap((group) => group.samples.map((sample) => {
+  const values = chartAnalytics.groups.flatMap((group) => group.samples.map((sample) => {
     if(metric === 'sduPerScan') return sample.sdu;
-    if(metric === 'successRate') return sample.success ? 100 : 0;
+    if(metric === 'scanSuccessRate') return sample.scanSuccess ? 100 : 0;
     return sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour;
   })).filter(Number.isFinite);
   const maxY = Math.max(1, ...values) * 1.08;
@@ -6478,19 +6522,20 @@ function renderScanningOptimizationValueChart(analytics, metric) {
     appendOptimizationSvg(svg, 'line', { x1: left, x2: width - right, y1: y, y2: y, class: 'grid-line' });
     appendOptimizationSvg(svg, 'text', { x: left - 6, y: y + 3, 'text-anchor': 'end', class: 'axis-label' }, (maxY * (1 - tick / 4)).toFixed(metric === 'successRate' ? 0 : 1));
   }
-  analytics.groups.forEach((group, index) => {
-    const x = analytics.groups.length === 1 ? (left + width - right) / 2 : left + index * (width - left - right) / (analytics.groups.length - 1);
+  chartAnalytics.groups.forEach((group, index) => {
+    const x = chartAnalytics.groups.length === 1 ? (left + width - right) / 2 : left + index * (width - left - right) / (chartAnalytics.groups.length - 1);
     const color = optimizationAnalyticsColor(index);
     group.samples.forEach((sample, sampleIndex) => {
-      const raw = metric === 'sduPerScan' ? sample.sdu : metric === 'successRate' ? (sample.success ? 100 : 0) : (sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour);
+      const raw = metric === 'sduPerScan' ? sample.sdu : metric === 'scanSuccessRate' ? (sample.scanSuccess ? 100 : 0) : (sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour);
       const y = top + (height - top - bottom) * (1 - Math.min(maxY, raw) / maxY);
       const jitter = ((sampleIndex % 7) - 3) * 2.2;
       const dot = appendOptimizationSvg(svg, 'circle', { cx: x + jitter, cy: y, r: 3, fill: color, opacity: 0.55 });
-      appendOptimizationSvg(dot, 'title', {}, `${group.parameter} ${group.value} · ${raw.toFixed(2)} · ${sample.sdu} SDU`);
+      bindOptimizationAnalyticsTooltip(dot, `${group.parameter} ${group.value} · ${raw.toFixed(2)} · ${sample.sdu} SDU · scan ${sample.scanSuccess ? 'successful' : 'unsuccessful'} · transaction ${sample.txSuccess ? 'successful' : 'failed'} · sector ${sample.sectorX},${sample.sectorY}`);
     });
     const mean = Number(group[metric] || 0);
     const meanY = top + (height - top - bottom) * (1 - Math.min(maxY, mean) / maxY);
-    appendOptimizationSvg(svg, 'circle', { cx: x, cy: meanY, r: 6, fill: color, class: 'mean-marker' });
+    const meanMarker = appendOptimizationSvg(svg, 'circle', { cx: x, cy: meanY, r: 6, fill: color, class: 'mean-marker' });
+    bindOptimizationAnalyticsTooltip(meanMarker, `${group.parameter} ${group.value} · mean ${mean.toFixed(2)} · ${group.scans} scans`);
     appendOptimizationSvg(svg, 'text', { x, y: height - bottom + 14, transform: `rotate(38 ${x} ${height - bottom + 14})`, 'text-anchor': 'start', class: 'axis-label' }, `${group.parameter} ${group.value}`);
   });
 }
@@ -6508,7 +6553,7 @@ function renderScanningOptimizationSectorChart(analytics) {
     const y = height - pad - (point.sectorY - minY) / Math.max(1, maxY - minY) * (height - pad * 2);
     const index = groupIndex.get(`${point.parameter}\u0000${point.value}`) || 0;
     const dot = appendOptimizationSvg(svg, 'circle', { cx: x, cy: y, r: point.sdu > 0 ? 5 : 3, fill: optimizationAnalyticsColor(index), opacity: point.sdu > 0 ? 0.9 : 0.4 });
-    appendOptimizationSvg(dot, 'title', {}, `${point.sectorX},${point.sectorY} · ${point.combination} · ${point.sdu} SDU`);
+    bindOptimizationAnalyticsTooltip(dot, `${point.sectorX},${point.sectorY} · ${point.combination} · ${point.sdu} SDU · scan ${point.scanSuccess ? 'successful' : 'unsuccessful'}`);
   }
   appendOptimizationSvg(svg, 'text', { x: pad, y: 14, class: 'axis-label' }, `X ${minX}…${maxX} · Y ${minY}…${maxY} · larger dots found SDU`);
 }
@@ -6516,6 +6561,7 @@ function renderScanningOptimizationSectorChart(analytics) {
 function renderScanningOptimizationAnalytics() {
   const selected = optimizationAnalyticsExperiment?.value || '__latest__';
   const analytics = buildScanningOptimizationAnalytics(optimizationAnalyticsRows.length ? optimizationAnalyticsRows : optimizationRows, selected);
+  if(!analytics.groups.some(group => `${group.parameter}\u0000${group.value}` === selectedScanningOptimizationGroupKey)) selectedScanningOptimizationGroupKey = '';
   if(optimizationAnalyticsExperiment) {
     const prior = selected;
     optimizationAnalyticsExperiment.replaceChildren(new Option('Latest experiment', '__latest__'), ...analytics.experiments.map((id) => new Option(id, id)));
@@ -6546,8 +6592,14 @@ function renderScanningOptimizationAnalytics() {
   if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} scans analyzed · ${analytics.experimentId} · rates use observed time between fleet scan results`;
   for(const group of [...analytics.groups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))) {
     const tr = document.createElement('tr');
+    const groupKey = `${group.parameter}\u0000${group.value}`;
+    tr.classList.toggle('selected', groupKey === selectedScanningOptimizationGroupKey);
+    tr.addEventListener('click', () => {
+      selectedScanningOptimizationGroupKey = selectedScanningOptimizationGroupKey === groupKey ? '' : groupKey;
+      renderScanningOptimizationAnalytics();
+    });
     const delta = best && Number(best[metric]) ? (Number(group[metric]) / Number(best[metric]) - 1) * 100 : 0;
-    for(const value of [group.parameter, group.value, group.scans, group.sduPerScan.toFixed(2), group.sduPerHour.toFixed(2), `${group.successRate.toFixed(1)}%`, group === best ? 'Best' : `${delta.toFixed(1)}%`]) {
+    for(const value of [group.parameter, group.value, group.scans, group.sduPerScan.toFixed(2), group.sduPerHour.toFixed(2), `${group.scanSuccessRate.toFixed(1)}%`, group === best ? 'Best' : `${delta.toFixed(1)}%`]) {
       const td = document.createElement('td'); td.textContent = String(value); tr.append(td);
     }
     optimizationAnalyticsRanking?.append(tr);
@@ -6580,7 +6632,8 @@ function buildUpgradingOptimizationAnalytics(result, now = new Date()) {
   }
   const byDay = new Map();
   for(const point of latestByHour.values()) { if(!byDay.has(point.day)) byDay.set(point.day, []); byDay.get(point.day).push(point); }
-  const forecasts = [...byDay].map(([day, points]) => ({ day, points: points.sort((a,b) => a.hour-b.hour), actual: day < today ? factionByDay.get(day) ?? null : null, today: day === today }))
+  const forecasts = [...byDay].map(([day, points]) => ({ day, points: points.sort((a,b) => a.hour-b.hour).slice(1), actual: day < today ? factionByDay.get(day) ?? null : null, today: day === today }))
+    .filter((day) => day.points.length)
     .sort((a,b) => a.day.localeCompare(b.day)).slice(-30);
   const errors = new Map();
   for(const day of forecasts) if(Number.isFinite(day.actual)) for(const point of day.points) {

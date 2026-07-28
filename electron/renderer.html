@@ -828,7 +828,7 @@
                   <select id="optimization-analytics-experiment"><option value="__latest__">Latest experiment</option></select>
                 </label>
                 <label class="activity-filter">Metric
-                  <select id="optimization-analytics-metric"><option value="sduPerHour">SDU / hour</option><option value="sduPerScan">SDU / scan</option><option value="successRate">Success rate</option></select>
+                  <select id="optimization-analytics-metric"><option value="sduPerHour">SDU / hour</option><option value="sduPerScan">SDU / scan</option><option value="scanSuccessRate">Scan success rate</option></select>
                 </label>
               </div>
               <div class="fleet-sync-status" id="optimization-analytics-status">Load scanning optimization data to calculate analytics</div>
@@ -841,6 +841,7 @@
                   <h3>Value distribution</h3>
                   <p class="optimization-analytics-note">Individual scan outcomes reveal spread and lucky clusters; the larger marker is the group mean.</p>
                   <div id="optimization-analytics-value-chart" class="optimization-analytics-chart"></div>
+                  <div id="optimization-analytics-tooltip" class="optimization-analytics-tooltip" hidden></div>
                 </section>
                 <section class="optimization-analytics-card">
                   <h3>Sector clusters</h3>
@@ -851,7 +852,7 @@
                   <h3>Parameter ranking</h3>
                   <div class="fleet-table-wrap">
                     <table class="fleet-table optimization-table">
-                      <thead><tr><th>Parameter</th><th>Value</th><th>Scans</th><th>SDU / scan</th><th>SDU / hour</th><th>Success</th><th>Δ best</th></tr></thead>
+                      <thead><tr><th>Parameter</th><th>Value</th><th>Scans</th><th>SDU / scan</th><th>SDU / hour</th><th>Scan success</th><th>Δ best</th></tr></thead>
                       <tbody id="optimization-analytics-ranking"><tr class="empty-row"><td colspan="7">Awaiting scan results</td></tr></tbody>
                     </table>
                   </div>
