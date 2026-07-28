@@ -264,6 +264,8 @@ select:focus {
 .optimization-analytics-chart .optimization-error-band { fill: rgba(34, 211, 238, 0.18); }
 .optimization-analytics-chart .optimization-error-line { stroke: var(--accent); stroke-width: 2.5; }
 .optimization-analytics-chart .optimization-hover-target { fill: transparent; stroke: none; pointer-events: all; cursor: crosshair; }
+.optimization-analytics-chart .optimization-line-hit { fill: none; stroke: transparent; pointer-events: stroke; cursor: crosshair; }
+.optimization-analytics-chart .optimization-forecast-line { stroke-linejoin: round; stroke-linecap: round; }
 .optimization-analytics-tooltip {
   position: fixed;
   z-index: 20;

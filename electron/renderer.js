@@ -47,6 +47,7 @@ const optimizationLoadMore = document.querySelector('#optimization-load-more');
 const optimizationStartFilter = document.querySelector('#optimization-start-filter');
 const optimizationStopFilter = document.querySelector('#optimization-stop-filter');
 const optimizationFleetFilter = document.querySelector('#optimization-fleet-filter');
+const optimizationExperimentFilter = document.querySelector('#optimization-experiment-filter');
 const optimizationEventFilter = document.querySelector('#optimization-event-filter');
 const optimizationOperationFilter = document.querySelector('#optimization-operation-filter');
 const optimizationStatusFilter = document.querySelector('#optimization-status-filter');
@@ -57,6 +58,7 @@ const optimizationUpgradingStartFilter = document.querySelector('#optimization-u
 const optimizationUpgradingStopFilter = document.querySelector('#optimization-upgrading-stop-filter');
 const optimizationAnalyticsExperiment = document.querySelector('#optimization-analytics-experiment');
 const optimizationAnalyticsMetric = document.querySelector('#optimization-analytics-metric');
+const optimizationAnalyticsParameter = document.querySelector('#optimization-analytics-parameter');
 const optimizationAnalyticsStatus = document.querySelector('#optimization-analytics-status');
 const optimizationAnalyticsSummary = document.querySelector('#optimization-analytics-summary');
 const optimizationAnalyticsValueChart = document.querySelector('#optimization-analytics-value-chart');
@@ -312,7 +314,7 @@ let latestOptimizationResult = null;
 let optimizationRows = [];
 let optimizationAnalyticsRows = [];
 let optimizationAnalyticsLoadedFaction = '';
-let selectedScanningOptimizationGroupKey = '';
+let selectedScanningOptimizationParameter = '';
 let optimizationColumns = [];
 let optimizationSelectedColumns = new Set();
 let optimizationKnownColumns = new Set();
@@ -6387,6 +6389,10 @@ function populateOptimizationFilter(select, rows, key, allLabel) {
   if (values.includes(selected)) select.value = selected;
 }
 
+function getOptimizationExperimentId(row) {
+  return String(row?.experimentId || row?.experiment_id || '').trim();
+}
+
 function parseScanningOptimizationValues(row) {
   try {
     const parsed = typeof row?.optimizationValues === 'string' ? JSON.parse(row.optimizationValues) : row?.optimizationValues;
@@ -6520,21 +6526,20 @@ function bindOptimizationAnalyticsTooltip(node, text) {
   node?.addEventListener('pointerleave', hideOptimizationAnalyticsTooltip);
 }
 
-function renderScanningOptimizationValueChart(analytics, metric) {
-  const selectedGroup = analytics.groups.find(group => `${group.parameter}\u0000${group.value}` === selectedScanningOptimizationGroupKey);
+function renderScanningOptimizationValueChart(analytics, metric, selectedParameter) {
+  const parameterGroups = analytics.groups.filter((group) => group.parameter === selectedParameter);
   optimizationAnalyticsValueChart?.replaceChildren();
-  if(!selectedGroup) {
+  if(!parameterGroups.length) {
     const prompt = document.createElement('div');
     prompt.className = 'optimization-analytics-chart-prompt';
-    prompt.textContent = 'Select a parameter test in the table below to display its distribution';
+    prompt.textContent = 'Select a tested parameter to display its value distribution';
     optimizationAnalyticsValueChart?.append(prompt);
     return;
   }
-  const chartAnalytics = { ...analytics, groups: [selectedGroup] };
   const svg = createOptimizationAnalyticsSvg(optimizationAnalyticsValueChart);
   if(!svg) return;
   const left = 48, right = 16, top = 15, bottom = 65, width = 760, height = 280;
-  const values = chartAnalytics.groups.flatMap((group) => group.samples.map((sample) => {
+  const values = parameterGroups.flatMap((group) => group.samples.map((sample) => {
     if(metric === 'sduPerScan') return sample.sdu;
     if(metric === 'scanSuccessRate') return sample.scanSuccess ? 100 : 0;
     return sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour;
@@ -6543,10 +6548,10 @@ function renderScanningOptimizationValueChart(analytics, metric) {
   for(let tick = 0; tick <= 4; tick++) {
     const y = top + (height - top - bottom) * tick / 4;
     appendOptimizationSvg(svg, 'line', { x1: left, x2: width - right, y1: y, y2: y, class: 'grid-line' });
-    appendOptimizationSvg(svg, 'text', { x: left - 6, y: y + 3, 'text-anchor': 'end', class: 'axis-label' }, (maxY * (1 - tick / 4)).toFixed(metric === 'successRate' ? 0 : 1));
+    appendOptimizationSvg(svg, 'text', { x: left - 6, y: y + 3, 'text-anchor': 'end', class: 'axis-label' }, (maxY * (1 - tick / 4)).toFixed(metric === 'scanSuccessRate' ? 0 : 1));
   }
-  chartAnalytics.groups.forEach((group, index) => {
-    const x = chartAnalytics.groups.length === 1 ? (left + width - right) / 2 : left + index * (width - left - right) / (chartAnalytics.groups.length - 1);
+  parameterGroups.forEach((group, index) => {
+    const x = parameterGroups.length === 1 ? (left + width - right) / 2 : left + index * (width - left - right) / (parameterGroups.length - 1);
     const color = optimizationAnalyticsColor(index);
     group.samples.forEach((sample, sampleIndex) => {
       const raw = metric === 'sduPerScan' ? sample.sdu : metric === 'scanSuccessRate' ? (sample.scanSuccess ? 100 : 0) : (sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour);
@@ -6559,26 +6564,41 @@ function renderScanningOptimizationValueChart(analytics, metric) {
     const meanY = top + (height - top - bottom) * (1 - Math.min(maxY, mean) / maxY);
     const meanMarker = appendOptimizationSvg(svg, 'circle', { cx: x, cy: meanY, r: 6, fill: color, class: 'mean-marker' });
     bindOptimizationAnalyticsTooltip(meanMarker, `${group.parameter} ${group.value} · mean ${mean.toFixed(2)} · ${group.scans} scans`);
-    appendOptimizationSvg(svg, 'text', { x, y: height - bottom + 14, transform: `rotate(38 ${x} ${height - bottom + 14})`, 'text-anchor': 'start', class: 'axis-label' }, `${group.parameter} ${group.value}`);
+    appendOptimizationSvg(svg, 'text', { x, y: height - bottom + 14, transform: `rotate(38 ${x} ${height - bottom + 14})`, 'text-anchor': 'start', class: 'axis-label' }, `${group.value}`);
   });
+  appendOptimizationSvg(svg, 'text', { x: left, y: 14, class: 'axis-label' }, `${selectedParameter} · ${parameterGroups.length} tested values`);
 }
 
-function renderScanningOptimizationSectorChart(analytics) {
+function renderScanningOptimizationSectorChart(analytics, selectedParameter) {
   const svg = createOptimizationAnalyticsSvg(optimizationAnalyticsSectorChart);
   const points = analytics.samples.filter((sample) => Number.isFinite(sample.sectorX) && Number.isFinite(sample.sectorY));
   if(!svg || !points.length) return;
   const width = 760, height = 280, pad = 30;
   const minX = Math.min(...points.map((point) => point.sectorX)), maxX = Math.max(...points.map((point) => point.sectorX));
   const minY = Math.min(...points.map((point) => point.sectorY)), maxY = Math.max(...points.map((point) => point.sectorY));
-  const groupIndex = new Map(analytics.groups.map((group, index) => [`${group.parameter}\u0000${group.value}`, index]));
-  for(const point of points) {
-    const x = pad + (point.sectorX - minX) / Math.max(1, maxX - minX) * (width - pad * 2);
-    const y = height - pad - (point.sectorY - minY) / Math.max(1, maxY - minY) * (height - pad * 2);
-    const index = groupIndex.get(`${point.parameter}\u0000${point.value}`) || 0;
-    const dot = appendOptimizationSvg(svg, 'circle', { cx: x, cy: y, r: point.sdu > 0 ? 5 : 3, fill: optimizationAnalyticsColor(index), opacity: point.sdu > 0 ? 0.9 : 0.4 });
-    bindOptimizationAnalyticsTooltip(dot, `${point.sectorX},${point.sectorY} · ${point.combination} · ${point.sdu} SDU · scan ${point.scanSuccess ? 'successful' : 'unsuccessful'}`);
+  const groupIndex = new Map(analytics.groups.filter((group) => group.parameter === selectedParameter).map((group, index) => [`${group.parameter}\u0000${group.value}`, index]));
+  const project = (point) => ({
+    x: pad + (point.sectorX - minX) / Math.max(1, maxX - minX) * (width - pad * 2),
+    y: height - pad - (point.sectorY - minY) / Math.max(1, maxY - minY) * (height - pad * 2),
+  });
+  const defs = appendOptimizationSvg(svg, 'defs');
+  const marker = appendOptimizationSvg(defs, 'marker', { id: 'optimization-route-arrow', viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 5, markerHeight: 5, orient: 'auto-start-reverse' });
+  appendOptimizationSvg(marker, 'path', { d: 'M 0 0 L 10 5 L 0 10 z', class: 'optimization-route-arrow-head' });
+  for(let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const point = points[index];
+    if(previous.sectorX === point.sectorX && previous.sectorY === point.sectorY) continue;
+    const start = project(previous); const end = project(point);
+    const route = appendOptimizationSvg(svg, 'line', { x1: start.x, y1: start.y, x2: end.x, y2: end.y, class: 'optimization-route-line', 'marker-end': 'url(#optimization-route-arrow)' });
+    bindOptimizationAnalyticsTooltip(route, `${previous.sectorX},${previous.sectorY} → ${point.sectorX},${point.sectorY}`);
   }
-  appendOptimizationSvg(svg, 'text', { x: pad, y: 14, class: 'axis-label' }, `X ${minX}…${maxX} · Y ${minY}…${maxY} · larger dots found SDU`);
+  points.forEach((point, pointIndex) => {
+    const { x, y } = project(point);
+    const index = groupIndex.get(`${point.parameter}\u0000${point.value}`) ?? 0;
+    const dot = appendOptimizationSvg(svg, 'circle', { cx: x, cy: y, r: pointIndex === 0 || pointIndex === points.length - 1 ? 6 : (point.sdu > 0 ? 5 : 3), fill: optimizationAnalyticsColor(index), opacity: point.sdu > 0 ? 0.92 : 0.5, class: pointIndex === 0 ? 'optimization-route-start' : (pointIndex === points.length - 1 ? 'optimization-route-end' : '') });
+    bindOptimizationAnalyticsTooltip(dot, `${pointIndex === 0 ? 'Start · ' : pointIndex === points.length - 1 ? 'End · ' : ''}${point.sectorX},${point.sectorY} · ${point.combination} · ${point.sdu} SDU · scan ${point.scanSuccess ? 'successful' : 'unsuccessful'}`);
+  });
+  appendOptimizationSvg(svg, 'text', { x: pad, y: 14, class: 'axis-label' }, `X ${minX}…${maxX} · Y ${minY}…${maxY} · arrows show scan order`);
 }
 
 function renderScanningOptimizationAnalytics() {
@@ -6686,7 +6706,7 @@ function renderUpgradingOptimizationAnalytics() {
   }
   svg=createOptimizationAnalyticsSvg(optimizationUpgradingForecastChart);
   const forecastValues=analytics.forecasts.flatMap(d=>[...d.points.map(p=>p.value),...(Number.isFinite(d.actual)?[d.actual]:[])]);
-  if(svg&&forecastValues.length){const min=Math.min(...forecastValues),max=Math.max(...forecastValues),pad=Math.max(1,(max-min)*.08),axes=renderUpgradingChartAxes(svg,{minY:Math.max(0,min-pad),maxY:max+pad}); analytics.forecasts.forEach((day,index)=>{const color=day.today?'#45d6c1':optimizationAnalyticsColor(index); const line=appendOptimizationSvg(svg,'polyline',{points:day.points.map(p=>`${axes.x(p.hour)},${axes.y(p.value)}`).join(' '),fill:'none',stroke:color,'stroke-width':day.today?3:1.5,opacity:day.today?1:.7}); appendOptimizationSvg(line,'title',{},`${day.day} forecast`); for(const point of day.points){const snapshot=appendOptimizationSvg(svg,'circle',{cx:axes.x(point.hour),cy:axes.y(point.value),r:5,fill:color}); const actual=Number.isFinite(day.actual)?`${day.actual.toLocaleString()} LP`:'not final'; const error=Number.isFinite(day.actual)?`${(point.value-day.actual).toLocaleString()} LP`:'not available'; bindOptimizationAnalyticsTooltip(snapshot,`${day.day} · ${String(point.hour).padStart(2,'0')}:00 UTC · expected ${point.value.toLocaleString()} LP · actual final ${actual} · forecast error ${error}`);} if(Number.isFinite(day.actual)){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(24),cy:axes.y(day.actual),r:4,fill:color,class:'mean-marker'});appendOptimizationSvg(dot,'title',{},`${day.day} actual ${day.actual.toLocaleString()} LP`);}});}
+  if(svg&&forecastValues.length){const min=Math.min(...forecastValues),max=Math.max(...forecastValues),pad=Math.max(1,(max-min)*.08),axes=renderUpgradingChartAxes(svg,{minY:Math.max(0,min-pad),maxY:max+pad}); const totalDays=analytics.forecasts.length; analytics.forecasts.forEach((day,index)=>{const isToday=day.today; const recency=totalDays>1?(totalDays-1-index)/(totalDays-1):1; const alpha=0.3+recency*0.7; const color=isToday?'#f59e0b':`rgba(69, 214, 193, ${alpha.toFixed(3)})`; const pointsAttr=day.points.map(p=>`${axes.x(p.hour)},${axes.y(p.value)}`).join(' '); const line=appendOptimizationSvg(svg,'polyline',{points:pointsAttr,fill:'none',stroke:color,'stroke-width':isToday?3.5:2,class:'optimization-forecast-line'}); appendOptimizationSvg(line,'title',{},`${day.day}${isToday?' (today)':''}`); const firstValue=day.points[0]?.value; const lastValue=day.points.at(-1)?.value; const actualText=Number.isFinite(day.actual)?day.actual.toLocaleString():'not final'; const daySummary=`${day.day}${isToday?' (today)':''} · ${day.points.length} snapshots · range ${Number.isFinite(firstValue)?firstValue.toLocaleString():'?'} → ${Number.isFinite(lastValue)?lastValue.toLocaleString():'?'} LP · actual final ${actualText} LP`; const hitArea=appendOptimizationSvg(svg,'polyline',{points:pointsAttr,class:'optimization-line-hit','stroke-width':16}); bindOptimizationAnalyticsTooltip(hitArea,daySummary); for(const point of day.points){const snapshot=appendOptimizationSvg(svg,'circle',{cx:axes.x(point.hour),cy:axes.y(point.value),r:5,fill:color}); const actual=Number.isFinite(day.actual)?`${day.actual.toLocaleString()} LP`:'not final'; const error=Number.isFinite(day.actual)?`${(point.value-day.actual).toLocaleString()} LP`:'not available'; bindOptimizationAnalyticsTooltip(snapshot,`${day.day} · ${String(point.hour).padStart(2,'0')}:00 UTC · expected ${point.value.toLocaleString()} LP · actual final ${actual} · forecast error ${error}`);} if(Number.isFinite(day.actual)){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(24),cy:axes.y(day.actual),r:4,fill:color,class:'mean-marker'});appendOptimizationSvg(dot,'title',{},`${day.day} actual ${day.actual.toLocaleString()} LP`);}});}
   svg=createOptimizationAnalyticsSvg(optimizationUpgradingErrorChart);
   if(svg&&analytics.errorByHour.length){const bound=Math.max(1,...analytics.errorByHour.flatMap(r=>[Math.abs(r.q25),Math.abs(r.q75)]))*1.1,axes=renderUpgradingChartAxes(svg,{minY:-bound,maxY:bound,xMax:23,xTicks:[0,6,12,18,23]}); appendOptimizationSvg(svg,'line',{x1:axes.left,x2:axes.width-axes.right,y1:axes.y(0),y2:axes.y(0),class:'optimization-zero-line'}); const polygon=[...analytics.errorByHour.map(r=>`${axes.x(r.hour)},${axes.y(r.q75)}`),...analytics.errorByHour.slice().reverse().map(r=>`${axes.x(r.hour)},${axes.y(r.q25)}`)].join(' '); appendOptimizationSvg(svg,'polygon',{points:polygon,class:'optimization-error-band'}); appendOptimizationSvg(svg,'polyline',{points:analytics.errorByHour.map(r=>`${axes.x(r.hour)},${axes.y(r.median)}`).join(' '),fill:'none',class:'optimization-error-line'}); for(const row of analytics.errorByHour){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(row.hour),cy:axes.y(row.median),r:3,fill:'#45d6c1'});appendOptimizationSvg(dot,'title',{},`${String(row.hour).padStart(2,'0')}:00 · median ${row.median.toLocaleString()} LP · middle 50% ${row.q25.toLocaleString()} to ${row.q75.toLocaleString()} · n=${row.count}`);}}
 }
@@ -6723,11 +6743,12 @@ async function refreshScanningOptimization({ append = false, force = false } = {
   const start = optimizationFilterIso(optimizationStartFilter);
   const stop = optimizationFilterIso(optimizationStopFilter, true);
   const fleet = optimizationFleetFilter.value;
+  const experimentId = optimizationExperimentFilter?.value || '__all__';
   const eventType = optimizationEventFilter.value;
   const operation = optimizationOperationFilter.value;
   const status = optimizationStatusFilter.value;
   const cached = !append && !force
-    ? getCachedFilterResult(faction, 'optimizationScanning', start || '', stop || '', fleet, eventType, operation, status)
+    ? getCachedFilterResult(faction, 'optimizationScanning', start || '', stop || '', fleet, experimentId, eventType, operation, status)
     : null;
   if (cached) {
     latestOptimizationResult = cached;
@@ -6736,6 +6757,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
     renderOptimizationColumnControls();
     renderOptimizationTable();
     populateOptimizationFilter(optimizationFleetFilter, optimizationRows, 'fleet', 'All fleets');
+    populateOptimizationFilter(optimizationExperimentFilter, optimizationRows, 'experimentId', 'All experiments');
     populateOptimizationFilter(optimizationOperationFilter, optimizationRows, 'operation', 'All operations');
     optimizationLoadMore.hidden = !cached.hasMore;
     optimizationSyncStatus.textContent = `${optimizationRows.length.toLocaleString()} cached rows · ${cached.bucket} · ${faction}`;
@@ -6751,6 +6773,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
     eventType,
     operation,
     status,
+    experimentId,
     offset: append ? optimizationRows.length : 0,
     limit: 500,
   });
@@ -6776,6 +6799,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
   renderOptimizationColumnControls();
   renderOptimizationTable();
   populateOptimizationFilter(optimizationFleetFilter, optimizationRows, 'fleet', 'All fleets');
+  populateOptimizationFilter(optimizationExperimentFilter, optimizationRows, 'experimentId', 'All experiments');
   populateOptimizationFilter(optimizationOperationFilter, optimizationRows, 'operation', 'All operations');
   optimizationLoadMore.hidden = !result.hasMore;
   optimizationSyncStatus.textContent = `${optimizationRows.length.toLocaleString()} rows · ${result.bucket} · ${normalizeFaction((latestSettings || getFormPayload()).faction)}`;
@@ -7079,6 +7103,7 @@ document.querySelectorAll('.optimization-view-button').forEach((button) => {
 
 optimizationAnalyticsExperiment?.addEventListener('change', renderScanningOptimizationAnalytics);
 optimizationAnalyticsMetric?.addEventListener('change', renderScanningOptimizationAnalytics);
+optimizationAnalyticsParameter?.addEventListener('change', () => { selectedScanningOptimizationParameter = optimizationAnalyticsParameter.value; renderScanningOptimizationAnalytics(); });
 
 renderEarningsColumnControls();
 setupEarningsFilterHandlers();
@@ -7485,7 +7510,7 @@ form.addEventListener('input', () => {
 
 fleetSearchInput.addEventListener('input', renderFleetSearch);
 
-for (const filter of [optimizationStartFilter, optimizationStopFilter, optimizationFleetFilter, optimizationEventFilter, optimizationOperationFilter, optimizationStatusFilter]) {
+for (const filter of [optimizationStartFilter, optimizationStopFilter, optimizationFleetFilter, optimizationExperimentFilter, optimizationEventFilter, optimizationOperationFilter, optimizationStatusFilter]) {
   filter?.addEventListener('change', () => refreshScanningOptimization());
 }
 for (const filter of [optimizationStartFilter, optimizationStopFilter]) {

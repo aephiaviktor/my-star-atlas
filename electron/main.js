@@ -595,7 +595,7 @@ async function fetchScanningOptimization(payload = {}) {
     `r.optimization_type == "scanning"`,
     `r.faction == "${escapeFluxString(faction)}"`,
   ];
-  for (const [field, value] of [['fleet', payload.fleet], ['event_type', payload.eventType], ['operation', payload.operation]]) {
+  for (const [field, value] of [['fleet', payload.fleet], ['experimentId', payload.experimentId], ['event_type', payload.eventType], ['operation', payload.operation]]) {
     if (value && value !== '__all__') filters.push(`r.${field} == "${escapeFluxString(value)}"`);
   }
   const statusFilter = payload.status === 'successful'
@@ -649,6 +649,7 @@ async function fetchUpgradingOptimization(payload = {}) {
   const bucket = String(settings.influxOptimizationBucket || 'optimization').trim();
   const querySettings = { ...settings, influxBucket: bucket };
   const faction = normalizeOptimizationFaction(payload.faction || settings.faction);
+  const aephiaFaction = normalizeFaction(payload.faction || settings.faction);
   const requestedStart = Date.parse(String(payload.start || ''));
   const start = new Date(Math.max(Date.parse(OPTIMIZATION_UPGRADING_START), Number.isFinite(requestedStart) ? requestedStart : Date.parse(OPTIMIZATION_UPGRADING_START))).toISOString();
   const requestedStop = Date.parse(String(payload.stop || ''));
@@ -680,7 +681,7 @@ async function fetchUpgradingOptimization(payload = {}) {
   ]);
   const rows = mergeUpgradingOptimizationRows(parseInfluxCsv(aggregateCsv), parseInfluxCsv(componentCsv));
   const playerDaily = parseInfluxCsv(playerCsv).map((row) => ({ date: String(row._time || '').slice(0, 10), lp: Number(row._value || 0) })).filter((row) => row.date && Number.isFinite(row.lp));
-  const factionDaily = Object.entries(factionLpByDate[faction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
+  const factionDaily = Object.entries(factionLpByDate[aephiaFaction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
   return { ok: true, rows, playerDaily, factionDaily, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 

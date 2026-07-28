@@ -786,6 +786,9 @@
               <label class="activity-filter">Fleet
                 <select id="optimization-fleet-filter"><option value="__all__">All fleets</option></select>
               </label>
+              <label class="activity-filter">Experiment
+                <select id="optimization-experiment-filter"><option value="__all__">All experiments</option></select>
+              </label>
               <label class="activity-filter">Event
                 <select id="optimization-event-filter"><option value="__all__">All events</option><option value="transaction">transaction</option><option value="scan_result">scan_result</option><option value="optimization_progress">optimization_progress</option></select>
               </label>
@@ -849,10 +852,15 @@
                   <div id="optimization-analytics-sector-chart" class="optimization-analytics-chart"></div>
                 </section>
                 <section class="optimization-analytics-card optimization-analytics-ranking-card">
-                  <h3>Parameter ranking</h3>
-                  <div class="fleet-table-wrap">
-                    <table class="fleet-table optimization-table">
-                      <thead><tr><th>Parameter</th><th>Value</th><th>Scans</th><th>SDU / scan</th><th>SDU / hour</th><th>Scan success</th><th>Δ best</th></tr></thead>
+                  <div class="optimization-analytics-ranking-header">
+                    <h3>Parameter ranking</h3>
+                    <label class="activity-filter">Parameter
+                      <select id="optimization-analytics-parameter"></select>
+                    </label>
+                  </div>
+                  <div class="fleet-table-wrap optimization-analytics-ranking-wrap">
+                    <table class="fleet-table optimization-table optimization-analytics-ranking">
+                      <thead><tr><th>Value</th><th>Scans</th><th>SDU / scan</th><th>SDU / hour</th><th>Scan success</th><th>Δ best</th></tr></thead>
                       <tbody id="optimization-analytics-ranking"><tr class="empty-row"><td colspan="7">Awaiting scan results</td></tr></tbody>
                     </table>
                   </div>

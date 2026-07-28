@@ -17,6 +17,8 @@ test('upgrading optimization backend joins snapshots and analytics history', () 
   assert.match(main, /r\._measurement == "lp_per_profile" and r\._field == "lp"/);
   assert.match(main, /r\.source == "redeemed"/);
   assert.match(main, /fetchFactionRedeemedLpByDate\(settings\)/);
+  assert.match(main, /const aephiaFaction = normalizeFaction\(/);
+  assert.match(main, /factionLpByDate\[aephiaFaction\]/);
   assert.match(main, /mergeUpgradingOptimizationRows\(/);
   assert.match(main, /handleTrustedIpc\('optimization:upgrading'/);
   assert.match(preload, /getUpgradingOptimization:.*optimization:upgrading/);
@@ -43,6 +45,13 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(renderer, /expected_total_lp_eod/);
   assert.match(renderer, /points\.sort\(\(a,b\) => a\.hour-b\.hour\)\.slice\(1\)/);
   assert.match(renderer, /bindOptimizationAnalyticsTooltip\(snapshot/);
+  assert.match(renderer, /bindOptimizationAnalyticsTooltip\(hitArea/);
+  assert.match(renderer, /optimization-line-hit/);
+  assert.match(renderer, /rgba\(69, 214, 193/);
+  assert.match(renderer, /#f59e0b.*?isToday\?/);
   assert.match(renderer, /actual final/);
   assert.match(renderer, /forecast error/);
+  const css = fs.readFileSync('electron/renderer.css', 'utf8');
+  assert.match(css, /\.optimization-line-hit/);
+  assert.match(css, /pointer-events: stroke/);
 });
