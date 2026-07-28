@@ -4130,10 +4130,15 @@ async function refreshDailySdu() {
     renderSduEmpty('Loading SDU data...');
   }
   try {
-    const result = await api.getDailySdu({
+    const payload = {
       ...(latestSettings || getFormPayload()),
       fleetFilter: context.fleetFilter,
-    });
+    };
+    const consumptionPromise = api.getDailySduConsumption(payload).catch((error) => ({
+      ok: false,
+      error: error?.message || String(error),
+    }));
+    const result = await api.getDailySdu(payload);
     if (!requestGuard.isCurrent(request, getRefreshContext({ fleetFilter: selectedScanningFleet }))) return;
     if (!result?.ok && cached) {
       renderSduChart(cached);
@@ -4143,6 +4148,24 @@ async function refreshDailySdu() {
       return;
     }
     renderSduChart(result);
+
+    const consumptionResult = await consumptionPromise;
+    if (!requestGuard.isCurrent(request, getRefreshContext({ fleetFilter: selectedScanningFleet }))) return;
+    if (!consumptionResult?.ok) {
+      renderSduChart({
+        ...result,
+        warning: `SDU consumption unavailable: ${consumptionResult?.error || 'unknown error'}`,
+      });
+      return;
+    }
+    const consumption = consumptionResult.consumption;
+    renderSduChart({
+      ...result,
+      consumption,
+      surplus: result.selectedFleet || !consumption ? null : result.total - consumption.total,
+      checkedAt: consumptionResult.checkedAt || result.checkedAt,
+      timings: { ...result.timings, ...consumptionResult.timings },
+    });
   } catch (error) {
     console.error(error);
     if (!requestGuard.isCurrent(request, getRefreshContext({ fleetFilter: selectedScanningFleet }))) return;
@@ -6663,7 +6686,7 @@ function renderUpgradingOptimizationAnalytics() {
   }
   svg=createOptimizationAnalyticsSvg(optimizationUpgradingForecastChart);
   const forecastValues=analytics.forecasts.flatMap(d=>[...d.points.map(p=>p.value),...(Number.isFinite(d.actual)?[d.actual]:[])]);
-  if(svg&&forecastValues.length){const min=Math.min(...forecastValues),max=Math.max(...forecastValues),pad=Math.max(1,(max-min)*.08),axes=renderUpgradingChartAxes(svg,{minY:Math.max(0,min-pad),maxY:max+pad}); analytics.forecasts.forEach((day,index)=>{const color=day.today?'#45d6c1':optimizationAnalyticsColor(index); const line=appendOptimizationSvg(svg,'polyline',{points:day.points.map(p=>`${axes.x(p.hour)},${axes.y(p.value)}`).join(' '),fill:'none',stroke:color,'stroke-width':day.today?3:1.5,opacity:day.today?1:.7}); appendOptimizationSvg(line,'title',{},`${day.day} forecast`); for(const point of day.points){const snapshot=appendOptimizationSvg(svg,'circle',{cx:axes.x(point.hour),cy:axes.y(point.value),r:2.2,fill:color});appendOptimizationSvg(snapshot,'title',{},`${day.day} ${String(point.hour).padStart(2,'0')}:00 · expected ${point.value.toLocaleString()} LP`);} if(Number.isFinite(day.actual)){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(24),cy:axes.y(day.actual),r:4,fill:color,class:'mean-marker'});appendOptimizationSvg(dot,'title',{},`${day.day} actual ${day.actual.toLocaleString()} LP`);}});}
+  if(svg&&forecastValues.length){const min=Math.min(...forecastValues),max=Math.max(...forecastValues),pad=Math.max(1,(max-min)*.08),axes=renderUpgradingChartAxes(svg,{minY:Math.max(0,min-pad),maxY:max+pad}); analytics.forecasts.forEach((day,index)=>{const color=day.today?'#45d6c1':optimizationAnalyticsColor(index); const line=appendOptimizationSvg(svg,'polyline',{points:day.points.map(p=>`${axes.x(p.hour)},${axes.y(p.value)}`).join(' '),fill:'none',stroke:color,'stroke-width':day.today?3:1.5,opacity:day.today?1:.7}); appendOptimizationSvg(line,'title',{},`${day.day} forecast`); for(const point of day.points){const snapshot=appendOptimizationSvg(svg,'circle',{cx:axes.x(point.hour),cy:axes.y(point.value),r:5,fill:color}); const actual=Number.isFinite(day.actual)?`${day.actual.toLocaleString()} LP`:'not final'; const error=Number.isFinite(day.actual)?`${(point.value-day.actual).toLocaleString()} LP`:'not available'; bindOptimizationAnalyticsTooltip(snapshot,`${day.day} · ${String(point.hour).padStart(2,'0')}:00 UTC · expected ${point.value.toLocaleString()} LP · actual final ${actual} · forecast error ${error}`);} if(Number.isFinite(day.actual)){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(24),cy:axes.y(day.actual),r:4,fill:color,class:'mean-marker'});appendOptimizationSvg(dot,'title',{},`${day.day} actual ${day.actual.toLocaleString()} LP`);}});}
   svg=createOptimizationAnalyticsSvg(optimizationUpgradingErrorChart);
   if(svg&&analytics.errorByHour.length){const bound=Math.max(1,...analytics.errorByHour.flatMap(r=>[Math.abs(r.q25),Math.abs(r.q75)]))*1.1,axes=renderUpgradingChartAxes(svg,{minY:-bound,maxY:bound,xMax:23,xTicks:[0,6,12,18,23]}); appendOptimizationSvg(svg,'line',{x1:axes.left,x2:axes.width-axes.right,y1:axes.y(0),y2:axes.y(0),class:'optimization-zero-line'}); const polygon=[...analytics.errorByHour.map(r=>`${axes.x(r.hour)},${axes.y(r.q75)}`),...analytics.errorByHour.slice().reverse().map(r=>`${axes.x(r.hour)},${axes.y(r.q25)}`)].join(' '); appendOptimizationSvg(svg,'polygon',{points:polygon,class:'optimization-error-band'}); appendOptimizationSvg(svg,'polyline',{points:analytics.errorByHour.map(r=>`${axes.x(r.hour)},${axes.y(r.median)}`).join(' '),fill:'none',class:'optimization-error-line'}); for(const row of analytics.errorByHour){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(row.hour),cy:axes.y(row.median),r:3,fill:'#45d6c1'});appendOptimizationSvg(dot,'title',{},`${String(row.hour).padStart(2,'0')}:00 · median ${row.median.toLocaleString()} LP · middle 50% ${row.q25.toLocaleString()} to ${row.q75.toLocaleString()} · n=${row.count}`);}}
 }
