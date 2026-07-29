@@ -168,6 +168,29 @@ test('Scanning Data filters by optimization parameter instead of status', () => 
   assert.match(main, /r\.optimizationParameter ==/);
 });
 
+test('Scanning Data scopes rows and fleet choices to the selected faction', () => {
+  const source = fs.readFileSync(rendererPath, 'utf8');
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext([
+    "const factionLabels = Object.freeze({ MUD: 'MUD', ONI: 'ONI', USTUR: 'USTUR' });",
+    extractFunction(source, 'normalizeFaction'),
+    extractFunction(source, 'filterScanningOptimizationRowsByFaction'),
+    'this.filterRows = filterScanningOptimizationRowsByFaction;'
+  ].join('\n'), context);
+
+  const rows = [
+    { faction: 'MUD', fleet: 'Mud Fleet' },
+    { faction: 'ONI', fleet: 'Oni Fleet' },
+    { faction: 'UST', fleet: 'Ustur Fleet' },
+    { faction: 'USTUR', fleet: 'Ustur Fleet 2' },
+  ];
+  assert.deepEqual(Array.from(context.filterRows(rows, 'MUD'), row => row.fleet), ['Mud Fleet']);
+  assert.deepEqual(Array.from(context.filterRows(rows, 'ONI'), row => row.fleet), ['Oni Fleet']);
+  assert.deepEqual(Array.from(context.filterRows(rows, 'USTUR'), row => row.fleet), ['Ustur Fleet', 'Ustur Fleet 2']);
+  assert.match(source, /optimizationRows = filterScanningOptimizationRowsByFaction/);
+});
+
 test('analytics requests may load complete scan history without enlarging Data pages', () => {
   const main = fs.readFileSync(mainPath, 'utf8');
   assert.match(main, /payload\.analytics === true \? 5000 : 500/);

@@ -1310,6 +1310,7 @@ function resetFactionScopedState() {
   latestEarningsResult = null;
   latestOptimizationResult = null;
   optimizationRows = [];
+  optimizationFleetFilter?.replaceChildren(new Option('All fleets', '__all__'));
   optimizationAnalyticsRows = [];
   optimizationAnalyticsLoadedFaction = '';
   latestUpgradingOptimizationResult = null;
@@ -6419,6 +6420,15 @@ function populateOptimizationFilter(select, rows, key, allLabel) {
   if (values.includes(selected)) select.value = selected;
 }
 
+function filterScanningOptimizationRowsByFaction(rows, faction) {
+  const selectedFaction = normalizeFaction(faction);
+  return (rows || []).filter((row) => {
+    const rowFaction = String(row?.faction || '').trim().toUpperCase();
+    const normalizedRowFaction = rowFaction === 'UST' ? 'USTUR' : rowFaction;
+    return normalizedRowFaction === selectedFaction;
+  });
+}
+
 function getOptimizationExperimentId(row) {
   return String(row?.experimentId || row?.experiment_id || '').trim();
 }
@@ -6988,7 +6998,7 @@ async function refreshScanningOptimization({ append = false, force = false } = {
     : null;
   if (cached) {
     latestOptimizationResult = cached;
-    optimizationRows = cached.rows || [];
+    optimizationRows = filterScanningOptimizationRowsByFaction(cached.rows, faction);
     optimizationColumns = getOrderedOptimizationColumns(new Set([...optimizationColumns, ...(cached.columns || [])]));
     renderOptimizationColumnControls();
     renderOptimizationTable();
@@ -7020,9 +7030,11 @@ async function refreshScanningOptimization({ append = false, force = false } = {
     if (!append) { optimizationRows = []; renderOptimizationTable(); }
     return;
   }
-  latestOptimizationResult = result;
-  if (!append) setCachedFilterResult(faction, 'optimizationScanning', result, start || '', stop || '', fleet, experimentId, eventType, operation, optimizationParameter);
-  optimizationRows = append ? [...optimizationRows, ...result.rows] : result.rows;
+  const factionRows = filterScanningOptimizationRowsByFaction(result.rows, faction);
+  const factionResult = { ...result, rows: factionRows };
+  latestOptimizationResult = factionResult;
+  if (!append) setCachedFilterResult(faction, 'optimizationScanning', factionResult, start || '', stop || '', fleet, experimentId, eventType, operation, optimizationParameter);
+  optimizationRows = append ? [...optimizationRows, ...factionRows] : factionRows;
   const discovered = getOrderedOptimizationColumns(new Set([...optimizationColumns, ...(result.columns || [])]));
   let discoveredNewColumn = false;
   for (const column of discovered) {
