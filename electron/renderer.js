@@ -68,6 +68,7 @@ const optimizationAnalyticsMetric = document.querySelector('#optimization-analyt
 const optimizationAnalyticsParameter = document.querySelector('#optimization-analytics-parameter');
 const optimizationAnalyticsStatus = document.querySelector('#optimization-analytics-status');
 const optimizationAnalyticsSummary = document.querySelector('#optimization-analytics-summary');
+const optimizationAnalyticsEconomics = document.querySelector('#optimization-analytics-economics');
 const optimizationAnalyticsValueChart = document.querySelector('#optimization-analytics-value-chart');
 const optimizationAnalyticsSectorChart = document.querySelector('#optimization-analytics-sector-chart');
 const optimizationAnalyticsRanking = document.querySelector('#optimization-analytics-ranking');
@@ -322,6 +323,7 @@ let latestOptimizationResult = null;
 let optimizationRows = [];
 let optimizationAnalyticsRows = [];
 let optimizationAnalyticsLoadedFaction = '';
+let optimizationAnalyticsPrices = null;
 let selectedScanningOptimizationDate = '';
 let scanningOptimizationCalendarMonth = '';
 let selectedScanningOptimizationParameter = '';
@@ -1313,6 +1315,7 @@ function resetFactionScopedState() {
   optimizationFleetFilter?.replaceChildren(new Option('All fleets', '__all__'));
   optimizationAnalyticsRows = [];
   optimizationAnalyticsLoadedFaction = '';
+  optimizationAnalyticsPrices = null;
   latestUpgradingOptimizationResult = null;
   optimizationUpgradingRows = [];
   latestSduResult = null;
@@ -6506,9 +6509,10 @@ function buildScanningOptimizationExperimentCatalog(rows, onlyOptimization = tru
 }
 
 function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest__', options = null) {
-  const scanRows = (Array.isArray(rows) ? rows : []).filter((row) => String(row?.event_type || row?.eventType || '') === 'scan_result');
+  const allRows = Array.isArray(rows) ? rows : [];
+  const scanRows = allRows.filter((row) => String(row?.event_type || row?.eventType || '') === 'scan_result');
   const experimentAliases = new Map();
-  for (const row of scanRows) {
+  for (const row of allRows) {
     const experimentId = getOptimizationExperimentId(row);
     const previousExperimentId = String(row?.previousExperimentId || row?.previous_experiment_id || '').trim();
     if(experimentId && previousExperimentId && previousExperimentId !== experimentId) experimentAliases.set(previousExperimentId, experimentId);
@@ -6529,35 +6533,48 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
   const experiments = catalog.experiments.filter((id) => !selectedDate || experimentDate.get(id) === selectedDate);
   const requestedExperimentId = canonicalExperimentId(String(selectedExperiment || ''));
   const experimentId = selectedExperiment === '__latest__' || !experiments.includes(requestedExperimentId) ? (experiments[0] || '') : requestedExperimentId;
-  const selectedRows = scanRows.filter((row) => canonicalExperimentId(getOptimizationExperimentId(row)) === experimentId)
+  const selectedRows = allRows.filter((row) => canonicalExperimentId(getOptimizationExperimentId(row)) === experimentId)
     .sort((a, b) => Date.parse(String(a.time || '')) - Date.parse(String(b.time || '')));
-  const runtimeCompletedScans = selectedRows.reduce((maximum, row) => {
+  const selectedScanRows = selectedRows.filter((row) => String(row?.event_type || row?.eventType || '') === 'scan_result');
+  const runtimeCompletedScans = selectedScanRows.reduce((maximum, row) => {
     const value = Number(row?.optimizationCompletedScans);
     return Number.isFinite(value) ? Math.max(maximum, value) : maximum;
   }, 0);
-  const runtimeTotalScans = selectedRows.reduce((maximum, row) => {
+  const runtimeTotalScans = selectedScanRows.reduce((maximum, row) => {
     const value = Number(row?.optimizationTotalScans);
     return Number.isFinite(value) ? Math.max(maximum, value) : maximum;
   }, 0);
+  const getIdentity = (row) => {
+    const values = parseScanningOptimizationValues(row);
+    const entries = Object.entries(values).filter(([, value]) => Number.isFinite(Number(value)))
+      .map(([parameter, value]) => [normalizeScanningOptimizationParameter(parameter), value]);
+    if(!entries.length) return null;
+    const combination = entries.map(([parameter, value]) => `${parameter}=${Number(value)}`).join(' × ');
+    const parameter = entries.length === 1 ? entries[0][0] : 'Combined';
+    const value = entries.length === 1 ? Number(entries[0][1]) : combination;
+    const rawBlockIndex = Number(row?.optimizationBlockIndex);
+    const blockIndex = Number.isInteger(rawBlockIndex) && rawBlockIndex >= 0 ? rawBlockIndex : null;
+    return { blockIndex, parameter, value, combination, key: blockIndex == null ? `${parameter}\u0000${value}` : `block:${blockIndex}` };
+  };
   const previousByFleet = new Map();
   const samples = [];
-  for (const row of selectedRows) {
+  for (const row of selectedScanRows) {
     const timeMs = Date.parse(String(row?.time || ''));
-    if(!Number.isFinite(timeMs)) continue;
+    const identity = getIdentity(row);
+    if(!Number.isFinite(timeMs) || !identity) continue;
     const fleet = String(row?.fleet || 'unknown');
     const previous = previousByFleet.get(fleet);
     previousByFleet.set(fleet, timeMs);
     const cycleHours = Number.isFinite(previous) && timeMs > previous ? (timeMs - previous) / 3600000 : null;
-    const values = parseScanningOptimizationValues(row);
-    const entries = Object.entries(values).filter(([, value]) => Number.isFinite(Number(value)))
-      .map(([parameter, value]) => [normalizeScanningOptimizationParameter(parameter), value]);
-    if(!entries.length) continue;
-    const combination = entries.map(([parameter, value]) => `${parameter}=${Number(value)}`).join(' × ');
     samples.push({
-      timeMs, fleet, combination,
-      parameter: entries.length === 1 ? entries[0][0] : 'Combined',
-      value: entries.length === 1 ? Number(entries[0][1]) : combination,
+      timeMs, fleet, ...identity,
       sdu: Number(row?.sduFound || 0),
+      chance: Number.isFinite(Number(row?.chance)) ? Number(row.chance) : null,
+      burnedFood: Number(row?.burnedFood || 0),
+      hasPauseTelemetry: Object.prototype.hasOwnProperty.call(row, 'pauseSeconds'),
+      pauseCount: Number(row?.pauseCount || 0),
+      pauseSeconds: Number(row?.pauseSeconds || 0),
+      txCostSol: Number(row?.txCostSol || 0),
       txSuccess: row?.success === true || String(row?.success).toLowerCase() === 'true',
       scanSuccess: Number(row?.sduFound || 0) > 0,
       cycleHours,
@@ -6567,11 +6584,29 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
   }
   const grouped = new Map();
   for (const sample of samples) {
-    const key = `${sample.parameter}\u0000${sample.value}`;
-    if(!grouped.has(key)) grouped.set(key, { parameter: sample.parameter, value: sample.value, samples: [] });
-    grouped.get(key).samples.push(sample);
+    if(!grouped.has(sample.key)) grouped.set(sample.key, { blockIndex: sample.blockIndex, parameter: sample.parameter, value: sample.value, samples: [] });
+    grouped.get(sample.key).samples.push(sample);
   }
-  const groups = [...grouped.values()].map((group) => {
+  const eventRowsByKey = new Map();
+  for(const row of selectedRows) {
+    const identity = getIdentity(row);
+    const timeMs = Date.parse(String(row?.time || ''));
+    if(!identity || !Number.isFinite(timeMs) || !grouped.has(identity.key)) continue;
+    if(!eventRowsByKey.has(identity.key)) eventRowsByKey.set(identity.key, []);
+    eventRowsByKey.get(identity.key).push({ row, timeMs });
+  }
+  const starts = [...eventRowsByKey.entries()].map(([key, events]) => ({ key, timeMs: Math.min(...events.map((event) => event.timeMs)) }))
+    .sort((a, b) => a.timeMs - b.timeMs);
+  const nextStartByKey = new Map(starts.map((entry, index) => [entry.key, starts[index + 1]?.timeMs ?? null]));
+  const prices = options?.prices && typeof options.prices === 'object' ? options.prices : {};
+  const pricedCost = (quantity, price) => {
+    if(quantity == null) return null;
+    const amount = Number(quantity || 0);
+    if(amount === 0) return 0;
+    const unitPrice = Number(price);
+    return Number.isFinite(unitPrice) ? amount * unitPrice : null;
+  };
+  const groups = [...grouped.entries()].map(([key, group]) => {
     const scans = group.samples.length;
     const successfulTransactions = group.samples.filter((sample) => sample.txSuccess).length;
     const successfulScans = group.samples.filter((sample) => sample.txSuccess && sample.scanSuccess).length;
@@ -6579,22 +6614,76 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
     const timed = group.samples.filter((sample) => Number.isFinite(sample.cycleHours) && sample.cycleHours > 0);
     const observedHours = timed.reduce((sum, sample) => sum + sample.cycleHours, 0);
     const estimatedHours = timed.length ? observedHours / timed.length * scans : 0;
+    const events = eventRowsByKey.get(key) || [];
+    const startedAtMs = events.length ? Math.min(...events.map((event) => event.timeMs)) : null;
+    const latestAtMs = events.length ? Math.max(...events.map((event) => event.timeMs)) : null;
+    const boundaryAtMs = nextStartByKey.get(key);
+    const elapsedSeconds = Number.isFinite(startedAtMs)
+      ? Math.max(0, ((Number.isFinite(boundaryAtMs) ? boundaryAtMs : latestAtMs) - startedAtMs) / 1000)
+      : estimatedHours * 3600;
+    const effectiveHours = elapsedSeconds > 0 ? elapsedSeconds / 3600 : estimatedHours;
+    const chances = group.samples.map((sample) => sample.chance).filter(Number.isFinite);
+    const hasPauseTelemetry = group.samples.every((sample) => sample.hasPauseTelemetry);
+    const pauseCount = hasPauseTelemetry ? group.samples.reduce((sum, sample) => sum + sample.pauseCount, 0) : null;
+    const pausedSeconds = hasPauseTelemetry ? group.samples.reduce((sum, sample) => sum + sample.pauseSeconds, 0) : null;
+    const movementTransactions = events.filter(({ row }) => ['WARP', 'SUBWARP'].includes(String(row?.operation || '').toUpperCase()));
+    const movementEvents = events.filter(({ row }) => String(row?.movementPhase || '').toLowerCase() === 'start');
+    const hasMovementTelemetry = movementTransactions.length === 0 || movementEvents.length > 0;
+    const movementSeconds = hasMovementTelemetry ? movementEvents.reduce((sum, { row }) => sum + Number(row?.movementSeconds || 0), 0) : null;
+    const cooldownOverlapSeconds = hasMovementTelemetry ? movementEvents.reduce((sum, { row }) => sum + Number(row?.cooldownOverlapSeconds || 0), 0) : null;
+    const opportunityCostMovementSeconds = hasMovementTelemetry ? movementEvents.reduce((sum, { row }) => sum + Number(row?.opportunityCostMovementSeconds || 0), 0) : null;
+    const burnedFood = group.samples.reduce((sum, sample) => sum + sample.burnedFood, 0);
+    const burnedFuel = hasMovementTelemetry ? movementEvents.reduce((sum, { row }) => sum + Number(row?.burnedFuel || 0), 0) : null;
+    const txCostsBySignature = new Map();
+    for(const { row, timeMs } of events) {
+      const cost = Number(row?.txCostSol || 0);
+      if(!Number.isFinite(cost) || cost <= 0) continue;
+      const signature = String(row?.signature || '').trim();
+      const key = signature || `${String(row?.event_type || row?.eventType || '')}:${timeMs}`;
+      txCostsBySignature.set(key, Math.max(txCostsBySignature.get(key) || 0, cost));
+    }
+    const txCostSol = [...txCostsBySignature.values()].reduce((sum, cost) => sum + cost, 0);
+    const grossRevenueAtlas = pricedCost(totalSdu, prices.sduPriceAtl);
+    const foodCostAtlas = pricedCost(burnedFood, prices.foodPriceAtl);
+    const fuelCostAtlas = pricedCost(burnedFuel, prices.fuelPriceAtl);
+    const txCostAtlas = pricedCost(txCostSol, prices.solPriceAtl);
+    const costs = [foodCostAtlas, fuelCostAtlas, txCostAtlas];
+    const totalCostAtlas = costs.every(Number.isFinite) ? costs.reduce((sum, value) => sum + value, 0) : null;
+    const netAtlas = Number.isFinite(grossRevenueAtlas) && Number.isFinite(totalCostAtlas) ? grossRevenueAtlas - totalCostAtlas : null;
     return {
       ...group,
       scans,
       totalSdu,
+      averageScanChance: chances.length ? chances.reduce((sum, value) => sum + value, 0) / chances.length : null,
       sduPerScan: scans ? totalSdu / scans : 0,
-      sduPerHour: estimatedHours > 0 ? totalSdu / estimatedHours : 0,
+      sduPerHour: effectiveHours > 0 ? totalSdu / effectiveHours : 0,
       txSuccessRate: scans ? successfulTransactions / scans * 100 : 0,
       scanSuccessRate: successfulTransactions ? successfulScans / successfulTransactions * 100 : 0,
+      elapsedSeconds,
+      pauseCount,
+      pausedSeconds,
+      movementSeconds,
+      cooldownOverlapSeconds,
+      opportunityCostMovementSeconds,
+      burnedFood,
+      burnedFuel,
+      txCostSol,
+      grossRevenueAtlas,
+      foodCostAtlas,
+      fuelCostAtlas,
+      txCostAtlas,
+      totalCostAtlas,
+      netAtlas,
+      netAtlasPerHour: Number.isFinite(netAtlas) && effectiveHours > 0 ? netAtlas / effectiveHours : null,
     };
-  }).sort((a, b) => a.parameter.localeCompare(b.parameter) || Number(a.value) - Number(b.value) || String(a.value).localeCompare(String(b.value)));
+  }).sort((a, b) => (a.blockIndex ?? Number.MAX_SAFE_INTEGER) - (b.blockIndex ?? Number.MAX_SAFE_INTEGER) || a.parameter.localeCompare(b.parameter) || Number(a.value) - Number(b.value) || String(a.value).localeCompare(String(b.value)));
   return {
     experimentId,
     experiments,
     catalog,
     samples,
     groups,
+    priceSnapshot: { ...prices },
     runtimeCompletedScans,
     runtimeTotalScans,
     unavailableHistoricalScans: Math.max(0, runtimeCompletedScans - samples.length),
@@ -6606,6 +6695,25 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
 
 function optimizationAnalyticsColor(index) {
   return ['#22d3ee','#45d6c1','#f59e0b','#a78bfa','#fb7185','#84cc16','#60a5fa','#f97316'][index % 8];
+}
+
+function formatOptimizationAnalyticsDuration(seconds) {
+  if(seconds == null || !Number.isFinite(Number(seconds))) return '--';
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const remainder = total % 60;
+  if(hours) return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+  if(minutes) return `${minutes}m ${String(remainder).padStart(2, '0')}s`;
+  return `${remainder}s`;
+}
+
+function getScanningOptimizationChartMetric(sample, group, metric) {
+  if(metric === 'averageScanChance') return Number.isFinite(sample.chance) ? sample.chance : group.averageScanChance;
+  if(metric === 'sduPerScan') return sample.sdu;
+  if(metric === 'scanSuccessRate') return sample.scanSuccess ? 100 : 0;
+  if(metric === 'netAtlasPerHour') return group.netAtlasPerHour;
+  return sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour;
 }
 
 function createOptimizationAnalyticsSvg(container, width = 760, height = 280) {
@@ -6712,21 +6820,20 @@ function renderScanningOptimizationValueChart(analytics, metric, selectedParamet
   if(!svg) return;
   const left = 48, right = 16, top = 15, bottom = 65, width = 760, height = 280;
   const values = parameterGroups.flatMap((group) => group.samples.map((sample) => {
-    if(metric === 'sduPerScan') return sample.sdu;
-    if(metric === 'scanSuccessRate') return sample.scanSuccess ? 100 : 0;
-    return sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour;
+    return getScanningOptimizationChartMetric(sample, group, metric);
   })).filter(Number.isFinite);
   const maxY = Math.max(1, ...values) * 1.08;
   for(let tick = 0; tick <= 4; tick++) {
     const y = top + (height - top - bottom) * tick / 4;
     appendOptimizationSvg(svg, 'line', { x1: left, x2: width - right, y1: y, y2: y, class: 'grid-line' });
-    appendOptimizationSvg(svg, 'text', { x: left - 6, y: y + 3, 'text-anchor': 'end', class: 'axis-label' }, (maxY * (1 - tick / 4)).toFixed(metric === 'scanSuccessRate' ? 0 : 1));
+    appendOptimizationSvg(svg, 'text', { x: left - 6, y: y + 3, 'text-anchor': 'end', class: 'axis-label' }, (maxY * (1 - tick / 4)).toFixed(metric === 'scanSuccessRate' || metric === 'averageScanChance' ? 0 : 1));
   }
   parameterGroups.forEach((group, index) => {
     const x = parameterGroups.length === 1 ? (left + width - right) / 2 : left + index * (width - left - right) / (parameterGroups.length - 1);
     const color = optimizationAnalyticsColor(index);
     group.samples.forEach((sample, sampleIndex) => {
-      const raw = metric === 'sduPerScan' ? sample.sdu : metric === 'scanSuccessRate' ? (sample.scanSuccess ? 100 : 0) : (sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour);
+      const raw = getScanningOptimizationChartMetric(sample, group, metric);
+      if(!Number.isFinite(raw)) return;
       const y = top + (height - top - bottom) * (1 - Math.min(maxY, raw) / maxY);
       const jitter = ((sampleIndex % 7) - 3) * 2.2;
       const dot = appendOptimizationSvg(svg, 'circle', { cx: x + jitter, cy: y, r: 3, fill: color, opacity: 0.55 });
@@ -6783,23 +6890,24 @@ function renderScanningOptimizationAnalytics() {
     scanningOptimizationCalendarMonth = selectedScanningOptimizationDate.slice(0, 7);
   }
   renderScanningOptimizationDateCalendar(catalog);
-  const analytics = buildScanningOptimizationAnalytics(rows, selected, { onlyOptimization, startDate: selectedScanningOptimizationDate });
+  const analytics = buildScanningOptimizationAnalytics(rows, selected, { onlyOptimization, startDate: selectedScanningOptimizationDate, prices: optimizationAnalyticsPrices });
   if(optimizationAnalyticsExperiment) {
     const prior = selected;
     optimizationAnalyticsExperiment.replaceChildren(new Option('Latest experiment', '__latest__'), ...analytics.experiments.map((id) => new Option(id, id)));
     optimizationAnalyticsExperiment.value = analytics.experiments.includes(prior) ? prior : '__latest__';
   }
   optimizationAnalyticsSummary?.replaceChildren();
+  optimizationAnalyticsEconomics?.replaceChildren();
   optimizationAnalyticsRanking?.replaceChildren();
   if(!analytics.experimentId || !analytics.samples.length) {
     if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = 'No scan_result rows with optimization values are loaded for this experiment';
     optimizationAnalyticsValueChart?.replaceChildren();
     optimizationAnalyticsSectorChart?.replaceChildren();
     optimizationAnalyticsParameter?.replaceChildren();
-    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 6; td.textContent = 'Awaiting scan results'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
+    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 9; td.textContent = 'Awaiting scan results'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
     return;
   }
-  const metric = optimizationAnalyticsMetric?.value || 'sduPerHour';
+  const metric = optimizationAnalyticsMetric?.value || 'averageScanChance';
   const parameters = [...new Set(analytics.groups.map((group) => group.parameter))].sort((a, b) => a.localeCompare(b));
   if(!parameters.includes(selectedScanningOptimizationParameter)) selectedScanningOptimizationParameter = parameters[0] || '';
   if(optimizationAnalyticsParameter) {
@@ -6809,18 +6917,48 @@ function renderScanningOptimizationAnalytics() {
     selectedScanningOptimizationParameter = optimizationAnalyticsParameter.value;
   }
   const parameterGroups = analytics.groups.filter((group) => group.parameter === selectedScanningOptimizationParameter);
-  const best = [...parameterGroups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))[0];
-  const globalBest = [...analytics.groups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))[0];
-  const elapsedHours = analytics.startedAt && analytics.endedAt ? Math.max(0, (Date.parse(analytics.endedAt) - Date.parse(analytics.startedAt)) / 3600000) : 0;
+  const totals = analytics.groups.reduce((result, group) => {
+    result.scans += group.scans;
+    result.totalSdu += group.totalSdu;
+    result.elapsedSeconds += group.elapsedSeconds;
+    result.chanceWeighted += Number.isFinite(group.averageScanChance) ? group.averageScanChance * group.scans : 0;
+    result.chanceScans += Number.isFinite(group.averageScanChance) ? group.scans : 0;
+    for(const key of ['pausedSeconds', 'movementSeconds', 'opportunityCostMovementSeconds']) {
+      result[key] = Number.isFinite(result[key]) && Number.isFinite(group[key]) ? result[key] + group[key] : null;
+    }
+    for(const key of ['grossRevenueAtlas', 'foodCostAtlas', 'fuelCostAtlas', 'txCostAtlas', 'totalCostAtlas', 'netAtlas']) {
+      result[key] = Number.isFinite(result[key]) && Number.isFinite(group[key]) ? result[key] + group[key] : null;
+    }
+    return result;
+  }, { scans: 0, totalSdu: 0, elapsedSeconds: 0, chanceWeighted: 0, chanceScans: 0, pausedSeconds: 0, movementSeconds: 0, opportunityCostMovementSeconds: 0, grossRevenueAtlas: 0, foodCostAtlas: 0, fuelCostAtlas: 0, txCostAtlas: 0, totalCostAtlas: 0, netAtlas: 0 });
+  const elapsedHours = totals.elapsedSeconds / 3600;
+  const averageScanChance = totals.chanceScans ? totals.chanceWeighted / totals.chanceScans : null;
+  const sduPerHour = elapsedHours > 0 ? totals.totalSdu / elapsedHours : 0;
+  const netAtlasPerHour = elapsedHours > 0 && Number.isFinite(totals.netAtlas) ? totals.netAtlas / elapsedHours : null;
   const metrics = [
-    ['Experiment', analytics.experimentId.slice(-12)], ['Scans', analytics.samples.length.toLocaleString()],
-    ['Parameters', parameters.length.toLocaleString()], ['Tests', analytics.groups.length.toLocaleString()],
-    ['Elapsed', `${elapsedHours.toFixed(1)} h`], ['Leader', globalBest ? `${globalBest.parameter} ${globalBest.value}` : '--'],
+    ['Average Scan Chance', Number.isFinite(averageScanChance) ? `${averageScanChance.toFixed(2)}%` : '--'],
+    ['SDU / hour', sduPerHour.toFixed(2)],
+    ['Net ATLAS / hour', Number.isFinite(netAtlasPerHour) ? formatAtlas(netAtlasPerHour, 2) : '--'],
+    ['Paused Time', formatOptimizationAnalyticsDuration(totals.pausedSeconds)],
+    ['Movement Time', formatOptimizationAnalyticsDuration(totals.movementSeconds)],
+    ['Opportunity-Cost Movement', formatOptimizationAnalyticsDuration(totals.opportunityCostMovementSeconds)],
+    ['Scan Count', totals.scans.toLocaleString()],
+    ['Elapsed Time', formatOptimizationAnalyticsDuration(totals.elapsedSeconds)],
   ];
   for(const [label, value] of metrics) {
     const div = document.createElement('div'); div.className = 'optimization-analytics-metric';
     const span = document.createElement('span'); span.textContent = label; const strong = document.createElement('strong'); strong.textContent = value;
     div.append(span, strong); optimizationAnalyticsSummary?.append(div);
+  }
+  if(optimizationAnalyticsEconomics) {
+    const prices = analytics.priceSnapshot || {};
+    const checkedAt = prices.checkedAt ? new Date(prices.checkedAt).toLocaleString() : 'unavailable';
+    const label = document.createElement('strong');
+    label.textContent = 'Net ATLAS audit: ';
+    const detail = document.createTextNode(Number.isFinite(totals.netAtlas)
+      ? `${formatAtlas(totals.grossRevenueAtlas, 2)} gross revenue − ${formatAtlas(totals.foodCostAtlas, 2)} food − ${formatAtlas(totals.fuelCostAtlas, 2)} movement fuel − ${formatAtlas(totals.txCostAtlas, 2)} transaction/SOL costs = ${formatAtlas(totals.netAtlas, 2)} net. Current price snapshot: ${checkedAt}; resources: ${prices.resourcePriceSource || 'unavailable'}; SOL/ATLAS: ${prices.atlasPerSolSource || 'unavailable'}.`
+      : 'unavailable because one or more current resource or SOL/ATLAS prices could not be loaded.');
+    optimizationAnalyticsEconomics.append(label, detail);
   }
   if(optimizationAnalyticsStatus) {
     const runtimeProgress = analytics.runtimeTotalScans > 0
@@ -6831,16 +6969,29 @@ function renderScanningOptimizationAnalytics() {
       : '';
     optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} telemetry scans analyzed${runtimeProgress}${unavailable} · ${analytics.experimentId} · ranking ${selectedScanningOptimizationParameter || 'no parameter'} values`;
   }
-  for(const group of [...parameterGroups].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))) {
+  for(const group of [...parameterGroups].sort((a, b) => (a.blockIndex ?? Number.MAX_SAFE_INTEGER) - (b.blockIndex ?? Number.MAX_SAFE_INTEGER))) {
     const tr = document.createElement('tr');
-    const delta = best && Number(best[metric]) ? (Number(group[metric]) / Number(best[metric]) - 1) * 100 : 0;
-    for(const value of [group.value, group.scans, group.sduPerScan.toFixed(2), group.sduPerHour.toFixed(2), `${group.scanSuccessRate.toFixed(1)}%`, group === best ? 'Best' : `${delta.toFixed(1)}%`]) {
+    const label = group.blockIndex == null ? group.value : `#${group.blockIndex + 1} · ${group.value}`;
+    for(const value of [
+      label,
+      group.scans,
+      Number.isFinite(group.averageScanChance) ? `${group.averageScanChance.toFixed(2)}%` : '--',
+      group.sduPerHour.toFixed(2),
+      Number.isFinite(group.netAtlasPerHour) ? formatAtlas(group.netAtlasPerHour, 2) : '--',
+      formatOptimizationAnalyticsDuration(group.pausedSeconds),
+      formatOptimizationAnalyticsDuration(group.movementSeconds),
+      formatOptimizationAnalyticsDuration(group.opportunityCostMovementSeconds),
+      formatOptimizationAnalyticsDuration(group.elapsedSeconds),
+    ]) {
       const td = document.createElement('td'); td.textContent = String(value); tr.append(td);
     }
+    tr.title = Number.isFinite(group.netAtlas)
+      ? `${formatAtlas(group.grossRevenueAtlas, 2)} gross − ${formatAtlas(group.foodCostAtlas, 2)} food − ${formatAtlas(group.fuelCostAtlas, 2)} fuel − ${formatAtlas(group.txCostAtlas, 2)} transaction/SOL = ${formatAtlas(group.netAtlas, 2)} net`
+      : 'Net ATLAS unavailable because one or more prices are missing';
     optimizationAnalyticsRanking?.append(tr);
   }
   if(!parameterGroups.length) {
-    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 6; td.textContent = 'No values for this parameter'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
+    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 9; td.textContent = 'No values for this parameter'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
   }
   renderScanningOptimizationValueChart(analytics, metric, selectedScanningOptimizationParameter);
   renderScanningOptimizationSectorChart(analytics, selectedScanningOptimizationParameter);
@@ -6964,12 +7115,12 @@ async function refreshScanningOptimizationAnalyticsData({ force = false } = {}) 
     renderScanningOptimizationAnalytics();
     return;
   }
-  if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = 'Loading complete scan-result history for analytics...';
+  if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = 'Loading complete optimization-event history and current earnings prices...';
   const result = await api.getScanningOptimization({
     faction,
     start: optimizationFilterIso(optimizationStartFilter),
     stop: optimizationFilterIso(optimizationStopFilter, true),
-    fleet: '__all__', eventType: 'scan_result', operation: '__all__', status: '__all__',
+    fleet: '__all__', eventType: '__all__', operation: '__all__', status: '__all__',
     offset: 0, limit: 5000, analytics: true,
   });
   if(faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return;
@@ -6978,9 +7129,10 @@ async function refreshScanningOptimizationAnalyticsData({ force = false } = {}) 
     return;
   }
   optimizationAnalyticsRows = result.rows || [];
+  optimizationAnalyticsPrices = result.prices || null;
   optimizationAnalyticsLoadedFaction = faction;
   renderScanningOptimizationAnalytics();
-  if(result.hasMore && optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent += ' · showing newest 5,000 scan results';
+  if(result.hasMore && optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent += ' · showing newest 5,000 optimization events';
 }
 
 async function refreshScanningOptimization({ append = false, force = false } = {}) {
@@ -7775,6 +7927,7 @@ for (const filter of [optimizationStartFilter, optimizationStopFilter]) {
   filter?.addEventListener('change', () => {
     optimizationAnalyticsRows = [];
     optimizationAnalyticsLoadedFaction = '';
+    optimizationAnalyticsPrices = null;
     if(currentOptimizationView === 'analytics' && currentOptimizationSubtab === 'scanning') refreshScanningOptimizationAnalyticsData({ force: true });
   });
 }

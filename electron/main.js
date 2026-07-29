@@ -614,10 +614,18 @@ async function fetchScanningOptimization(payload = {}) {
   const parsed = parseInfluxCsv(await queryInfluxFlux(querySettings, flux)).map(cleanOptimizationRow);
   const rows = parsed.slice(0, pageSize);
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  const prices = payload.analytics === true
+    ? await fetchCurrentEarningsPrices().then((value) => ({
+      ...value,
+      checkedAt: new Date().toISOString(),
+      resourcePriceSource: 'Aephia /gm/resource pricingATL.priceATL',
+    })).catch(() => null)
+    : null;
   return {
     ok: true,
     rows,
     columns,
+    prices,
     hasMore: parsed.length > pageSize,
     offset,
     bucket,

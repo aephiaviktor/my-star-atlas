@@ -846,8 +846,8 @@
                 <label class="activity-filter">Experiment
                   <select id="optimization-analytics-experiment"><option value="__latest__">Latest experiment</option></select>
                 </label>
-                <label class="activity-filter">Metric
-                  <select id="optimization-analytics-metric"><option value="sduPerHour">SDU / hour</option><option value="sduPerScan">SDU / scan</option><option value="scanSuccessRate">Scan success rate</option></select>
+                <label class="activity-filter">Chart metric
+                  <select id="optimization-analytics-metric"><option value="averageScanChance">Average Scan Chance</option><option value="sduPerHour">SDU / hour</option><option value="sduPerScan">SDU / scan</option><option value="scanSuccessRate">Scan success rate</option></select>
                 </label>
               </div>
               <div class="fleet-sync-status" id="optimization-analytics-status">Load scanning optimization data to calculate analytics</div>
@@ -855,6 +855,7 @@
                 <section class="optimization-analytics-card optimization-analytics-summary-card">
                   <h3>Experiment summary</h3>
                   <div id="optimization-analytics-summary" class="optimization-analytics-metrics"></div>
+                  <div id="optimization-analytics-economics" class="optimization-analytics-economics"></div>
                 </section>
                 <section class="optimization-analytics-card">
                   <h3>Value distribution</h3>
@@ -875,8 +876,8 @@
                   </div>
                   <div class="fleet-table-wrap optimization-analytics-ranking-wrap">
                     <table class="fleet-table optimization-table optimization-analytics-ranking">
-                      <thead><tr><th>Value</th><th>Scans</th><th>SDU / scan</th><th>SDU / hour</th><th>Scan success</th><th>Δ best</th></tr></thead>
-                      <tbody id="optimization-analytics-ranking"><tr class="empty-row"><td colspan="7">Awaiting scan results</td></tr></tbody>
+                      <thead><tr><th>Block / Value</th><th>Scans</th><th>Avg Scan Chance</th><th>SDU / hour</th><th>Net ATLAS / hour</th><th>Paused</th><th>Movement</th><th>Opportunity Cost</th><th>Elapsed</th></tr></thead>
+                      <tbody id="optimization-analytics-ranking"><tr class="empty-row"><td colspan="9">Awaiting scan results</td></tr></tbody>
                     </table>
                   </div>
                 </section>

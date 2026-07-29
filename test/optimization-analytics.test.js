@@ -67,6 +67,54 @@ test('scanning analytics selects the latest experiment and ranks value groups', 
   assert.equal(eight.parameter, 'minProb');
 });
 
+test('scanning analytics reports chance, economics, pauses, and movement per optimization block', () => {
+  const { build } = loadAnalytics();
+  const rows = [
+    { time: '2026-07-29T10:00:00Z', event_type: 'optimization_start', experimentId: 'scan-20260729-economic-20', optimizationValues: '{"scanMin":8}', optimizationBlockIndex: 0, fleet: 'A' },
+    { time: '2026-07-29T10:05:00Z', event_type: 'transaction', experimentId: 'scan-20260729-economic-20', optimizationValues: '{"scanMin":8}', optimizationBlockIndex: 0, fleet: 'A', operation: 'SCAN', signature: 'scan-one', txCostSol: 0.001 },
+    { time: '2026-07-29T10:05:01Z', event_type: 'scan_result', experimentId: 'scan-20260729-economic-20', optimizationValues: '{"scanMin":8}', optimizationBlockIndex: 0, fleet: 'A', signature: 'scan-one', success: true, sduFound: 2, chance: 40, burnedFood: 1, pauseCount: 1, pauseSeconds: 60, txCostSol: 0.001 },
+    { time: '2026-07-29T10:06:00Z', event_type: 'transaction', experimentId: 'scan-20260729-economic-20', optimizationValues: '{"scanMin":8}', optimizationBlockIndex: 0, fleet: 'A', operation: 'WARP', movementPhase: 'start', movementSeconds: 420, cooldownOverlapSeconds: 300, opportunityCostMovementSeconds: 120, burnedFuel: 3, txCostSol: 0.002 },
+    { time: '2026-07-29T10:10:00Z', event_type: 'scan_result', experimentId: 'scan-20260729-economic-20', optimizationValues: '{"scanMin":8}', optimizationBlockIndex: 0, fleet: 'A', success: true, sduFound: 0, chance: 60, burnedFood: 1, pauseCount: 0, pauseSeconds: 0, txCostSol: 0.001 },
+    { time: '2026-07-29T10:20:00Z', event_type: 'optimization_progress', experimentId: 'scan-20260729-economic-20', optimizationValues: '{"scanMin":12}', optimizationBlockIndex: 1, fleet: 'A' },
+    { time: '2026-07-29T10:30:00Z', event_type: 'scan_result', experimentId: 'scan-20260729-economic-20', optimizationValues: '{"scanMin":12}', optimizationBlockIndex: 1, fleet: 'A', success: true, sduFound: 1, chance: 70, burnedFood: 1, txCostSol: 0.001 },
+    { time: '2026-07-29T10:40:00Z', event_type: 'optimization_complete', experimentId: 'scan-20260729-economic-20', optimizationValues: '{"scanMin":12}', optimizationBlockIndex: 1, fleet: 'A' },
+  ];
+  const result = build(rows, '__latest__', {
+    prices: { sduPriceAtl: 10, foodPriceAtl: 1, fuelPriceAtl: 2, solPriceAtl: 100, checkedAt: '2026-07-29T10:45:00Z', source: 'test prices' },
+  });
+  const block = result.groups.find((group) => group.value === 8);
+  assert.equal(block.blockIndex, 0);
+  assert.equal(block.scans, 2);
+  assert.equal(block.averageScanChance, 50);
+  assert.equal(block.elapsedSeconds, 1200);
+  assert.equal(block.sduPerHour, 6);
+  assert.equal(block.pauseCount, 1);
+  assert.equal(block.pausedSeconds, 60);
+  assert.equal(block.movementSeconds, 420);
+  assert.equal(block.cooldownOverlapSeconds, 300);
+  assert.equal(block.opportunityCostMovementSeconds, 120);
+  assert.equal(block.grossRevenueAtlas, 20);
+  assert.equal(block.foodCostAtlas, 2);
+  assert.equal(block.fuelCostAtlas, 6);
+  assert.equal(block.txCostAtlas, 0.4);
+  assert.ok(Math.abs(block.netAtlasPerHour - 34.8) < 1e-9);
+  assert.equal(result.priceSnapshot.checkedAt, '2026-07-29T10:45:00Z');
+});
+
+test('scanning analytics does not present missing historical pause and movement telemetry as zero', () => {
+  const { build } = loadAnalytics();
+  const result = build([
+    { time: '2026-07-28T10:00:00Z', event_type: 'scan_result', experimentId: 'scan-20260728-legacy-10', optimizationValues: '{"scanMin":8}', optimizationBlockIndex: 0, fleet: 'A', success: true, sduFound: 1, chance: 50, burnedFood: 1, txCostSol: 0.001 },
+    { time: '2026-07-28T10:01:00Z', event_type: 'transaction', experimentId: 'scan-20260728-legacy-10', optimizationValues: '{"scanMin":8}', optimizationBlockIndex: 0, fleet: 'A', operation: 'WARP', txCostSol: 0.002 },
+    { time: '2026-07-28T10:10:00Z', event_type: 'optimization_complete', experimentId: 'scan-20260728-legacy-10', optimizationValues: '{"scanMin":8}', optimizationBlockIndex: 0, fleet: 'A' },
+  ], '__latest__', { prices: { sduPriceAtl: 10, foodPriceAtl: 1, fuelPriceAtl: 2, solPriceAtl: 100 } });
+  const block = result.groups[0];
+  assert.equal(block.pausedSeconds, null);
+  assert.equal(block.movementSeconds, null);
+  assert.equal(block.opportunityCostMovementSeconds, null);
+  assert.equal(block.netAtlasPerHour, null);
+});
+
 
 test('scanning analytics merges legacy experiment ids through previousExperimentId aliases', () => {
   const { build } = loadAnalytics();
@@ -134,7 +182,11 @@ test('scanning analytics ranks one selected parameter and charts all its values'
   assert.match(renderer, /optimization-route-arrow/);
   assert.match(html, /id="optimization-analytics-parameter"/);
   assert.match(html, /id="optimization-experiment-filter"/);
-  assert.match(html, />Scan success</);
+  assert.match(html, />Scan success rate</);
+  assert.match(html, />Average Scan Chance</);
+  assert.match(html, />Net ATLAS \/ hour</);
+  assert.match(html, />Opportunity Cost</);
+  assert.match(html, /id="optimization-analytics-economics"/);
   assert.match(css, /optimization-analytics-ranking-wrap/);
   assert.match(css, /optimization-route-line/);
   assert.match(html, /id="optimization-analytics-date-calendar"/);
@@ -195,8 +247,10 @@ test('analytics requests may load complete scan history without enlarging Data p
   const main = fs.readFileSync(mainPath, 'utf8');
   assert.match(main, /payload\.analytics === true \? 5000 : 500/);
   const renderer = fs.readFileSync(rendererPath, 'utf8');
-  assert.match(renderer, /eventType: 'scan_result'/);
+  assert.match(renderer, /eventType: '__all__'/);
   assert.match(renderer, /limit: 5000, analytics: true/);
+  assert.match(main, /payload\.analytics === true[\s\S]*fetchCurrentEarningsPrices/);
+  assert.match(renderer, /prices: optimizationAnalyticsPrices/);
   assert.match(main, /pivot[\s\S]*\$\{experimentFilter\}/);
   assert.match(main, /r\.experimentId ==/);
   assert.match(renderer, /experimentId,\n    offset/);
