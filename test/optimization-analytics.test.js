@@ -36,10 +36,12 @@ function loadAnalytics() {
     extractFunction(source, 'normalizeScanningOptimizationParameter'),
     extractFunction(source, 'buildScanningOptimizationExperimentCatalog'),
     extractFunction(source, 'buildScanningOptimizationAnalytics'),
+    extractFunction(source, 'sortScanningOptimizationAnalyticsGroups'),
     'this.catalog = buildScanningOptimizationExperimentCatalog;',
-    'this.build = buildScanningOptimizationAnalytics;'
+    'this.build = buildScanningOptimizationAnalytics;',
+    'this.sortGroups = sortScanningOptimizationAnalyticsGroups;'
   ].join('\n'), context);
-  return { build: context.build, catalog: context.catalog };
+  return { build: context.build, catalog: context.catalog, sortGroups: context.sortGroups };
 }
 
 test('scanning analytics selects the latest experiment and ranks value groups', () => {
@@ -115,6 +117,18 @@ test('scanning analytics does not present missing historical pause and movement 
   assert.equal(block.netAtlasPerHour, null);
 });
 
+test('scanning analytics ranking sorts every metric and keeps unavailable values last', () => {
+  const { sortGroups } = loadAnalytics();
+  const groups = [
+    { blockIndex: 0, parameter: 'minProb', value: 8, scans: 10, averageScanChance: 40, movementSeconds: 30 },
+    { blockIndex: 1, parameter: 'minProb', value: 12, scans: 20, averageScanChance: 60, movementSeconds: null },
+    { blockIndex: 2, parameter: 'minProb', value: 16, scans: 15, averageScanChance: 50, movementSeconds: 90 },
+  ];
+  assert.deepEqual(Array.from(sortGroups(groups, { column: 'averageScanChance', direction: 'desc' }), group => group.value), [12, 16, 8]);
+  assert.deepEqual(Array.from(sortGroups(groups, { column: 'scans', direction: 'asc' }), group => group.value), [8, 16, 12]);
+  assert.deepEqual(Array.from(sortGroups(groups, { column: 'movementSeconds', direction: 'desc' }), group => group.value), [16, 8, 12]);
+});
+
 
 test('scanning analytics merges legacy experiment ids through previousExperimentId aliases', () => {
   const { build } = loadAnalytics();
@@ -187,6 +201,9 @@ test('scanning analytics ranks one selected parameter and charts all its values'
   assert.match(html, />Net ATLAS \/ hour</);
   assert.match(html, />Opportunity Cost</);
   assert.match(html, /id="optimization-analytics-economics"/);
+  assert.match(html, /id="optimization-analytics-ranking-head"/);
+  assert.match(html, /data-optimization-analytics-sort="averageScanChance"/);
+  assert.match(renderer, /sortScanningOptimizationAnalyticsGroups\(analytics\.groups, optimizationAnalyticsSort\)/);
   assert.match(css, /optimization-analytics-ranking-wrap/);
   assert.match(css, /optimization-route-line/);
   assert.match(html, /id="optimization-analytics-date-calendar"/);

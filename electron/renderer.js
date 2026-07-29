@@ -71,6 +71,7 @@ const optimizationAnalyticsSummary = document.querySelector('#optimization-analy
 const optimizationAnalyticsEconomics = document.querySelector('#optimization-analytics-economics');
 const optimizationAnalyticsValueChart = document.querySelector('#optimization-analytics-value-chart');
 const optimizationAnalyticsSectorChart = document.querySelector('#optimization-analytics-sector-chart');
+const optimizationAnalyticsRankingHead = document.querySelector('#optimization-analytics-ranking-head');
 const optimizationAnalyticsRanking = document.querySelector('#optimization-analytics-ranking');
 const optimizationAnalyticsTooltip = document.querySelector('#optimization-analytics-tooltip');
 const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
@@ -327,6 +328,7 @@ let optimizationAnalyticsPrices = null;
 let selectedScanningOptimizationDate = '';
 let scanningOptimizationCalendarMonth = '';
 let selectedScanningOptimizationParameter = '';
+let optimizationAnalyticsSort = { column: 'averageScanChance', direction: 'desc' };
 let optimizationColumns = [];
 let optimizationSelectedColumns = new Set();
 let optimizationKnownColumns = new Set();
@@ -6716,6 +6718,26 @@ function getScanningOptimizationChartMetric(sample, group, metric) {
   return sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour;
 }
 
+function sortScanningOptimizationAnalyticsGroups(groups, sort) {
+  const column = String(sort?.column || 'averageScanChance');
+  const direction = sort?.direction === 'asc' ? 'asc' : 'desc';
+  const factor = direction === 'asc' ? 1 : -1;
+  return [...(Array.isArray(groups) ? groups : [])].sort((left, right) => {
+    const a = left?.[column];
+    const b = right?.[column];
+    const aMissing = a == null || (typeof a === 'number' && !Number.isFinite(a));
+    const bMissing = b == null || (typeof b === 'number' && !Number.isFinite(b));
+    if(aMissing !== bMissing) return aMissing ? 1 : -1;
+    if(!aMissing && !bMissing) {
+      const comparison = typeof a === 'number' && typeof b === 'number'
+        ? a - b
+        : String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+      if(comparison) return comparison * factor;
+    }
+    return Number(left?.blockIndex ?? Number.MAX_SAFE_INTEGER) - Number(right?.blockIndex ?? Number.MAX_SAFE_INTEGER);
+  });
+}
+
 function createOptimizationAnalyticsSvg(container, width = 760, height = 280) {
   container?.replaceChildren();
   if(!container) return null;
@@ -6904,7 +6926,7 @@ function renderScanningOptimizationAnalytics() {
     optimizationAnalyticsValueChart?.replaceChildren();
     optimizationAnalyticsSectorChart?.replaceChildren();
     optimizationAnalyticsParameter?.replaceChildren();
-    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 9; td.textContent = 'Awaiting scan results'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
+    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 11; td.textContent = 'Awaiting scan results'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
     return;
   }
   const metric = optimizationAnalyticsMetric?.value || 'averageScanChance';
@@ -6917,6 +6939,11 @@ function renderScanningOptimizationAnalytics() {
     selectedScanningOptimizationParameter = optimizationAnalyticsParameter.value;
   }
   const parameterGroups = analytics.groups.filter((group) => group.parameter === selectedScanningOptimizationParameter);
+  for(const header of optimizationAnalyticsRankingHead?.querySelectorAll('[data-optimization-analytics-sort]') || []) {
+    const active = header.dataset.optimizationAnalyticsSort === optimizationAnalyticsSort.column;
+    header.textContent = `${header.dataset.label || header.textContent}${active ? (optimizationAnalyticsSort.direction === 'asc' ? ' ▲' : ' ▼') : ''}`;
+    header.setAttribute('aria-sort', active ? (optimizationAnalyticsSort.direction === 'asc' ? 'ascending' : 'descending') : 'none');
+  }
   const totals = analytics.groups.reduce((result, group) => {
     result.scans += group.scans;
     result.totalSdu += group.totalSdu;
@@ -6967,13 +6994,14 @@ function renderScanningOptimizationAnalytics() {
     const unavailable = analytics.unavailableHistoricalScans > 0
       ? ` · ${analytics.unavailableHistoricalScans.toLocaleString()} historical scans unavailable`
       : '';
-    optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} telemetry scans analyzed${runtimeProgress}${unavailable} · ${analytics.experimentId} · ranking ${selectedScanningOptimizationParameter || 'no parameter'} values`;
+    optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} telemetry scans analyzed${runtimeProgress}${unavailable} · ${analytics.experimentId} · ranking all blocks · charting ${selectedScanningOptimizationParameter || 'no parameter'}`;
   }
-  for(const group of [...parameterGroups].sort((a, b) => (a.blockIndex ?? Number.MAX_SAFE_INTEGER) - (b.blockIndex ?? Number.MAX_SAFE_INTEGER))) {
+  for(const group of sortScanningOptimizationAnalyticsGroups(analytics.groups, optimizationAnalyticsSort)) {
     const tr = document.createElement('tr');
-    const label = group.blockIndex == null ? group.value : `#${group.blockIndex + 1} · ${group.value}`;
     for(const value of [
-      label,
+      group.blockIndex == null ? '--' : `#${group.blockIndex + 1}`,
+      group.parameter,
+      group.value,
       group.scans,
       Number.isFinite(group.averageScanChance) ? `${group.averageScanChance.toFixed(2)}%` : '--',
       group.sduPerHour.toFixed(2),
@@ -6990,8 +7018,8 @@ function renderScanningOptimizationAnalytics() {
       : 'Net ATLAS unavailable because one or more prices are missing';
     optimizationAnalyticsRanking?.append(tr);
   }
-  if(!parameterGroups.length) {
-    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 9; td.textContent = 'No values for this parameter'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
+  if(!analytics.groups.length) {
+    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 11; td.textContent = 'No optimization blocks for this experiment'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
   }
   renderScanningOptimizationValueChart(analytics, metric, selectedScanningOptimizationParameter);
   renderScanningOptimizationSectorChart(analytics, selectedScanningOptimizationParameter);
@@ -7506,6 +7534,15 @@ document.querySelectorAll('.optimization-view-button').forEach((button) => {
 optimizationAnalyticsExperiment?.addEventListener('change', renderScanningOptimizationAnalytics);
 optimizationAnalyticsMetric?.addEventListener('change', renderScanningOptimizationAnalytics);
 optimizationAnalyticsParameter?.addEventListener('change', () => { selectedScanningOptimizationParameter = optimizationAnalyticsParameter.value; renderScanningOptimizationAnalytics(); });
+optimizationAnalyticsRankingHead?.addEventListener('click', (event) => {
+  const header = event.target.closest('[data-optimization-analytics-sort]');
+  if(!header) return;
+  const column = header.dataset.optimizationAnalyticsSort;
+  optimizationAnalyticsSort = optimizationAnalyticsSort.column === column
+    ? { column, direction: optimizationAnalyticsSort.direction === 'desc' ? 'asc' : 'desc' }
+    : { column, direction: 'desc' };
+  renderScanningOptimizationAnalytics();
+});
 optimizationAnalyticsOnlyOptimization?.addEventListener('change', () => {
   selectedScanningOptimizationDate = '';
   scanningOptimizationCalendarMonth = '';

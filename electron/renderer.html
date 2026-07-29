@@ -869,15 +869,15 @@
                 </section>
                 <section class="optimization-analytics-card optimization-analytics-ranking-card">
                   <div class="optimization-analytics-ranking-header">
-                    <h3>Parameter ranking</h3>
-                    <label class="activity-filter">Parameter
+                    <h3>Block ranking</h3>
+                    <label class="activity-filter">Chart parameter
                       <select id="optimization-analytics-parameter"></select>
                     </label>
                   </div>
                   <div class="fleet-table-wrap optimization-analytics-ranking-wrap">
                     <table class="fleet-table optimization-table optimization-analytics-ranking">
-                      <thead><tr><th>Block / Value</th><th>Scans</th><th>Avg Scan Chance</th><th>SDU / hour</th><th>Net ATLAS / hour</th><th>Paused</th><th>Movement</th><th>Opportunity Cost</th><th>Elapsed</th></tr></thead>
-                      <tbody id="optimization-analytics-ranking"><tr class="empty-row"><td colspan="9">Awaiting scan results</td></tr></tbody>
+                      <thead id="optimization-analytics-ranking-head"><tr><th data-optimization-analytics-sort="blockIndex" data-label="Block">Block</th><th data-optimization-analytics-sort="parameter" data-label="Parameter">Parameter</th><th data-optimization-analytics-sort="value" data-label="Value">Value</th><th data-optimization-analytics-sort="scans" data-label="Scans">Scans</th><th data-optimization-analytics-sort="averageScanChance" data-label="Avg Scan Chance">Avg Scan Chance</th><th data-optimization-analytics-sort="sduPerHour" data-label="SDU / hour">SDU / hour</th><th data-optimization-analytics-sort="netAtlasPerHour" data-label="Net ATLAS / hour">Net ATLAS / hour</th><th data-optimization-analytics-sort="pausedSeconds" data-label="Paused">Paused</th><th data-optimization-analytics-sort="movementSeconds" data-label="Movement">Movement</th><th data-optimization-analytics-sort="opportunityCostMovementSeconds" data-label="Opportunity Cost">Opportunity Cost</th><th data-optimization-analytics-sort="elapsedSeconds" data-label="Elapsed">Elapsed</th></tr></thead>
+                      <tbody id="optimization-analytics-ranking"><tr class="empty-row"><td colspan="11">Awaiting scan results</td></tr></tbody>
                     </table>
                   </div>
                 </section>

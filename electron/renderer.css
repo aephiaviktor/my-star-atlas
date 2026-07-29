@@ -349,6 +349,8 @@ select:focus {
 .optimization-analytics-ranking-header h3 { margin: 0; }
 .optimization-analytics-ranking-wrap { max-height: 320px; overflow-y: auto; }
 .optimization-analytics-ranking-wrap table thead th { position: sticky; top: 0; z-index: 1; background: rgba(6, 19, 27, 0.98); }
+.optimization-analytics-ranking-wrap th[data-optimization-analytics-sort] { cursor: pointer; user-select: none; }
+.optimization-analytics-ranking-wrap th[data-optimization-analytics-sort]:hover { color: var(--accent); }
 .optimization-analytics-chart-prompt { display: grid; place-items: center; height: 280px; color: var(--muted); font-size: 12px; text-align: center; }
 .optimization-analytics-empty { align-items: center; justify-content: center; padding: 32px; text-align: center; }
 .optimization-analytics-empty p { max-width: 650px; color: var(--muted); }
