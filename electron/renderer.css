@@ -1583,6 +1583,7 @@ select:focus {
 .optimization-process-evidence-wrap {
   flex: 0 0 auto;
   min-height: auto;
+  max-height: none;
   overflow: visible;
   scrollbar-gutter: auto;
 }
