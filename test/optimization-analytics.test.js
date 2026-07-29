@@ -202,8 +202,11 @@ test('scanning analytics ranks one selected parameter and charts all its values'
   assert.match(html, />Opportunity Cost</);
   assert.match(html, /id="optimization-analytics-economics"/);
   assert.match(html, /id="optimization-analytics-ranking-head"/);
+  assert.match(html, /id="optimization-analytics-ranking-parameter"/);
+  assert.match(html, />All Parameters</);
   assert.match(html, /data-optimization-analytics-sort="averageScanChance"/);
-  assert.match(renderer, /sortScanningOptimizationAnalyticsGroups\(analytics\.groups, optimizationAnalyticsSort\)/);
+  assert.match(renderer, /rankingGroups = selectedScanningOptimizationRankingParameter === '__all__'/);
+  assert.match(renderer, /sortScanningOptimizationAnalyticsGroups\(rankingGroups, optimizationAnalyticsSort\)/);
   assert.match(css, /optimization-analytics-ranking-wrap/);
   assert.match(css, /optimization-route-line/);
   assert.match(html, /id="optimization-analytics-date-calendar"/);

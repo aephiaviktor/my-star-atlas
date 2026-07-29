@@ -66,6 +66,7 @@ const optimizationAnalyticsOnlyOptimization = document.querySelector('#optimizat
 const optimizationAnalyticsExperiment = document.querySelector('#optimization-analytics-experiment');
 const optimizationAnalyticsMetric = document.querySelector('#optimization-analytics-metric');
 const optimizationAnalyticsParameter = document.querySelector('#optimization-analytics-parameter');
+const optimizationAnalyticsRankingParameter = document.querySelector('#optimization-analytics-ranking-parameter');
 const optimizationAnalyticsStatus = document.querySelector('#optimization-analytics-status');
 const optimizationAnalyticsSummary = document.querySelector('#optimization-analytics-summary');
 const optimizationAnalyticsEconomics = document.querySelector('#optimization-analytics-economics');
@@ -328,6 +329,7 @@ let optimizationAnalyticsPrices = null;
 let selectedScanningOptimizationDate = '';
 let scanningOptimizationCalendarMonth = '';
 let selectedScanningOptimizationParameter = '';
+let selectedScanningOptimizationRankingParameter = '__all__';
 let optimizationAnalyticsSort = { column: 'averageScanChance', direction: 'desc' };
 let optimizationColumns = [];
 let optimizationSelectedColumns = new Set();
@@ -6938,7 +6940,15 @@ function renderScanningOptimizationAnalytics() {
     optimizationAnalyticsParameter.value = parameters.includes(prior) ? prior : selectedScanningOptimizationParameter;
     selectedScanningOptimizationParameter = optimizationAnalyticsParameter.value;
   }
+  if(!parameters.includes(selectedScanningOptimizationRankingParameter)) selectedScanningOptimizationRankingParameter = '__all__';
+  if(optimizationAnalyticsRankingParameter) {
+    optimizationAnalyticsRankingParameter.replaceChildren(new Option('All Parameters', '__all__'), ...parameters.map((parameter) => new Option(parameter, parameter)));
+    optimizationAnalyticsRankingParameter.value = selectedScanningOptimizationRankingParameter;
+  }
   const parameterGroups = analytics.groups.filter((group) => group.parameter === selectedScanningOptimizationParameter);
+  const rankingGroups = selectedScanningOptimizationRankingParameter === '__all__'
+    ? analytics.groups
+    : analytics.groups.filter((group) => group.parameter === selectedScanningOptimizationRankingParameter);
   for(const header of optimizationAnalyticsRankingHead?.querySelectorAll('[data-optimization-analytics-sort]') || []) {
     const active = header.dataset.optimizationAnalyticsSort === optimizationAnalyticsSort.column;
     header.textContent = `${header.dataset.label || header.textContent}${active ? (optimizationAnalyticsSort.direction === 'asc' ? ' ▲' : ' ▼') : ''}`;
@@ -6994,9 +7004,10 @@ function renderScanningOptimizationAnalytics() {
     const unavailable = analytics.unavailableHistoricalScans > 0
       ? ` · ${analytics.unavailableHistoricalScans.toLocaleString()} historical scans unavailable`
       : '';
-    optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} telemetry scans analyzed${runtimeProgress}${unavailable} · ${analytics.experimentId} · ranking all blocks · charting ${selectedScanningOptimizationParameter || 'no parameter'}`;
+    const rankingScope = selectedScanningOptimizationRankingParameter === '__all__' ? 'all parameters' : selectedScanningOptimizationRankingParameter;
+    optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} telemetry scans analyzed${runtimeProgress}${unavailable} · ${analytics.experimentId} · ranking ${rankingScope} · charting ${selectedScanningOptimizationParameter || 'no parameter'}`;
   }
-  for(const group of sortScanningOptimizationAnalyticsGroups(analytics.groups, optimizationAnalyticsSort)) {
+  for(const group of sortScanningOptimizationAnalyticsGroups(rankingGroups, optimizationAnalyticsSort)) {
     const tr = document.createElement('tr');
     for(const value of [
       group.blockIndex == null ? '--' : `#${group.blockIndex + 1}`,
@@ -7018,8 +7029,8 @@ function renderScanningOptimizationAnalytics() {
       : 'Net ATLAS unavailable because one or more prices are missing';
     optimizationAnalyticsRanking?.append(tr);
   }
-  if(!analytics.groups.length) {
-    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 11; td.textContent = 'No optimization blocks for this experiment'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
+  if(!rankingGroups.length) {
+    const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 11; td.textContent = 'No optimization blocks for this table parameter'; tr.append(td); optimizationAnalyticsRanking?.append(tr);
   }
   renderScanningOptimizationValueChart(analytics, metric, selectedScanningOptimizationParameter);
   renderScanningOptimizationSectorChart(analytics, selectedScanningOptimizationParameter);
@@ -7534,6 +7545,7 @@ document.querySelectorAll('.optimization-view-button').forEach((button) => {
 optimizationAnalyticsExperiment?.addEventListener('change', renderScanningOptimizationAnalytics);
 optimizationAnalyticsMetric?.addEventListener('change', renderScanningOptimizationAnalytics);
 optimizationAnalyticsParameter?.addEventListener('change', () => { selectedScanningOptimizationParameter = optimizationAnalyticsParameter.value; renderScanningOptimizationAnalytics(); });
+optimizationAnalyticsRankingParameter?.addEventListener('change', () => { selectedScanningOptimizationRankingParameter = optimizationAnalyticsRankingParameter.value; renderScanningOptimizationAnalytics(); });
 optimizationAnalyticsRankingHead?.addEventListener('click', (event) => {
   const header = event.target.closest('[data-optimization-analytics-sort]');
   if(!header) return;
