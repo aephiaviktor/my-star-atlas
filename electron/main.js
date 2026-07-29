@@ -7,6 +7,7 @@ const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { BorshAccountsCoder } = require('@staratlas/anchor');
+const { IDL: SAGE_IDL } = require('@staratlas/sage/dist/src/idl/sage');
 const bs58Module = require('bs58');
 const { RpcLimiter, resolvePaths: resolveRpcLimiterPaths } = require('rpc_limiter');
 const {
@@ -27,6 +28,10 @@ const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeB
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
+const { scanLocalMarketTrades, DEFAULT_START_ISO: LOCAL_MARKET_START_ISO } = require('./local-market-scanner');
+const { formatLocalMarketInfluxLine } = require('./local-market-trades');
+const { STARBASE_REGISTRY } = require('./starbase-registry');
+const { ASSET_REGISTRY } = require('./asset-registry');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -111,6 +116,7 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const ATLAS_MINT = 'ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
 const SES_SHIP_STATS_URL = 'https://ses.staratlas.com/tools/ship-stats/engine/data/sot.js';
 const SAGE_PROGRAM_ID = new PublicKey('SAGE2HAwep459SNq61LHvjxPk4pLPEJLoMETef7f7EE');
+const PLAYER_PROFILE_PROGRAM_ID = new PublicKey('pprofELXjL5Kck7Jn5hCpwAL82DpTkSYBENzahVtbc9');
 const SAGE_GAME_ID = new PublicKey('GAMEzqJehF8yAnKiTARUuhZMvLvkZVAsCVri5vSfemLr');
 const SRSLY_PROGRAM_ID = new PublicKey('SRSLY1fq9TJqCk1gNSE7VZL2bztvTn9wm4VR8u8jMKT');
 const DEFAULT_PUBLIC_KEY = PublicKey.default.toBase58();
@@ -177,6 +183,10 @@ function settingsPath() {
 
 function ledgerCheckpointPath(faction) {
   return path.join(app.getPath('userData'), 'inventory-cost-ledger', `${sanitizeProfileName(faction)}.json`);
+}
+
+function localMarketCheckpointPath(faction) {
+  return path.join(app.getPath('userData'), 'local-market-trades', `${sanitizeProfileName(faction)}.json`);
 }
 
 function normalizeFaction(value) {
@@ -3741,6 +3751,131 @@ async function fetchCurrentEarningsPrices() {
   };
 }
 
+function decodePlayerProfileWallets(accountInfo) {
+  if (!accountInfo?.owner?.equals(PLAYER_PROFILE_PROGRAM_ID) || !Buffer.isBuffer(accountInfo.data) || accountInfo.data.length < 30) return [];
+  const keyCount = accountInfo.data.readUInt16LE(28);
+  const wallets = [];
+  for (let index = 0; index < keyCount; index += 1) {
+    const offset = 30 + index * 80;
+    if (offset + 80 > accountInfo.data.length) break;
+    // Keep expired/removed operational keys in the scan set: they may have
+    // created valid historical fills after the cost-basis cutoff.
+    wallets.push(new PublicKey(accountInfo.data.subarray(offset, offset + 32)).toBase58());
+  }
+  return Array.from(new Set(wallets));
+}
+
+async function buildLocalMarketAssetMap(connection, faction) {
+  const starbases = STARBASE_REGISTRY.filter((entry) => entry.faction === faction);
+  const infos = starbases.length
+    ? await connection.getMultipleAccountsInfo(starbases.map((entry) => new PublicKey(entry.publicKey)), 'confirmed')
+    : [];
+  const coder = new BorshAccountsCoder(SAGE_IDL);
+  const map = {};
+  starbases.forEach((starbase, index) => {
+    const info = infos[index];
+    if (!info) return;
+    let decoded;
+    try {
+      decoded = coder.decode('starbase', info.data);
+    } catch (_error) {
+      return;
+    }
+    const seqId = Number(decoded?.seqId);
+    if (!Number.isInteger(seqId) || seqId < 0 || seqId > 65535) return;
+    const seqIdSeed = Buffer.alloc(2);
+    seqIdSeed.writeUInt16LE(seqId);
+    for (const asset of ASSET_REGISTRY) {
+      try {
+        const certificateMint = PublicKey.findProgramAddressSync([
+          Buffer.from('CertificateMint'),
+          new PublicKey(asset.mint).toBuffer(),
+          new PublicKey(starbase.publicKey).toBuffer(),
+          seqIdSeed,
+        ], SAGE_PROGRAM_ID)[0].toBase58();
+        map[certificateMint] = { starbase: starbase.name, asset: asset.name, rawMint: asset.mint };
+      } catch (_error) {
+        // A malformed registry row must not prevent the remaining market map.
+      }
+    }
+  });
+  return map;
+}
+
+async function loadLocalMarketTradeCheckpoint(filePath) {
+  try {
+    const document = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    return {
+      trades: Array.isArray(document?.trades) ? document.trades : [],
+      publishedTradeIds: new Set(Array.isArray(document?.publishedTradeIds) ? document.publishedTradeIds : []),
+    };
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { trades: [], publishedTradeIds: new Set() };
+    throw error;
+  }
+}
+
+async function writeInfluxLines(settings, lines) {
+  const body = Array.from(new Set(lines.filter(Boolean))).join('\n');
+  if (!body) return true;
+  if (!settings.influxUrl || !settings.influxAuthToken || !settings.influxBucket) return false;
+  const token = String(settings.influxAuthToken).trim().replace(/^Token\s+/i, '').replace(/^Bearer\s+/i, '');
+  const orgId = await resolveInfluxOrgId(settings.influxUrl, token, settings.influxBucket);
+  const url = `${getInfluxBaseUrl(settings.influxUrl)}/api/v2/write?org=${encodeURIComponent(orgId)}&bucket=${encodeURIComponent(settings.influxBucket)}&precision=ns`;
+  const response = await fetchWithInfluxRetry(({ signal }) => fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Token ${token}`, 'Content-Type': 'text/plain; charset=utf-8' },
+    body,
+    signal,
+  }), { timeoutMs: 15_000, retries: 2, retryDelayMs: 500 });
+  if (!response.ok) throw new Error(`influx_write_${response.status}:${(await response.text()).slice(0, 300)}`);
+  return true;
+}
+
+async function fetchLocalMarketTrades(settings, connection) {
+  const faction = normalizeFaction(settings.faction);
+  const profile = getConfiguredPlayerProfile(settings, faction);
+  if (!profile) return { trades: [], error: 'local_market_profile_not_configured' };
+  const accountInfo = await connection.getAccountInfo(new PublicKey(profile), 'confirmed');
+  const trackedWallets = decodePlayerProfileWallets(accountInfo);
+  if (!trackedWallets.length) return { trades: [], error: 'local_market_profile_has_no_active_wallets' };
+  const marketAssetsByMint = await buildLocalMarketAssetMap(connection, faction);
+  const filePath = localMarketCheckpointPath(faction);
+  const checkpoint = await loadLocalMarketTradeCheckpoint(filePath);
+  const existing = checkpoint.trades;
+  const newestMs = existing.reduce((max, trade) => Math.max(max, Date.parse(trade.timestamp) || 0), Date.parse(LOCAL_MARKET_START_ISO));
+  const overlapStart = new Date(Math.max(Date.parse(LOCAL_MARKET_START_ISO), newestMs - 24 * 60 * 60 * 1000)).toISOString();
+  const scanned = await scanLocalMarketTrades(connection, {
+    trackedWallets,
+    marketAssetsByMint,
+    startIso: overlapStart,
+    addressFactory: (value) => new PublicKey(value),
+  });
+  const byId = new Map(existing.map((trade) => [trade.id, trade]));
+  for (const trade of scanned) byId.set(trade.id, trade);
+  const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= Date.parse(LOCAL_MARKET_START_ISO))
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
+  const unpublished = trades.filter((trade) => !checkpoint.publishedTradeIds.has(trade.id));
+  let publishError = '';
+  try {
+    const published = await writeInfluxLines(settings, unpublished.map((trade) => formatLocalMarketInfluxLine(trade, { faction, profile: profileName })));
+    if (published) {
+      for (const trade of unpublished) checkpoint.publishedTradeIds.add(trade.id);
+    }
+  } catch (error) {
+    publishError = String(error?.message || error || 'local_market_influx_write_failed');
+  }
+  await writeJsonAtomic(filePath, {
+    schemaVersion: 1,
+    faction,
+    profile,
+    savedAt: new Date().toISOString(),
+    trades,
+    publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
+  });
+  return { trades, error: publishError };
+}
+
 function getCurrentResourcePriceAtl(prices, resourceName) {
   const key = normalizeShipName(resourceName);
   const price = Number(prices?.resourcePricesAtlByName?.[key]);
@@ -5400,6 +5535,10 @@ async function fetchEarningsSnapshot(payload) {
   }));
   const ledgerFaction = normalizeFaction(settings.faction);
   const ledgerFactionStarbases = await fetchFactionStarbases(settings);
+  const localMarketResult = await fetchLocalMarketTrades(settings, connection).catch((error) => ({
+    trades: [],
+    error: String(error?.message || error || 'local_market_unavailable'),
+  }));
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
   const checkpoint = await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName });
   let openingInventoryRows = [];
@@ -5424,6 +5563,7 @@ async function fetchEarningsSnapshot(payload) {
     cargoRows: ledgerCargoAllocations,
     craftingRows: ledgerCraftingRows,
     upgradingRows: upgradingRows.ledgerEvents || [],
+    localMarketTrades: localMarketResult.trades,
   });
   const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
   const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
@@ -5858,6 +5998,8 @@ async function fetchEarningsSnapshot(payload) {
     upgradingRows: upgrading,
     breakevenRows,
     breakevenError,
+    localMarketTradeCount: localMarketResult.trades.length,
+    localMarketError: localMarketResult.error,
     inventoryCostLedgerEvents,
     inventoryCostLedgerAppliedEventResults,
     inventoryCostLedgerRows,

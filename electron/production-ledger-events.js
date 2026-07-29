@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
+const { buildLocalMarketLedgerEvents } = require('./local-market-trades');
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
@@ -150,7 +151,7 @@ function buildUpgradingConsumptionEvents(rows) {
   return events;
 }
 
-function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [] } = {}) {
+function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [] } = {}) {
   const ledger = initialLedger || new InventoryCostLedger();
   const previousCounts = { ...(eventFingerprintCounts || {}) };
   for (const fingerprint of seenEventFingerprints || []) previousCounts[fingerprint] = Math.max(1, Number(previousCounts[fingerprint] || 0));
@@ -165,6 +166,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
     ...buildCargoTransferEvents(cargoRows),
     ...buildCraftingEvents(craftingRows),
     ...buildUpgradingConsumptionEvents(upgradingRows),
+    ...buildLocalMarketLedgerEvents(localMarketTrades),
   ].map((event, index) => ({ event, index }))
     .sort((left, right) => Date.parse(left.event.timestamp) - Date.parse(right.event.timestamp) || left.index - right.index)
     .map(({ event }) => event);
