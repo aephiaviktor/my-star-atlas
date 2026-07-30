@@ -44,3 +44,19 @@ test('LM scanner resolves the configured profile through the existing settings h
   assert.doesNotMatch(main, /getConfiguredPlayerProfile\(/);
   assert.match(main, /const profile = getSelectedPlayerProfile\(settings\);/);
 });
+
+test('Earnings reads Marketplace executions from Influx without awaiting a chain scan', () => {
+  assert.match(main, /fetchMarketplaceTradesFromInflux\(settings\)/);
+  const snapshotStart = main.indexOf('async function fetchEarningsSnapshot');
+  const snapshot = main.slice(snapshotStart, main.indexOf("handleTrustedIpc('app:get-profile-name'", snapshotStart));
+  assert.doesNotMatch(snapshot, /fetchLocalMarketTrades\(/);
+  assert.match(snapshot, /localMarketTrades: localMarketResult\.trades/);
+});
+
+test('Marketplace chain synchronization is exposed separately and runs in the background', () => {
+  assert.match(main, /handleTrustedIpc\('marketplace:sync'/);
+  assert.match(main, /handleTrustedIpc\('marketplace:snapshot'/);
+  assert.match(renderer, /api\.syncMarketplace/);
+  assert.match(renderer, /setInterval\(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS\)/);
+  assert.match(renderer, /currentEarningsSubtab === 'marketplace'[\s\S]*refreshMarketplace/);
+});

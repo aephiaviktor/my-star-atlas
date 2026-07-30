@@ -132,7 +132,7 @@ function formatLocalMarketInfluxLine(trade, { faction, profile, market = 'LM' } 
   const tags = {
     faction, profile, market,
     starbase: trade.starbase, asset: trade.asset, side: trade.side,
-    wallet: trade.wallet, tradeId: trade.id,
+    wallet: trade.wallet, tradeId: trade.id, orderId: trade.orderId,
   };
   const tagText = Object.entries(tags).filter(([, value]) => String(value || '').trim()).map(([key, value]) => `${key}=${escapeTag(value)}`).join(',');
   const quantity = Number(trade.quantity);

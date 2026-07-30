@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   sendSettingsToRpcLimiter: (payload) => ipcRenderer.invoke('rpc-limiter:send-settings', payload),
   getFleets: (payload) => ipcRenderer.invoke('fleet:list', payload),
   getEarningsSnapshot: (payload) => ipcRenderer.invoke('earnings:snapshot', payload),
+  getMarketplaceSnapshot: (payload) => ipcRenderer.invoke('marketplace:snapshot', payload),
+  syncMarketplace: (payload) => ipcRenderer.invoke('marketplace:sync', payload),
   testInflux: (payload) => ipcRenderer.invoke('influx:test', payload),
   getDailySdu: (payload) => ipcRenderer.invoke('sdu:daily', payload),
   getDailySduConsumption: (payload) => ipcRenderer.invoke('sdu:consumption', payload),

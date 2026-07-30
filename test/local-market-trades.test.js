@@ -87,6 +87,7 @@ test('scanner deduplicates signatures found through multiple profile wallets', a
   });
   assert.equal(result.trades.length, 1);
   assert.equal(result.trades[0].id, 'shared-sig:certificate-1:UST-1');
+  assert.deepEqual(result.stats, { signatureRequests: 2, transactionRequests: 1, totalRpcRequests: 3 });
 });
 
 function gmData(name, ...values) {

@@ -6299,6 +6299,38 @@ function renderEarningsCargoAllocations(result) {
 // refresh) used to fan out into a parallel RPC storm and surface HTTP 429
 // to the UI on first app start.
 let earningsRefreshInFlight = null;
+const marketplaceRefreshInFlight = new Map();
+const MARKETPLACE_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+
+async function refreshMarketplace({ sync = false } = {}) {
+  const settings = latestSettings || getFormPayload();
+  const faction = normalizeFaction(settings.faction);
+  if (marketplaceRefreshInFlight.has(faction)) return marketplaceRefreshInFlight.get(faction);
+  const promise = (async () => {
+    if (sync) {
+      setText(earningsMarketplaceSyncStatus, 'Marketplace sync running in background...');
+      await api.syncMarketplace(settings);
+    }
+    const result = await api.getMarketplaceSnapshot(settings);
+    if (faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return result;
+    latestEarningsResult = { ...(latestEarningsResult || {}), ...result, ok: latestEarningsResult?.ok ?? result.ok };
+    renderEarningsMarketplace(latestEarningsResult);
+    return result;
+  })().catch((error) => {
+    console.error(error);
+    setText(earningsMarketplaceSyncStatus, 'Marketplace sync unavailable');
+  }).finally(() => {
+    if (marketplaceRefreshInFlight.get(faction) === promise) marketplaceRefreshInFlight.delete(faction);
+  });
+  marketplaceRefreshInFlight.set(faction, promise);
+  return promise;
+}
+
+function runMarketplaceBackgroundSync() {
+  if (!latestSettings || !getActivePlayerProfile(latestSettings)) return Promise.resolve();
+  return refreshMarketplace({ sync: true });
+}
+
 async function refreshEarnings() {
   if (earningsRefreshInFlight) return earningsRefreshInFlight;
   const refreshPromise = (async () => {
@@ -7534,7 +7566,10 @@ function refreshVisibleFactionViews() {
 
 function refreshCurrentVisibleData() {
   if (currentSection === 'fleet') return refreshFleets();
-  if (currentSection === 'earnings') return refreshEarnings();
+  if (currentSection === 'earnings') {
+    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: true });
+    return refreshEarnings();
+  }
   if (currentSection === 'optimization') {
     if(currentOptimizationSubtab === 'upgrading') return refreshUpgradingOptimization({ force: true });
     return currentOptimizationView === 'analytics' ? refreshScanningOptimizationAnalyticsData({ force: true }) : refreshScanningOptimization({ force: true });
@@ -7654,6 +7689,8 @@ async function loadInitialState() {
   void checkForUpdates();
   initInventory();
   await loadVisibleThenPrefetch(refreshVisibleFactionViews);
+  void runMarketplaceBackgroundSync();
+  setInterval(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS);
 }
 
 document.querySelectorAll('.nav-button').forEach((button) => {

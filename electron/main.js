@@ -546,6 +546,41 @@ async function fetchNewestMarketplaceTradeMs(settings) {
   return null;
 }
 
+function escapeInfluxSqlLiteral(value) {
+  return String(value ?? '').replace(/'/g, "''");
+}
+
+async function fetchMarketplaceTradesFromInflux(settings) {
+  const bucket = String(settings.influxBucket || '').trim();
+  const profile = getSelectedPlayerProfile(settings);
+  if (!bucket || !profile) return { trades: [], error: profile ? 'influx_not_configured' : 'local_market_profile_not_configured' };
+  const faction = normalizeFaction(settings.faction);
+  const escapedBucket = bucket.replace(/"/g, '""');
+  const sql = `SELECT time, market, starbase, asset, side, wallet, tradeId, orderId, quantity, settledAtlas, grossAtlas, marketplaceFeeAtlas, txFeeAtlas, netAtlas, unitPriceAtlas, signature, creationSignature, rawMint, certificateMint
+FROM "${escapedBucket}"."autogen"."marketplace"
+WHERE time > now() - interval '40' day AND faction = '${escapeInfluxSqlLiteral(faction)}' AND profile = '${escapeInfluxSqlLiteral(profileName)}'
+ORDER BY time DESC`;
+  try {
+    const result = await queryInfluxSql(settings, sql);
+    const rows = Array.isArray(result) ? result : [];
+    return {
+      trades: rows.map((row) => ({
+        id: String(row.tradeId || ''), timestamp: String(row.time || ''), marketplace: String(row.market || 'LM'),
+        starbase: String(row.starbase || ''), asset: String(row.asset || ''), side: String(row.side || '').toLowerCase(),
+        wallet: String(row.wallet || ''), quantity: Number(row.quantity || 0), settledAtlas: Number(row.settledAtlas || 0),
+        grossAtlas: Number(row.grossAtlas ?? row.settledAtlas ?? 0), marketplaceFeeAtlas: Number(row.marketplaceFeeAtlas || 0),
+        txFeeAtlas: Number(row.txFeeAtlas || 0), netAtlas: Number(row.netAtlas ?? row.settledAtlas ?? 0),
+        unitPriceAtlas: Number(row.unitPriceAtlas || 0), signature: String(row.signature || ''),
+        creationSignature: String(row.creationSignature || ''), rawMint: String(row.rawMint || ''), certificateMint: String(row.certificateMint || ''),
+        orderId: String(row.orderId || ''),
+      })).filter((row) => row.id && row.timestamp && (row.side === 'buy' || row.side === 'sell')),
+      error: '',
+    };
+  } catch (error) {
+    return { trades: [], error: String(error?.message || error || 'marketplace_influx_unavailable') };
+  }
+}
+
 async function resolveInfluxOrgId(influxUrl, token, bucket) {
   const baseUrl = getInfluxBaseUrl(influxUrl);
   const cacheKey = `${baseUrl}\n${token}\n${bucket}`;
@@ -4040,7 +4075,27 @@ async function fetchLocalMarketTrades(settings, connection) {
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     marketplaceBackfilled: checkpoint.marketplaceBackfilled === true,
   });
-  return { trades, error: publishError };
+  return { trades, error: publishError, rpc: scanned.stats };
+}
+
+const marketplaceSyncInFlight = new Map();
+async function syncMarketplaceTrades(payload) {
+  const settings = normalizeSettings(payload || (await readSettings()));
+  const faction = normalizeFaction(settings.faction);
+  if (marketplaceSyncInFlight.has(faction)) return marketplaceSyncInFlight.get(faction);
+  const startedAt = Date.now();
+  const promise = (async () => {
+    const result = await fetchLocalMarketTrades(settings, createSolanaConnection(settings));
+    return { ok: !result.error, ...result, faction, durationMs: Date.now() - startedAt, checkedAt: new Date().toISOString() };
+  })().finally(() => marketplaceSyncInFlight.delete(faction));
+  marketplaceSyncInFlight.set(faction, promise);
+  return promise;
+}
+
+async function fetchMarketplaceSnapshot(payload) {
+  const settings = normalizeSettings(payload || (await readSettings()));
+  const result = await fetchMarketplaceTradesFromInflux(settings);
+  return { ok: !result.error, localMarketTrades: result.trades, localMarketTradeCount: result.trades.length, localMarketError: result.error, checkedAt: new Date().toISOString() };
 }
 
 function getCurrentResourcePriceAtl(prices, resourceName) {
@@ -5744,10 +5799,7 @@ async function fetchEarningsSnapshot(payload) {
   }));
   const ledgerFaction = normalizeFaction(settings.faction);
   const ledgerFactionStarbases = await fetchFactionStarbases(settings);
-  const localMarketResult = await fetchLocalMarketTrades(settings, connection).catch((error) => ({
-    trades: [],
-    error: String(error?.message || error || 'local_market_unavailable'),
-  }));
+  const localMarketResult = await fetchMarketplaceTradesFromInflux(settings);
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
   const checkpoint = await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName });
   let openingInventoryRows = [];
@@ -6292,6 +6344,14 @@ handleTrustedIpc('earnings:snapshot', async (_event, payload) => {
       error: String(error?.message || error || 'earnings_snapshot_failed'),
       checkedAt: new Date().toISOString(),
     };
+  }
+});
+handleTrustedIpc('marketplace:snapshot', async (_event, payload) => fetchMarketplaceSnapshot(payload));
+handleTrustedIpc('marketplace:sync', async (_event, payload) => {
+  try {
+    return await syncMarketplaceTrades(payload);
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error || 'marketplace_sync_failed'), checkedAt: new Date().toISOString() };
   }
 });
 handleTrustedIpc('influx:test', async (_event, payload) => {
