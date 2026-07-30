@@ -102,7 +102,14 @@ function parseExchangeAmounts(logMessages) {
   return { quantity, marketplaceFeeAtlas, transferAtlas };
 }
 
-function decodeOrderExecution(transaction, ordersById, trackedWallets = []) {
+function computeTxFeeAtlas(transaction, atlasPerSol) {
+  const lamports = Number(transaction?.meta?.fee);
+  if (!Number.isFinite(lamports) || lamports <= 0) return 0;
+  if (!Number.isFinite(atlasPerSol) || atlasPerSol <= 0) return 0;
+  return (lamports / 1e9) * atlasPerSol;
+}
+
+function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { atlasPerSol } = {}) {
   const signature = String(transaction?.signature || transaction?.transaction?.signatures?.[0] || '');
   const timestamp = new Date(Number(transaction?.blockTime) * 1000);
   if (!signature || Number.isNaN(timestamp.getTime()) || transaction?.meta?.err) return null;
@@ -120,7 +127,7 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = []) {
     const grossAtlas = quantity * unitPriceAtlas;
     const marketplaceFeeAtlas = Number(logAmounts.marketplaceFeeAtlas || 0);
     const feePayer = keyText(transaction.transaction?.message?.accountKeys?.[0]);
-    const txFeeAtlas = tracked.has(feePayer) ? Number(transaction.meta?.fee || 0) / 1e9 : 0;
+    const txFeeAtlas = tracked.has(feePayer) ? computeTxFeeAtlas(transaction, atlasPerSol) : 0;
     const netAtlas = order.side === 'sell'
       ? Math.max(0, logAmounts.transferAtlas ?? (grossAtlas - marketplaceFeeAtlas)) - txFeeAtlas
       : grossAtlas + marketplaceFeeAtlas + txFeeAtlas;
@@ -171,6 +178,7 @@ async function scanLocalMarketTrades(connection, {
   trackedWallets = [], marketAssetsByMint = {}, knownOrders = [], startIso,
   addressFactory = (value) => value, maxPages = MAX_SIGNATURE_PAGES,
   requestsPerSecond = DEFAULT_REQUESTS_PER_SECOND,
+  atlasPerSol,
 } = {}) {
   const resolvedStartIso = startIso ?? resolveLocalMarketStartIso();
   const startMs = Date.parse(resolvedStartIso);
@@ -188,7 +196,7 @@ async function scanLocalMarketTrades(connection, {
   const transactions = walletTransactions.concat(await fetchTransactions(connection, newOrderSignatures, pacer));
   const tradesById = new Map();
   for (const transaction of transactions) {
-    const execution = decodeOrderExecution(transaction, ordersById, trackedWallets)
+    const execution = decodeOrderExecution(transaction, ordersById, trackedWallets, { atlasPerSol })
       || decodeLocalMarketTrade(transaction, { trackedWallets, marketAssetsByMint });
     if (execution) tradesById.set(execution.id, execution);
   }
@@ -201,5 +209,5 @@ async function scanLocalMarketTrades(connection, {
 module.exports = {
   DEFAULT_START_ISO, MAX_LOOKBACK_MS, DEFAULT_REQUESTS_PER_SECOND,
   resolveLocalMarketStartIso, createLocalMarketPacer,
-  scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions,
+  scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, computeTxFeeAtlas, fetchTransactions,
 };

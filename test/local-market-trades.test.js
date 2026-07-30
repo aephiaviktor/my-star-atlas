@@ -7,7 +7,7 @@ const {
   buildLocalMarketLedgerEvents,
   formatLocalMarketInfluxLine,
 } = require('../electron/local-market-trades');
-const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions, resolveLocalMarketStartIso, createLocalMarketPacer, DEFAULT_REQUESTS_PER_SECOND } = require('../electron/local-market-scanner');
+const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions, resolveLocalMarketStartIso, createLocalMarketPacer, computeTxFeeAtlas, DEFAULT_REQUESTS_PER_SECOND } = require('../electron/local-market-scanner');
 const crypto = require('node:crypto');
 const bs58Module = require('bs58');
 const bs58 = bs58Module.default || bs58Module;
@@ -149,6 +149,32 @@ test('tracks LM order creation separately and matches fills by order ID', () => 
   assert.equal(execution.marketplaceFeeAtlas, 0.0349);
   assert.equal(execution.txFeeAtlas, 0);
   assert.equal(execution.netAtlas, 3489.651);
+});
+
+test('LM execution tx fee converts from SOL to ATLAS using the cached atlasPerSol rate', () => {
+  const txWithoutUserPayer = lifecycleTx({
+    signature: 'fill', name: 'process_exchange', values: [10000000, 34900], fee: 5000,
+    accounts: ['taker', 'taker-deposit', 'taker-receive', ATLAS_MINT, 'certificate-1', 'lancer', 'init-deposit', 'init-receive', 'vault', 'vault-auth', 'order-1'],
+    logs: ['Program log: Transfer amounts: TransferAmount { purchase_quantity: 10000000, royalty: 3490000, transfer_amount: 348965100000, commission: None }'],
+  });
+  const order = { orderId: 'order-1', side: 'sell', initializer: 'lancer', priceAtlas: 0.000349 };
+  const execution = decodeOrderExecution(txWithoutUserPayer, new Map([[order.orderId, order]]), ['handler', 'lancer'], { atlasPerSol: 1000 });
+  assert.equal(execution.txFeeAtlas, 0);
+});
+
+test('LM execution tx fee is attributed to the user when their wallet pays it and atlasPerSol is supplied', () => {
+  const order = { orderId: 'order-1', side: 'sell', initializer: 'lancer', priceAtlas: 0.000349 };
+  const userPayerTx = lifecycleTx({
+    signature: 'fill-user-pays', name: 'process_exchange', values: [10000000, 34900], fee: 5000,
+    accounts: ['lancer', 'lancer-deposit', 'lancer-receive', ATLAS_MINT, 'certificate-1', 'init-deposit', 'init-receive', 'vault', 'vault-auth', 'taker', 'order-1'],
+    logs: ['Program log: Transfer amounts: TransferAmount { purchase_quantity: 10000000, royalty: 3490000, transfer_amount: 348965100000, commission: None }'],
+  });
+  const execution = decodeOrderExecution(userPayerTx, new Map([[order.orderId, order]]), ['lancer', 'handler'], { atlasPerSol: 1000 });
+  // 5000 lamports = 0.000005 SOL; atlasPerSol = 1000 → 0.005 ATLAS
+  assert.equal(execution.txFeeAtlas, 0.005);
+  assert.equal(computeTxFeeAtlas({ meta: { fee: 0 } }, 1000), 0);
+  assert.equal(computeTxFeeAtlas({ meta: { fee: 5000 } }, null), 0);
+  assert.equal(computeTxFeeAtlas({}, 1000), 0);
 });
 
 test('local market start ISO falls back to a rolling 30-day window after the anchor', () => {

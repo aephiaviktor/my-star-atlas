@@ -3910,6 +3910,7 @@ async function fetchLocalMarketTrades(settings, connection) {
     knownOrders: checkpoint.orders,
     startIso: overlapStart,
     addressFactory: (value) => new PublicKey(value),
+    atlasPerSol: await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null),
   });
   const byId = new Map(existing.map((trade) => [trade.id, trade]));
   for (const trade of scanned.trades) byId.set(trade.id, trade);

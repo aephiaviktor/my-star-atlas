@@ -1434,6 +1434,24 @@ function formatCompactNumber(value) {
   return String(Math.round(n));
 }
 
+const marketplaceNumberFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const marketplaceAtlasFormatter = (digits) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: digits });
+function formatMarketplaceWhole(value) {
+  return marketplaceNumberFormatter.format(Number(value) || 0);
+}
+function formatMarketplaceAtlas(value, digits = 6) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '--';
+  return marketplaceAtlasFormatter(digits).format(number);
+}
+function formatMarketplaceTimestamp(value) {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  const iso = date.toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)}Z`;
+}
+
 function createYAxis(maxValue) {
   const axis = document.createElement('div');
   axis.className = 'chart-yaxis';
@@ -5977,26 +5995,34 @@ function renderEarningsCrafting(result) {
 function renderEarningsMarketplace(result) {
   const rows = Array.isArray(result?.localMarketTrades) ? result.localMarketTrades : [];
   const errorSuffix = result?.localMarketError ? ` · ${result.localMarketError}` : '';
-  setText(earningsMarketplaceSyncStatus, `${formatWholeNumber(rows.length)} LM executions at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
+  setText(earningsMarketplaceSyncStatus, `${formatMarketplaceWhole(rows.length)} LM executions at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
   if (!earningsMarketplaceTableBody) return;
   earningsMarketplaceTableBody.textContent = '';
   if (!rows.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     const td = createTextCell(result?.localMarketError ? `LM execution scan failed: ${result.localMarketError}` : 'No LM executions found');
-    td.colSpan = 13;
+    td.colSpan = 14;
     tr.appendChild(td);
     earningsMarketplaceTableBody.appendChild(tr);
     return;
   }
   for (const entry of [...rows].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))) {
     const tr = document.createElement('tr');
+    const quantity = Number(entry.quantity) || 0;
+    const gross = Number(entry.grossAtlas) || 0;
+    const txFee = Number(entry.txFeeAtlas) || 0;
+    const net = Number(entry.netAtlas ?? entry.settledAtlas ?? 0);
+    const incomePerUnit = entry.side === 'sell' && quantity > 0 ? net / quantity : null;
+    const costPerUnit = quantity > 0 ? (gross + txFee) / quantity : null;
     const values = [
-      entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '--', entry.marketplace || 'LM', String(entry.side || '--').toUpperCase(),
-      entry.starbase || '--', entry.asset || '--', formatWholeNumber(entry.quantity || 0),
-      formatAtlasNumber(entry.grossAtlas || 0, 6), formatAtlasNumber(entry.unitPriceAtlas || 0, 8),
-      formatAtlasNumber(entry.marketplaceFeeAtlas || 0, 6), formatAtlasNumber(entry.txFeeAtlas || 0, 6),
-      formatAtlasNumber(entry.netAtlas ?? entry.settledAtlas ?? 0, 6), entry.orderId || '--', entry.signature || '--',
+      formatMarketplaceTimestamp(entry.timestamp), entry.marketplace || 'LM', String(entry.side || '--').toUpperCase(),
+      entry.starbase || '--', entry.asset || '--', formatMarketplaceWhole(quantity),
+      formatMarketplaceAtlas(gross, 6), formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
+      formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6), formatMarketplaceAtlas(txFee, 6),
+      formatMarketplaceAtlas(net, 6), incomePerUnit == null ? '--' : formatMarketplaceAtlas(incomePerUnit, 8),
+      costPerUnit == null ? '--' : formatMarketplaceAtlas(costPerUnit, 8),
+      entry.orderId || '--', entry.signature || '--',
     ];
     for (const value of values.slice(0, -1)) tr.appendChild(createTextCell(value));
     const signatureCell = document.createElement('td');
