@@ -884,6 +884,35 @@
                     </table>
                   </div>
                 </section>
+                <details class="earnings-metric-guide optimization-scanning-page-guide" open>
+                  <summary>How to read this page</summary>
+                  <div class="earnings-metric-guide-list">
+                    <article class="earnings-metric-guide-item">
+                      <h4>Experiment summary</h4>
+                      <p>Shows the selected scanning experiment, its available analyzable scan-result records, and the experiment-level economics derived from those rows.</p>
+                      <p class="earnings-metric-guide-formula"><strong>Formula: </strong>Selected experiment rows, optionally limited to Optimization data, grouped by the experiment ID and selected start date.</p>
+                      <p><strong>Interpretation: </strong>Use this as the data-quality check before trusting the charts. Runtime progress can be higher than analyzable rows when older scan results were not stored in telemetry.</p>
+                    </article>
+                    <article class="earnings-metric-guide-item">
+                      <h4>Value distribution</h4>
+                      <p>Shows individual scan outcomes for each tested parameter value; the larger marker is the group mean.</p>
+                      <p class="earnings-metric-guide-formula"><strong>Formula: </strong>Each scan result is plotted by selected chart metric, grouped by the active optimization parameter value.</p>
+                      <p><strong>Interpretation: </strong>Look for separation between group means, but also check the spread. A lucky cluster can make a weak setting look better than it is.</p>
+                    </article>
+                    <article class="earnings-metric-guide-item">
+                      <h4>Sector clusters</h4>
+                      <p>Maps the scanned sectors and colors them by the tested parameter value.</p>
+                      <p class="earnings-metric-guide-formula"><strong>Formula: </strong>Scan-result rows are placed by sector coordinates and grouped by the same parameter buckets used in the ranking.</p>
+                      <p><strong>Interpretation: </strong>Use this to spot location bias. If one parameter mostly ran in a better sector cluster, compare results cautiously.</p>
+                    </article>
+                    <article class="earnings-metric-guide-item">
+                      <h4>Block ranking</h4>
+                      <p>Ranks tested optimization blocks by the selected table parameter and exposes the main scan, value, time, movement, and net ATLAS metrics.</p>
+                      <p class="earnings-metric-guide-formula"><strong>Formula: </strong>Rows are grouped into contiguous experiment blocks by parameter and value, then metrics are aggregated per block.</p>
+                      <p><strong>Interpretation: </strong>The best block is the strongest candidate setting, but prefer settings with enough scans and reasonable elapsed time over tiny samples.</p>
+                    </article>
+                  </div>
+                </details>
               </div>
             </section>
           </div>
@@ -922,13 +951,12 @@
                 <details class="earnings-metric-guide optimization-upgrading-page-guide" open>
                   <summary>How to read this page</summary>
                   <div class="earnings-metric-guide-list">
-                    <div><strong>Faction LP redemption vs player LP per upgrading crew</strong><span>Each dot is one completed UTC day. It compares total faction redemption with this player’s LP per average hourly phantom crew; correlation describes how strongly those values move together.</span></div>
-                    <div><strong>Expected Total LP by EOD vs actual</strong><span>Each line follows one day’s hourly forecast. The final dot is the actual faction LP redemption, so distance from the line shows forecast error at each hour.</span></div>
-                    <div><strong>Forecast error by snapshot hour</strong><span>The center line is median signed error: above zero means overestimation and below zero means underestimation. The band contains the middle 50% of observed errors.</span></div>
-                    <div><strong>Process automation evidence</strong><span>Hourly snapshots are deduplicated by process ID. A predecessor link requires the same profile, starbase, recipe, quantity, and duration, with the next process starting after the prior one ends.</span></div>
-                    <div><strong>Restart percentiles</strong><span>p80 means 80% of matched restart gaps are at or below that value. The ≤120 sec and ≤300 sec rows show direct shares and are evidence of fast repetition—not proof that the player used automation.</span></div>
-                    <div><strong>Detected restart gap</strong><span>The page finds the largest relative jump between adjacent restart times in the central 20–90% of each faction’s observations. The lower edge becomes that faction’s provisional probable-automation threshold.</span></div>
-                    <div><strong>Interpretation boundary</strong><span>“Probably automated” means the restart is at or below the detected threshold. Slower restarts are unconfirmed, not automatically manual. More history and repeated predecessor chains will strengthen the classification.</span></div>
+                    <article class="earnings-metric-guide-item"><h4>Faction LP redemption vs player LP per upgrading crew</h4><p>Each dot is one completed UTC day comparing total faction redemption with this player’s LP per average hourly phantom crew.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Player LP per crew = daily player LP / average hourly phantom crew; correlation compares that value with faction LP redeemed that day.</p><p><strong>Interpretation: </strong>Higher correlation means the player’s upgrading pace moves with the faction’s redemption pattern; it is directional evidence, not proof by itself.</p></article>
+                    <article class="earnings-metric-guide-item"><h4>Expected Total LP by EOD vs actual</h4><p>Each line follows one day’s hourly forecast. The final dot is the actual faction LP redemption.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Hourly expected_total_lp_eod snapshots are plotted against the final daily faction LP redemption.</p><p><strong>Interpretation: </strong>Distance from the line to the final dot is forecast error at that hour; tighter lines mean the forecast stabilized earlier in the day.</p></article>
+                    <article class="earnings-metric-guide-item"><h4>Forecast error by snapshot hour</h4><p>Shows the signed forecast error distribution for each snapshot hour.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Error = expected total LP by EOD - actual faction LP redemption; the line is median error and the band is the middle 50%.</p><p><strong>Interpretation: </strong>Above zero means overestimation; below zero means underestimation. A narrow band means that hour is more reliable.</p></article>
+                    <article class="earnings-metric-guide-item"><h4>Process automation evidence</h4><p>Summarizes exact repeated upgrading process chains for the selected faction.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Snapshots are deduplicated by process ID; a predecessor link requires the same profile, starbase, recipe, quantity, and duration, with the next process starting after the prior one ends.</p><p><strong>Interpretation: </strong>Repeated short restart gaps support automation classification, but matching chains are evidence rather than a final verdict.</p></article>
+                    <article class="earnings-metric-guide-item"><h4>Restart percentiles</h4><p>Shows the distribution of matched restart gaps.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>p80 means 80% of matched restart gaps are at or below that value; ≤120 sec and ≤300 sec rows show direct shares.</p><p><strong>Interpretation: </strong>Fast repetition is automation evidence. It does not prove the player used automation on every process.</p></article>
+                    <article class="earnings-metric-guide-item"><h4>Detected restart gap</h4><p>Finds the faction-specific restart gap where observations shift from very fast repeats to slower restarts.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>The page finds the largest relative jump between adjacent restart times in the central 20–90% of each faction’s observations; the lower edge becomes the provisional threshold.</p><p><strong>Interpretation: </strong>Restarts at or below the threshold are classified as probably automated; slower restarts are unconfirmed, not automatically manual.</p></article>
                   </div>
                 </details>
               </div>
@@ -1021,7 +1049,7 @@
                 </table>
               </div>
               <details class="earnings-metric-guide" open>
-                <summary>How to read this table</summary>
+                <summary>How to read this page</summary>
                 <div id="earnings-scanning-metric-guide" class="earnings-metric-guide-list"></div>
               </details>
             </section>
@@ -1151,7 +1179,7 @@
                 </table>
               </div>
               <details class="earnings-metric-guide" open>
-                <summary>How to read this table</summary>
+                <summary>How to read this page</summary>
                 <div id="earnings-mining-metric-guide" class="earnings-metric-guide-list"></div>
               </details>
             </section>
@@ -1228,7 +1256,7 @@
                 </table>
               </div>
               <details class="earnings-metric-guide" open>
-                <summary>How to read this table</summary>
+                <summary>How to read this page</summary>
                 <div id="earnings-cargo-metric-guide" class="earnings-metric-guide-list"></div>
               </details>
               </div>
@@ -1266,7 +1294,7 @@
                 </table>
               </div>
               <details class="earnings-metric-guide" open>
-                <summary>How to read this table</summary>
+                <summary>How to read this page</summary>
                 <div id="earnings-cargoAllocation-metric-guide" class="earnings-metric-guide-list"></div>
               </details>
               </div>
@@ -1384,7 +1412,7 @@
                 </table>
               </div>
               <details class="earnings-metric-guide" open>
-                <summary>How to read this table</summary>
+                <summary>How to read this page</summary>
                 <div id="earnings-crafting-metric-guide" class="earnings-metric-guide-list"></div>
               </details>
             </section>
@@ -1407,7 +1435,7 @@
               </div>
               <div id="earnings-upgrading-sync-status" class="fleet-sync-status" role="status">Awaiting upgrading data</div>
               <div class="fleet-table-wrap"><table class="fleet-table earnings-table"><thead id="earnings-upgrading-table-head"><tr><th>Date</th><th>Starbase</th><th>Asset</th><th>Installed</th><th>Avg Crew</th><th>Revenue</th><th>Component Cost Basis</th><th>Txs Costs</th><th>Total Costs</th><th>Net Profit</th><th>Net Profit per Crew</th><th>Profit Margin</th></tr></thead><tbody id="earnings-upgrading-table-body"><tr class="empty-row"><td colspan="12">No upgrading data loaded</td></tr></tbody></table></div>
-              <details class="earnings-metric-guide" open><summary>How to read this table</summary><div id="earnings-upgrading-metric-guide" class="earnings-metric-guide-list"></div></details>
+              <details class="earnings-metric-guide" open><summary>How to read this page</summary><div id="earnings-upgrading-metric-guide" class="earnings-metric-guide-list"></div></details>
             </section>
           </div>
           <div class="earnings-panel" data-earnings-panel="breakeven">
@@ -1419,7 +1447,7 @@
               </div>
               <div id="earnings-breakeven-sync-status" class="fleet-sync-status" role="status">Awaiting breakeven data</div>
               <div class="fleet-table-wrap"><table class="fleet-table earnings-table"><thead id="earnings-breakeven-table-head"><tr><th>Starbase</th><th>Asset</th><th>Inventory</th><th>Scanning C/U</th><th>Mining C/U</th><th>Crafting C/U</th><th>LM C/U</th><th>GM C/U</th><th>Base Cost / Unit</th><th>Cargo Cost / Unit</th><th>Total Cost / Unit</th><th>Inventory Cost Basis</th><th>Cost Coverage</th><th>GM Price / Unit</th><th>Inventory External Value</th><th>Ledger Status</th></tr></thead><tbody id="earnings-breakeven-table-body"><tr class="empty-row"><td colspan="16">No breakeven data loaded</td></tr></tbody></table></div>
-              <details class="earnings-metric-guide" open><summary>How to read this table</summary><div id="earnings-breakeven-metric-guide" class="earnings-metric-guide-list"></div></details>
+              <details class="earnings-metric-guide" open><summary>How to read this page</summary><div id="earnings-breakeven-metric-guide" class="earnings-metric-guide-list"></div></details>
             </section>
           </div>
         </section>

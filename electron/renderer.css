@@ -228,7 +228,8 @@ select:focus {
 .optimization-analytics-surface::-webkit-scrollbar { width: 11px; }
 .optimization-analytics-surface::-webkit-scrollbar-track { background: rgba(8, 25, 34, 0.72); border-radius: 8px; }
 .optimization-analytics-surface::-webkit-scrollbar-thumb { background: rgba(69, 214, 193, 0.72); border: 2px solid rgba(8, 25, 34, 0.72); border-radius: 8px; }
-.optimization-upgrading-page-guide { grid-column: 1 / -1; }
+.optimization-upgrading-page-guide,
+.optimization-scanning-page-guide { grid-column: 1 / -1; }
 .optimization-analytics-filter-bar { align-items: flex-end; overflow: visible; }
 .optimization-analytics-only-filter { flex-direction: row !important; align-items: center; gap: 7px; min-height: 31px; }
 .optimization-analytics-calendar-filter { position: relative; }

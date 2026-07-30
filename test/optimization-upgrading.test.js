@@ -107,6 +107,13 @@ test('Optimization exposes Upgrading after Scanning with date filters, table, an
   assert.match(html, /Process automation evidence/);
   assert.match(html, /How to read this page/);
   assert.match(html, /optimization-process-evidence-wrap/);
+  assert.match(html, /optimization-upgrading-page-guide[\s\S]*earnings-metric-guide-item/);
+  assert.match(html, /optimization-upgrading-page-guide[\s\S]*Formula:/);
+  assert.match(html, /optimization-upgrading-page-guide[\s\S]*Interpretation:/);
+  assert.match(html, /optimization-scanning-page-guide[\s\S]*How to read this page/);
+  assert.match(html, /optimization-scanning-page-guide[\s\S]*Formula:/);
+  assert.match(html, /optimization-scanning-page-guide[\s\S]*Interpretation:/);
+  assert.doesNotMatch(html, /How to read this table/);
   assert.ok(html.indexOf('id="optimization-analytics-tooltip"') > html.indexOf('data-optimization-panel="upgrading"'), 'shared tooltip must live outside hidden analytics panels');
   assert.doesNotMatch(html, /id="optimization-upgrading-instance-filter"/);
   assert.doesNotMatch(renderer, /optimizationUpgradingInstanceFilter/);
