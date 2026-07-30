@@ -77,6 +77,23 @@ test('process automation evidence deduplicates snapshots and summarizes exact re
   assert.equal(result.probablyAutomatedPercent, 50);
 });
 
+test('upgrading comparison scales use all factions while keeping chart units separate', () => {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext([
+    extractFunction(renderer, 'optimizationQuantile'),
+    extractFunction(renderer, 'buildUpgradingOptimizationAnalytics'),
+    extractFunction(renderer, 'getUpgradingComparisonScales'),
+    'this.scales = getUpgradingComparisonScales;',
+  ].join('\n'), context);
+  const result = context.scales([
+    { factionDaily: [{ date: '2026-07-27', lp: 100 }], playerDaily: [{ date: '2026-07-27', lp: 1_000 }], rows: [{ time: '2026-07-27T01:00:00Z', phantom_crew: 10, expected_total_lp_eod: 80 }, { time: '2026-07-27T02:00:00Z', phantom_crew: 10, expected_total_lp_eod: 80 }] },
+    { factionDaily: [{ date: '2026-07-27', lp: 200 }], playerDaily: [{ date: '2026-07-27', lp: 4_000 }], rows: [{ time: '2026-07-27T01:00:00Z', phantom_crew: 20, expected_total_lp_eod: 500 }, { time: '2026-07-27T02:00:00Z', phantom_crew: 20, expected_total_lp_eod: 500 }] },
+  ], new Date('2026-07-28T12:00:00Z'));
+  assert.equal(result.playerLpPerCrewMax, 200);
+  assert.equal(result.forecastErrorBound, 300);
+});
+
 test('upgrading redemption scatter normalizes player LP by average hourly phantom crew', () => {
   const context = {};
   vm.createContext(context);
