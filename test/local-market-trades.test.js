@@ -203,10 +203,17 @@ test('LM buys acquire weighted lm basis while sells consume local weighted basis
   ]);
 });
 
-test('formats an idempotent Influx point with reusable LM trade dimensions', () => {
+test('formats an idempotent Influx point under the marketplace measurement with the LM market tag', () => {
   const line = formatLocalMarketInfluxLine({ id: 'sig:0', signature: 'sig', timestamp: '2026-07-25T01:00:00Z', wallet: 'wallet', starbase: 'UST-1', asset: 'Food', side: 'buy', quantity: 10, settledAtlas: 5, unitPriceAtlas: 0.5 }, { faction: 'USTUR', profile: 'USTUR' });
-  assert.match(line, /^local_market_trade,/);
+  assert.match(line, /^marketplace,/);
+  assert.match(line, /market=LM/);
   assert.match(line, /tradeId=sig:0/);
   assert.match(line, /quantity=10,settledAtlas=5,grossAtlas=5,marketplaceFeeAtlas=0,netAtlas=5,unitPriceAtlas=0.5/);
   assert.match(line, /1784941200000000000$/);
+});
+
+test('allows overriding the market tag so future GM trades can share the measurement', () => {
+  const line = formatLocalMarketInfluxLine({ id: 'sig:1', signature: 'sig', timestamp: '2026-07-25T01:00:00Z', wallet: 'wallet', starbase: 'UST-1', asset: 'Food', side: 'buy', quantity: 1, settledAtlas: 1, unitPriceAtlas: 1 }, { faction: 'USTUR', profile: 'USTUR', market: 'GM' });
+  assert.match(line, /^marketplace,/);
+  assert.match(line, /market=GM/);
 });

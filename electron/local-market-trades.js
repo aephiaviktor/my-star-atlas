@@ -126,11 +126,12 @@ function escapeFieldString(value) {
   return `"${String(value ?? '').replace(/(["\\])/g, '\\$1')}"`;
 }
 
-function formatLocalMarketInfluxLine(trade, { faction, profile } = {}) {
+function formatLocalMarketInfluxLine(trade, { faction, profile, market = 'LM' } = {}) {
   const timestamp = new Date(trade?.timestamp);
   if (Number.isNaN(timestamp.getTime())) return '';
   const tags = {
-    faction, profile, starbase: trade.starbase, asset: trade.asset, side: trade.side,
+    faction, profile, market,
+    starbase: trade.starbase, asset: trade.asset, side: trade.side,
     wallet: trade.wallet, tradeId: trade.id,
   };
   const tagText = Object.entries(tags).filter(([, value]) => String(value || '').trim()).map(([key, value]) => `${key}=${escapeTag(value)}`).join(',');
@@ -142,7 +143,7 @@ function formatLocalMarketInfluxLine(trade, { faction, profile } = {}) {
   const marketplaceFeeAtlas = Number(trade.marketplaceFeeAtlas ?? 0);
   const netAtlas = Number(trade.netAtlas ?? settledAtlas);
   const fields = `quantity=${quantity},settledAtlas=${settledAtlas},grossAtlas=${grossAtlas},marketplaceFeeAtlas=${marketplaceFeeAtlas},netAtlas=${netAtlas},unitPriceAtlas=${unitPriceAtlas},signature=${escapeFieldString(trade.signature)},rawMint=${escapeFieldString(trade.rawMint)},certificateMint=${escapeFieldString(trade.certificateMint)}`;
-  return `local_market_trade${tagText ? `,${tagText}` : ''} ${fields} ${BigInt(timestamp.getTime()) * 1000000n}`;
+  return `marketplace${tagText ? `,${tagText}` : ''} ${fields} ${BigInt(timestamp.getTime()) * 1000000n}`;
 }
 
 module.exports = {

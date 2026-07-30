@@ -489,6 +489,63 @@ async function queryInfluxFlux(settings, flux) {
   return response.text();
 }
 
+async function queryInfluxSql(settings, sql) {
+  const influxUrl = String(settings.influxUrl || '').trim();
+  const token = String(settings.influxAuthToken || '').trim().replace(/^Token\s+/i, '').replace(/^Bearer\s+/i, '');
+  const bucket = String(settings.influxBucket || '').trim();
+  if (!influxUrl || !token || !bucket) {
+    throw new Error('influx_not_configured');
+  }
+
+  const orgId = await resolveInfluxOrgId(influxUrl, token, bucket);
+  const url = `${getInfluxBaseUrl(influxUrl)}/api/v2/query?org=${encodeURIComponent(orgId)}`;
+  const response = await fetchWithInfluxRetry(
+    ({ signal }) => fetch(url, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Token ${token}`,
+      },
+      body: JSON.stringify({ query: sql, type: 'sql' }),
+      signal,
+    }),
+    { timeoutMs: 15_000, retries: 1, retryDelayMs: 250 }
+  );
+
+  if (!response.ok) {
+    let detail = '';
+    try {
+      detail = await response.text();
+    } catch (_error) {
+      detail = '';
+    }
+    throw new Error(`influx_sql_${response.status}${detail ? `:${detail.slice(0, 300)}` : ''}`);
+  }
+
+  return response.json();
+}
+
+async function fetchNewestMarketplaceTradeMs(settings) {
+  // SQL via InfluxDB v2's /api/v2/query type=sql endpoint. We pull the
+  // newest _time for the marketplace measurement within the last 40d;
+  // a fresh MSA install will have nothing here, which is fine (returns
+  // null) and falls back to the local checkpoint anchor.
+  const bucket = String(settings.influxBucket || '').trim();
+  if (!bucket) return null;
+  const escaped = bucket.replace(/"/g, '""');
+  const sql = `SELECT MAX(time) AS newest_time FROM "${escaped}"."autogen"."marketplace" WHERE time > now() - interval '40' day`;
+  const result = await queryInfluxSql(settings, sql);
+  const rows = Array.isArray(result) ? result : [];
+  for (const row of rows) {
+    const raw = row?.newest_time ?? row?.['MAX(time)'] ?? null;
+    if (!raw) continue;
+    const ms = Date.parse(String(raw));
+    if (Number.isFinite(ms)) return ms;
+  }
+  return null;
+}
+
 async function resolveInfluxOrgId(influxUrl, token, bucket) {
   const baseUrl = getInfluxBaseUrl(influxUrl);
   const cacheKey = `${baseUrl}\n${token}\n${bucket}`;
@@ -3933,8 +3990,14 @@ async function fetchLocalMarketTrades(settings, connection) {
   const existing = checkpoint.trades;
   const startIso = resolveLocalMarketStartIso();
   const startMs = Date.parse(startIso);
-  const newestMs = existing.reduce((max, trade) => Math.max(max, Date.parse(trade.timestamp) || 0), startMs);
-  const overlapStart = new Date(Math.max(startMs, newestMs - 24 * 60 * 60 * 1000)).toISOString();
+  const checkpointNewestMs = existing.reduce((max, trade) => Math.max(max, Date.parse(trade.timestamp) || 0), startMs);
+  // Anchor: use the newer of the local checkpoint or what InfluxDB
+  // already has under the 'marketplace' measurement. This way a wiped
+  // checkpoint, or a fresh install pointing at a populated bucket,
+  // never re-scans more than the 1h overlap below.
+  const influxNewestMs = await fetchNewestMarketplaceTradeMs(settings).catch(() => null);
+  const anchorMs = Math.max(checkpointNewestMs, Number.isFinite(influxNewestMs) ? influxNewestMs : 0, startMs);
+  const overlapStart = new Date(Math.max(startMs, anchorMs - 60 * 60 * 1000)).toISOString();
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
     marketAssetsByMint,
@@ -3947,12 +4010,22 @@ async function fetchLocalMarketTrades(settings, connection) {
   for (const trade of scanned.trades) byId.set(trade.id, trade);
   const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
-  const unpublished = trades.filter((trade) => !checkpoint.publishedTradeIds.has(trade.id));
+  // One-shot backfill: if the checkpoint predates the rename from
+  // 'local_market_trade' to 'marketplace', publish every existing trade
+  // once under the new measurement, then mark the checkpoint so we
+  // never re-publish them. publishedTradeIds is intentionally ignored
+  // on this single pass because the trade IDs were already recorded
+  // against the old measurement name.
+  const needsBackfill = !checkpoint.marketplaceBackfilled;
+  const unpublished = needsBackfill
+    ? trades
+    : trades.filter((trade) => !checkpoint.publishedTradeIds.has(trade.id));
   let publishError = '';
   try {
     const published = await writeInfluxLines(settings, unpublished.map((trade) => formatLocalMarketInfluxLine(trade, { faction, profile: profileName })));
     if (published) {
       for (const trade of unpublished) checkpoint.publishedTradeIds.add(trade.id);
+      checkpoint.marketplaceBackfilled = true;
     }
   } catch (error) {
     publishError = String(error?.message || error || 'local_market_influx_write_failed');
@@ -3965,6 +4038,7 @@ async function fetchLocalMarketTrades(settings, connection) {
     orders: scanned.orders,
     trades,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
+    marketplaceBackfilled: checkpoint.marketplaceBackfilled === true,
   });
   return { trades, error: publishError };
 }
