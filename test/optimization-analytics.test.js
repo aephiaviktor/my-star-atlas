@@ -191,7 +191,8 @@ test('scanning analytics ranks one selected parameter and charts all its values'
   const css = fs.readFileSync(cssPath, 'utf8');
   assert.match(renderer, /selectedScanningOptimizationParameter/);
   assert.match(renderer, /optimizationAnalyticsParameter\?\.replaceChildren/);
-  assert.match(renderer, /parameterGroups = analytics\.groups\.filter/);
+  assert.match(renderer, /selectedScanningOptimizationParameter === '__all__'/);
+  assert.match(renderer, /parameterGroups = selectedScanningOptimizationParameter === '__all__'/);
   assert.match(renderer, /renderScanningOptimizationValueChart\(analytics, metric, selectedScanningOptimizationParameter\)/);
   assert.match(renderer, /optimization-route-arrow/);
   assert.match(html, /id="optimization-analytics-parameter"/);
@@ -202,12 +203,13 @@ test('scanning analytics ranks one selected parameter and charts all its values'
   assert.match(html, />Opportunity Cost</);
   assert.match(html, /id="optimization-analytics-economics"/);
   assert.match(html, /id="optimization-analytics-ranking-head"/);
-  assert.match(html, /id="optimization-analytics-ranking-parameter"/);
-  assert.match(html, />All Parameters</);
+  assert.doesNotMatch(html, /id="optimization-analytics-ranking-parameter"/);
+  assert.match(html, /id="optimization-analytics-parameter"[^>]*>[\s\S]*All Parameters/);
   assert.match(html, /data-optimization-analytics-sort="averageScanChance"/);
-  assert.match(renderer, /rankingGroups = selectedScanningOptimizationRankingParameter === '__all__'/);
+  assert.match(renderer, /rankingGroups = parameterGroups/);
   assert.match(renderer, /sortScanningOptimizationAnalyticsGroups\(rankingGroups, optimizationAnalyticsSort\)/);
   assert.match(css, /optimization-analytics-ranking-wrap/);
+  assert.match(css, /optimization-analytics-value-chart--scrollable/);
   assert.match(css, /optimization-route-line/);
   assert.match(html, /id="optimization-analytics-date-calendar"/);
   assert.match(html, /id="optimization-analytics-only-optimization"[^>]*checked/);

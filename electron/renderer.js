@@ -68,7 +68,6 @@ const optimizationAnalyticsOnlyOptimization = document.querySelector('#optimizat
 const optimizationAnalyticsExperiment = document.querySelector('#optimization-analytics-experiment');
 const optimizationAnalyticsMetric = document.querySelector('#optimization-analytics-metric');
 const optimizationAnalyticsParameter = document.querySelector('#optimization-analytics-parameter');
-const optimizationAnalyticsRankingParameter = document.querySelector('#optimization-analytics-ranking-parameter');
 const optimizationAnalyticsStatus = document.querySelector('#optimization-analytics-status');
 const optimizationAnalyticsSummary = document.querySelector('#optimization-analytics-summary');
 const optimizationAnalyticsEconomics = document.querySelector('#optimization-analytics-economics');
@@ -336,8 +335,7 @@ let optimizationAnalyticsLoadedFaction = '';
 let optimizationAnalyticsPrices = null;
 let selectedScanningOptimizationDate = '';
 let scanningOptimizationCalendarMonth = '';
-let selectedScanningOptimizationParameter = '';
-let selectedScanningOptimizationRankingParameter = '__all__';
+let selectedScanningOptimizationParameter = '__all__';
 let optimizationAnalyticsSort = { column: 'averageScanChance', direction: 'desc' };
 let optimizationColumns = [];
 let optimizationSelectedColumns = new Set();
@@ -6959,7 +6957,7 @@ function moveScanningOptimizationCalendarMonth(offset) {
 }
 
 function renderScanningOptimizationValueChart(analytics, metric, selectedParameter) {
-  const parameterGroups = analytics.groups.filter((group) => group.parameter === selectedParameter);
+  const parameterGroups = selectedParameter === '__all__' ? analytics.groups : analytics.groups.filter((group) => group.parameter === selectedParameter);
   optimizationAnalyticsValueChart?.replaceChildren();
   if(!parameterGroups.length) {
     const prompt = document.createElement('div');
@@ -6968,9 +6966,12 @@ function renderScanningOptimizationValueChart(analytics, metric, selectedParamet
     optimizationAnalyticsValueChart?.append(prompt);
     return;
   }
+  optimizationAnalyticsValueChart?.classList.toggle('optimization-analytics-value-chart--scrollable', selectedParameter === '__all__');
   const svg = createOptimizationAnalyticsSvg(optimizationAnalyticsValueChart);
   if(!svg) return;
-  const left = 48, right = 16, top = 15, bottom = 65, width = 760, height = 280;
+  const left = 48, right = 16, top = 15, bottom = 65, width = selectedParameter === '__all__' ? Math.max(760, parameterGroups.length * 92) : 760, height = 280;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  if(selectedParameter === '__all__') svg.style.width = `${width}px`;
   const values = parameterGroups.flatMap((group) => group.samples.map((sample) => {
     return getScanningOptimizationChartMetric(sample, group, metric);
   })).filter(Number.isFinite);
@@ -6995,9 +6996,9 @@ function renderScanningOptimizationValueChart(analytics, metric, selectedParamet
     const meanY = top + (height - top - bottom) * (1 - Math.min(maxY, mean) / maxY);
     const meanMarker = appendOptimizationSvg(svg, 'circle', { cx: x, cy: meanY, r: 6, fill: color, class: 'mean-marker' });
     bindOptimizationAnalyticsTooltip(meanMarker, `${group.parameter} ${group.value} · mean ${mean.toFixed(2)} · ${group.scans} scans`);
-    appendOptimizationSvg(svg, 'text', { x, y: height - bottom + 14, transform: `rotate(38 ${x} ${height - bottom + 14})`, 'text-anchor': 'start', class: 'axis-label' }, `${group.value}`);
+    appendOptimizationSvg(svg, 'text', { x, y: height - bottom + 14, transform: `rotate(38 ${x} ${height - bottom + 14})`, 'text-anchor': 'start', class: 'axis-label' }, selectedParameter === '__all__' ? `${group.parameter}: ${group.value}` : `${group.value}`);
   });
-  appendOptimizationSvg(svg, 'text', { x: left, y: 14, class: 'axis-label' }, `${selectedParameter} · ${parameterGroups.length} tested values`);
+  appendOptimizationSvg(svg, 'text', { x: left, y: 14, class: 'axis-label' }, `${selectedParameter === '__all__' ? 'All Parameters' : selectedParameter} · ${parameterGroups.length} tested values`);
 }
 
 function renderScanningOptimizationSectorChart(analytics, selectedParameter) {
@@ -7061,22 +7062,17 @@ function renderScanningOptimizationAnalytics() {
   }
   const metric = optimizationAnalyticsMetric?.value || 'averageScanChance';
   const parameters = [...new Set(analytics.groups.map((group) => group.parameter))].sort((a, b) => a.localeCompare(b));
-  if(!parameters.includes(selectedScanningOptimizationParameter)) selectedScanningOptimizationParameter = parameters[0] || '';
+  if(selectedScanningOptimizationParameter !== '__all__' && !parameters.includes(selectedScanningOptimizationParameter)) selectedScanningOptimizationParameter = '__all__';
   if(optimizationAnalyticsParameter) {
     const prior = selectedScanningOptimizationParameter;
-    optimizationAnalyticsParameter.replaceChildren(...parameters.map((parameter) => new Option(parameter, parameter)));
-    optimizationAnalyticsParameter.value = parameters.includes(prior) ? prior : selectedScanningOptimizationParameter;
+    optimizationAnalyticsParameter.replaceChildren(new Option('All Parameters', '__all__'), ...parameters.map((parameter) => new Option(parameter, parameter)));
+    optimizationAnalyticsParameter.value = prior === '__all__' || parameters.includes(prior) ? prior : '__all__';
     selectedScanningOptimizationParameter = optimizationAnalyticsParameter.value;
   }
-  if(!parameters.includes(selectedScanningOptimizationRankingParameter)) selectedScanningOptimizationRankingParameter = '__all__';
-  if(optimizationAnalyticsRankingParameter) {
-    optimizationAnalyticsRankingParameter.replaceChildren(new Option('All Parameters', '__all__'), ...parameters.map((parameter) => new Option(parameter, parameter)));
-    optimizationAnalyticsRankingParameter.value = selectedScanningOptimizationRankingParameter;
-  }
-  const parameterGroups = analytics.groups.filter((group) => group.parameter === selectedScanningOptimizationParameter);
-  const rankingGroups = selectedScanningOptimizationRankingParameter === '__all__'
+  const parameterGroups = selectedScanningOptimizationParameter === '__all__'
     ? analytics.groups
-    : analytics.groups.filter((group) => group.parameter === selectedScanningOptimizationRankingParameter);
+    : analytics.groups.filter((group) => group.parameter === selectedScanningOptimizationParameter);
+  const rankingGroups = parameterGroups;
   for(const header of optimizationAnalyticsRankingHead?.querySelectorAll('[data-optimization-analytics-sort]') || []) {
     const active = header.dataset.optimizationAnalyticsSort === optimizationAnalyticsSort.column;
     header.textContent = `${header.dataset.label || header.textContent}${active ? (optimizationAnalyticsSort.direction === 'asc' ? ' ▲' : ' ▼') : ''}`;
@@ -7132,7 +7128,7 @@ function renderScanningOptimizationAnalytics() {
     const unavailable = analytics.unavailableHistoricalScans > 0
       ? ` · ${analytics.unavailableHistoricalScans.toLocaleString()} historical scans unavailable`
       : '';
-    const rankingScope = selectedScanningOptimizationRankingParameter === '__all__' ? 'all parameters' : selectedScanningOptimizationRankingParameter;
+    const rankingScope = selectedScanningOptimizationParameter === '__all__' ? 'all parameters' : selectedScanningOptimizationParameter;
     optimizationAnalyticsStatus.textContent = `${analytics.samples.length.toLocaleString()} telemetry scans analyzed${runtimeProgress}${unavailable} · ${analytics.experimentId} · ranking ${rankingScope} · charting ${selectedScanningOptimizationParameter || 'no parameter'}`;
   }
   for(const group of sortScanningOptimizationAnalyticsGroups(rankingGroups, optimizationAnalyticsSort)) {
@@ -7724,7 +7720,6 @@ document.querySelectorAll('.optimization-view-button').forEach((button) => {
 optimizationAnalyticsExperiment?.addEventListener('change', renderScanningOptimizationAnalytics);
 optimizationAnalyticsMetric?.addEventListener('change', renderScanningOptimizationAnalytics);
 optimizationAnalyticsParameter?.addEventListener('change', () => { selectedScanningOptimizationParameter = optimizationAnalyticsParameter.value; renderScanningOptimizationAnalytics(); });
-optimizationAnalyticsRankingParameter?.addEventListener('change', () => { selectedScanningOptimizationRankingParameter = optimizationAnalyticsRankingParameter.value; renderScanningOptimizationAnalytics(); });
 optimizationAnalyticsRankingHead?.addEventListener('click', (event) => {
   const header = event.target.closest('[data-optimization-analytics-sort]');
   if(!header) return;

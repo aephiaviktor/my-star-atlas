@@ -319,6 +319,8 @@ select:focus {
 .optimization-analytics-note { margin: -3px 0 8px; color: var(--muted); font-size: 11px; }
 .optimization-analytics-chart { min-height: 280px; overflow: hidden; }
 .optimization-analytics-chart svg { display: block; width: 100%; height: 280px; }
+.optimization-analytics-value-chart--scrollable { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.optimization-analytics-value-chart--scrollable svg { max-width: none; }
 .optimization-upgrading-tall-chart { min-height: 0; }
 .optimization-upgrading-tall-chart svg { height: auto; aspect-ratio: 760 / 340; }
 .optimization-analytics-chart .axis-label { fill: var(--muted); font-size: 10px; }
@@ -350,6 +352,7 @@ select:focus {
 }
 .optimization-analytics-ranking-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .optimization-analytics-ranking-header h3 { margin: 0; }
+.optimization-analytics-parameter-filter { margin: 0 auto; }
 .optimization-analytics-ranking-wrap { max-height: 320px; overflow-y: auto; }
 .optimization-analytics-ranking-wrap table thead th { position: sticky; top: 0; z-index: 1; background: rgba(6, 19, 27, 0.98); }
 .optimization-analytics-ranking-wrap th[data-optimization-analytics-sort] { cursor: pointer; user-select: none; }
