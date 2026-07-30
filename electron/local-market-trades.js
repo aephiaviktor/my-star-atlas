@@ -141,8 +141,9 @@ function formatLocalMarketInfluxLine(trade, { faction, profile, market = 'LM' } 
   if (!(quantity > 0) || !(settledAtlas >= 0) || !(unitPriceAtlas >= 0)) return '';
   const grossAtlas = Number(trade.grossAtlas ?? settledAtlas);
   const marketplaceFeeAtlas = Number(trade.marketplaceFeeAtlas ?? 0);
+  const txFeeAtlas = Number(trade.txFeeAtlas ?? 0);
   const netAtlas = Number(trade.netAtlas ?? settledAtlas);
-  const fields = `quantity=${quantity},settledAtlas=${settledAtlas},grossAtlas=${grossAtlas},marketplaceFeeAtlas=${marketplaceFeeAtlas},netAtlas=${netAtlas},unitPriceAtlas=${unitPriceAtlas},signature=${escapeFieldString(trade.signature)},rawMint=${escapeFieldString(trade.rawMint)},certificateMint=${escapeFieldString(trade.certificateMint)}`;
+  const fields = `quantity=${quantity},settledAtlas=${settledAtlas},grossAtlas=${grossAtlas},marketplaceFeeAtlas=${marketplaceFeeAtlas},txFeeAtlas=${txFeeAtlas},netAtlas=${netAtlas},unitPriceAtlas=${unitPriceAtlas},signature=${escapeFieldString(trade.signature)},creationSignature=${escapeFieldString(trade.creationSignature)},rawMint=${escapeFieldString(trade.rawMint)},certificateMint=${escapeFieldString(trade.certificateMint)}`;
   return `marketplace${tagText ? `,${tagText}` : ''} ${fields} ${BigInt(timestamp.getTime()) * 1000000n}`;
 }
 

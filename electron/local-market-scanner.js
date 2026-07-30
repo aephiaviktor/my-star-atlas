@@ -64,7 +64,7 @@ function gmInstructions(transaction) {
     .map((instruction) => ({ instruction, accounts: instructionAccounts(instruction, keys), data: decodeInstructionData(instruction) }));
 }
 
-function decodeLocalMarketOrder(transaction, { trackedWallets = [], marketAssetsByMint = {} } = {}) {
+function decodeLocalMarketOrder(transaction, { trackedWallets = [], marketAssetsByMint = {}, atlasPerSol } = {}) {
   const tracked = new Set(trackedWallets.map(String));
   const signature = String(transaction?.signature || transaction?.transaction?.signatures?.[0] || '');
   const timestamp = new Date(Number(transaction?.blockTime) * 1000);
@@ -78,10 +78,13 @@ function decodeLocalMarketOrder(transaction, { trackedWallets = [], marketAssets
     const priceRaw = readU64(data, 8);
     const originalQuantity = readU64(data, 16);
     if (!(priceRaw >= 0) || !(originalQuantity > 0)) continue;
+    const creationTxFeeSol = Number(transaction?.meta?.fee || 0) / 1e9;
     return {
       orderId: accounts[8], side, initializer: accounts[0], certificateMint,
       rawMint: String(context.rawMint || certificateMint), starbase: String(context.starbase || ''), asset: String(context.asset || ''),
       originalQuantity, priceAtlas: priceRaw / 1e8, createdAt: timestamp.toISOString(), creationSignature: signature,
+      creationTxFeeSol: Number.isFinite(creationTxFeeSol) && creationTxFeeSol > 0 ? creationTxFeeSol : 0,
+      creationTxFeeAtlas: computeTxFeeAtlas(transaction, atlasPerSol),
     };
   }
   return null;
@@ -127,7 +130,12 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { at
     const grossAtlas = quantity * unitPriceAtlas;
     const marketplaceFeeAtlas = Number(logAmounts.marketplaceFeeAtlas || 0);
     const feePayer = keyText(transaction.transaction?.message?.accountKeys?.[0]);
-    const txFeeAtlas = tracked.has(feePayer) ? computeTxFeeAtlas(transaction, atlasPerSol) : 0;
+    const executionTxFeeAtlas = tracked.has(feePayer) ? computeTxFeeAtlas(transaction, atlasPerSol) : 0;
+    const originalQuantity = Number(order.originalQuantity);
+    const allocatedCreationTxFeeAtlas = Number.isFinite(originalQuantity) && originalQuantity > 0
+      ? Number(order.creationTxFeeAtlas || 0) * Math.min(1, quantity / originalQuantity)
+      : Number(order.creationTxFeeAtlas || 0);
+    const txFeeAtlas = executionTxFeeAtlas + allocatedCreationTxFeeAtlas;
     const netAtlas = order.side === 'sell'
       ? Math.max(0, logAmounts.transferAtlas ?? (grossAtlas - marketplaceFeeAtlas)) - txFeeAtlas
       : grossAtlas + marketplaceFeeAtlas + txFeeAtlas;
@@ -135,7 +143,8 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { at
       id: `${signature}:${order.orderId}`, signature, timestamp: timestamp.toISOString(), marketplace: 'LM',
       side: order.side, orderId: order.orderId, wallet: order.initializer, starbase: order.starbase, asset: order.asset,
       rawMint: order.rawMint, certificateMint: order.certificateMint, quantity, settledAtlas: netAtlas,
-      grossAtlas, marketplaceFeeAtlas, txFeeAtlas, netAtlas, unitPriceAtlas,
+      grossAtlas, marketplaceFeeAtlas, txFeeAtlas, executionTxFeeAtlas, allocatedCreationTxFeeAtlas,
+      creationSignature: order.creationSignature || '', netAtlas, unitPriceAtlas,
     };
   }
   return null;
@@ -185,10 +194,21 @@ async function scanLocalMarketTrades(connection, {
   if (!Number.isFinite(startMs)) throw new Error('local market startIso is invalid');
   const pacer = createLocalMarketPacer(requestsPerSecond);
   const ordersById = new Map((knownOrders || []).filter((row) => row?.orderId).map((row) => [String(row.orderId), row]));
+  // Checkpoints written before creation-fee tracking already contain the
+  // initialization signature. Fetch each missing creation tx once, enrich
+  // the order, and persist it through the returned orders array.
+  for (const order of ordersById.values()) {
+    if (order.creationTxFeeAtlas != null || !order.creationSignature) continue;
+    if (pacer) await pacer();
+    const transaction = await connection.getParsedTransaction(order.creationSignature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+    if (!transaction) continue;
+    const enriched = decodeLocalMarketOrder({ ...transaction, signature: order.creationSignature }, { trackedWallets, marketAssetsByMint, atlasPerSol });
+    if (enriched) ordersById.set(enriched.orderId, enriched);
+  }
   const walletSignatures = await collectSignatures(connection, trackedWallets, startMs, addressFactory, maxPages, pacer);
   const walletTransactions = await fetchTransactions(connection, walletSignatures, pacer);
   for (const transaction of walletTransactions) {
-    const order = decodeLocalMarketOrder(transaction, { trackedWallets, marketAssetsByMint });
+    const order = decodeLocalMarketOrder(transaction, { trackedWallets, marketAssetsByMint, atlasPerSol });
     if (order) ordersById.set(order.orderId, order);
   }
   const orderSignatures = await collectSignatures(connection, Array.from(ordersById.keys()), startMs, addressFactory, maxPages, pacer);

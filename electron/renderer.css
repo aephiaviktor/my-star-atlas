@@ -652,6 +652,60 @@ select:focus {
   padding: 7px 12px;
 }
 
+.update-action-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+
+.marketplace-side-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.marketplace-side-switch[hidden] {
+  display: none;
+}
+
+.marketplace-side-button {
+  min-width: 50px;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  opacity: 0.62;
+}
+
+.marketplace-side-buy {
+  color: #91f0bd;
+  border-color: rgba(73, 214, 160, 0.46);
+  background: rgba(23, 91, 62, 0.58);
+}
+
+.marketplace-side-sell {
+  color: #ffaaa5;
+  border-color: rgba(248, 113, 113, 0.46);
+  background: rgba(111, 35, 39, 0.58);
+}
+
+.marketplace-side-button.active {
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(244, 247, 248, 0.1);
+}
+
+.marketplace-side-buy.active {
+  border-color: rgba(73, 214, 160, 0.9);
+  background: rgba(23, 91, 62, 0.9);
+}
+
+.marketplace-side-sell.active {
+  border-color: rgba(248, 113, 113, 0.9);
+  background: rgba(111, 35, 39, 0.9);
+}
+
 .refresh-data-btn:disabled {
   opacity: 0.58;
   cursor: wait;

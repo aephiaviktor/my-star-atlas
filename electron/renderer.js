@@ -149,6 +149,9 @@ const earningsBreakevenAssetFilter = document.querySelector('#earnings-breakeven
 const earningsBreakevenHideLowInventory = document.querySelector('#earnings-breakeven-hide-low-inventory');
 const earningsMarketplaceSyncStatus = document.querySelector('#earnings-marketplace-sync-status');
 const earningsMarketplaceTableBody = document.querySelector('#earnings-marketplace-table-body');
+const earningsMarketplaceSideSwitch = document.querySelector('#earnings-marketplace-side-switch');
+const earningsMarketplaceSideButtons = Array.from(document.querySelectorAll('[data-marketplace-side]'));
+const earningsMarketplaceUnitHeader = document.querySelector('#earnings-marketplace-unit-header');
 const earningsScanningDateFilter = document.querySelector('#earnings-scanning-date-filter');
 const earningsScanningFleetFilter = document.querySelector('#earnings-scanning-fleet-filter');
 const earningsMiningDateFilter = document.querySelector('#earnings-mining-date-filter');
@@ -321,6 +324,7 @@ const factionButtons = Array.from(document.querySelectorAll('.faction-button'));
 let currentSection = 'production';
 let currentSubtab = 'scanning';
 let currentEarningsSubtab = 'scanning';
+let earningsMarketplaceSide = 'buy';
 let activeCargoTable = 'fleet';
 let latestSettings = null;
 let latestFleetResult = null;
@@ -5994,34 +5998,41 @@ function renderEarningsCrafting(result) {
 
 function renderEarningsMarketplace(result) {
   const rows = Array.isArray(result?.localMarketTrades) ? result.localMarketTrades : [];
+  const visibleRows = rows.filter((entry) => entry.side === earningsMarketplaceSide);
   const errorSuffix = result?.localMarketError ? ` · ${result.localMarketError}` : '';
-  setText(earningsMarketplaceSyncStatus, `${formatMarketplaceWhole(rows.length)} LM executions at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
+  setText(earningsMarketplaceSyncStatus, `${formatMarketplaceWhole(visibleRows.length)} LM ${earningsMarketplaceSide} executions at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
+  setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
+  earningsMarketplaceSideButtons.forEach((button) => {
+    const active = button.dataset.marketplaceSide === earningsMarketplaceSide;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
   if (!earningsMarketplaceTableBody) return;
   earningsMarketplaceTableBody.textContent = '';
-  if (!rows.length) {
+  if (!visibleRows.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
-    const td = createTextCell(result?.localMarketError ? `LM execution scan failed: ${result.localMarketError}` : 'No LM executions found');
-    td.colSpan = 14;
+    const td = createTextCell(result?.localMarketError ? `LM execution scan failed: ${result.localMarketError}` : `No LM ${earningsMarketplaceSide} executions found`);
+    td.colSpan = 13;
     tr.appendChild(td);
     earningsMarketplaceTableBody.appendChild(tr);
     return;
   }
-  for (const entry of [...rows].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))) {
+  for (const entry of [...visibleRows].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))) {
     const tr = document.createElement('tr');
     const quantity = Number(entry.quantity) || 0;
     const gross = Number(entry.grossAtlas) || 0;
     const txFee = Number(entry.txFeeAtlas) || 0;
     const net = Number(entry.netAtlas ?? entry.settledAtlas ?? 0);
-    const incomePerUnit = entry.side === 'sell' && quantity > 0 ? net / quantity : null;
-    const costPerUnit = quantity > 0 ? (gross + txFee) / quantity : null;
+    const unitMetric = quantity > 0
+      ? (earningsMarketplaceSide === 'buy' ? (gross + txFee) / quantity : net / quantity)
+      : null;
     const values = [
-      formatMarketplaceTimestamp(entry.timestamp), entry.marketplace || 'LM', String(entry.side || '--').toUpperCase(),
+      formatMarketplaceTimestamp(entry.timestamp), entry.marketplace || 'LM',
       entry.starbase || '--', entry.asset || '--', formatMarketplaceWhole(quantity),
       formatMarketplaceAtlas(gross, 6), formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
       formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6), formatMarketplaceAtlas(txFee, 6),
-      formatMarketplaceAtlas(net, 6), incomePerUnit == null ? '--' : formatMarketplaceAtlas(incomePerUnit, 8),
-      costPerUnit == null ? '--' : formatMarketplaceAtlas(costPerUnit, 8),
+      formatMarketplaceAtlas(net, 6), unitMetric == null ? '--' : formatMarketplaceAtlas(unitMetric, 8),
       entry.orderId || '--', entry.signature || '--',
     ];
     for (const value of values.slice(0, -1)) tr.appendChild(createTextCell(value));
@@ -7459,8 +7470,15 @@ function setActiveOptimizationView(view) {
   setActiveOptimizationSubtab(currentOptimizationSubtab);
 }
 
+function updateMarketplaceSideSwitchVisibility() {
+  if (earningsMarketplaceSideSwitch) {
+    earningsMarketplaceSideSwitch.hidden = !(currentSection === 'earnings' && currentEarningsSubtab === 'marketplace');
+  }
+}
+
 function setActiveSection(section) {
   currentSection = section;
+  updateMarketplaceSideSwitchVisibility();
   appShell?.classList.toggle('earnings-active', section === 'earnings');
   appShell?.classList.toggle('optimization-active', section === 'optimization');
   document.querySelectorAll('.nav-button').forEach((button) => {
@@ -7597,6 +7615,7 @@ function setActiveSubtab(subtab) {
 
 function setActiveEarningsSubtab(subtab) {
   currentEarningsSubtab = subtab;
+  updateMarketplaceSideSwitchVisibility();
   document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
     const active = button.dataset.earningsSubtab === subtab;
     button.classList.toggle('active', active);
@@ -7647,6 +7666,13 @@ document.querySelectorAll('.subtab-button[data-subtab]').forEach((button) => {
 
 document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
   button.addEventListener('click', () => setActiveEarningsSubtab(button.dataset.earningsSubtab));
+});
+
+earningsMarketplaceSideButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    earningsMarketplaceSide = button.dataset.marketplaceSide === 'sell' ? 'sell' : 'buy';
+    if (latestEarningsResult) renderEarningsMarketplace(latestEarningsResult);
+  });
 });
 
 document.querySelectorAll('.optimization-subtab-button').forEach((button) => {

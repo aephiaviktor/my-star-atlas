@@ -133,10 +133,14 @@ test('tracks LM order creation separately and matches fills by order ID', () => 
   const order = decodeLocalMarketOrder(orderTx, {
     trackedWallets: ['handler', 'lancer'],
     marketAssetsByMint: { 'certificate-1': { starbase: 'ONI-1', asset: 'Hydrogen', rawMint: 'hydrogen-mint' } },
+    atlasPerSol: 1000,
   });
   assert.equal(order.orderId, 'order-1');
   assert.equal(order.side, 'sell');
   assert.equal(order.priceAtlas, 0.000349);
+  assert.equal(order.creationSignature, 'create');
+  assert.equal(order.creationTxFeeSol, 0.000005);
+  assert.equal(order.creationTxFeeAtlas, 0.005);
 
   const fillTx = lifecycleTx({
     signature: 'fill', name: 'process_exchange', values: [10000000, 34900], fee: 5000,
@@ -147,8 +151,9 @@ test('tracks LM order creation separately and matches fills by order ID', () => 
   assert.equal(execution.orderId, 'order-1');
   assert.equal(execution.quantity, 10000000);
   assert.equal(execution.marketplaceFeeAtlas, 0.0349);
-  assert.equal(execution.txFeeAtlas, 0);
-  assert.equal(execution.netAtlas, 3489.651);
+  assert.ok(Math.abs(execution.txFeeAtlas - (0.005 / 3)) < 1e-12);
+  assert.ok(Math.abs(execution.netAtlas - (3489.651 - (0.005 / 3))) < 1e-12);
+  assert.equal(execution.creationSignature, 'create');
 });
 
 test('LM execution tx fee converts from SOL to ATLAS using the cached atlasPerSol rate', () => {
@@ -208,7 +213,7 @@ test('formats an idempotent Influx point under the marketplace measurement with 
   assert.match(line, /^marketplace,/);
   assert.match(line, /market=LM/);
   assert.match(line, /tradeId=sig:0/);
-  assert.match(line, /quantity=10,settledAtlas=5,grossAtlas=5,marketplaceFeeAtlas=0,netAtlas=5,unitPriceAtlas=0.5/);
+  assert.match(line, /quantity=10,settledAtlas=5,grossAtlas=5,marketplaceFeeAtlas=0,txFeeAtlas=0,netAtlas=5,unitPriceAtlas=0.5/);
   assert.match(line, /1784941200000000000$/);
 });
 
