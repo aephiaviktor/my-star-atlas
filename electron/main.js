@@ -3835,7 +3835,7 @@ async function writeInfluxLines(settings, lines) {
 
 async function fetchLocalMarketTrades(settings, connection) {
   const faction = normalizeFaction(settings.faction);
-  const profile = getConfiguredPlayerProfile(settings, faction);
+  const profile = getSelectedPlayerProfile(settings);
   if (!profile) return { trades: [], error: 'local_market_profile_not_configured' };
   const accountInfo = await connection.getAccountInfo(new PublicKey(profile), 'confirmed');
   const trackedWallets = decodePlayerProfileWallets(accountInfo);

@@ -25,3 +25,8 @@ test('Marketplace renderer exposes LM scan errors and links execution signatures
   assert.match(renderer, /https:\/\/solscan\.io\/tx\//);
   assert.match(main, /localMarketTrades: localMarketResult\.trades/);
 });
+
+test('LM scanner resolves the configured profile through the existing settings helper', () => {
+  assert.doesNotMatch(main, /getConfiguredPlayerProfile\(/);
+  assert.match(main, /const profile = getSelectedPlayerProfile\(settings\);/);
+});
