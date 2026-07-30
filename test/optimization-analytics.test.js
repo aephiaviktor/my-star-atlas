@@ -263,6 +263,7 @@ test('Scanning Data scopes rows and fleet choices to the selected faction', () =
   assert.deepEqual(Array.from(context.filterRows(rows, 'ONI'), row => row.fleet), ['Oni Fleet']);
   assert.deepEqual(Array.from(context.filterRows(rows, 'USTUR'), row => row.fleet), ['Ustur Fleet', 'Ustur Fleet 2']);
   assert.match(source, /optimizationRows = filterScanningOptimizationRowsByFaction/);
+  assert.doesNotMatch(source, /const existing = Array\.from\(select\?\.options/);
 });
 
 test('analytics requests may load complete scan history without enlarging Data pages', () => {

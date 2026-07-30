@@ -6547,10 +6547,9 @@ function renderOptimizationTable() {
 
 function populateOptimizationFilter(select, rows, key, allLabel) {
   const selected = select?.value || '__all__';
-  const existing = Array.from(select?.options || []).map((option) => option.value).filter((value) => value !== '__all__');
-  const values = Array.from(new Set([...existing, ...rows.map((row) => row[key]).filter(Boolean)])).sort((a, b) => String(a).localeCompare(String(b)));
+  const values = Array.from(new Set(rows.map((row) => row[key]).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b)));
   select?.replaceChildren(new Option(allLabel, '__all__'), ...values.map((value) => new Option(value, value)));
-  if (values.includes(selected)) select.value = selected;
+  select.value = values.includes(selected) ? selected : '__all__';
 }
 
 function filterScanningOptimizationRowsByFaction(rows, faction) {
