@@ -7,7 +7,7 @@ const {
   buildLocalMarketLedgerEvents,
   formatLocalMarketInfluxLine,
 } = require('../electron/local-market-trades');
-const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution } = require('../electron/local-market-scanner');
+const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions } = require('../electron/local-market-scanner');
 const crypto = require('node:crypto');
 const bs58Module = require('bs58');
 const bs58 = bs58Module.default || bs58Module;
@@ -102,6 +102,31 @@ function lifecycleTx({ signature, name, accounts, values = [], fee = 5000, logs 
     transaction: { signatures: [signature], message: { accountKeys: accounts.map((pubkey, index) => ({ pubkey, signer: index === 0 })), instructions: [{ programId: GM_PROGRAM_ID, accounts, data: gmData(name, ...values) }] } },
   };
 }
+
+test('transaction fetches split oversized RPC batches without losing order', async () => {
+  const rows = new Map(Array.from({ length: 7 }, (_, index) => {
+    const signature = `signature-${index}`;
+    return [signature, { signature, blockTime: index + 1 }];
+  }));
+  const batchSizes = [];
+  const connection = {
+    async getParsedTransactions(signatures) {
+      batchSizes.push(signatures.length);
+      if (signatures.length > 2) {
+        const error = new Error('413 Payload Too Large: Too many requests');
+        error.status = 413;
+        throw error;
+      }
+      return signatures.map((signature) => ({ blockTime: Number(signature.split('-')[1]) + 1, transaction: { signatures: [signature] }, meta: { err: null } }));
+    },
+  };
+
+  const transactions = await fetchTransactions(connection, rows);
+  assert.equal(transactions.length, 7);
+  assert.deepEqual(transactions.map((transaction) => transaction.signature), Array.from(rows.keys()));
+  assert.ok(batchSizes.some((size) => size > 2));
+  assert.ok(batchSizes.filter((size) => size <= 2).length >= 4);
+});
 
 test('tracks LM order creation separately and matches fills by order ID', () => {
   const orderTx = lifecycleTx({

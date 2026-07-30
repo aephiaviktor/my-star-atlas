@@ -7,6 +7,7 @@ const { decodeLocalMarketTrade } = require('./local-market-trades');
 const bs58 = bs58Module.default || bs58Module;
 const DEFAULT_START_ISO = '2026-07-24T00:00:00.000Z';
 const MAX_SIGNATURE_PAGES = 20;
+const TRANSACTION_BATCH_SIZE = 20;
 const GM_PROGRAM_ID = 'traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg';
 
 function discriminator(name) {
@@ -134,13 +135,35 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
   return signatures;
 }
 
+function isOversizedTransactionBatchError(error) {
+  const status = Number(error?.status || error?.response?.status);
+  const code = Number(error?.code || error?.body?.error?.code);
+  const message = String(error?.message || error || '');
+  return status === 413 || code === -32413 || /413|payload too large/i.test(message);
+}
+
+async function fetchParsedTransactionBatch(connection, batch) {
+  try {
+    return await connection.getParsedTransactions(batch.map((row) => row.signature), {
+      commitment: 'confirmed',
+      maxSupportedTransactionVersion: 0,
+    });
+  } catch (error) {
+    if (!isOversizedTransactionBatchError(error) || batch.length === 1) throw error;
+    const middle = Math.ceil(batch.length / 2);
+    const left = await fetchParsedTransactionBatch(connection, batch.slice(0, middle));
+    const right = await fetchParsedTransactionBatch(connection, batch.slice(middle));
+    return left.concat(right);
+  }
+}
+
 async function fetchTransactions(connection, rows) {
   const ordered = Array.from(rows.values()).sort((a, b) => Number(a.blockTime || 0) - Number(b.blockTime || 0));
   const transactions = [];
-  for (let offset = 0; offset < ordered.length; offset += 100) {
-    const batch = ordered.slice(offset, offset + 100);
+  for (let offset = 0; offset < ordered.length; offset += TRANSACTION_BATCH_SIZE) {
+    const batch = ordered.slice(offset, offset + TRANSACTION_BATCH_SIZE);
     const fetched = typeof connection.getParsedTransactions === 'function'
-      ? await connection.getParsedTransactions(batch.map((row) => row.signature), { commitment: 'confirmed', maxSupportedTransactionVersion: 0 })
+      ? await fetchParsedTransactionBatch(connection, batch)
       : await Promise.all(batch.map((row) => connection.getParsedTransaction(row.signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 })));
     fetched.forEach((transaction, index) => {
       if (transaction) transactions.push({ ...transaction, signature: batch[index].signature, blockTime: transaction.blockTime ?? batch[index].blockTime });
@@ -178,5 +201,5 @@ async function scanLocalMarketTrades(connection, {
 }
 
 module.exports = {
-  DEFAULT_START_ISO, scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution,
+  DEFAULT_START_ISO, scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions,
 };
