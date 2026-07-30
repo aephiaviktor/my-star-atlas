@@ -70,3 +70,19 @@ test('Marketplace sync discovers current player orders and persists incremental 
   assert.match(main, /archivedOrderIds: scanned\.archivedOrderIds/);
   assert.match(main, /schemaVersion: 2/);
 });
+
+test('Marketplace reads use supported Flux queries instead of Influx SQL', () => {
+  assert.match(main, /_measurement == "marketplace"/);
+  assert.match(main, /pivot\(rowKey: \["_time", "tradeId"\]/);
+  assert.doesNotMatch(main, /queryInfluxSql|type:\s*['"]sql['"]/);
+});
+
+test('GM sync includes handler and additional wallets while remaining global and ATLAS-only', () => {
+  assert.match(html, /name="gmTradingWallets"/);
+  assert.match(renderer, /gmTradingWallets: String\(data\.get\('gmTradingWallets'\)/);
+  assert.match(main, /decodePlayerProfileHandlerWallets/);
+  assert.match(main, /\.\.\.decodePlayerProfileHandlerWallets\(accountInfo\), \.\.\.extraWallets/);
+  assert.match(main, /faction: 'GLOBAL', profile: 'GLOBAL', market: 'GM'/);
+  assert.match(main, /quoteMint: ATLAS_MINT/);
+  assert.match(main, /fetchMarketplaceAssetFlowsFromInflux/);
+});

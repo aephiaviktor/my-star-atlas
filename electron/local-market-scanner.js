@@ -73,8 +73,9 @@ function decodeLocalMarketOrder(transaction, { trackedWallets = [], marketAssets
     const side = data.subarray(0, 8).equals(INITIALIZE_BUY) ? 'buy' : data.subarray(0, 8).equals(INITIALIZE_SELL) ? 'sell' : '';
     if (!side || accounts.length < 9 || !tracked.has(accounts[0])) continue;
     const certificateMint = side === 'sell' ? accounts[2] : accounts[3];
+    const currencyMint = side === 'sell' ? accounts[3] : accounts[2];
     const context = marketAssetsByMint[certificateMint];
-    if (!context) continue;
+    if (!context || (context.marketplace === 'GM' && currencyMint !== context.quoteMint)) continue;
     const priceRaw = readU64(data, 8);
     const originalQuantity = readU64(data, 16);
     if (!(priceRaw >= 0) || !(originalQuantity > 0)) continue;
@@ -82,6 +83,7 @@ function decodeLocalMarketOrder(transaction, { trackedWallets = [], marketAssets
     return {
       orderId: accounts[8], side, initializer: accounts[0], certificateMint,
       rawMint: String(context.rawMint || certificateMint), starbase: String(context.starbase || ''), asset: String(context.asset || ''),
+      marketplace: String(context.marketplace || 'LM'), quoteMint: currencyMint,
       originalQuantity, priceAtlas: priceRaw / 1e8, createdAt: timestamp.toISOString(), creationSignature: signature,
       creationTxFeeSol: Number.isFinite(creationTxFeeSol) && creationTxFeeSol > 0 ? creationTxFeeSol : 0,
       creationTxFeeAtlas: computeTxFeeAtlas(transaction, atlasPerSol),
@@ -140,7 +142,7 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { at
       ? Math.max(0, logAmounts.transferAtlas ?? (grossAtlas - marketplaceFeeAtlas)) - txFeeAtlas
       : grossAtlas + marketplaceFeeAtlas + txFeeAtlas;
     return {
-      id: `${signature}:${order.orderId}`, signature, timestamp: timestamp.toISOString(), marketplace: 'LM',
+      id: `${signature}:${order.orderId}`, signature, timestamp: timestamp.toISOString(), marketplace: String(order.marketplace || 'LM'),
       side: order.side, orderId: order.orderId, wallet: order.initializer, starbase: order.starbase, asset: order.asset,
       rawMint: order.rawMint, certificateMint: order.certificateMint, quantity, settledAtlas: netAtlas,
       grossAtlas, marketplaceFeeAtlas, txFeeAtlas, executionTxFeeAtlas, allocatedCreationTxFeeAtlas,
@@ -200,7 +202,7 @@ async function scanLocalMarketTrades(connection, {
   walletCursors = {}, orderCursors = {}, activeOrderIds = [], archivedOrderIds = [], openOrderIds = [],
   addressFactory = (value) => value, maxPages = MAX_SIGNATURE_PAGES,
   requestsPerSecond = DEFAULT_REQUESTS_PER_SECOND,
-  atlasPerSol,
+  atlasPerSol, decodeAssetFlows,
 } = {}) {
   const resolvedStartIso = startIso ?? resolveLocalMarketStartIso();
   const startMs = Date.parse(resolvedStartIso);
@@ -261,10 +263,14 @@ async function scanLocalMarketTrades(connection, {
     if (order) ordersById.set(order.orderId, order);
   }
   const tradesById = new Map();
+  const assetFlowsById = new Map();
   for (const transaction of transactions) {
     const execution = decodeOrderExecution(transaction, ordersById, trackedWallets, { atlasPerSol })
       || decodeLocalMarketTrade(transaction, { trackedWallets, marketAssetsByMint });
     if (execution) tradesById.set(execution.id, execution);
+    if (decodeAssetFlows) {
+      for (const flow of decodeAssetFlows(transaction) || []) if (flow?.id) assetFlowsById.set(flow.id, flow);
+    }
   }
   const pendingFinalization = new Set();
   for (const orderId of candidateOrderIds) {
@@ -285,6 +291,7 @@ async function scanLocalMarketTrades(connection, {
     orders: Array.from(ordersById.values()).filter((order) => !archived.has(String(order.orderId)))
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.orderId.localeCompare(b.orderId)),
     trades: Array.from(tradesById.values()).sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id)),
+    assetFlows: Array.from(assetFlowsById.values()).sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id)),
     walletCursors: stats.transactionMisses > 0 ? { ...walletCursors } : walletScan.cursors,
     orderCursors: nextOrderCursors,
     activeOrderIds: active,

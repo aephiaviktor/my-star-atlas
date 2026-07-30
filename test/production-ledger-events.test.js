@@ -216,3 +216,21 @@ test('an overdraft cargo event fails closed without corrupting earlier ledger st
   assert.equal(result.ledger.get('UST-1', 'Iron Ore').quantity, 5);
   assert.equal(result.ledger.get('UST-2', 'Iron Ore').quantity, 0);
 });
+
+test('GM basis follows the buying wallet through handler custody into CSS', () => {
+  const result = buildCostLedgerResult({
+    localMarketTrades: [{
+      id: 'gm-buy', marketplace: 'GM', timestamp: '2026-07-25T00:00:00Z', wallet: 'gm-wallet',
+      asset: 'Food', side: 'buy', quantity: 10, settledAtlas: 5,
+    }],
+    assetFlowEvents: [
+      { type: 'transfer', timestamp: '2026-07-25T00:01:00Z', origin: 'wallet:gm-wallet', destination: 'wallet:handler', asset: 'Food', quantity: 10, cargoCost: 0.01 },
+      { type: 'transfer', timestamp: '2026-07-25T00:02:00Z', origin: 'wallet:handler', destination: 'UST-1', asset: 'Food', quantity: 10, cargoCost: 0.02 },
+    ],
+  });
+  const css = result.ledger.get('UST-1', 'Food');
+  assert.equal(css.quantity, 10);
+  assert.equal(css.costs.gm, 5);
+  assert.ok(Math.abs(css.cargoCost - 0.03) < 1e-12);
+  assert.equal(result.rejectedEvents.length, 0);
+});

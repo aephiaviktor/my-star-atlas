@@ -245,6 +245,24 @@ test('tracks LM order creation separately and matches fills by order ID', () => 
   assert.equal(execution.creationSignature, 'create');
 });
 
+test('tracks ATLAS-quoted GM raw-asset orders and rejects other quote mints', () => {
+  const gmContext = { marketplace: 'GM', asset: 'Food', rawMint: 'food-mint', quoteMint: ATLAS_MINT };
+  const atlasOrder = decodeLocalMarketOrder(lifecycleTx({
+    signature: 'gm-create', name: 'process_initialize_buy', values: [100000000, 10],
+    accounts: ['handler', 'market-vars', ATLAS_MINT, 'food-mint', 'vault', 'vault-auth', 'atlas-ata', 'food-ata', 'gm-order'],
+  }), { trackedWallets: ['handler'], marketAssetsByMint: { 'food-mint': gmContext } });
+  assert.equal(atlasOrder.marketplace, 'GM');
+  assert.equal(atlasOrder.asset, 'Food');
+  assert.equal(atlasOrder.starbase, '');
+  assert.equal(atlasOrder.orderId, 'gm-order');
+
+  const usdcOrder = decodeLocalMarketOrder(lifecycleTx({
+    signature: 'gm-usdc', name: 'process_initialize_buy', values: [1000000, 10],
+    accounts: ['handler', 'market-vars', 'usdc-mint', 'food-mint', 'vault', 'vault-auth', 'usdc-ata', 'food-ata', 'gm-usdc-order'],
+  }), { trackedWallets: ['handler'], marketAssetsByMint: { 'food-mint': gmContext } });
+  assert.equal(usdcOrder, null);
+});
+
 test('LM execution tx fee converts from SOL to ATLAS using the cached atlasPerSol rate', () => {
   const txWithoutUserPayer = lifecycleTx({
     signature: 'fill', name: 'process_exchange', values: [10000000, 34900], fee: 5000,

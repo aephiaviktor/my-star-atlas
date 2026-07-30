@@ -106,14 +106,16 @@ function decodeLocalMarketTrade(transaction, { trackedWallets = [], marketAssets
 function buildLocalMarketLedgerEvents(trades) {
   return Array.from(trades || []).flatMap((trade) => {
     const timestamp = new Date(trade?.timestamp);
-    const location = String(trade?.starbase || '').trim();
+    const marketplace = String(trade?.marketplace || 'LM').toUpperCase();
+    const location = marketplace === 'GM' ? `wallet:${String(trade?.wallet || '').trim()}` : String(trade?.starbase || '').trim();
     const asset = String(trade?.asset || '').trim();
     const quantity = Number(trade?.quantity);
     const settledAtlas = Number(trade?.settledAtlas);
     if (Number.isNaN(timestamp.getTime()) || !location || !asset || !(quantity > 0) || !(settledAtlas >= 0)) return [];
     const common = { timestamp: timestamp.toISOString(), location, asset, quantity };
-    if (trade.side === 'buy') return [{ type: 'acquire', ...common, source: 'lm', totalCost: settledAtlas, tradeId: String(trade.id || '') }];
-    if (trade.side === 'sell') return [{ type: 'consume', ...common, purpose: 'lm-sell', tradeId: String(trade.id || '') }];
+    const source = marketplace === 'GM' ? 'gm' : 'lm';
+    if (trade.side === 'buy') return [{ type: 'acquire', ...common, source, totalCost: settledAtlas, tradeId: String(trade.id || '') }];
+    if (trade.side === 'sell') return [{ type: 'consume', ...common, purpose: `${source}-sell`, tradeId: String(trade.id || '') }];
     return [];
   });
 }

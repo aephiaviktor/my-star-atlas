@@ -1234,6 +1234,7 @@ function getFormPayload() {
     aephiaApiKey: String(data.get('aephiaApiKey') || ''),
     playerProfile: playerProfiles[faction],
     playerProfiles,
+    gmTradingWallets: String(data.get('gmTradingWallets') || ''),
     faction,
     influxUrl: String(data.get('influxUrl') || ''),
     influxAuthToken: String(data.get('influxAuthToken') || ''),
@@ -5999,7 +6000,7 @@ function renderEarningsCrafting(result) {
 function renderEarningsMarketplace(result) {
   const rows = Array.isArray(result?.localMarketTrades) ? result.localMarketTrades : [];
   const visibleRows = rows.filter((entry) => entry.side === earningsMarketplaceSide);
-  const errorSuffix = result?.localMarketError ? ` · ${result.localMarketError}` : '';
+  const errorSuffix = result?.localMarketError ? ` · Influx read failed: ${result.localMarketError}` : '';
   setText(earningsMarketplaceSyncStatus, `${formatMarketplaceWhole(visibleRows.length)} LM ${earningsMarketplaceSide} executions at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
   setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
   earningsMarketplaceSideButtons.forEach((button) => {
@@ -6012,7 +6013,7 @@ function renderEarningsMarketplace(result) {
   if (!visibleRows.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
-    const td = createTextCell(result?.localMarketError ? `LM execution scan failed: ${result.localMarketError}` : `No LM ${earningsMarketplaceSide} executions found`);
+    const td = createTextCell(result?.localMarketError ? `Marketplace Influx read failed: ${result.localMarketError}` : `No Marketplace ${earningsMarketplaceSide} executions found`);
     td.colSpan = 13;
     tr.appendChild(td);
     earningsMarketplaceTableBody.appendChild(tr);

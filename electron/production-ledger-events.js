@@ -151,7 +151,7 @@ function buildUpgradingConsumptionEvents(rows) {
   return events;
 }
 
-function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [] } = {}) {
+function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [] } = {}) {
   const ledger = initialLedger || new InventoryCostLedger();
   const previousCounts = { ...(eventFingerprintCounts || {}) };
   for (const fingerprint of seenEventFingerprints || []) previousCounts[fingerprint] = Math.max(1, Number(previousCounts[fingerprint] || 0));
@@ -167,6 +167,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
     ...buildCraftingEvents(craftingRows),
     ...buildUpgradingConsumptionEvents(upgradingRows),
     ...buildLocalMarketLedgerEvents(localMarketTrades),
+    ...(assetFlowEvents || []),
   ].map((event, index) => ({ event, index }))
     .sort((left, right) => Date.parse(left.event.timestamp) - Date.parse(right.event.timestamp) || left.index - right.index)
     .map(({ event }) => event);
