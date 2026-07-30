@@ -51,12 +51,21 @@ test('LM scanner resolves the configured profile through the existing settings h
   assert.match(main, /const profile = getSelectedPlayerProfile\(settings\);/);
 });
 
-test('Earnings reads Marketplace executions from Influx without awaiting a chain scan', () => {
-  assert.match(main, /fetchMarketplaceTradesFromInflux\(settings\)/);
+test('Earnings snapshot stays on the fast path and leaves Marketplace to its own loader', () => {
   const snapshotStart = main.indexOf('async function fetchEarningsSnapshot');
   const snapshot = main.slice(snapshotStart, main.indexOf("handleTrustedIpc('app:get-profile-name'", snapshotStart));
   assert.doesNotMatch(snapshot, /fetchLocalMarketTrades\(/);
-  assert.match(snapshot, /localMarketTrades: localMarketResult\.trades/);
+  assert.match(snapshot, /needsInventoryLedger/);
+  assert.match(snapshot, /const localMarketResult = \{ trades: \[\], error: '' \}/);
+  assert.match(renderer, /earningsSubtab: currentEarningsSubtab/);
+  assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading Marketplace data\.\.\.'\)/);
+});
+
+test('Marketplace loader shows loading state and runs sync when the tab is opened or faction-switched', () => {
+  assert.match(renderer, /function renderEarningsMarketplaceLoading/);
+  assert.match(renderer, /renderEarningsMarketplaceLoading\(sync \? 'Syncing Marketplace data\.\.\.' : 'Loading Marketplace data\.\.\.'\)/);
+  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: true \}\) : refreshEarnings\(\)/);
+  assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: true \}\);/);
 });
 
 test('Marketplace chain synchronization is exposed separately and runs in the background', () => {
@@ -98,4 +107,14 @@ test('GM sync includes handler and additional wallets while remaining global and
   assert.match(main, /faction: 'GLOBAL', profile: 'GLOBAL', market: 'GM'/);
   assert.match(main, /quoteMint: ATLAS_MINT/);
   assert.match(main, /fetchMarketplaceAssetFlowsFromInflux/);
+});
+
+test('Marketplace Influx read includes selected profile pubkey rows and global GM rows', () => {
+  assert.match(main, /r\.profile == "\$\{escapeFluxString\(profileName\)\}" or r\.profile == "\$\{escapeFluxString\(profile\)\}"/);
+  assert.match(main, /or r\.faction == "GLOBAL"/);
+});
+
+test('ONI and MUD earnings accept second-instance SDU tags', () => {
+  assert.match(main, /instance: \['ONI', 'ONI2'\]/);
+  assert.match(main, /instance: \['MUD', 'MUD2'\]/);
 });

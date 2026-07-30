@@ -128,11 +128,11 @@ const FLEET_ACCOUNT_DISCRIMINATOR = bs58.encode(BorshAccountsCoder.accountDiscri
 const factionInfluxAliases = Object.freeze({
   MUD: {
     faction: ['MUD'],
-    instance: ['MUD'],
+    instance: ['MUD', 'MUD2'],
   },
   ONI: {
     faction: ['ONI'],
-    instance: ['ONI'],
+    instance: ['ONI', 'ONI2'],
   },
   USTUR: {
     faction: ['UST', 'USTUR'],
@@ -525,7 +525,7 @@ async function fetchMarketplaceTradesFromInflux(settings) {
   const flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -40d)
   |> filter(fn: (r) => r._measurement == "marketplace")
-  |> filter(fn: (r) => (r.faction == "${escapeFluxString(faction)}" and r.profile == "${escapeFluxString(profileName)}") or r.faction == "GLOBAL")
+  |> filter(fn: (r) => (r.faction == "${escapeFluxString(faction)}" and (not exists r.profile or r.profile == "${escapeFluxString(profileName)}" or r.profile == "${escapeFluxString(profile)}")) or r.faction == "GLOBAL")
   |> pivot(rowKey: ["_time", "tradeId"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
   try {
@@ -5494,7 +5494,8 @@ async function fetchFleetSignatureDailyCounts(connection, fleetKeys, includedDay
 }
 
 async function fetchEarningsSnapshot(payload) {
-  const settings = normalizeSettings(payload || (await readSettings()));
+  const rawPayload = payload || (await readSettings());
+  const settings = normalizeSettings(rawPayload);
   const fleetResult = await fetchProfileFleets(settings);
   const fleets = Array.isArray(fleetResult.fleets) ? fleetResult.fleets : [];
   const connection = createSolanaConnection(settings);
@@ -5956,14 +5957,18 @@ async function fetchEarningsSnapshot(payload) {
     txsCostsAtlas: atlasPerSol != null && Number.isFinite(Number(row.txCostSol)) ? Number(row.txCostSol) * atlasPerSol : null,
   }));
   const ledgerFaction = normalizeFaction(settings.faction);
-  const ledgerFactionStarbases = await fetchFactionStarbases(settings);
-  const localMarketResult = await fetchMarketplaceTradesFromInflux(settings);
-  const marketplaceAssetFlowEvents = await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []);
+  const snapshotScope = String(rawPayload.earningsScope || rawPayload.earningsSubtab || '').trim().toLowerCase();
+  const needsInventoryLedger = ['breakeven', 'crafting', 'upgrading'].includes(snapshotScope);
+  const ledgerFactionStarbases = needsInventoryLedger ? await fetchFactionStarbases(settings) : null;
+  const localMarketResult = { trades: [], error: '' };
+  const marketplaceAssetFlowEvents = needsInventoryLedger ? await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []) : [];
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
-  const checkpoint = await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName });
+  const checkpoint = needsInventoryLedger
+    ? await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName })
+    : { status: 'skipped', ledger: null, seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {}, savedAt: null };
   let openingInventoryRows = [];
   let openingInventoryError = '';
-  if (checkpoint.status !== 'loaded') {
+  if (needsInventoryLedger && checkpoint.status !== 'loaded') {
     try {
       openingInventoryRows = (await fetchOpeningPerStarbaseInventory(settings))
         .filter((row) => isStarbaseIncluded(row.starbase, ledgerFactionStarbases, ledgerFaction));
@@ -5971,7 +5976,7 @@ async function fetchEarningsSnapshot(payload) {
       openingInventoryError = String(error?.message || error || 'opening_inventory_unavailable');
     }
   }
-  const inventoryCostLedgerResult = buildCostLedgerResult({
+  const inventoryCostLedgerResult = needsInventoryLedger ? buildCostLedgerResult({
     initialLedger: checkpoint.status === 'loaded' ? checkpoint.ledger : null,
     seenEventFingerprints: checkpoint.seenEventFingerprints,
     eventResultByFingerprint: checkpoint.eventResultByFingerprint,
@@ -5985,7 +5990,7 @@ async function fetchEarningsSnapshot(payload) {
     upgradingRows: upgradingRows.ledgerEvents || [],
     localMarketTrades: localMarketResult.trades,
     assetFlowEvents: marketplaceAssetFlowEvents,
-  });
+  }) : { events: [], appliedEventResults: [], ledger: { snapshot: () => [] }, rejectedEvents: [], seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {} };
   const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
   const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
   const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
@@ -5993,7 +5998,9 @@ async function fetchEarningsSnapshot(payload) {
   let ledgerCheckpointStatus = checkpoint.status === 'loaded' ? 'updated' : 'created';
   let ledgerCheckpointError = checkpoint.status === 'invalid' ? checkpoint.error : '';
   let ledgerCheckpointSavedAt = checkpoint.savedAt;
-  if (checkpoint.status !== 'loaded' && openingInventoryError) {
+  if (!needsInventoryLedger) {
+    ledgerCheckpointStatus = 'skipped';
+  } else if (checkpoint.status !== 'loaded' && openingInventoryError) {
     ledgerCheckpointStatus = 'baseline-unavailable';
   } else {
     try {
@@ -6044,7 +6051,7 @@ async function fetchEarningsSnapshot(payload) {
   let breakevenError = '';
   try {
     const inventoryRows = await fetchCurrentPerStarbaseInventory(settings);
-    const factionStarbases = ledgerFactionStarbases;
+    const factionStarbases = ledgerFactionStarbases || await fetchFactionStarbases(settings);
     const faction = ledgerFaction;
     breakevenRows = buildLedgerBreakevenRows({ ledgerRows: inventoryCostLedgerRows, inventoryRows, prices })
       .filter((row) => isStarbaseIncluded(row.starbase, factionStarbases, faction));

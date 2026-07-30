@@ -6051,6 +6051,19 @@ function renderEarningsMarketplace(result) {
   }
 }
 
+function renderEarningsMarketplaceLoading(message = 'Loading Marketplace data...') {
+  setText(earningsMarketplaceSyncStatus, message);
+  setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
+  if (!earningsMarketplaceTableBody) return;
+  earningsMarketplaceTableBody.textContent = '';
+  const tr = document.createElement('tr');
+  tr.className = 'empty-row';
+  const td = createTextCell(message);
+  td.colSpan = 13;
+  tr.appendChild(td);
+  earningsMarketplaceTableBody.appendChild(tr);
+}
+
 function renderEarningsBreakevenEmpty(message) {
   renderEarningsBreakevenHeader();
   setText(earningsBreakevenSyncStatus, message);
@@ -6306,6 +6319,7 @@ async function refreshMarketplace({ sync = false } = {}) {
   const faction = normalizeFaction(settings.faction);
   if (marketplaceRefreshInFlight.has(faction)) return marketplaceRefreshInFlight.get(faction);
   const promise = (async () => {
+    renderEarningsMarketplaceLoading(sync ? 'Syncing Marketplace data...' : 'Loading Marketplace data...');
     if (sync) {
       setText(earningsMarketplaceSyncStatus, 'Marketplace sync running in background...');
       await api.syncMarketplace(settings);
@@ -6333,7 +6347,7 @@ function runMarketplaceBackgroundSync() {
 async function refreshEarnings() {
   if (earningsRefreshInFlight) return earningsRefreshInFlight;
   const refreshPromise = (async () => {
-    const settings = latestSettings || getFormPayload();
+    const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: currentEarningsSubtab };
     const context = {
       faction: normalizeFaction(settings?.faction),
       playerProfile: getActivePlayerProfile(settings),
@@ -6357,6 +6371,7 @@ async function refreshEarnings() {
       renderEarningsEmpty('Loading earnings data...');
       renderEarningsMiningEmpty('Loading mining earnings data...');
       renderEarningsCargoEmpty('Loading cargo earnings data...');
+      renderEarningsMarketplaceLoading('Loading Marketplace data...');
       setEarningsStatus('Loading earnings data...');
       setEarningsMiningStatus('Loading mining earnings data...');
       setEarningsCargoStatus('Loading cargo earnings data...');
@@ -7551,7 +7566,7 @@ function refreshVisibleProductionSubtab() {
 
 function refreshVisibleFactionViews() {
   if (currentSection === 'fleet') return refreshFleets();
-  if (currentSection === 'earnings') return refreshEarnings();
+  if (currentSection === 'earnings') return currentEarningsSubtab === 'marketplace' ? refreshMarketplace({ sync: true }) : refreshEarnings();
   if (currentSection === 'optimization') {
     if(currentOptimizationSubtab === 'upgrading') return refreshUpgradingOptimization();
     return currentOptimizationView === 'analytics' ? refreshScanningOptimizationAnalyticsData() : refreshScanningOptimization();
@@ -7657,7 +7672,11 @@ function setActiveEarningsSubtab(subtab) {
   });
   renderEarningsColumnControls();
   updateTitle();
-  if ((subtab === 'scanning' || subtab === 'mining' || subtab === 'marketplace' || subtab === 'cargo' || subtab === 'crafting') && !latestEarningsResult) {
+  if (subtab === 'marketplace') {
+    refreshMarketplace({ sync: true });
+    return;
+  }
+  if ((subtab === 'scanning' || subtab === 'mining' || subtab === 'cargo' || subtab === 'crafting') && !latestEarningsResult) {
     refreshEarnings();
   }
   if (subtab === 'mining' && latestEarningsResult) {
