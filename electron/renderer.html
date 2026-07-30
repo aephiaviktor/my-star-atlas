@@ -109,6 +109,7 @@
             <div class="subtab-bar toolbar-tab-group" data-toolbar-section="earnings" role="tablist" aria-label="Earnings views" hidden>
               <button class="earnings-subtab-button subtab-button active" type="button" data-earnings-subtab="scanning" aria-selected="true">Scanning</button>
               <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="mining" aria-selected="false">Mining</button>
+              <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="marketplace" aria-selected="false">Marketplace</button>
               <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="cargo" aria-selected="false">Cargo</button>
               <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="crafting" aria-selected="false">Crafting</button>
               <button class="earnings-subtab-button subtab-button" type="button" data-earnings-subtab="upgrading" aria-selected="false">Upgrading</button>
@@ -1181,6 +1182,19 @@
               </details>
             </section>
           </div>
+
+          <div class="earnings-panel" data-earnings-panel="marketplace">
+            <section class="work-surface earnings-surface">
+              <div id="earnings-marketplace-sync-status" class="fleet-sync-status" role="status">Awaiting LM executions</div>
+              <div class="fleet-table-wrap">
+                <table class="fleet-table earnings-table">
+                  <thead><tr><th>Timestamp</th><th>Marketplace</th><th>Side</th><th>Starbase</th><th>Asset</th><th>Amount</th><th>Gross ATLAS</th><th>Price / C/U</th><th>Marketplace Fee</th><th>Tx Fee</th><th>Net ATLAS</th><th>Order ID</th><th>Signature</th></tr></thead>
+                  <tbody id="earnings-marketplace-table-body"><tr class="empty-row"><td colspan="13">No LM executions loaded</td></tr></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
           <div class="earnings-panel" data-earnings-panel="cargo">
             <section class="work-surface earnings-chart-surface collapsed" data-chart-panel>
               <button class="earnings-chart-toggle" type="button" data-chart-toggle aria-expanded="false">

@@ -7,7 +7,10 @@ const {
   buildLocalMarketLedgerEvents,
   formatLocalMarketInfluxLine,
 } = require('../electron/local-market-trades');
-const { scanLocalMarketTrades } = require('../electron/local-market-scanner');
+const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution } = require('../electron/local-market-scanner');
+const crypto = require('node:crypto');
+const bs58Module = require('bs58');
+const bs58 = bs58Module.default || bs58Module;
 
 const GM_PROGRAM_ID = 'traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg';
 const ATLAS_MINT = 'ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
@@ -77,13 +80,53 @@ test('scanner deduplicates signatures found through multiple profile wallets', a
       return [fill];
     },
   };
-  const trades = await scanLocalMarketTrades(connection, {
+  const result = await scanLocalMarketTrades(connection, {
     trackedWallets: ['wallet-1', 'wallet-2'],
     marketAssetsByMint: { 'certificate-1': { starbase: 'UST-1', asset: 'Food' } },
     startIso: '2026-07-15T00:00:00Z',
   });
-  assert.equal(trades.length, 1);
-  assert.equal(trades[0].id, 'shared-sig:certificate-1:UST-1');
+  assert.equal(result.trades.length, 1);
+  assert.equal(result.trades[0].id, 'shared-sig:certificate-1:UST-1');
+});
+
+function gmData(name, ...values) {
+  const discriminator = crypto.createHash('sha256').update(`global:${name}`).digest().subarray(0, 8);
+  const encoded = values.map((value) => { const bytes = Buffer.alloc(8); bytes.writeBigUInt64LE(BigInt(value)); return bytes; });
+  return bs58.encode(Buffer.concat([discriminator, ...encoded]));
+}
+
+function lifecycleTx({ signature, name, accounts, values = [], fee = 5000, logs = [] }) {
+  return {
+    signature, blockTime: 1784159245,
+    meta: { err: null, fee, logMessages: logs, preTokenBalances: [], postTokenBalances: [] },
+    transaction: { signatures: [signature], message: { accountKeys: accounts.map((pubkey, index) => ({ pubkey, signer: index === 0 })), instructions: [{ programId: GM_PROGRAM_ID, accounts, data: gmData(name, ...values) }] } },
+  };
+}
+
+test('tracks LM order creation separately and matches fills by order ID', () => {
+  const orderTx = lifecycleTx({
+    signature: 'create', name: 'process_initialize_sell', values: [34900, 30000000],
+    accounts: ['lancer', 'market-vars', 'certificate-1', ATLAS_MINT, 'vault', 'vault-auth', 'asset-ata', 'atlas-ata', 'order-1'],
+  });
+  const order = decodeLocalMarketOrder(orderTx, {
+    trackedWallets: ['handler', 'lancer'],
+    marketAssetsByMint: { 'certificate-1': { starbase: 'ONI-1', asset: 'Hydrogen', rawMint: 'hydrogen-mint' } },
+  });
+  assert.equal(order.orderId, 'order-1');
+  assert.equal(order.side, 'sell');
+  assert.equal(order.priceAtlas, 0.000349);
+
+  const fillTx = lifecycleTx({
+    signature: 'fill', name: 'process_exchange', values: [10000000, 34900], fee: 5000,
+    accounts: ['taker', 'taker-deposit', 'taker-receive', ATLAS_MINT, 'certificate-1', 'lancer', 'init-deposit', 'init-receive', 'vault', 'vault-auth', 'order-1'],
+    logs: ['Program log: Transfer amounts: TransferAmount { purchase_quantity: 10000000, royalty: 3490000, transfer_amount: 348965100000, commission: None }'],
+  });
+  const execution = decodeOrderExecution(fillTx, new Map([[order.orderId, order]]), ['handler', 'lancer']);
+  assert.equal(execution.orderId, 'order-1');
+  assert.equal(execution.quantity, 10000000);
+  assert.equal(execution.marketplaceFeeAtlas, 0.0349);
+  assert.equal(execution.txFeeAtlas, 0);
+  assert.equal(execution.netAtlas, 3489.651);
 });
 
 test('LM buys acquire weighted lm basis while sells consume local weighted basis', () => {

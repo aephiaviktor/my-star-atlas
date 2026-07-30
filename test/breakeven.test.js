@@ -287,7 +287,7 @@ test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   assert.match(css, /\.breakeven-inventory-toggle\s*\{[^}]*font-size:\s*0\.72rem/s);
   assert.match(js, /handle\(earningsBreakevenTableHead, 'breakeven'\)/);
   assert.match(js, /else if \(subtab === 'breakeven'\) renderEarningsBreakeven\(latestEarningsResult\);/);
-  assert.match(js, /renderEarningsUpgrading\(result\);\s+renderEarningsBreakeven\(result\);/);
+  assert.match(js, /renderEarningsUpgrading\(result\);\s+renderEarningsMarketplace\(result\);\s+renderEarningsBreakeven\(result\);/);
   assert.match(js, /result\?\.openingInventoryError/);
   assert.match(js, /result\?\.ledgerCheckpointStatus/);
 });

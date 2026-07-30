@@ -145,6 +145,8 @@ const earningsBreakevenSyncStatus = document.querySelector('#earnings-breakeven-
 const earningsBreakevenStarbaseFilter = document.querySelector('#earnings-breakeven-starbase-filter');
 const earningsBreakevenAssetFilter = document.querySelector('#earnings-breakeven-asset-filter');
 const earningsBreakevenHideLowInventory = document.querySelector('#earnings-breakeven-hide-low-inventory');
+const earningsMarketplaceSyncStatus = document.querySelector('#earnings-marketplace-sync-status');
+const earningsMarketplaceTableBody = document.querySelector('#earnings-marketplace-table-body');
 const earningsScanningDateFilter = document.querySelector('#earnings-scanning-date-filter');
 const earningsScanningFleetFilter = document.querySelector('#earnings-scanning-fleet-filter');
 const earningsMiningDateFilter = document.querySelector('#earnings-mining-date-filter');
@@ -5707,6 +5709,7 @@ function renderEarnings(result) {
     renderEarningsCargo(result);
     renderEarningsCrafting(result);
     renderEarningsUpgrading(result);
+    renderEarningsMarketplace(result);
     renderEarningsBreakeven(result);
     return;
   }
@@ -5727,6 +5730,7 @@ function renderEarnings(result) {
   renderEarningsCargo(result);
   renderEarningsCrafting(result);
   renderEarningsUpgrading(result);
+  renderEarningsMarketplace(result);
   renderEarningsBreakeven(result);
 }
 
@@ -5954,6 +5958,47 @@ function renderEarningsCrafting(result) {
       row.appendChild(createCraftingEarningsOptionalCell(entry, column.id, null));
     }
     earningsCraftingTableBody.appendChild(row);
+  }
+}
+
+function renderEarningsMarketplace(result) {
+  const rows = Array.isArray(result?.localMarketTrades) ? result.localMarketTrades : [];
+  const errorSuffix = result?.localMarketError ? ` · ${result.localMarketError}` : '';
+  setText(earningsMarketplaceSyncStatus, `${formatWholeNumber(rows.length)} LM executions at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
+  if (!earningsMarketplaceTableBody) return;
+  earningsMarketplaceTableBody.textContent = '';
+  if (!rows.length) {
+    const tr = document.createElement('tr');
+    tr.className = 'empty-row';
+    const td = createTextCell(result?.localMarketError ? `LM execution scan failed: ${result.localMarketError}` : 'No LM executions found');
+    td.colSpan = 13;
+    tr.appendChild(td);
+    earningsMarketplaceTableBody.appendChild(tr);
+    return;
+  }
+  for (const entry of [...rows].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))) {
+    const tr = document.createElement('tr');
+    const values = [
+      entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '--', entry.marketplace || 'LM', String(entry.side || '--').toUpperCase(),
+      entry.starbase || '--', entry.asset || '--', formatWholeNumber(entry.quantity || 0),
+      formatAtlasNumber(entry.grossAtlas || 0, 6), formatAtlasNumber(entry.unitPriceAtlas || 0, 8),
+      formatAtlasNumber(entry.marketplaceFeeAtlas || 0, 6), formatAtlasNumber(entry.txFeeAtlas || 0, 6),
+      formatAtlasNumber(entry.netAtlas ?? entry.settledAtlas ?? 0, 6), entry.orderId || '--', entry.signature || '--',
+    ];
+    for (const value of values.slice(0, -1)) tr.appendChild(createTextCell(value));
+    const signatureCell = document.createElement('td');
+    if (entry.signature) {
+      const link = document.createElement('a');
+      link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = entry.signature;
+      signatureCell.appendChild(link);
+    } else {
+      signatureCell.textContent = '--';
+    }
+    tr.appendChild(signatureCell);
+    earningsMarketplaceTableBody.appendChild(tr);
   }
 }
 
@@ -7496,11 +7541,13 @@ function setActiveEarningsSubtab(subtab) {
   });
   renderEarningsColumnControls();
   updateTitle();
-  if ((subtab === 'scanning' || subtab === 'mining' || subtab === 'cargo' || subtab === 'crafting') && !latestEarningsResult) {
+  if ((subtab === 'scanning' || subtab === 'mining' || subtab === 'marketplace' || subtab === 'cargo' || subtab === 'crafting') && !latestEarningsResult) {
     refreshEarnings();
   }
   if (subtab === 'mining' && latestEarningsResult) {
     renderEarningsMining(latestEarningsResult);
+  } else if (subtab === 'marketplace' && latestEarningsResult) {
+    renderEarningsMarketplace(latestEarningsResult);
   } else if (subtab === 'cargo' && latestEarningsResult) {
     renderEarningsCargo(latestEarningsResult);
   }

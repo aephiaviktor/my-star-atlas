@@ -3806,11 +3806,12 @@ async function loadLocalMarketTradeCheckpoint(filePath) {
   try {
     const document = JSON.parse(await fs.readFile(filePath, 'utf8'));
     return {
+      orders: Array.isArray(document?.orders) ? document.orders : [],
       trades: Array.isArray(document?.trades) ? document.trades : [],
       publishedTradeIds: new Set(Array.isArray(document?.publishedTradeIds) ? document.publishedTradeIds : []),
     };
   } catch (error) {
-    if (error?.code === 'ENOENT') return { trades: [], publishedTradeIds: new Set() };
+    if (error?.code === 'ENOENT') return { orders: [], trades: [], publishedTradeIds: new Set() };
     throw error;
   }
 }
@@ -3848,11 +3849,12 @@ async function fetchLocalMarketTrades(settings, connection) {
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
     marketAssetsByMint,
+    knownOrders: checkpoint.orders,
     startIso: overlapStart,
     addressFactory: (value) => new PublicKey(value),
   });
   const byId = new Map(existing.map((trade) => [trade.id, trade]));
-  for (const trade of scanned) byId.set(trade.id, trade);
+  for (const trade of scanned.trades) byId.set(trade.id, trade);
   const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= Date.parse(LOCAL_MARKET_START_ISO))
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
   const unpublished = trades.filter((trade) => !checkpoint.publishedTradeIds.has(trade.id));
@@ -3870,6 +3872,7 @@ async function fetchLocalMarketTrades(settings, connection) {
     faction,
     profile,
     savedAt: new Date().toISOString(),
+    orders: scanned.orders,
     trades,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
   });
@@ -5998,6 +6001,7 @@ async function fetchEarningsSnapshot(payload) {
     upgradingRows: upgrading,
     breakevenRows,
     breakevenError,
+    localMarketTrades: localMarketResult.trades,
     localMarketTradeCount: localMarketResult.trades.length,
     localMarketError: localMarketResult.error,
     inventoryCostLedgerEvents,
