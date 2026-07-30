@@ -128,6 +128,7 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(renderer, /function buildUpgradingOptimizationAnalytics\(/);
   assert.match(renderer, /function renderUpgradingOptimizationAnalytics\(/);
   assert.match(renderer, /correlation/);
+  assert.match(renderer, /x:axes\.width-axes\.right,y:axes\.top-2,'text-anchor':'end'/);
   assert.match(renderer, /expected_total_lp_eod/);
   assert.match(renderer, /points\.sort\(\(a,b\) => a\.hour-b\.hour\)\.slice\(1\)/);
   assert.match(renderer, /bindOptimizationAnalyticsTooltip\(snapshot/);
