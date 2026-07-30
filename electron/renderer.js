@@ -16,8 +16,10 @@ const saveStatus = document.querySelector('#save-status');
 const settingsStatus = document.querySelector('#settings-status');
 const syncDot = document.querySelector('.sync-dot');
 const toggleSensitiveButton = document.querySelector('#toggle-sensitive-btn');
-const rpcLimiterCurrentUrl = document.querySelector('#rpc-limiter-current-url');
+const rpcLimiterMainUrl = document.querySelector('#rpc-limiter-main-url');
+const rpcLimiterFallbackUrl = document.querySelector('#rpc-limiter-fallback-url');
 const rpcLimiterStatePath = document.querySelector('#rpc-limiter-state-path');
+const rpcLimiterActive = document.querySelector('#rpc-limiter-active');
 const rpcLimiterUpdated = document.querySelector('#rpc-limiter-updated');
 const sendRpcLimiterButton = document.querySelector('#send-rpc-limiter-btn');
 const testInfluxButton = document.querySelector('#test-influx-btn');
@@ -1109,8 +1111,17 @@ function openSettings() {
 }
 
 function renderRpcLimiterStatus(status) {
-  rpcLimiterCurrentUrl.value = status?.currentRpcUrl || '';
+  rpcLimiterMainUrl.value = status?.providers?.main?.url || '';
+  rpcLimiterFallbackUrl.value = status?.providers?.fallback?.url || '';
   rpcLimiterStatePath.textContent = status?.path || '—';
+  const activeParts = [];
+  if (status?.activeProvider) activeParts.push(`active: ${status.activeProvider}`);
+  if (status?.providers?.main?.cooldown) activeParts.push('main: cooldown');
+  if (status?.providers?.fallback?.cooldown) activeParts.push('fallback: cooldown');
+  if (status?.providers?.main?.cooldown && status?.providers?.fallback?.cooldown) {
+    activeParts.push('⚠ both providers in cooldown');
+  }
+  rpcLimiterActive.textContent = activeParts.join(' · ');
   const detail = [];
   if (status?.updatedBy) detail.push(`updated by ${status.updatedBy}`);
   if (status?.updatedAt) detail.push(`at ${status.updatedAt}`);
@@ -1227,6 +1238,7 @@ function getFormPayload() {
     useRpcLimiter: Boolean(data.get('useRpcLimiter')),
     rpcUrl: String(data.get('rpcUrl') || ''),
     rpcRequestsPerSecond: String(data.get('rpcRequestsPerSecond') || ''),
+    providerRole: data.get('providerRole') ? 'fallback' : 'main',
   };
 }
 
@@ -7970,6 +7982,7 @@ sendRpcLimiterButton.addEventListener('click', async () => {
     const status = await api.sendSettingsToRpcLimiter({
       rpcUrl: payload.rpcUrl,
       rpcRequestsPerSecond: payload.rpcRequestsPerSecond,
+      providerRole: payload.providerRole,
     });
     renderRpcLimiterStatus(status);
     saveStatus.textContent = 'RPC limiter settings updated';

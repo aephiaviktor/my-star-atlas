@@ -3420,9 +3420,9 @@ async function listFactionStarbasesForInventory(settings, faction) {
   return all.filter((s) => set.has(s));
 }
 
-function buildSharedRpcUrl(rpcBaseUrl, apiKey) {
-  const base = String(rpcBaseUrl || '').trim();
-  const key = String(apiKey || '').trim();
+function buildProviderUrl(p) {
+  const base = String(p?.rpcBaseUrl || '').trim();
+  const key = String(p?.apiKey || '').trim();
   if (!base) return '';
   if (!key) return base;
   try {
@@ -3449,10 +3449,38 @@ function isUsableSharedRpcUrl(value) {
 function getRpcLimiterStatus() {
   const paths = resolveRpcLimiterPaths();
   const state = readRpcLimiterState(paths.stateFile, Date.now());
+  const now = Date.now();
+  const providers = state.providers || { main: {}, fallback: {} };
+  const inCooldown = (p) => Boolean(p?.cooldownUntilMs && p.cooldownUntilMs > now);
+  const available = (p) => Boolean(p?.rpcBaseUrl) && !inCooldown(p);
+
+  const mainAvail = available(providers.main);
+  const fallbackAvail = available(providers.fallback);
+  let activeProvider = null;
+  if (mainAvail && !fallbackAvail) activeProvider = 'main';
+  else if (!mainAvail && fallbackAvail) activeProvider = 'fallback';
+
   return {
     path: paths.stateFile,
     enabled: Boolean(state.enabled),
-    currentRpcUrl: buildSharedRpcUrl(state.rpcBaseUrl, state.apiKey),
+    providers: {
+      main: {
+        url: buildProviderUrl(providers.main),
+        cooldown: inCooldown(providers.main),
+        cooldownUntil: providers.main?.cooldownUntilMs || null,
+        failures: providers.main?.failures || 0,
+      },
+      fallback: {
+        url: buildProviderUrl(providers.fallback),
+        cooldown: inCooldown(providers.fallback),
+        cooldownUntil: providers.fallback?.cooldownUntilMs || null,
+        failures: providers.fallback?.failures || 0,
+      },
+    },
+    activeProvider,
+    // Legacy field kept for callers that still expect a single URL. Points
+    // at main so the bot's primary Connection keeps working unchanged.
+    currentRpcUrl: buildProviderUrl(providers.main),
     updatedBy: state.updatedBy || '',
     updatedAt: state.updatedAt || '',
     revision: state.revision ?? 0,
@@ -3476,6 +3504,10 @@ function parseRpcUrlForLimiter(rawValue) {
 
 async function sendSettingsToRpcLimiter(payload) {
   const { rpcBaseUrl, apiKey } = parseRpcUrlForLimiter(payload.rpcUrl);
+  // The Main vs Fallback checkbox: unchecked (default) writes to 'main';
+  // checked writes to 'fallback'. The user assigns the URL they just
+  // pasted to one of the two provider slots.
+  const role = parseBooleanSetting(payload.providerRole) ? 'fallback' : 'main';
   const requestsPerSecond = Number(payload.rpcRequestsPerSecond);
   if (!Number.isFinite(requestsPerSecond) || requestsPerSecond <= 0) {
     throw new Error('Requests / sec must be a positive number.');
@@ -3491,8 +3523,15 @@ async function sendSettingsToRpcLimiter(payload) {
   try {
     const state = readRpcLimiterState(paths.stateFile, Date.now());
     state.enabled = true;
-    state.rpcBaseUrl = rpcBaseUrl;
-    state.apiKey = apiKey;
+    state.providers = state.providers || { main: {}, fallback: {} };
+    state.providers[role] = {
+      ...(state.providers[role] || {}),
+      rpcBaseUrl,
+      apiKey,
+      // Reset health metrics on re-configuration.
+      failures: 0,
+      cooldownUntilMs: null,
+    };
     state.buckets ||= {};
     state.buckets['rpc:shared'] = {
       ...(state.buckets['rpc:shared'] || { nextSlotMs: 0 }),
@@ -3511,10 +3550,27 @@ async function sendSettingsToRpcLimiter(payload) {
 function getRpcUrl(settings) {
   if (settings && settings.useRpcLimiter) {
     const status = getRpcLimiterStatus();
-    if (status.currentRpcUrl && isUsableSharedRpcUrl(status.currentRpcUrl)) return status.currentRpcUrl;
-    throw new Error('Use RPC Limiter is enabled, but no Current RPC Limiter URL is configured. Send settings to RPC Limiter first.');
+    // Prefer main; if main isn't configured, fall back to fallback.
+    const mainUrl = status.providers?.main?.url;
+    const fallbackUrl = status.providers?.fallback?.url;
+    const url = mainUrl || fallbackUrl;
+    if (url && isUsableSharedRpcUrl(url)) return url;
+    throw new Error('Use RPC Limiter is enabled, but no RPC Limiter URLs are configured. Send settings to RPC Limiter first.');
   }
   return String(settings?.rpcUrl || '').trim() || DEFAULT_RPC_URL;
+}
+
+function getRpcFallbackUrl(settings) {
+  if (!settings?.useRpcLimiter) return undefined;
+  const status = getRpcLimiterStatus();
+  // Fallback slot is the per-call failover target. If main is the only one
+  // configured, return undefined so the Connection doesn't try to use it.
+  const mainUrl = status.providers?.main?.url;
+  const fallbackUrl = status.providers?.fallback?.url;
+  if (!fallbackUrl) return undefined;
+  if (!isUsableSharedRpcUrl(fallbackUrl)) return undefined;
+  if (mainUrl && fallbackUrl === mainUrl) return undefined;
+  return fallbackUrl;
 }
 
 function readPublicKey(data, offset) {
@@ -4077,8 +4133,10 @@ function getRpcMethodLabel(init) {
 async function acquireRpcSlot(settings, label = 'solanaRpc') {
   if (!settings?.useRpcLimiter) return;
   const status = getRpcLimiterStatus();
-  if (!status.currentRpcUrl || !isUsableSharedRpcUrl(status.currentRpcUrl)) {
-    throw new Error('Use RPC Limiter is enabled, but no Current RPC Limiter URL is configured. Send settings to RPC Limiter first.');
+  const mainUrl = status.providers?.main?.url;
+  const fallbackUrl = status.providers?.fallback?.url;
+  if ((!mainUrl || !isUsableSharedRpcUrl(mainUrl)) && (!fallbackUrl || !isUsableSharedRpcUrl(fallbackUrl))) {
+    throw new Error('Use RPC Limiter is enabled, but no RPC Limiter URLs are configured. Send settings to RPC Limiter first.');
   }
   if (!sharedRpcLimiter || sharedRpcLimiterRevision !== status.revision) {
     sharedRpcLimiter = new RpcLimiter();
@@ -4091,12 +4149,36 @@ async function acquireRpcSlot(settings, label = 'solanaRpc') {
 }
 
 function createSolanaConnection(settings) {
-  return new Connection(getRpcUrl(settings), {
+  const primaryUrl = getRpcUrl(settings);
+  const fallbackUrl = getRpcFallbackUrl(settings);
+  const connectionConfig = {
     commitment: 'confirmed',
     disableRetryOnRateLimit: false,
     fetch: async (info, init) => {
       await acquireRpcSlot(settings, getRpcMethodLabel(init));
       return fetch(info, init);
+    },
+  };
+  const primary = new Connection(primaryUrl, connectionConfig);
+  if (!fallbackUrl || fallbackUrl === primaryUrl) return primary;
+
+  // Two-provider failover: try the primary (main) on every call, and on
+  // any thrown error fall through to the secondary (fallback) URL. This
+  // mirrors the createFailoverConnection shape used by the other bots.
+  const fallback = new Connection(fallbackUrl, connectionConfig);
+  return new Proxy(primary, {
+    get(target, prop, receiver) {
+      const primaryFn = Reflect.get(target, prop, receiver);
+      if (typeof primaryFn !== 'function') return primaryFn;
+      const fallbackFn = Reflect.get(fallback, prop, fallback);
+      if (typeof fallbackFn !== 'function') return primaryFn;
+      return async (...args) => {
+        try {
+          return await primaryFn.apply(target, args);
+        } catch (primaryError) {
+          return await fallbackFn.apply(fallback, args);
+        }
+      };
     },
   });
 }

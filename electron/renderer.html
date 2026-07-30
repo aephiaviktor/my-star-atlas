@@ -1525,16 +1525,25 @@
               <span>Use RPC limiter</span>
             </label>
             <label>
-              Current RPC Limiter URL
-              <input class="sensitive-field" id="rpc-limiter-current-url" type="text" readonly autocomplete="off" />
+              RPC Limiter Main URL
+              <input class="sensitive-field" id="rpc-limiter-main-url" type="text" readonly autocomplete="off" />
+            </label>
+            <label>
+              RPC Limiter Fallback URL
+              <input class="sensitive-field" id="rpc-limiter-fallback-url" type="text" readonly autocomplete="off" />
             </label>
             <div class="rpc-limiter-state-row">
               <span>State: <strong id="rpc-limiter-state-path">—</strong></span>
+              <span id="rpc-limiter-active"></span>
               <span id="rpc-limiter-updated"></span>
             </div>
             <label>
               Replacement RPC URL
               <input name="rpcUrl" type="password" autocomplete="new-password" spellcheck="false" />
+            </label>
+            <label class="switch-row">
+              <input name="providerRole" type="checkbox" />
+              <span>Send above URL to Fallback slot (unchecked = Main)</span>
             </label>
             <label>
               Requests / sec
