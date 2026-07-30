@@ -7,7 +7,7 @@ const {
   buildLocalMarketLedgerEvents,
   formatLocalMarketInfluxLine,
 } = require('../electron/local-market-trades');
-const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions } = require('../electron/local-market-scanner');
+const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions, resolveLocalMarketStartIso, createLocalMarketPacer, DEFAULT_REQUESTS_PER_SECOND } = require('../electron/local-market-scanner');
 const crypto = require('node:crypto');
 const bs58Module = require('bs58');
 const bs58 = bs58Module.default || bs58Module;
@@ -149,6 +149,22 @@ test('tracks LM order creation separately and matches fills by order ID', () => 
   assert.equal(execution.marketplaceFeeAtlas, 0.0349);
   assert.equal(execution.txFeeAtlas, 0);
   assert.equal(execution.netAtlas, 3489.651);
+});
+
+test('local market start ISO falls back to a rolling 30-day window after the anchor', () => {
+  const anchorMs = Date.parse('2026-07-24T00:00:00.000Z');
+  assert.equal(resolveLocalMarketStartIso(anchorMs + 6 * 24 * 60 * 60 * 1000), '2026-07-24T00:00:00.000Z');
+  assert.equal(resolveLocalMarketStartIso(anchorMs + 35 * 24 * 60 * 60 * 1000), '2026-07-29T00:00:00.000Z');
+  assert.equal(resolveLocalMarketStartIso(anchorMs + 90 * 24 * 60 * 60 * 1000), '2026-09-22T00:00:00.000Z');
+});
+
+test('local market pacer spaces calls and never exceeds the configured rate', async () => {
+  const pacer = createLocalMarketPacer(20);
+  const start = Date.now();
+  for (let index = 0; index < 5; index += 1) await pacer();
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed >= 4 * 50 - 10, `expected >=190ms (got ${elapsed}ms) for 5 calls at 20 RPS`);
+  assert.equal(DEFAULT_REQUESTS_PER_SECOND, 8);
 });
 
 test('LM buys acquire weighted lm basis while sells consume local weighted basis', () => {

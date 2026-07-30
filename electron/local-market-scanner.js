@@ -6,8 +6,28 @@ const { decodeLocalMarketTrade } = require('./local-market-trades');
 
 const bs58 = bs58Module.default || bs58Module;
 const DEFAULT_START_ISO = '2026-07-24T00:00:00.000Z';
+const MAX_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_REQUESTS_PER_SECOND = 8;
 const MAX_SIGNATURE_PAGES = 20;
 const GM_PROGRAM_ID = 'traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg';
+
+function resolveLocalMarketStartIso(now = Date.now()) {
+  const anchorMs = Date.parse(DEFAULT_START_ISO);
+  if (!Number.isFinite(anchorMs)) return DEFAULT_START_ISO;
+  const cutoffMs = Number.isFinite(now) ? now - MAX_LOOKBACK_MS : anchorMs;
+  return new Date(Math.max(anchorMs, cutoffMs)).toISOString();
+}
+
+function createLocalMarketPacer(requestsPerSecond = DEFAULT_REQUESTS_PER_SECOND) {
+  const intervalMs = Math.max(1, Math.round(1000 / Math.max(1, requestsPerSecond)));
+  let nextReleaseAt = 0;
+  return async function pace() {
+    const now = Date.now();
+    const wait = Math.max(0, nextReleaseAt - now);
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    nextReleaseAt = Date.now() + intervalMs;
+  };
+}
 
 function discriminator(name) {
   return crypto.createHash('sha256').update(`global:${name}`).digest().subarray(0, 8);
@@ -114,11 +134,12 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = []) {
   return null;
 }
 
-async function collectSignatures(connection, addresses, startMs, addressFactory, maxPages) {
+async function collectSignatures(connection, addresses, startMs, addressFactory, maxPages, pacer) {
   const signatures = new Map();
   for (const address of Array.from(new Set(addresses.map(String).filter(Boolean)))) {
     let before;
     for (let page = 0; page < maxPages; page += 1) {
+      if (pacer) await pacer();
       const rows = await connection.getSignaturesForAddress(addressFactory(address), { limit: 1000, ...(before ? { before } : {}) }, 'confirmed');
       let reachedStart = false;
       for (const row of rows || []) {
@@ -134,10 +155,11 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
   return signatures;
 }
 
-async function fetchTransactions(connection, rows) {
+async function fetchTransactions(connection, rows, pacer) {
   const ordered = Array.from(rows.values()).sort((a, b) => Number(a.blockTime || 0) - Number(b.blockTime || 0));
   const transactions = [];
   for (const row of ordered) {
+    if (pacer) await pacer();
     const signature = String(row.signature);
     const transaction = await connection.getParsedTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
     if (transaction) transactions.push({ ...transaction, signature, blockTime: transaction.blockTime ?? row.blockTime });
@@ -146,21 +168,24 @@ async function fetchTransactions(connection, rows) {
 }
 
 async function scanLocalMarketTrades(connection, {
-  trackedWallets = [], marketAssetsByMint = {}, knownOrders = [], startIso = DEFAULT_START_ISO,
+  trackedWallets = [], marketAssetsByMint = {}, knownOrders = [], startIso,
   addressFactory = (value) => value, maxPages = MAX_SIGNATURE_PAGES,
+  requestsPerSecond = DEFAULT_REQUESTS_PER_SECOND,
 } = {}) {
-  const startMs = Date.parse(startIso);
+  const resolvedStartIso = startIso ?? resolveLocalMarketStartIso();
+  const startMs = Date.parse(resolvedStartIso);
   if (!Number.isFinite(startMs)) throw new Error('local market startIso is invalid');
+  const pacer = createLocalMarketPacer(requestsPerSecond);
   const ordersById = new Map((knownOrders || []).filter((row) => row?.orderId).map((row) => [String(row.orderId), row]));
-  const walletSignatures = await collectSignatures(connection, trackedWallets, startMs, addressFactory, maxPages);
-  const walletTransactions = await fetchTransactions(connection, walletSignatures);
+  const walletSignatures = await collectSignatures(connection, trackedWallets, startMs, addressFactory, maxPages, pacer);
+  const walletTransactions = await fetchTransactions(connection, walletSignatures, pacer);
   for (const transaction of walletTransactions) {
     const order = decodeLocalMarketOrder(transaction, { trackedWallets, marketAssetsByMint });
     if (order) ordersById.set(order.orderId, order);
   }
-  const orderSignatures = await collectSignatures(connection, Array.from(ordersById.keys()), startMs, addressFactory, maxPages);
+  const orderSignatures = await collectSignatures(connection, Array.from(ordersById.keys()), startMs, addressFactory, maxPages, pacer);
   const newOrderSignatures = new Map(Array.from(orderSignatures).filter(([signature]) => !walletSignatures.has(signature)));
-  const transactions = walletTransactions.concat(await fetchTransactions(connection, newOrderSignatures));
+  const transactions = walletTransactions.concat(await fetchTransactions(connection, newOrderSignatures, pacer));
   const tradesById = new Map();
   for (const transaction of transactions) {
     const execution = decodeOrderExecution(transaction, ordersById, trackedWallets)
@@ -174,5 +199,7 @@ async function scanLocalMarketTrades(connection, {
 }
 
 module.exports = {
-  DEFAULT_START_ISO, scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions,
+  DEFAULT_START_ISO, MAX_LOOKBACK_MS, DEFAULT_REQUESTS_PER_SECOND,
+  resolveLocalMarketStartIso, createLocalMarketPacer,
+  scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions,
 };

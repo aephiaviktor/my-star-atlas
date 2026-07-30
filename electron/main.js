@@ -28,7 +28,7 @@ const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeB
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
-const { scanLocalMarketTrades, DEFAULT_START_ISO: LOCAL_MARKET_START_ISO } = require('./local-market-scanner');
+const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { formatLocalMarketInfluxLine } = require('./local-market-trades');
 const { STARBASE_REGISTRY } = require('./starbase-registry');
 const { ASSET_REGISTRY } = require('./asset-registry');
@@ -3844,8 +3844,10 @@ async function fetchLocalMarketTrades(settings, connection) {
   const filePath = localMarketCheckpointPath(faction);
   const checkpoint = await loadLocalMarketTradeCheckpoint(filePath);
   const existing = checkpoint.trades;
-  const newestMs = existing.reduce((max, trade) => Math.max(max, Date.parse(trade.timestamp) || 0), Date.parse(LOCAL_MARKET_START_ISO));
-  const overlapStart = new Date(Math.max(Date.parse(LOCAL_MARKET_START_ISO), newestMs - 24 * 60 * 60 * 1000)).toISOString();
+  const startIso = resolveLocalMarketStartIso();
+  const startMs = Date.parse(startIso);
+  const newestMs = existing.reduce((max, trade) => Math.max(max, Date.parse(trade.timestamp) || 0), startMs);
+  const overlapStart = new Date(Math.max(startMs, newestMs - 24 * 60 * 60 * 1000)).toISOString();
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
     marketAssetsByMint,
@@ -3855,7 +3857,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   });
   const byId = new Map(existing.map((trade) => [trade.id, trade]));
   for (const trade of scanned.trades) byId.set(trade.id, trade);
-  const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= Date.parse(LOCAL_MARKET_START_ISO))
+  const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
   const unpublished = trades.filter((trade) => !checkpoint.publishedTradeIds.has(trade.id));
   let publishError = '';
