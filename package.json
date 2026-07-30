@@ -1,6 +1,6 @@
 {
   "name": "my-star-atlas",
-  "version": "0.6.90",
+  "version": "0.6.91",
   "private": true,
   "main": "electron/main.js",
   "type": "commonjs",
@@ -17,6 +17,6 @@
     "bs58": "^6.0.0",
     "electron": "^42.1.0",
     "proper-lockfile": "^4.1.2",
-    "rpc_limiter": "https://codeload.github.com/aephiaviktor/rpc-limiter/tar.gz/ba63cdda930a6f809af2a37c2b12dfcd9562f699"
+    "rpc_limiter": "file:../rpc-limiter"
   }
 }

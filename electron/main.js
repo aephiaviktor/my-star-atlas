@@ -3446,6 +3446,25 @@ function isUsableSharedRpcUrl(value) {
   }
 }
 
+function getErrorText(error) {
+  if (error instanceof Error) {
+    return `${error.name} ${error.message}`.trim();
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch (_error) {
+    return String(error);
+  }
+}
+
+function isRpcRateLimitError(error) {
+  const text = getErrorText(error).toLowerCase();
+  return text.includes('429') || text.includes('too many requests') || text.includes('rate limit');
+}
+
 function getRpcLimiterStatus() {
   const paths = resolveRpcLimiterPaths();
   const state = readRpcLimiterState(paths.stateFile, Date.now());
@@ -4177,6 +4196,22 @@ function createSolanaConnection(settings) {
         try {
           return await primaryFn.apply(target, args);
         } catch (primaryError) {
+          // Report 429s back to the shared limiter so the primary (main)
+          // goes into cooldown and the next call routes to the fallback.
+          // We use 'main' as the failed-provider id here because this
+          // Proxy is currently "primary = main, fallback on error". The
+          // full provider-aware dispatch (asking the limiter which to use)
+          // is a follow-up that requires rewriting the fetch URL inside
+          // the Connection's fetch callback; for now, reporting on the
+          // primary-side failure is the signal that gets the cooldown
+          // logic to actually trip.
+          if (sharedRpcLimiter && isRpcRateLimitError(primaryError)) {
+            try {
+              await sharedRpcLimiter.recordProviderOutcome('main', 'rate_limited');
+            } catch (_reportError) {
+              // Best-effort; never let a report failure mask the real error.
+            }
+          }
           return await fallbackFn.apply(fallback, args);
         }
       };
