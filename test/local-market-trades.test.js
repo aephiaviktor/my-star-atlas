@@ -75,9 +75,9 @@ test('scanner deduplicates signatures found through multiple profile wallets', a
     async getSignaturesForAddress() {
       return [{ signature: 'shared-sig', blockTime: fill.blockTime, err: null }];
     },
-    async getParsedTransactions(signatures) {
-      assert.deepEqual(signatures, ['shared-sig']);
-      return [fill];
+    async getParsedTransaction(signature) {
+      assert.equal(signature, 'shared-sig');
+      return fill;
     },
   };
   const result = await scanLocalMarketTrades(connection, {
@@ -103,29 +103,26 @@ function lifecycleTx({ signature, name, accounts, values = [], fee = 5000, logs 
   };
 }
 
-test('transaction fetches split oversized RPC batches without losing order', async () => {
-  const rows = new Map(Array.from({ length: 7 }, (_, index) => {
+test('transaction fetches use one RPC call per signature so batch-disabled plans still work', async () => {
+  const rows = new Map(Array.from({ length: 5 }, (_, index) => {
     const signature = `signature-${index}`;
     return [signature, { signature, blockTime: index + 1 }];
   }));
-  const batchSizes = [];
+  const calledSignatures = [];
   const connection = {
-    async getParsedTransactions(signatures) {
-      batchSizes.push(signatures.length);
-      if (signatures.length > 2) {
-        const error = new Error('413 Payload Too Large: Too many requests');
-        error.status = 413;
-        throw error;
-      }
-      return signatures.map((signature) => ({ blockTime: Number(signature.split('-')[1]) + 1, transaction: { signatures: [signature] }, meta: { err: null } }));
+    async getParsedTransaction(signature) {
+      calledSignatures.push(signature);
+      return { blockTime: Number(signature.split('-')[1]) + 1, transaction: { signatures: [signature] }, meta: { err: null } };
+    },
+    getParsedTransactions() {
+      throw new Error('getParsedTransactions must not be used for batch-disabled RPC plans');
     },
   };
 
   const transactions = await fetchTransactions(connection, rows);
-  assert.equal(transactions.length, 7);
+  assert.equal(transactions.length, 5);
+  assert.deepEqual(calledSignatures, Array.from(rows.keys()));
   assert.deepEqual(transactions.map((transaction) => transaction.signature), Array.from(rows.keys()));
-  assert.ok(batchSizes.some((size) => size > 2));
-  assert.ok(batchSizes.filter((size) => size <= 2).length >= 4);
 });
 
 test('tracks LM order creation separately and matches fills by order ID', () => {
