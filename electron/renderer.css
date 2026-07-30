@@ -659,6 +659,12 @@ select:focus {
   gap: 5px;
 }
 
+.top-action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .marketplace-side-switch {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -29,6 +29,12 @@ test('Marketplace renderer filters rows by selected side and swaps the unit metr
   assert.match(renderer, /entry\.side === earningsMarketplaceSide/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Cost \/ Unit' : 'Income \/ Unit'/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy'[\s\S]*\(gross \+ txFee\) \/ quantity[\s\S]*net \/ quantity/);
+  assert.match(renderer, /formatMarketplaceAtlas\(txFee, 2\)/);
+  assert.match(renderer, /formatMarketplaceAtlas\(net, 2\)/);
+});
+
+test('Update shares a row with Refresh data while the BUY SELL switch stays below', () => {
+  assert.match(html, /class="update-action-stack"[\s\S]*class="top-action-row"[\s\S]*id="refresh-data-btn"[\s\S]*id="update-btn"[\s\S]*id="earnings-marketplace-side-switch"/);
 });
 
 test('Marketplace renderer exposes LM scan errors and links execution signatures', () => {
@@ -75,6 +81,13 @@ test('Marketplace reads use supported Flux queries instead of Influx SQL', () =>
   assert.match(main, /_measurement == "marketplace"/);
   assert.match(main, /pivot\(rowKey: \["_time", "tradeId"\]/);
   assert.doesNotMatch(main, /queryInfluxSql|type:\s*['"]sql['"]/);
+});
+
+test('legacy Marketplace rows are rescanned once and enriched rows replace fallback duplicates', () => {
+  assert.match(main, /tradeEnrichmentVersion/);
+  assert.match(main, /needsTradeEnrichment \? \{\} : checkpoint\.walletCursors/);
+  assert.match(main, /prior\.signature === trade\.signature/);
+  assert.match(main, /!current\.orderId && trade\.orderId/);
 });
 
 test('GM sync includes handler and additional wallets while remaining global and ATLAS-only', () => {

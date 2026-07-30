@@ -530,8 +530,7 @@ async function fetchMarketplaceTradesFromInflux(settings) {
   |> sort(columns: ["_time"], desc: true)`;
   try {
     const rows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
-    return {
-      trades: rows.map((row) => ({
+    const parsedTrades = rows.map((row) => ({
         id: String(row.tradeId || ''), timestamp: String(row._time || ''), marketplace: String(row.market || 'LM'),
         starbase: String(row.starbase || ''), asset: String(row.asset || ''), side: String(row.side || '').toLowerCase(),
         wallet: String(row.wallet || ''), quantity: Number(row.quantity || 0), settledAtlas: Number(row.settledAtlas || 0),
@@ -540,9 +539,18 @@ async function fetchMarketplaceTradesFromInflux(settings) {
         unitPriceAtlas: Number(row.unitPriceAtlas || 0), signature: String(row.signature || ''),
         creationSignature: String(row.creationSignature || ''), rawMint: String(row.rawMint || ''), certificateMint: String(row.certificateMint || ''),
         orderId: String(row.orderId || ''),
-      })).filter((row) => row.id && row.timestamp && (row.side === 'buy' || row.side === 'sell')),
-      error: '',
-    };
+      })).filter((row) => row.id && row.timestamp && (row.side === 'buy' || row.side === 'sell'));
+    const byExecution = new Map();
+    for (const trade of parsedTrades) {
+      const key = trade.signature
+        ? `${trade.signature}\n${trade.rawMint}\n${trade.side}\n${trade.quantity}`
+        : trade.id;
+      const current = byExecution.get(key);
+      if (!current || (!current.orderId && trade.orderId) || (Number(current.txFeeAtlas || 0) === 0 && Number(trade.txFeeAtlas || 0) > 0)) {
+        byExecution.set(key, trade);
+      }
+    }
+    return { trades: Array.from(byExecution.values()), error: '' };
   } catch (error) {
     return { trades: [], error: String(error?.message || error || 'marketplace_influx_unavailable') };
   }
@@ -4012,12 +4020,14 @@ async function loadLocalMarketTradeCheckpoint(filePath) {
       archivedOrderIds: Array.isArray(document?.archivedOrderIds) ? document.archivedOrderIds : [],
       marketplaceBackfilled: document?.marketplaceBackfilled === true,
       assetFlowBackfilled: document?.assetFlowBackfilled === true,
+      tradeEnrichmentVersion: Number(document?.tradeEnrichmentVersion || 0),
     };
   } catch (error) {
     if (error?.code === 'ENOENT') return {
       orders: [], trades: [], assetFlows: [], publishedTradeIds: new Set(), publishedFlowIds: new Set(), walletCursors: {}, orderCursors: {},
       activeOrderIds: [], archivedOrderIds: [], marketplaceBackfilled: false,
       assetFlowBackfilled: false,
+      tradeEnrichmentVersion: 0,
     };
     throw error;
   }
@@ -4075,21 +4085,31 @@ async function fetchLocalMarketTrades(settings, connection) {
   const influxNewestMs = await fetchNewestMarketplaceTradeMs(settings).catch(() => null);
   const anchorMs = Math.max(checkpointNewestMs, Number.isFinite(influxNewestMs) ? influxNewestMs : 0, startMs);
   const overlapStart = new Date(Math.max(startMs, anchorMs - 60 * 60 * 1000)).toISOString();
+  const needsTradeEnrichment = checkpoint.tradeEnrichmentVersion < 1;
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
     marketAssetsByMint,
     knownOrders: checkpoint.orders,
-    walletCursors: checkpoint.walletCursors,
-    orderCursors: checkpoint.orderCursors,
+    walletCursors: needsTradeEnrichment ? {} : checkpoint.walletCursors,
+    orderCursors: needsTradeEnrichment ? {} : checkpoint.orderCursors,
     activeOrderIds: checkpoint.activeOrderIds,
     archivedOrderIds: checkpoint.archivedOrderIds,
     openOrderIds: openOrders.orderIds,
-    startIso: overlapStart,
+    startIso: needsTradeEnrichment ? startIso : overlapStart,
     addressFactory: (value) => new PublicKey(value),
     atlasPerSol: await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null),
   });
   const byId = new Map(existing.map((trade) => [trade.id, trade]));
-  for (const trade of scanned.trades) byId.set(trade.id, trade);
+  for (const trade of scanned.trades) {
+    for (const [id, prior] of byId) {
+      const sameExecution = prior.signature && prior.signature === trade.signature
+        && String(prior.rawMint || '') === String(trade.rawMint || '')
+        && String(prior.side || '') === String(trade.side || '')
+        && Number(prior.quantity || 0) === Number(trade.quantity || 0);
+      if (id !== trade.id && sameExecution) byId.delete(id);
+    }
+    byId.set(trade.id, trade);
+  }
   const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
   // One-shot backfill: if the checkpoint predates the rename from
@@ -4125,6 +4145,7 @@ async function fetchLocalMarketTrades(settings, connection) {
     archivedOrderIds: scanned.archivedOrderIds,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     marketplaceBackfilled: checkpoint.marketplaceBackfilled === true,
+    tradeEnrichmentVersion: scanned.stats.transactionMisses === 0 && !publishError ? 1 : checkpoint.tradeEnrichmentVersion,
   });
   return {
     trades,

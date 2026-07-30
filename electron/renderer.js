@@ -6032,8 +6032,8 @@ function renderEarningsMarketplace(result) {
       formatMarketplaceTimestamp(entry.timestamp), entry.marketplace || 'LM',
       entry.starbase || '--', entry.asset || '--', formatMarketplaceWhole(quantity),
       formatMarketplaceAtlas(gross, 6), formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
-      formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6), formatMarketplaceAtlas(txFee, 6),
-      formatMarketplaceAtlas(net, 6), unitMetric == null ? '--' : formatMarketplaceAtlas(unitMetric, 8),
+      formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6), formatMarketplaceAtlas(txFee, 2),
+      formatMarketplaceAtlas(net, 2), unitMetric == null ? '--' : formatMarketplaceAtlas(unitMetric, 8),
       entry.orderId || '--', entry.signature || '--',
     ];
     for (const value of values.slice(0, -1)) tr.appendChild(createTextCell(value));
