@@ -129,6 +129,8 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(renderer, /function renderUpgradingOptimizationAnalytics\(/);
   assert.match(renderer, /correlation/);
   assert.match(renderer, /x:axes\.width-axes\.right,y:axes\.top-2,'text-anchor':'end'/);
+  for (const label of ['Faction LP redeemed', 'Player LP / avg phantom crew', 'Snapshot hour (UTC)', 'Expected total LP by EOD', 'Forecast error (LP)']) assert.match(renderer, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  for (const subtitle of ['One dot per completed UTC day', 'Hourly optimization snapshots', 'Median signed error with the middle 50% band']) assert.doesNotMatch(html, new RegExp(subtitle));
   assert.match(renderer, /expected_total_lp_eod/);
   assert.match(renderer, /points\.sort\(\(a,b\) => a\.hour-b\.hour\)\.slice\(1\)/);
   assert.match(renderer, /bindOptimizationAnalyticsTooltip\(snapshot/);
