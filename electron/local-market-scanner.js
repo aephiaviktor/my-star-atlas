@@ -150,14 +150,22 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { at
   return null;
 }
 
-async function collectSignatures(connection, addresses, startMs, addressFactory, maxPages, pacer, stats) {
+async function collectSignatures(connection, addresses, startMs, addressFactory, maxPages, pacer, stats, cursors = {}) {
   const signatures = new Map();
+  const nextCursors = { ...cursors };
   for (const address of Array.from(new Set(addresses.map(String).filter(Boolean)))) {
     let before;
+    const until = String(cursors[address] || '');
+    let newestSignature = '';
     for (let page = 0; page < maxPages; page += 1) {
       if (pacer) await pacer();
       if (stats) stats.signatureRequests += 1;
-      const rows = await connection.getSignaturesForAddress(addressFactory(address), { limit: 1000, ...(before ? { before } : {}) }, 'confirmed');
+      const rows = await connection.getSignaturesForAddress(addressFactory(address), {
+        limit: 1000,
+        ...(before ? { before } : {}),
+        ...(until ? { until } : {}),
+      }, 'confirmed');
+      if (!newestSignature && rows?.[0]?.signature) newestSignature = String(rows[0].signature);
       let reachedStart = false;
       for (const row of rows || []) {
         const timestampMs = Number(row.blockTime) * 1000;
@@ -168,8 +176,9 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
       before = rows[rows.length - 1]?.signature;
       if (!before) break;
     }
+    if (newestSignature) nextCursors[address] = newestSignature;
   }
-  return signatures;
+  return { signatures, cursors: nextCursors };
 }
 
 async function fetchTransactions(connection, rows, pacer, stats) {
@@ -181,12 +190,14 @@ async function fetchTransactions(connection, rows, pacer, stats) {
     const signature = String(row.signature);
     const transaction = await connection.getParsedTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
     if (transaction) transactions.push({ ...transaction, signature, blockTime: transaction.blockTime ?? row.blockTime });
+    else if (stats) stats.transactionMisses += 1;
   }
   return transactions;
 }
 
 async function scanLocalMarketTrades(connection, {
   trackedWallets = [], marketAssetsByMint = {}, knownOrders = [], startIso,
+  walletCursors = {}, orderCursors = {}, activeOrderIds = [], archivedOrderIds = [], openOrderIds = [],
   addressFactory = (value) => value, maxPages = MAX_SIGNATURE_PAGES,
   requestsPerSecond = DEFAULT_REQUESTS_PER_SECOND,
   atlasPerSol,
@@ -195,8 +206,22 @@ async function scanLocalMarketTrades(connection, {
   const startMs = Date.parse(resolvedStartIso);
   if (!Number.isFinite(startMs)) throw new Error('local market startIso is invalid');
   const pacer = createLocalMarketPacer(requestsPerSecond);
-  const stats = { signatureRequests: 0, transactionRequests: 0 };
+  const stats = { signatureRequests: 0, transactionRequests: 0, transactionMisses: 0 };
   const ordersById = new Map((knownOrders || []).filter((row) => row?.orderId).map((row) => [String(row.orderId), row]));
+  const archived = new Set((archivedOrderIds || []).map(String));
+  const open = new Set((openOrderIds || []).map(String));
+  for (const orderId of open) archived.delete(orderId);
+  const hasLifecycleCheckpoint = (activeOrderIds || []).length > 0
+    || (archivedOrderIds || []).length > 0
+    || Object.keys(orderCursors || {}).length > 0;
+  if (!hasLifecycleCheckpoint) {
+    // Schema-v1 migration: old checkpoints retained every historical order.
+    // Their executions are already in `trades`, so archive closed IDs without
+    // issuing one final RPC request for every lifetime order.
+    for (const orderId of ordersById.keys()) {
+      if (!open.has(orderId)) archived.add(orderId);
+    }
+  }
   // Checkpoints written before creation-fee tracking already contain the
   // initialization signature. Fetch each missing creation tx once, enrich
   // the order, and persist it through the returned orders array.
@@ -205,28 +230,65 @@ async function scanLocalMarketTrades(connection, {
     if (pacer) await pacer();
     stats.transactionRequests += 1;
     const transaction = await connection.getParsedTransaction(order.creationSignature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
-    if (!transaction) continue;
+    if (!transaction) { stats.transactionMisses += 1; continue; }
     const enriched = decodeLocalMarketOrder({ ...transaction, signature: order.creationSignature }, { trackedWallets, marketAssetsByMint, atlasPerSol });
     if (enriched) ordersById.set(enriched.orderId, enriched);
   }
-  const walletSignatures = await collectSignatures(connection, trackedWallets, startMs, addressFactory, maxPages, pacer, stats);
-  const walletTransactions = await fetchTransactions(connection, walletSignatures, pacer, stats);
+  const walletScan = await collectSignatures(connection, trackedWallets, startMs, addressFactory, maxPages, pacer, stats, walletCursors);
+  const walletTransactions = await fetchTransactions(connection, walletScan.signatures, pacer, stats);
+  const discoveredOrderIds = new Set();
   for (const transaction of walletTransactions) {
+    const order = decodeLocalMarketOrder(transaction, { trackedWallets, marketAssetsByMint, atlasPerSol });
+    if (order) {
+      ordersById.set(order.orderId, order);
+      discoveredOrderIds.add(order.orderId);
+      archived.delete(order.orderId);
+    }
+  }
+  const candidateOrderIds = new Set([
+    ...(activeOrderIds || []).map(String),
+    ...open,
+    ...discoveredOrderIds,
+  ]);
+  for (const orderId of archived) candidateOrderIds.delete(orderId);
+  const orderScan = await collectSignatures(
+    connection, Array.from(candidateOrderIds), startMs, addressFactory, maxPages, pacer, stats, orderCursors,
+  );
+  const newOrderSignatures = new Map(Array.from(orderScan.signatures).filter(([signature]) => !walletScan.signatures.has(signature)));
+  const transactions = walletTransactions.concat(await fetchTransactions(connection, newOrderSignatures, pacer, stats));
+  for (const transaction of transactions) {
     const order = decodeLocalMarketOrder(transaction, { trackedWallets, marketAssetsByMint, atlasPerSol });
     if (order) ordersById.set(order.orderId, order);
   }
-  const orderSignatures = await collectSignatures(connection, Array.from(ordersById.keys()), startMs, addressFactory, maxPages, pacer, stats);
-  const newOrderSignatures = new Map(Array.from(orderSignatures).filter(([signature]) => !walletSignatures.has(signature)));
-  const transactions = walletTransactions.concat(await fetchTransactions(connection, newOrderSignatures, pacer, stats));
   const tradesById = new Map();
   for (const transaction of transactions) {
     const execution = decodeOrderExecution(transaction, ordersById, trackedWallets, { atlasPerSol })
       || decodeLocalMarketTrade(transaction, { trackedWallets, marketAssetsByMint });
     if (execution) tradesById.set(execution.id, execution);
   }
+  const pendingFinalization = new Set();
+  for (const orderId of candidateOrderIds) {
+    if (!open.has(orderId)) {
+      if (stats.transactionMisses > 0) pendingFinalization.add(orderId);
+      else archived.add(orderId);
+    }
+  }
+  const active = Array.from(new Set([...open, ...pendingFinalization])).sort();
+  const nextOrderCursors = {};
+  for (const orderId of active) {
+    const cursor = pendingFinalization.has(orderId)
+      ? orderCursors[orderId]
+      : (orderScan.cursors[orderId] || orderCursors[orderId] || ordersById.get(orderId)?.creationSignature);
+    if (cursor) nextOrderCursors[orderId] = cursor;
+  }
   return {
-    orders: Array.from(ordersById.values()).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.orderId.localeCompare(b.orderId)),
+    orders: Array.from(ordersById.values()).filter((order) => !archived.has(String(order.orderId)))
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.orderId.localeCompare(b.orderId)),
     trades: Array.from(tradesById.values()).sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id)),
+    walletCursors: stats.transactionMisses > 0 ? { ...walletCursors } : walletScan.cursors,
+    orderCursors: nextOrderCursors,
+    activeOrderIds: active,
+    archivedOrderIds: Array.from(archived).sort(),
     stats: { ...stats, totalRpcRequests: stats.signatureRequests + stats.transactionRequests },
   };
 }

@@ -8,6 +8,7 @@ const { pathToFileURL } = require('url');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { BorshAccountsCoder } = require('@staratlas/anchor');
 const { IDL: SAGE_IDL } = require('@staratlas/sage/dist/src/idl/sage');
+const { getOpenOrdersForPlayer } = require('@staratlas/factory');
 const bs58Module = require('bs58');
 const { RpcLimiter, resolvePaths: resolveRpcLimiterPaths } = require('rpc_limiter');
 const {
@@ -116,6 +117,7 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const ATLAS_MINT = 'ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
 const SES_SHIP_STATS_URL = 'https://ses.staratlas.com/tools/ship-stats/engine/data/sot.js';
 const SAGE_PROGRAM_ID = new PublicKey('SAGE2HAwep459SNq61LHvjxPk4pLPEJLoMETef7f7EE');
+const GM_PROGRAM_ID = new PublicKey('traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg');
 const PLAYER_PROFILE_PROGRAM_ID = new PublicKey('pprofELXjL5Kck7Jn5hCpwAL82DpTkSYBENzahVtbc9');
 const SAGE_GAME_ID = new PublicKey('GAMEzqJehF8yAnKiTARUuhZMvLvkZVAsCVri5vSfemLr');
 const SRSLY_PROGRAM_ID = new PublicKey('SRSLY1fq9TJqCk1gNSE7VZL2bztvTn9wm4VR8u8jMKT');
@@ -3988,11 +3990,32 @@ async function loadLocalMarketTradeCheckpoint(filePath) {
       orders: Array.isArray(document?.orders) ? document.orders : [],
       trades: Array.isArray(document?.trades) ? document.trades : [],
       publishedTradeIds: new Set(Array.isArray(document?.publishedTradeIds) ? document.publishedTradeIds : []),
+      walletCursors: document?.walletCursors && typeof document.walletCursors === 'object' ? document.walletCursors : {},
+      orderCursors: document?.orderCursors && typeof document.orderCursors === 'object' ? document.orderCursors : {},
+      activeOrderIds: Array.isArray(document?.activeOrderIds) ? document.activeOrderIds : [],
+      archivedOrderIds: Array.isArray(document?.archivedOrderIds) ? document.archivedOrderIds : [],
+      marketplaceBackfilled: document?.marketplaceBackfilled === true,
     };
   } catch (error) {
-    if (error?.code === 'ENOENT') return { orders: [], trades: [], publishedTradeIds: new Set() };
+    if (error?.code === 'ENOENT') return {
+      orders: [], trades: [], publishedTradeIds: new Set(), walletCursors: {}, orderCursors: {},
+      activeOrderIds: [], archivedOrderIds: [], marketplaceBackfilled: false,
+    };
     throw error;
   }
+}
+
+async function fetchOpenLocalMarketOrderIds(connection, trackedWallets) {
+  const ids = new Set();
+  const wallets = Array.from(new Set(trackedWallets.map(String).filter(Boolean)));
+  for (const wallet of wallets) {
+    const rows = await getOpenOrdersForPlayer(connection, new PublicKey(wallet), GM_PROGRAM_ID);
+    for (const row of rows || []) {
+      const key = row?.publicKey ?? row?.pubkey ?? row?.id;
+      if (key) ids.add(String(key));
+    }
+  }
+  return { orderIds: Array.from(ids), requestCount: wallets.length };
 }
 
 async function writeInfluxLines(settings, lines) {
@@ -4022,6 +4045,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   const marketAssetsByMint = await buildLocalMarketAssetMap(connection, faction);
   const filePath = localMarketCheckpointPath(faction);
   const checkpoint = await loadLocalMarketTradeCheckpoint(filePath);
+  const openOrders = await fetchOpenLocalMarketOrderIds(connection, trackedWallets);
   const existing = checkpoint.trades;
   const startIso = resolveLocalMarketStartIso();
   const startMs = Date.parse(startIso);
@@ -4037,6 +4061,11 @@ async function fetchLocalMarketTrades(settings, connection) {
     trackedWallets,
     marketAssetsByMint,
     knownOrders: checkpoint.orders,
+    walletCursors: checkpoint.walletCursors,
+    orderCursors: checkpoint.orderCursors,
+    activeOrderIds: checkpoint.activeOrderIds,
+    archivedOrderIds: checkpoint.archivedOrderIds,
+    openOrderIds: openOrders.orderIds,
     startIso: overlapStart,
     addressFactory: (value) => new PublicKey(value),
     atlasPerSol: await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null),
@@ -4066,16 +4095,24 @@ async function fetchLocalMarketTrades(settings, connection) {
     publishError = String(error?.message || error || 'local_market_influx_write_failed');
   }
   await writeJsonAtomic(filePath, {
-    schemaVersion: 1,
+    schemaVersion: 2,
     faction,
     profile,
     savedAt: new Date().toISOString(),
     orders: scanned.orders,
     trades,
+    walletCursors: scanned.walletCursors,
+    orderCursors: scanned.orderCursors,
+    activeOrderIds: scanned.activeOrderIds,
+    archivedOrderIds: scanned.archivedOrderIds,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     marketplaceBackfilled: checkpoint.marketplaceBackfilled === true,
   });
-  return { trades, error: publishError, rpc: scanned.stats };
+  return {
+    trades,
+    error: publishError,
+    rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
+  };
 }
 
 const marketplaceSyncInFlight = new Map();

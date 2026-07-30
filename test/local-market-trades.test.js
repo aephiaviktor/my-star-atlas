@@ -87,7 +87,95 @@ test('scanner deduplicates signatures found through multiple profile wallets', a
   });
   assert.equal(result.trades.length, 1);
   assert.equal(result.trades[0].id, 'shared-sig:certificate-1:UST-1');
-  assert.deepEqual(result.stats, { signatureRequests: 2, transactionRequests: 1, totalRpcRequests: 3 });
+  assert.deepEqual(result.stats, { signatureRequests: 2, transactionRequests: 1, transactionMisses: 0, totalRpcRequests: 3 });
+});
+
+test('incremental scanner uses durable wallet and active-order cursors', async () => {
+  const calls = [];
+  const connection = {
+    async getSignaturesForAddress(address, options) {
+      calls.push({ address: String(address), options });
+      return [];
+    },
+    async getParsedTransaction() { throw new Error('no new signatures should be fetched'); },
+  };
+  const result = await scanLocalMarketTrades(connection, {
+    trackedWallets: ['wallet-1'], walletCursors: { 'wallet-1': 'wallet-cursor' },
+    knownOrders: [{ orderId: 'order-1', createdAt: '2026-07-25T00:00:00Z' }],
+    activeOrderIds: ['order-1'], openOrderIds: ['order-1'], orderCursors: { 'order-1': 'order-cursor' },
+    startIso: '2026-07-24T00:00:00Z',
+  });
+  assert.deepEqual(calls, [
+    { address: 'wallet-1', options: { limit: 1000, until: 'wallet-cursor' } },
+    { address: 'order-1', options: { limit: 1000, until: 'order-cursor' } },
+  ]);
+  assert.deepEqual(result.walletCursors, { 'wallet-1': 'wallet-cursor' });
+  assert.deepEqual(result.orderCursors, { 'order-1': 'order-cursor' });
+  assert.deepEqual(result.activeOrderIds, ['order-1']);
+  assert.deepEqual(result.archivedOrderIds, []);
+});
+
+test('incremental scanner performs one final check then archives a closed order', async () => {
+  const calls = [];
+  const connection = {
+    async getSignaturesForAddress(address, options) {
+      calls.push({ address: String(address), options });
+      return [];
+    },
+  };
+  const result = await scanLocalMarketTrades(connection, {
+    knownOrders: [{ orderId: 'closed-order', createdAt: '2026-07-25T00:00:00Z' }],
+    activeOrderIds: ['closed-order'], orderCursors: { 'closed-order': 'last-seen' }, openOrderIds: [],
+    startIso: '2026-07-24T00:00:00Z',
+  });
+  assert.deepEqual(calls, [{ address: 'closed-order', options: { limit: 1000, until: 'last-seen' } }]);
+  assert.deepEqual(result.activeOrderIds, []);
+  assert.deepEqual(result.archivedOrderIds, ['closed-order']);
+  assert.deepEqual(result.orderCursors, {});
+  assert.deepEqual(result.orders, []);
+});
+
+test('archived orders are never queried again', async () => {
+  const connection = { async getSignaturesForAddress() { throw new Error('archived order was queried'); } };
+  const result = await scanLocalMarketTrades(connection, {
+    knownOrders: [{ orderId: 'archived-order', createdAt: '2026-07-25T00:00:00Z' }],
+    activeOrderIds: ['archived-order'], archivedOrderIds: ['archived-order'], openOrderIds: [],
+    startIso: '2026-07-24T00:00:00Z',
+  });
+  assert.equal(result.stats.totalRpcRequests, 0);
+  assert.deepEqual(result.archivedOrderIds, ['archived-order']);
+});
+
+test('schema-v1 migration archives historical closed orders without querying them', async () => {
+  const connection = { async getSignaturesForAddress() { throw new Error('historical closed order was queried'); } };
+  const result = await scanLocalMarketTrades(connection, {
+    knownOrders: [{ orderId: 'legacy-closed', createdAt: '2026-07-25T00:00:00Z' }],
+    openOrderIds: [], startIso: '2026-07-24T00:00:00Z',
+  });
+  assert.deepEqual(result.archivedOrderIds, ['legacy-closed']);
+  assert.deepEqual(result.orders, []);
+  assert.equal(result.stats.totalRpcRequests, 0);
+});
+
+test('missing parsed transactions preserve cursors and defer closed-order archival for retry', async () => {
+  const connection = {
+    async getSignaturesForAddress(address) {
+      if (String(address) === 'wallet-1') return [{ signature: 'new-wallet-sig', blockTime: 1785410000, err: null }];
+      return [{ signature: 'new-order-sig', blockTime: 1785410000, err: null }];
+    },
+    async getParsedTransaction() { return null; },
+  };
+  const result = await scanLocalMarketTrades(connection, {
+    trackedWallets: ['wallet-1'], walletCursors: { 'wallet-1': 'old-wallet-sig' },
+    knownOrders: [{ orderId: 'closing-order', createdAt: '2026-07-25T00:00:00Z' }],
+    activeOrderIds: ['closing-order'], orderCursors: { 'closing-order': 'old-order-sig' }, openOrderIds: [],
+    startIso: '2026-07-24T00:00:00Z',
+  });
+  assert.equal(result.stats.transactionMisses, 2);
+  assert.deepEqual(result.walletCursors, { 'wallet-1': 'old-wallet-sig' });
+  assert.deepEqual(result.orderCursors, { 'closing-order': 'old-order-sig' });
+  assert.deepEqual(result.activeOrderIds, ['closing-order']);
+  assert.deepEqual(result.archivedOrderIds, []);
 });
 
 function gmData(name, ...values) {

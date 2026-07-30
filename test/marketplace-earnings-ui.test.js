@@ -60,3 +60,13 @@ test('Marketplace chain synchronization is exposed separately and runs in the ba
   assert.match(renderer, /setInterval\(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS\)/);
   assert.match(renderer, /currentEarningsSubtab === 'marketplace'[\s\S]*refreshMarketplace/);
 });
+
+test('Marketplace sync discovers current player orders and persists incremental cursors', () => {
+  assert.match(main, /getOpenOrdersForPlayer/);
+  assert.match(main, /fetchOpenLocalMarketOrderIds\(connection, trackedWallets\)/);
+  assert.match(main, /walletCursors: scanned\.walletCursors/);
+  assert.match(main, /orderCursors: scanned\.orderCursors/);
+  assert.match(main, /activeOrderIds: scanned\.activeOrderIds/);
+  assert.match(main, /archivedOrderIds: scanned\.archivedOrderIds/);
+  assert.match(main, /schemaVersion: 2/);
+});
