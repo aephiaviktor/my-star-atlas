@@ -168,5 +168,7 @@ test('Marketplace runtime does not count limiter rejection as an HTTP attempt', 
 
 test('Marketplace sync failure IPC result carries the sealed telemetry snapshot', () => {
   assert.match(main, /marketplaceRpcTelemetry: error\?\.marketplaceRpcTelemetry \|\| null/);
-  assert.match(main, /error\.marketplaceRpcTelemetry = telemetry\.finish\(\)/);
+  assert.match(main, /const marketplaceRpcTelemetry = telemetry\.finish\(\)/);
+  assert.match(main, /telemetryAttached = error\.marketplaceRpcTelemetry === marketplaceRpcTelemetry/);
+  assert.match(main, /wrapped\.marketplaceRpcTelemetry = marketplaceRpcTelemetry/);
 });

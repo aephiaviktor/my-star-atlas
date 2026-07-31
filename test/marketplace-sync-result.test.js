@@ -151,3 +151,52 @@ test('Marketplace sync seals telemetry on unexpected failure and coalesces calle
   assert.equal(firstError.marketplaceRpcTelemetry.totals.cacheHits, 0);
   assert.equal(firstError.marketplaceRpcTelemetry.totals.cacheMisses, 0);
 });
+
+test('Marketplace sync preserves telemetry for primitive and frozen errors', async () => {
+  const start = main.indexOf('async function syncMarketplaceTrades(payload)');
+  const end = main.indexOf('async function fetchMarketplaceSnapshot', start);
+  const functionSource = main.slice(start, end);
+  const cases = [
+    { thrown: 'primitive_failure', message: 'primitive_failure' },
+    { thrown: Object.freeze(new Error('frozen_failure')), message: 'frozen_failure' },
+  ];
+
+  for (const scenario of cases) {
+    const context = {
+      input: { faction: 'MUD' },
+      marketplaceSyncInFlight: new Map(),
+      normalizeSettings: (value) => value,
+      readSettings: async () => ({}),
+      normalizeFaction: (value) => value,
+      createMarketplaceRpcTelemetry,
+      createMarketplaceRpcInstrumentation,
+      wrapMarketplaceConnection,
+      createSolanaConnection: (_settings, { instrumentation }) => ({
+        async getAccountInfo() {
+          instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'main' });
+          return null;
+        },
+      }),
+      fetchLocalMarketTrades: async (_settings, connection) => {
+        await connection.getAccountInfo();
+        throw scenario.thrown;
+      },
+      fetchGlobalMarketTrades: async () => { throw new Error('GM must not run'); },
+    };
+
+    const error = await vm.runInNewContext(
+      `${functionSource}\nsyncMarketplaceTrades(input);`,
+      context,
+    ).catch((caught) => caught);
+
+    assert.equal(typeof error, 'object');
+    assert.equal(error.message, scenario.message);
+    assert.notEqual(error.marketplaceRpcTelemetry, null);
+    assert.notEqual(error.marketplaceRpcTelemetry.completedAt, null);
+    assert.equal(error.marketplaceRpcTelemetry.operations.LM.methods.getAccountInfo.logicalOperations, 1);
+    assert.equal(error.marketplaceRpcTelemetry.totals.logicalOperations, 1);
+    assert.equal(error.marketplaceRpcTelemetry.totals.rpcAttempts, 1);
+    assert.equal(error.marketplaceRpcTelemetry.totals.cacheHits, 0);
+    assert.equal(error.marketplaceRpcTelemetry.totals.cacheMisses, 0);
+  }
+});

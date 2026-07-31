@@ -4259,8 +4259,20 @@ async function syncMarketplaceTrades(payload) {
         faction, durationMs: Date.now() - startedAt, checkedAt: new Date().toISOString(),
       };
     } catch (error) {
-      if (error && typeof error === 'object') error.marketplaceRpcTelemetry = telemetry.finish();
-      throw error;
+      const marketplaceRpcTelemetry = telemetry.finish();
+      let telemetryAttached = false;
+      if (error && (typeof error === 'object' || typeof error === 'function')) {
+        try {
+          error.marketplaceRpcTelemetry = marketplaceRpcTelemetry;
+          telemetryAttached = error.marketplaceRpcTelemetry === marketplaceRpcTelemetry;
+        } catch (_attachmentError) {
+          telemetryAttached = false;
+        }
+      }
+      if (telemetryAttached) throw error;
+      const wrapped = new Error(String(error?.message || error || 'marketplace_sync_failed'));
+      wrapped.marketplaceRpcTelemetry = marketplaceRpcTelemetry;
+      throw wrapped;
     }
   })().finally(() => marketplaceSyncInFlight.delete(faction));
   marketplaceSyncInFlight.set(faction, promise);
