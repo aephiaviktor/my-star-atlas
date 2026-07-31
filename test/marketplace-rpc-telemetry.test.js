@@ -3,9 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
- createMarketplaceRpcTelemetry,
- createMarketplaceRpcInstrumentation,
- wrapMarketplaceConnection,
+  createMarketplaceRpcTelemetry,
+  createMarketplaceRpcInstrumentation,
+  wrapMarketplaceConnection,
 } = require('../electron/marketplace-rpc-telemetry');
 
 test('Marketplace telemetry keeps LM and GM aggregates separate', () => {
@@ -106,71 +106,71 @@ test('Marketplace telemetry finish is idempotent and seals later writes', () => 
   assert.equal(finished.durationMs, 250);
   assert.equal(finished.completedAt, '1970-01-01T00:00:04.250Z');
   assert.deepEqual(telemetry.finish(), finished);
- assert.deepEqual(telemetry.snapshot(), finished);
+  assert.deepEqual(telemetry.snapshot(), finished);
 });
 
 test('Marketplace instrumentation derives retries per provider within one logical call', async () => {
- const telemetry = createMarketplaceRpcTelemetry({ runId: 'run-attempts', now: () => 5_000 });
- const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
+  const telemetry = createMarketplaceRpcTelemetry({ runId: 'run-attempts', now: () => 5_000 });
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
 
- await instrumentation.runLogical({ operation: 'LM', method: 'getAccountInfo' }, async () => {
- instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'main' });
- instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'main' });
- instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'fallback', fallback: true });
- instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'fallback', fallback: true });
- });
+  await instrumentation.runLogical({ operation: 'LM', method: 'getAccountInfo' }, async () => {
+    instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'main' });
+    instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'main' });
+    instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'fallback', fallback: true });
+    instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'fallback', fallback: true });
+  });
 
- const result = telemetry.finish();
- assert.deepEqual(result.totals, {
- logicalOperations: 1, rpcAttempts: 4, retries: 2, fallbackCalls: 2, cacheHits: 0, cacheMisses: 0,
- });
- assert.deepEqual(result.samples.slice(1).map(({ provider, retry, fallback }) => ({ provider, retry, fallback })), [
- { provider: 'main', retry: false, fallback: false },
- { provider: 'main', retry: true, fallback: false },
- { provider: 'fallback', retry: false, fallback: true },
- { provider: 'fallback', retry: true, fallback: true },
- ]);
+  const result = telemetry.finish();
+  assert.deepEqual(result.totals, {
+    logicalOperations: 1, rpcAttempts: 4, retries: 2, fallbackCalls: 2, cacheHits: 0, cacheMisses: 0,
+  });
+  assert.deepEqual(result.samples.slice(1).map(({ provider, retry, fallback }) => ({ provider, retry, fallback })), [
+    { provider: 'main', retry: false, fallback: false },
+    { provider: 'main', retry: true, fallback: false },
+    { provider: 'fallback', retry: false, fallback: true },
+    { provider: 'fallback', retry: true, fallback: true },
+  ]);
 });
 
 test('Marketplace instrumentation isolates concurrent LM and GM logical contexts', async () => {
- const telemetry = createMarketplaceRpcTelemetry({ runId: 'run-concurrent', now: () => 6_000 });
- const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
- let releaseLm;
- const lmGate = new Promise((resolve) => { releaseLm = resolve; });
+  const telemetry = createMarketplaceRpcTelemetry({ runId: 'run-concurrent', now: () => 6_000 });
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
+  let releaseLm;
+  const lmGate = new Promise((resolve) => { releaseLm = resolve; });
 
- const lm = instrumentation.runLogical({ operation: 'LM', method: 'getAccountInfo' }, async () => {
- await lmGate;
- instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'main' });
- });
- const gm = instrumentation.runLogical({ operation: 'GM', method: 'getSignaturesForAddress' }, async () => {
- instrumentation.recordAttempt({ method: 'getSignaturesForAddress', provider: 'fallback' });
- });
- releaseLm();
- await Promise.all([lm, gm]);
+  const lm = instrumentation.runLogical({ operation: 'LM', method: 'getAccountInfo' }, async () => {
+    await lmGate;
+    instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'main' });
+  });
+  const gm = instrumentation.runLogical({ operation: 'GM', method: 'getSignaturesForAddress' }, async () => {
+    instrumentation.recordAttempt({ method: 'getSignaturesForAddress', provider: 'fallback' });
+  });
+  releaseLm();
+  await Promise.all([lm, gm]);
 
- const result = telemetry.finish();
- assert.equal(result.operations.LM.methods.getAccountInfo.logicalOperations, 1);
- assert.equal(result.operations.LM.methods.getAccountInfo.rpcAttempts, 1);
- assert.equal(result.operations.GM.methods.getSignaturesForAddress.logicalOperations, 1);
- assert.equal(result.operations.GM.methods.getSignaturesForAddress.rpcAttempts, 1);
+  const result = telemetry.finish();
+  assert.equal(result.operations.LM.methods.getAccountInfo.logicalOperations, 1);
+  assert.equal(result.operations.LM.methods.getAccountInfo.rpcAttempts, 1);
+  assert.equal(result.operations.GM.methods.getSignaturesForAddress.logicalOperations, 1);
+  assert.equal(result.operations.GM.methods.getSignaturesForAddress.rpcAttempts, 1);
 });
 
 test('Marketplace Connection wrappers record logical and wire methods without retaining inputs', async () => {
- const telemetry = createMarketplaceRpcTelemetry({ runId: 'run-wrapper', now: () => 7_000 });
- const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
- const connection = {
- endpoint: 'https://rpc.example/?api-key=rpc-secret',
- async getMultipleAccountsInfo(_secretInput) {
- instrumentation.recordAttempt({ method: 'getMultipleAccounts', provider: 'main' });
- return ['ok'];
- },
- };
- const lmConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
+  const telemetry = createMarketplaceRpcTelemetry({ runId: 'run-wrapper', now: () => 7_000 });
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
+  const connection = {
+    endpoint: 'https://rpc.example/?api-key=rpc-secret',
+    async getMultipleAccountsInfo(_secretInput) {
+      instrumentation.recordAttempt({ method: 'getMultipleAccounts', provider: 'main' });
+      return ['ok'];
+    },
+  };
+  const lmConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
 
- assert.deepEqual(await lmConnection.getMultipleAccountsInfo({ token: 'wallet-secret' }), ['ok']);
- const result = telemetry.finish();
- assert.equal(result.operations.LM.methods.getMultipleAccountsInfo.logicalOperations, 1);
- assert.equal(result.operations.LM.methods.getMultipleAccounts.rpcAttempts, 1);
- assert.equal(JSON.stringify(result).includes('rpc-secret'), false);
- assert.equal(JSON.stringify(result).includes('wallet-secret'), false);
+  assert.deepEqual(await lmConnection.getMultipleAccountsInfo({ token: 'wallet-secret' }), ['ok']);
+  const result = telemetry.finish();
+  assert.equal(result.operations.LM.methods.getMultipleAccountsInfo.logicalOperations, 1);
+  assert.equal(result.operations.LM.methods.getMultipleAccounts.rpcAttempts, 1);
+  assert.equal(JSON.stringify(result).includes('rpc-secret'), false);
+  assert.equal(JSON.stringify(result).includes('wallet-secret'), false);
 });
