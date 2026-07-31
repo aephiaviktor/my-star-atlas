@@ -62,11 +62,11 @@ test('Earnings snapshot stays on the fast path and leaves Marketplace to its own
   assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading Marketplace data\.\.\.'\)/);
 });
 
-test('Marketplace loader shows loading state and runs sync when the tab is opened or faction-switched', () => {
+test('Marketplace loader uses cached snapshots on tab activation while faction refresh still syncs', () => {
   assert.match(renderer, /function renderEarningsMarketplaceLoading/);
   assert.match(renderer, /renderEarningsMarketplaceLoading\(sync \? 'Syncing Marketplace data\.\.\.' : 'Loading Marketplace data\.\.\.'\)/);
+  assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: false \}\);/);
   assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: true \}\) : refreshEarnings\(\)/);
-  assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: true \}\);/);
 });
 
 test('Marketplace chain synchronization is exposed separately and runs in the background', () => {
@@ -120,17 +120,15 @@ test('ONI and MUD earnings accept second-instance SDU tags', () => {
   assert.match(main, /instance: \['MUD', 'MUD2'\]/);
 });
 
-test('Marketplace activation, startup, faction refresh, and manual refresh converge on one gated sync', async () => {
-  assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: true \}\);/);
-  assert.match(renderer, /void runMarketplaceBackgroundSync\(\);\s*setInterval\(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS\)/);
+test('Marketplace activation loads snapshots while background, faction refresh, and manual refresh sync through the guard', async () => {
+  assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: false \}\);/);
   assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: true \}\) : refreshEarnings\(\)/);
   assert.match(renderer, /function refreshCurrentVisibleData\([\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: true \}\)/);
   assert.match(renderer, /refreshDataButton\?\.addEventListener\('click'[\s\S]*await refreshCurrentVisibleData\(\)/);
 
   const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
   const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
-  let releaseSync;
-  const syncGate = new Promise((resolve) => { releaseSync = resolve; });
+  const snapshotPayloads = [];
   let syncCalls = 0;
   let snapshotCalls = 0;
   const context = {
@@ -142,8 +140,12 @@ test('Marketplace activation, startup, faction refresh, and manual refresh conve
     setText: () => {},
     earningsMarketplaceSyncStatus: {},
     api: {
-      syncMarketplace: async () => { syncCalls += 1; await syncGate; return { ok: true }; },
-      getMarketplaceSnapshot: async () => { snapshotCalls += 1; return { ok: true, localMarketTrades: [] }; },
+      syncMarketplace: async () => { syncCalls += 1; return { ok: true }; },
+      getMarketplaceSnapshot: async (settings) => {
+        snapshotCalls += 1;
+        snapshotPayloads.push(settings);
+        return { ok: true, faction: settings.faction, localMarketTrades: [{ id: `cached-${snapshotCalls}` }] };
+      },
     },
     latestEarningsResult: null,
     renderEarningsMarketplace: () => {},
@@ -152,14 +154,24 @@ test('Marketplace activation, startup, faction refresh, and manual refresh conve
   };
   vm.runInNewContext(`${renderer.slice(sourceStart, sourceEnd)}\nthis.refreshMarketplace = refreshMarketplace; this.runMarketplaceBackgroundSync = runMarketplaceBackgroundSync;`, context);
 
-  const tabActivation = context.refreshMarketplace({ sync: true });
-  const repeatedActivation = context.refreshMarketplace({ sync: true });
+  await context.refreshMarketplace({ sync: false });
+  await context.refreshMarketplace({ sync: false });
+  assert.equal(syncCalls, 0);
+  assert.equal(snapshotCalls, 2);
+  assert.deepEqual(snapshotPayloads.map((settings) => settings.faction), ['MUD', 'MUD']);
+
+  let releaseSync;
+  const syncGate = new Promise((resolve) => { releaseSync = resolve; });
+  context.api.syncMarketplace = async () => { syncCalls += 1; await syncGate; return { ok: true }; };
+  const startupBackground = context.runMarketplaceBackgroundSync();
   const scheduledTick = context.runMarketplaceBackgroundSync();
+  const manualRefresh = context.refreshMarketplace({ sync: true });
+  const factionRefresh = context.refreshMarketplace({ sync: true });
   assert.equal(syncCalls, 1);
   releaseSync();
-  await Promise.all([tabActivation, repeatedActivation, scheduledTick]);
+  await Promise.all([startupBackground, scheduledTick, manualRefresh, factionRefresh]);
   assert.equal(syncCalls, 1);
-  assert.equal(snapshotCalls, 1);
+  assert.equal(snapshotCalls, 3);
 });
 
 test('Marketplace skipped cross-faction sync still loads and uses the requested faction snapshot', async () => {
@@ -212,4 +224,12 @@ test('Marketplace skipped cross-faction sync still loads and uses the requested 
   assert.equal(rendered[0].faction, 'ONI');
   assert.equal(rendered[0].localMarketTrades[0].id, 'oni-cached');
   assert.equal(JSON.stringify(rendered).includes('MUD'), false);
+});
+
+test('Marketplace scheduler uses hourly guarded background synchronization', () => {
+  assert.match(renderer, /const MARKETPLACE_SYNC_INTERVAL_MS = 60 \* 60 \* 1000;/);
+  assert.doesNotMatch(renderer, /const MARKETPLACE_SYNC_INTERVAL_MS = 5 \* 60 \* 1000;/);
+  assert.match(renderer, /void runMarketplaceBackgroundSync\(\);/);
+  assert.match(renderer, /setInterval\(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS\)/);
+  assert.match(renderer, /function runMarketplaceBackgroundSync\(\) \{\s*if \(!latestSettings \|\| !getActivePlayerProfile\(latestSettings\)\) return Promise\.resolve\(\);\s*return refreshMarketplace\(\{ sync: true \}\);\s*\}/);
 });

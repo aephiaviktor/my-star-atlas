@@ -6312,7 +6312,7 @@ function renderEarningsCargoAllocations(result) {
 // to the UI on first app start.
 let earningsRefreshInFlight = null;
 const marketplaceRefreshInFlight = new Map();
-const MARKETPLACE_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+const MARKETPLACE_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 
 async function refreshMarketplace({ sync = false } = {}) {
   const settings = latestSettings || getFormPayload();
@@ -7679,7 +7679,7 @@ function setActiveEarningsSubtab(subtab) {
   renderEarningsColumnControls();
   updateTitle();
   if (subtab === 'marketplace') {
-    refreshMarketplace({ sync: true });
+    refreshMarketplace({ sync: false });
     return;
   }
   if ((subtab === 'scanning' || subtab === 'mining' || subtab === 'cargo' || subtab === 'crafting') && !latestEarningsResult) {
