@@ -34,6 +34,11 @@ const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./ma
 const { formatLocalMarketInfluxLine } = require('./local-market-trades');
 const { STARBASE_REGISTRY } = require('./starbase-registry');
 const { ASSET_REGISTRY } = require('./asset-registry');
+const {
+  createMarketplaceRpcTelemetry,
+  createMarketplaceRpcInstrumentation,
+  wrapMarketplaceConnection,
+} = require('./marketplace-rpc-telemetry');
 
 const bs58 = bs58Module.default || bs58Module;
 
@@ -4235,18 +4240,28 @@ async function syncMarketplaceTrades(payload) {
   const faction = normalizeFaction(settings.faction);
   if (marketplaceSyncInFlight.has(faction)) return marketplaceSyncInFlight.get(faction);
   const startedAt = Date.now();
+  const telemetry = createMarketplaceRpcTelemetry();
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
   const promise = (async () => {
-    const connection = createSolanaConnection(settings);
-    const local = await fetchLocalMarketTrades(settings, connection);
-    const global = await fetchGlobalMarketTrades(settings, connection);
-    const errors = [local.error, global.error].filter(Boolean);
-    return {
-      ok: errors.length === 0, trades: [...local.trades, ...global.trades], error: errors.join('; '),
-      localMarketTrades: local.trades, globalMarketTrades: global.trades,
-      localMarketRpc: local.rpc || null, globalMarketRpc: global.rpc || null,
-      rpcCoverage: 'scanner_and_open_orders_only',
-      faction, durationMs: Date.now() - startedAt, checkedAt: new Date().toISOString(),
-    };
+    try {
+      const connection = createSolanaConnection(settings, { instrumentation });
+      const localConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
+      const globalConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'GM' });
+      const local = await fetchLocalMarketTrades(settings, localConnection);
+      const global = await fetchGlobalMarketTrades(settings, globalConnection);
+      const errors = [local.error, global.error].filter(Boolean);
+      return {
+        ok: errors.length === 0, trades: [...local.trades, ...global.trades], error: errors.join('; '),
+        localMarketTrades: local.trades, globalMarketTrades: global.trades,
+        localMarketRpc: local.rpc || null, globalMarketRpc: global.rpc || null,
+        rpcCoverage: 'scanner_and_open_orders_only',
+        marketplaceRpcTelemetry: telemetry.finish(),
+        faction, durationMs: Date.now() - startedAt, checkedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      if (error && typeof error === 'object') error.marketplaceRpcTelemetry = telemetry.finish();
+      throw error;
+    }
   })().finally(() => marketplaceSyncInFlight.delete(faction));
   marketplaceSyncInFlight.set(faction, promise);
   return promise;
@@ -4469,24 +4484,51 @@ async function acquireRpcSlot(settings, label = 'solanaRpc') {
   });
 }
 
-function createSolanaConnection(settings) {
-  const primaryUrl = getRpcUrl(settings);
-  const fallbackUrl = getRpcFallbackUrl(settings);
-  const connectionConfig = {
+function resolveSolanaConnectionRoutes(settings) {
+  if (!settings?.useRpcLimiter) {
+    return { primaryUrl: String(settings?.rpcUrl || '').trim() || DEFAULT_RPC_URL, primaryProvider: 'main' };
+  }
+  const status = getRpcLimiterStatus();
+  const mainUrl = status.providers?.main?.url;
+  const configuredFallbackUrl = status.providers?.fallback?.url;
+  const primaryUrl = mainUrl || configuredFallbackUrl;
+  if (!primaryUrl || !isUsableSharedRpcUrl(primaryUrl)) {
+    throw new Error('Use RPC Limiter is enabled, but no RPC Limiter URLs are configured. Send settings to RPC Limiter first.');
+  }
+  const fallbackUrl = mainUrl && configuredFallbackUrl
+    && configuredFallbackUrl !== primaryUrl && isUsableSharedRpcUrl(configuredFallbackUrl)
+    ? configuredFallbackUrl
+    : undefined;
+  return {
+    primaryUrl,
+    primaryProvider: mainUrl ? 'main' : 'fallback',
+    fallbackUrl,
+  };
+}
+
+function createSolanaConnection(settings, { instrumentation } = {}) {
+  const routes = resolveSolanaConnectionRoutes(settings);
+  const createConnectionConfig = (provider, fallback) => ({
     commitment: 'confirmed',
     disableRetryOnRateLimit: false,
     fetch: async (info, init) => {
-      await acquireRpcSlot(settings, getRpcMethodLabel(init));
+      const method = getRpcMethodLabel(init);
+      await acquireRpcSlot(settings, method);
+      instrumentation?.recordAttempt({ method, provider, fallback });
       return fetch(info, init);
     },
-  };
-  const primary = new Connection(primaryUrl, connectionConfig);
-  if (!fallbackUrl || fallbackUrl === primaryUrl) return primary;
+  });
+  const primary = new Connection(
+    routes.primaryUrl,
+    createConnectionConfig(routes.primaryProvider, false),
+  );
+  const fallbackUrl = routes.fallbackUrl;
+  if (!fallbackUrl || fallbackUrl === routes.primaryUrl) return primary;
 
   // Two-provider failover: try the primary (main) on every call, and on
   // any thrown error fall through to the secondary (fallback) URL. This
   // mirrors the createFailoverConnection shape used by the other bots.
-  const fallback = new Connection(fallbackUrl, connectionConfig);
+  const fallback = new Connection(fallbackUrl, createConnectionConfig('fallback', true));
   return new Proxy(primary, {
     get(target, prop, receiver) {
       const primaryFn = Reflect.get(target, prop, receiver);
@@ -6520,7 +6562,12 @@ handleTrustedIpc('marketplace:sync', async (_event, payload) => {
   try {
     return await syncMarketplaceTrades(payload);
   } catch (error) {
-    return { ok: false, error: String(error?.message || error || 'marketplace_sync_failed'), checkedAt: new Date().toISOString() };
+    return {
+      ok: false,
+      error: String(error?.message || error || 'marketplace_sync_failed'),
+      marketplaceRpcTelemetry: error?.marketplaceRpcTelemetry || null,
+      checkedAt: new Date().toISOString(),
+    };
   }
 });
 handleTrustedIpc('influx:test', async (_event, payload) => {
