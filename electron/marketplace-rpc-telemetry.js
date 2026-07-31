@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { AsyncLocalStorage } = require('node:async_hooks');
 
 const DEFAULT_SAMPLE_LIMIT = 50;
 const MAX_SAMPLE_LIMIT = 100;
@@ -127,4 +128,58 @@ function createMarketplaceRpcTelemetry({ runId, maxSamples = DEFAULT_SAMPLE_LIMI
   };
 }
 
-module.exports = { createMarketplaceRpcTelemetry, DEFAULT_SAMPLE_LIMIT, MAX_SAMPLE_LIMIT };
+function createMarketplaceRpcInstrumentation(telemetry) {
+ if (!telemetry || typeof telemetry.recordLogical !== 'function' || typeof telemetry.recordAttempt !== 'function') {
+ throw new TypeError('Marketplace RPC telemetry collector is required.');
+ }
+ const callContext = new AsyncLocalStorage();
+
+ function runLogical({ operation, method } = {}, callback) {
+ if (typeof callback !== 'function') throw new TypeError('Marketplace RPC callback is required.');
+ const safeOperation = normalizeOperation(operation);
+ telemetry.recordLogical({ operation: safeOperation, method });
+ return callContext.run({ operation: safeOperation, attempts: Object.create(null) }, callback);
+ }
+
+ function recordAttempt({ method, provider, fallback = false } = {}) {
+ const active = callContext.getStore();
+ const safeProvider = normalizeProvider(provider);
+ const priorAttempts = Number(active?.attempts?.[safeProvider] || 0);
+ if (active) active.attempts[safeProvider] = priorAttempts + 1;
+ telemetry.recordAttempt({
+ operation: active?.operation || 'UNKNOWN',
+ method,
+ provider: safeProvider,
+ retry: priorAttempts > 0,
+ fallback: fallback === true,
+ });
+ }
+
+ return { runLogical, recordAttempt };
+}
+
+function wrapMarketplaceConnection(connection, { instrumentation, operation } = {}) {
+ if (!connection || typeof connection !== 'object') throw new TypeError('Marketplace Connection is required.');
+ if (!instrumentation || typeof instrumentation.runLogical !== 'function') {
+ throw new TypeError('Marketplace RPC instrumentation is required.');
+ }
+ return new Proxy(connection, {
+ get(target, prop, receiver) {
+ const value = Reflect.get(target, prop, receiver);
+ if (typeof value !== 'function') return value;
+ const method = typeof prop === 'string' ? prop : 'unknown';
+ return (...args) => instrumentation.runLogical(
+ { operation, method },
+ () => value.apply(target, args),
+ );
+ },
+ });
+}
+
+module.exports = {
+ createMarketplaceRpcTelemetry,
+ createMarketplaceRpcInstrumentation,
+ wrapMarketplaceConnection,
+ DEFAULT_SAMPLE_LIMIT,
+ MAX_SAMPLE_LIMIT,
+};
