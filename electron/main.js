@@ -4243,6 +4243,8 @@ async function syncMarketplaceTrades(payload) {
     return {
       ok: errors.length === 0, trades: [...local.trades, ...global.trades], error: errors.join('; '),
       localMarketTrades: local.trades, globalMarketTrades: global.trades,
+      localMarketRpc: local.rpc || null, globalMarketRpc: global.rpc || null,
+      rpcCoverage: 'scanner_and_open_orders_only',
       faction, durationMs: Date.now() - startedAt, checkedAt: new Date().toISOString(),
     };
   })().finally(() => marketplaceSyncInFlight.delete(faction));
