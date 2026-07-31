@@ -84,3 +84,23 @@ test('Marketplace telemetry collectors are isolated and perform no RPC work', ()
   assert.equal(second.finish().totals.rpcAttempts, 0);
   assert.equal(second.finish().totals.cacheHits, 1);
 });
+
+test('Marketplace telemetry finish is idempotent and seals later writes', () => {
+  let time = 4_000;
+  const telemetry = createMarketplaceRpcTelemetry({ runId: 'run-finished', now: () => time });
+  telemetry.recordLogical({ operation: 'LM', method: 'getAccountInfo' });
+  time = 4_250;
+
+  const finished = telemetry.finish();
+  time = 9_000;
+  telemetry.recordLogical({ operation: 'GM', method: 'getSignaturesForAddress' });
+  telemetry.recordAttempt({
+    operation: 'GM', method: 'getSignaturesForAddress', provider: 'main', retry: true,
+  });
+  telemetry.recordCache({ operation: 'GM', method: 'getSignaturesForAddress', hit: true });
+
+  assert.equal(finished.durationMs, 250);
+  assert.equal(finished.completedAt, '1970-01-01T00:00:04.250Z');
+  assert.deepEqual(telemetry.finish(), finished);
+  assert.deepEqual(telemetry.snapshot(), finished);
+});

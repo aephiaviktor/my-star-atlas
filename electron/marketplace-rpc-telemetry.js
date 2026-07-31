@@ -67,6 +67,7 @@ function createMarketplaceRpcTelemetry({ runId, maxSamples = DEFAULT_SAMPLE_LIMI
   }
 
   function recordLogical({ operation, method } = {}) {
+    if (completedMs != null) return;
     const safeOperation = normalizeOperation(operation);
     const safeMethod = normalizeMethod(method);
     increment(safeOperation, safeMethod, ['logicalOperations']);
@@ -74,6 +75,7 @@ function createMarketplaceRpcTelemetry({ runId, maxSamples = DEFAULT_SAMPLE_LIMI
   }
 
   function recordAttempt({ operation, method, provider, retry = false, fallback = false } = {}) {
+    if (completedMs != null) return;
     const safeOperation = normalizeOperation(operation);
     const safeMethod = normalizeMethod(method);
     const keys = ['rpcAttempts'];
@@ -87,6 +89,7 @@ function createMarketplaceRpcTelemetry({ runId, maxSamples = DEFAULT_SAMPLE_LIMI
   }
 
   function recordCache({ operation, method, hit } = {}) {
+    if (completedMs != null) return;
     const safeOperation = normalizeOperation(operation);
     const safeMethod = normalizeMethod(method);
     increment(safeOperation, safeMethod, [hit === true ? 'cacheHits' : 'cacheMisses']);
