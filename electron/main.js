@@ -4234,15 +4234,49 @@ async function fetchGlobalMarketTrades(settings, connection) {
   };
 }
 
-const marketplaceSyncInFlight = new Map();
+let marketplaceSyncActive = null;
+
+function marketplaceSyncAttempt(disposition, requestedFaction, activeFaction, runId) {
+  return { disposition, requestedFaction, activeFaction, runId };
+}
+
+function marketplaceSyncCallerError(error, attempt, preserveOriginal = false) {
+  if (preserveOriginal && error && (typeof error === 'object' || typeof error === 'function')) {
+    try {
+      error.marketplaceSyncAttempt = attempt;
+      if (error.marketplaceSyncAttempt === attempt) return error;
+    } catch (_attachmentError) {
+      // Fall through to a caller-specific wrapper.
+    }
+  }
+  const wrapped = new Error(String(error?.message || error || 'marketplace_sync_failed'));
+  wrapped.marketplaceRpcTelemetry = error?.marketplaceRpcTelemetry || null;
+  wrapped.marketplaceSyncAttempt = attempt;
+  return wrapped;
+}
+
 async function syncMarketplaceTrades(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const faction = normalizeFaction(settings.faction);
-  if (marketplaceSyncInFlight.has(faction)) return marketplaceSyncInFlight.get(faction);
+  if (marketplaceSyncActive) {
+    const active = marketplaceSyncActive;
+    const disposition = active.faction === faction ? 'coalesced' : 'skipped';
+    const attempt = marketplaceSyncAttempt(disposition, faction, active.faction, active.runId);
+    if (disposition === 'skipped') {
+      return { ok: true, skipped: true, faction, marketplaceSyncAttempt: attempt };
+    }
+    try {
+      const result = await active.promise;
+      return { ...result, marketplaceSyncAttempt: attempt };
+    } catch (error) {
+      throw marketplaceSyncCallerError(error, attempt);
+    }
+  }
   const startedAt = Date.now();
   const telemetry = createMarketplaceRpcTelemetry();
   const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
-  const promise = (async () => {
+  const runId = telemetry.snapshot().runId;
+  const underlyingPromise = (async () => {
     try {
       const connection = createSolanaConnection(settings, { instrumentation });
       const localConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
@@ -4274,9 +4308,19 @@ async function syncMarketplaceTrades(payload) {
       wrapped.marketplaceRpcTelemetry = marketplaceRpcTelemetry;
       throw wrapped;
     }
-  })().finally(() => marketplaceSyncInFlight.delete(faction));
-  marketplaceSyncInFlight.set(faction, promise);
-  return promise;
+  })();
+  const active = { faction, runId, promise: null };
+  active.promise = underlyingPromise.finally(() => {
+    if (marketplaceSyncActive === active) marketplaceSyncActive = null;
+  });
+  marketplaceSyncActive = active;
+  const attempt = marketplaceSyncAttempt('started', faction, faction, runId);
+  try {
+    const result = await active.promise;
+    return { ...result, marketplaceSyncAttempt: attempt };
+  } catch (error) {
+    throw marketplaceSyncCallerError(error, attempt, true);
+  }
 }
 
 async function fetchMarketplaceSnapshot(payload) {
@@ -6578,6 +6622,7 @@ handleTrustedIpc('marketplace:sync', async (_event, payload) => {
       ok: false,
       error: String(error?.message || error || 'marketplace_sync_failed'),
       marketplaceRpcTelemetry: error?.marketplaceRpcTelemetry || null,
+      marketplaceSyncAttempt: error?.marketplaceSyncAttempt || null,
       checkedAt: new Date().toISOString(),
     };
   }

@@ -14,7 +14,7 @@ const {
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 
 test('Marketplace sync returns separate partial LM and GM RPC summaries without settings', async () => {
-  const start = main.indexOf('async function syncMarketplaceTrades(payload)');
+  const start = main.indexOf('function marketplaceSyncAttempt');
   const end = main.indexOf('async function fetchMarketplaceSnapshot', start);
   const functionSource = main.slice(start, end);
   const calls = [];
@@ -28,7 +28,7 @@ test('Marketplace sync returns separate partial LM and GM RPC summaries without 
   const receivedConnections = [];
   const context = {
     input,
-    marketplaceSyncInFlight: new Map(),
+    marketplaceSyncActive: null,
     normalizeSettings: (value) => value,
     readSettings: async () => { throw new Error('unexpected readSettings call'); },
     normalizeFaction: (value) => value,
@@ -84,6 +84,9 @@ test('Marketplace sync returns separate partial LM and GM RPC summaries without 
     signatureRequests: 7, transactionRequests: 11, totalRpcRequests: 18,
   });
   assert.equal(plainResult.rpcCoverage, 'scanner_and_open_orders_only');
+  assert.deepEqual(plainResult.marketplaceSyncAttempt, {
+    disposition: 'started', requestedFaction: 'MUD', activeFaction: 'MUD', runId: plainResult.marketplaceRpcTelemetry.runId,
+  });
   assert.equal(receivedConnections.length, 2);
   assert.notEqual(receivedConnections[0], receivedConnections[1]);
   assert.equal(receivedConnections[0].marker, underlyingConnection.marker);
@@ -102,7 +105,7 @@ test('Marketplace sync returns separate partial LM and GM RPC summaries without 
 });
 
 test('Marketplace sync seals telemetry on unexpected failure and coalesces callers', async () => {
-  const start = main.indexOf('async function syncMarketplaceTrades(payload)');
+  const start = main.indexOf('function marketplaceSyncAttempt');
   const end = main.indexOf('async function fetchMarketplaceSnapshot', start);
   const functionSource = main.slice(start, end);
   let releaseFailure;
@@ -110,7 +113,7 @@ test('Marketplace sync seals telemetry on unexpected failure and coalesces calle
   let connectionCount = 0;
   const context = {
     input: { faction: 'ONI' },
-    marketplaceSyncInFlight: new Map(),
+    marketplaceSyncActive: null,
     normalizeSettings: (value) => value,
     readSettings: async () => ({}),
     normalizeFaction: (value) => value,
@@ -146,6 +149,9 @@ test('Marketplace sync seals telemetry on unexpected failure and coalesces calle
   assert.equal(firstError.message, 'simulated_failure');
   assert.equal(secondError.message, 'simulated_failure');
   assert.equal(firstError.marketplaceRpcTelemetry.runId, secondError.marketplaceRpcTelemetry.runId);
+  assert.equal(firstError.marketplaceSyncAttempt.disposition, 'started');
+  assert.equal(secondError.marketplaceSyncAttempt.disposition, 'coalesced');
+  assert.equal(firstError.marketplaceSyncAttempt.runId, secondError.marketplaceSyncAttempt.runId);
   assert.equal(firstError.marketplaceRpcTelemetry.operations.LM.methods.getAccountInfo.logicalOperations, 1);
   assert.equal(firstError.marketplaceRpcTelemetry.totals.rpcAttempts, 1);
   assert.equal(firstError.marketplaceRpcTelemetry.totals.cacheHits, 0);
@@ -153,7 +159,7 @@ test('Marketplace sync seals telemetry on unexpected failure and coalesces calle
 });
 
 test('Marketplace sync preserves telemetry for primitive and frozen errors', async () => {
-  const start = main.indexOf('async function syncMarketplaceTrades(payload)');
+  const start = main.indexOf('function marketplaceSyncAttempt');
   const end = main.indexOf('async function fetchMarketplaceSnapshot', start);
   const functionSource = main.slice(start, end);
   const cases = [
@@ -164,7 +170,7 @@ test('Marketplace sync preserves telemetry for primitive and frozen errors', asy
   for (const scenario of cases) {
     const context = {
       input: { faction: 'MUD' },
-      marketplaceSyncInFlight: new Map(),
+      marketplaceSyncActive: null,
       normalizeSettings: (value) => value,
       readSettings: async () => ({}),
       normalizeFaction: (value) => value,
@@ -193,6 +199,8 @@ test('Marketplace sync preserves telemetry for primitive and frozen errors', asy
     assert.equal(error.message, scenario.message);
     assert.notEqual(error.marketplaceRpcTelemetry, null);
     assert.notEqual(error.marketplaceRpcTelemetry.completedAt, null);
+    assert.equal(error.marketplaceSyncAttempt.disposition, 'started');
+    assert.equal(error.marketplaceSyncAttempt.runId, error.marketplaceRpcTelemetry.runId);
     assert.equal(error.marketplaceRpcTelemetry.operations.LM.methods.getAccountInfo.logicalOperations, 1);
     assert.equal(error.marketplaceRpcTelemetry.totals.logicalOperations, 1);
     assert.equal(error.marketplaceRpcTelemetry.totals.rpcAttempts, 1);

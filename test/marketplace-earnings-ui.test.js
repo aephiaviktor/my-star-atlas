@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
 const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
@@ -117,4 +118,98 @@ test('Marketplace Influx read includes selected profile pubkey rows and global G
 test('ONI and MUD earnings accept second-instance SDU tags', () => {
   assert.match(main, /instance: \['ONI', 'ONI2'\]/);
   assert.match(main, /instance: \['MUD', 'MUD2'\]/);
+});
+
+test('Marketplace activation, startup, faction refresh, and manual refresh converge on one gated sync', async () => {
+  assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: true \}\);/);
+  assert.match(renderer, /void runMarketplaceBackgroundSync\(\);\s*setInterval\(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS\)/);
+  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: true \}\) : refreshEarnings\(\)/);
+  assert.match(renderer, /function refreshCurrentVisibleData\([\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: true \}\)/);
+  assert.match(renderer, /refreshDataButton\?\.addEventListener\('click'[\s\S]*await refreshCurrentVisibleData\(\)/);
+
+  const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
+  const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
+  let releaseSync;
+  const syncGate = new Promise((resolve) => { releaseSync = resolve; });
+  let syncCalls = 0;
+  let snapshotCalls = 0;
+  const context = {
+    latestSettings: { faction: 'MUD', playerProfiles: { MUD: 'profile' } },
+    getFormPayload: () => ({}),
+    normalizeFaction: (value) => value,
+    getActivePlayerProfile: () => 'profile',
+    renderEarningsMarketplaceLoading: () => {},
+    setText: () => {},
+    earningsMarketplaceSyncStatus: {},
+    api: {
+      syncMarketplace: async () => { syncCalls += 1; await syncGate; return { ok: true }; },
+      getMarketplaceSnapshot: async () => { snapshotCalls += 1; return { ok: true, localMarketTrades: [] }; },
+    },
+    latestEarningsResult: null,
+    renderEarningsMarketplace: () => {},
+    console: { error: () => {} },
+    Promise,
+  };
+  vm.runInNewContext(`${renderer.slice(sourceStart, sourceEnd)}\nthis.refreshMarketplace = refreshMarketplace; this.runMarketplaceBackgroundSync = runMarketplaceBackgroundSync;`, context);
+
+  const tabActivation = context.refreshMarketplace({ sync: true });
+  const repeatedActivation = context.refreshMarketplace({ sync: true });
+  const scheduledTick = context.runMarketplaceBackgroundSync();
+  assert.equal(syncCalls, 1);
+  releaseSync();
+  await Promise.all([tabActivation, repeatedActivation, scheduledTick]);
+  assert.equal(syncCalls, 1);
+  assert.equal(snapshotCalls, 1);
+});
+
+test('Marketplace skipped cross-faction sync still loads and uses the requested faction snapshot', async () => {
+  const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
+  const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
+  const rendered = [];
+  const syncPayloads = [];
+  const snapshotPayloads = [];
+  const oniSettings = { faction: 'ONI', playerProfiles: { ONI: 'oni-profile' } };
+  const oniSnapshot = { ok: true, faction: 'ONI', localMarketTrades: [{ id: 'oni-cached' }] };
+  const context = {
+    latestSettings: oniSettings,
+    getFormPayload: () => ({}),
+    normalizeFaction: (value) => value,
+    getActivePlayerProfile: () => 'oni-profile',
+    renderEarningsMarketplaceLoading: () => {},
+    setText: () => {},
+    earningsMarketplaceSyncStatus: {},
+    api: {
+      syncMarketplace: async (settings) => {
+        syncPayloads.push(settings);
+        return {
+          ok: true,
+          skipped: true,
+          faction: 'ONI',
+          marketplaceSyncAttempt: {
+            disposition: 'skipped', requestedFaction: 'ONI', activeFaction: 'MUD', runId: 'mud-run',
+          },
+        };
+      },
+      getMarketplaceSnapshot: async (settings) => {
+        snapshotPayloads.push(settings);
+        return oniSnapshot;
+      },
+    },
+    latestEarningsResult: null,
+    renderEarningsMarketplace: (result) => rendered.push(result),
+    console: { error: () => {} },
+    Promise,
+  };
+  vm.runInNewContext(`${renderer.slice(sourceStart, sourceEnd)}\nthis.refreshMarketplace = refreshMarketplace;`, context);
+
+  const result = await context.refreshMarketplace({ sync: true });
+  assert.equal(syncPayloads.length, 1);
+  assert.equal(syncPayloads[0].faction, 'ONI');
+  assert.equal(snapshotPayloads.length, 1);
+  assert.equal(snapshotPayloads[0].faction, 'ONI');
+  assert.equal(result, oniSnapshot);
+  assert.equal(rendered.length, 1);
+  assert.equal(rendered[0].faction, 'ONI');
+  assert.equal(rendered[0].localMarketTrades[0].id, 'oni-cached');
+  assert.equal(JSON.stringify(rendered).includes('MUD'), false);
 });
