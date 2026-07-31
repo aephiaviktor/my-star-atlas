@@ -38,6 +38,9 @@ const {
   createMarketplaceRpcTelemetry,
   createMarketplaceRpcInstrumentation,
   wrapMarketplaceConnection,
+  createMarketplaceRpcAttemptBudget,
+  isMarketplaceRpcBudgetExhaustedError,
+  DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
 } = require('./marketplace-rpc-telemetry');
 
 const bs58 = bs58Module.default || bs58Module;
@@ -4068,17 +4071,42 @@ async function writeInfluxLines(settings, lines) {
   return true;
 }
 
+function resolveMarketplaceCheckpointCursors(checkpoint, scanned) {
+  if (scanned.exhaustion) {
+    return { walletCursors: checkpoint.walletCursors, orderCursors: checkpoint.orderCursors };
+  }
+  return { walletCursors: scanned.walletCursors, orderCursors: scanned.orderCursors };
+}
+
 async function fetchLocalMarketTrades(settings, connection) {
   const faction = normalizeFaction(settings.faction);
   const profile = getSelectedPlayerProfile(settings);
   if (!profile) return { trades: [], error: 'local_market_profile_not_configured' };
-  const accountInfo = await connection.getAccountInfo(new PublicKey(profile), 'confirmed');
+  let accountInfo;
+  try {
+    accountInfo = await connection.getAccountInfo(new PublicKey(profile), 'confirmed');
+  } catch (error) {
+    if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
+    return { trades: [], error: '', rpc: null, exhaustion: error };
+  }
   const trackedWallets = decodePlayerProfileWallets(accountInfo);
   if (!trackedWallets.length) return { trades: [], error: 'local_market_profile_has_no_active_wallets' };
-  const marketAssetsByMint = await buildLocalMarketAssetMap(connection, faction);
+  let marketAssetsByMint;
+  try {
+    marketAssetsByMint = await buildLocalMarketAssetMap(connection, faction);
+  } catch (error) {
+    if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
+    return { trades: [], error: '', rpc: null, exhaustion: error };
+  }
   const filePath = localMarketCheckpointPath(faction);
   const checkpoint = await loadLocalMarketTradeCheckpoint(filePath);
-  const openOrders = await fetchOpenLocalMarketOrderIds(connection, trackedWallets);
+  let openOrders;
+  try {
+    openOrders = await fetchOpenLocalMarketOrderIds(connection, trackedWallets);
+  } catch (error) {
+    if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
+    return { trades: [], error: '', rpc: null, exhaustion: error };
+  }
   const existing = checkpoint.trades;
   const startIso = resolveLocalMarketStartIso();
   const startMs = Date.parse(startIso);
@@ -4137,6 +4165,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   } catch (error) {
     publishError = String(error?.message || error || 'local_market_influx_write_failed');
   }
+  const persistedCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
   await writeJsonAtomic(filePath, {
     schemaVersion: 2,
     faction,
@@ -4144,25 +4173,31 @@ async function fetchLocalMarketTrades(settings, connection) {
     savedAt: new Date().toISOString(),
     orders: scanned.orders,
     trades,
-    walletCursors: scanned.walletCursors,
-    orderCursors: scanned.orderCursors,
+    ...persistedCursors,
     activeOrderIds: scanned.activeOrderIds,
     archivedOrderIds: scanned.archivedOrderIds,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     marketplaceBackfilled: checkpoint.marketplaceBackfilled === true,
-    tradeEnrichmentVersion: scanned.stats.transactionMisses === 0 && !publishError ? 1 : checkpoint.tradeEnrichmentVersion,
+    tradeEnrichmentVersion: !scanned.exhaustion && scanned.stats.transactionMisses === 0 && !publishError ? 1 : checkpoint.tradeEnrichmentVersion,
   });
   return {
     trades,
     error: publishError,
     rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
+    exhaustion: scanned.exhaustion || null,
   };
 }
 
 async function fetchGlobalMarketTrades(settings, connection) {
   const profile = getSelectedPlayerProfile(settings);
   if (!profile) return { trades: [], error: 'gm_profile_not_configured' };
-  const accountInfo = await connection.getAccountInfo(new PublicKey(profile), 'confirmed');
+  let accountInfo;
+  try {
+    accountInfo = await connection.getAccountInfo(new PublicKey(profile), 'confirmed');
+  } catch (error) {
+    if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
+    return { trades: [], assetFlows: [], error: '', rpc: null, exhaustion: error };
+  }
   let extraWallets;
   try {
     extraWallets = parseGmTradingWallets(settings.gmTradingWallets);
@@ -4173,7 +4208,13 @@ async function fetchGlobalMarketTrades(settings, connection) {
   if (!trackedWallets.length) return { trades: [], error: 'gm_profile_has_no_handler_wallet' };
   const filePath = globalMarketCheckpointPath();
   const checkpoint = await loadLocalMarketTradeCheckpoint(filePath);
-  const openOrders = await fetchOpenLocalMarketOrderIds(connection, trackedWallets);
+  let openOrders;
+  try {
+    openOrders = await fetchOpenLocalMarketOrderIds(connection, trackedWallets);
+  } catch (error) {
+    if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
+    return { trades: [], assetFlows: [], error: '', rpc: null, exhaustion: error };
+  }
   const existing = checkpoint.trades;
   const startIso = resolveLocalMarketStartIso();
   const startMs = Date.parse(startIso);
@@ -4221,16 +4262,18 @@ async function fetchGlobalMarketTrades(settings, connection) {
   } catch (error) {
     publishError = String(error?.message || error || 'gm_market_influx_write_failed');
   }
+  const persistedCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
   await writeJsonAtomic(filePath, {
     schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets,
-    orders: scanned.orders, trades, assetFlows, walletCursors: scanned.walletCursors, orderCursors: scanned.orderCursors,
+    orders: scanned.orders, trades, assetFlows, ...persistedCursors,
     activeOrderIds: scanned.activeOrderIds, archivedOrderIds: scanned.archivedOrderIds,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(), publishedFlowIds: Array.from(checkpoint.publishedFlowIds).sort(), marketplaceBackfilled: true,
-    assetFlowBackfilled: publishError === '',
+    assetFlowBackfilled: !scanned.exhaustion && publishError === '',
   });
   return {
     trades, assetFlows, error: publishError,
     rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
+    exhaustion: scanned.exhaustion || null,
   };
 }
 
@@ -4255,7 +4298,7 @@ function marketplaceSyncCallerError(error, attempt, preserveOriginal = false) {
   return wrapped;
 }
 
-async function syncMarketplaceTrades(payload) {
+async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT } = {}) {
   const settings = normalizeSettings(payload || (await readSettings()));
   const faction = normalizeFaction(settings.faction);
   if (marketplaceSyncActive) {
@@ -4274,7 +4317,8 @@ async function syncMarketplaceTrades(payload) {
   }
   const startedAt = Date.now();
   const telemetry = createMarketplaceRpcTelemetry();
-  const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
+  const attemptBudget = createMarketplaceRpcAttemptBudget({ limit: rpcAttemptLimit });
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry, { attemptBudget });
   const runId = telemetry.snapshot().runId;
   const underlyingPromise = (async () => {
     try {
@@ -4282,16 +4326,40 @@ async function syncMarketplaceTrades(payload) {
       const localConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
       const globalConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'GM' });
       const local = await fetchLocalMarketTrades(settings, localConnection);
-      const global = await fetchGlobalMarketTrades(settings, globalConnection);
+      let exhaustion = local.exhaustion || null;
+      let global = { trades: [], assetFlows: [], error: '', rpc: null };
+      if (!exhaustion) {
+        const budgetBeforeGm = attemptBudget.snapshot();
+        if (budgetBeforeGm.used >= budgetBeforeGm.limit) {
+          exhaustion = { operation: 'GM', method: null };
+        } else {
+          global = await fetchGlobalMarketTrades(settings, globalConnection);
+          exhaustion = global.exhaustion || null;
+        }
+      }
       const errors = [local.error, global.error].filter(Boolean);
-      return {
+      const marketplaceRpcTelemetry = telemetry.finish();
+      const result = {
         ok: errors.length === 0, trades: [...local.trades, ...global.trades], error: errors.join('; '),
         localMarketTrades: local.trades, globalMarketTrades: global.trades,
         localMarketRpc: local.rpc || null, globalMarketRpc: global.rpc || null,
         rpcCoverage: 'scanner_and_open_orders_only',
-        marketplaceRpcTelemetry: telemetry.finish(),
+        marketplaceRpcTelemetry,
         faction, durationMs: Date.now() - startedAt, checkedAt: new Date().toISOString(),
       };
+      if (exhaustion) {
+        const budget = attemptBudget.snapshot();
+        result.ok = true;
+        result.status = 'budget_exhausted';
+        result.resumable = true;
+        result.partial = true;
+        result.marketplaceRpcBudget = {
+          status: 'exhausted', limit: budget.limit, used: budget.used,
+          operation: exhaustion.operation === 'GM' ? 'GM' : 'LM',
+          method: exhaustion.method == null ? null : String(exhaustion.method).slice(0, 64),
+        };
+      }
+      return result;
     } catch (error) {
       const marketplaceRpcTelemetry = telemetry.finish();
       let telemetryAttached = false;
@@ -4570,7 +4638,7 @@ function createSolanaConnection(settings, { instrumentation } = {}) {
     fetch: async (info, init) => {
       const method = getRpcMethodLabel(init);
       await acquireRpcSlot(settings, method);
-      instrumentation?.recordAttempt({ method, provider, fallback });
+      instrumentation?.admitAttempt({ method, provider, fallback });
       return fetch(info, init);
     },
   });
@@ -4595,6 +4663,9 @@ function createSolanaConnection(settings, { instrumentation } = {}) {
         try {
           return await primaryFn.apply(target, args);
         } catch (primaryError) {
+          const budgetExhaustion = instrumentation?.getBudgetExhaustion?.();
+          if (budgetExhaustion) throw budgetExhaustion;
+          if (isMarketplaceRpcBudgetExhaustedError(primaryError)) throw primaryError;
           // Report 429s back to the shared limiter so the primary (main)
           // goes into cooldown and the next call routes to the fallback.
           // We use 'main' as the failed-provider id here because this

@@ -6,6 +6,9 @@ const {
   createMarketplaceRpcTelemetry,
   createMarketplaceRpcInstrumentation,
   wrapMarketplaceConnection,
+  createMarketplaceRpcAttemptBudget,
+  isMarketplaceRpcBudgetExhaustedError,
+  DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
 } = require('../electron/marketplace-rpc-telemetry');
 
 test('Marketplace telemetry keeps LM and GM aggregates separate', () => {
@@ -173,4 +176,42 @@ test('Marketplace Connection wrappers record logical and wire methods without re
   assert.equal(result.operations.LM.methods.getMultipleAccounts.rpcAttempts, 1);
   assert.equal(JSON.stringify(result).includes('rpc-secret'), false);
   assert.equal(JSON.stringify(result).includes('wallet-secret'), false);
+});
+
+test('Marketplace attempt budget retains the exact first refused sentinel', () => {
+  const attemptBudget = createMarketplaceRpcAttemptBudget({ limit: 0 });
+  let first;
+  let second;
+  try { attemptBudget.admit('LM', 'getAccountInfo'); } catch (error) { first = error; }
+  try { attemptBudget.admit('GM', 'getSignaturesForAddress'); } catch (error) { second = error; }
+
+  assert.equal(first, second);
+  assert.equal(attemptBudget.getExhaustion(), first);
+  assert.equal(first.operation, 'LM');
+  assert.equal(first.method, 'getAccountInfo');
+  assert.deepEqual(attemptBudget.snapshot(), { limit: 0, used: 0 });
+});
+
+test('Marketplace attempt budget defaults to 300 and refuses without telemetry or cache cost', async () => {
+  assert.equal(DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT, 300);
+  const telemetry = createMarketplaceRpcTelemetry({ runId: 'budget-limit' });
+  const attemptBudget = createMarketplaceRpcAttemptBudget({ limit: 2 });
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry, { attemptBudget });
+
+  await instrumentation.runLogical({ operation: 'LM', method: 'getAccountInfo' }, async () => {
+    instrumentation.admitAttempt({ method: 'getAccountInfo', provider: 'main' });
+    instrumentation.admitAttempt({ method: 'getAccountInfo', provider: 'main' });
+    assert.throws(
+      () => instrumentation.admitAttempt({ method: 'getAccountInfo', provider: 'fallback', fallback: true }),
+      (error) => isMarketplaceRpcBudgetExhaustedError(error) && error.operation === 'LM' && error.method === 'getAccountInfo',
+    );
+  });
+  telemetry.recordCache({ operation: 'LM', method: 'getAccountInfo', hit: true });
+
+  assert.deepEqual(attemptBudget.snapshot(), { limit: 2, used: 2 });
+  const result = telemetry.finish();
+  assert.equal(result.totals.rpcAttempts, 2);
+  assert.equal(result.totals.retries, 1);
+  assert.equal(result.totals.fallbackCalls, 0);
+  assert.equal(result.totals.cacheHits, 1);
 });

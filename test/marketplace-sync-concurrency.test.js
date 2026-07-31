@@ -9,6 +9,8 @@ const {
   createMarketplaceRpcTelemetry,
   createMarketplaceRpcInstrumentation,
   wrapMarketplaceConnection,
+  createMarketplaceRpcAttemptBudget,
+  DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
 } = require('../electron/marketplace-rpc-telemetry');
 
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
@@ -25,6 +27,8 @@ function createContext(overrides = {}) {
     createMarketplaceRpcTelemetry,
     createMarketplaceRpcInstrumentation,
     wrapMarketplaceConnection,
+    createMarketplaceRpcAttemptBudget,
+    DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
     createSolanaConnection: (_settings, { instrumentation }) => ({
       async getAccountInfo() {
         instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'main' });
@@ -216,4 +220,47 @@ test('Marketplace failure keeps caller diagnostics isolated and releases the glo
   assert.equal(oni.marketplaceSyncAttempt.disposition, 'started');
   assert.notEqual(oni.marketplaceRpcTelemetry.runId, startedError.marketplaceRpcTelemetry.runId);
   assert.equal(connectionCount, 2);
+});
+
+test('Marketplace exhaustion is shared by coalesced callers and releases the global guard', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let exhaust = true;
+  const context = createContext({
+    createSolanaConnection: (_settings, { instrumentation }) => ({
+      async getAccountInfo() {
+        instrumentation.admitAttempt({ method: 'getAccountInfo', provider: 'main' });
+        return null;
+      },
+    }),
+    fetchLocalMarketTrades: async (_settings, connection) => {
+      await connection.getAccountInfo();
+      if (exhaust) {
+        await gate;
+        try { await connection.getAccountInfo(); } catch (error) {
+          return { trades: [{ id: 'partial' }], error: '', rpc: { totalRpcRequests: 1 }, exhaustion: error };
+        }
+      }
+      return { trades: [{ id: 'complete' }], error: '', rpc: { totalRpcRequests: 1 } };
+    },
+    fetchGlobalMarketTrades: async () => ({ trades: [], error: '', rpc: { totalRpcRequests: 0 } }),
+  });
+  const sync = install(context);
+  const startedPromise = sync({ faction: 'MUD' }, { rpcAttemptLimit: 1 });
+  const coalescedPromise = sync({ faction: 'MUD' });
+  release();
+  const [started, coalesced] = await Promise.all([startedPromise, coalescedPromise]);
+
+  assert.equal(started.status, 'budget_exhausted');
+  assert.equal(coalesced.status, 'budget_exhausted');
+  assert.notEqual(started, coalesced);
+  assert.equal(started.marketplaceSyncAttempt.disposition, 'started');
+  assert.equal(coalesced.marketplaceSyncAttempt.disposition, 'coalesced');
+  assert.equal(started.marketplaceRpcTelemetry.runId, coalesced.marketplaceRpcTelemetry.runId);
+  assert.deepEqual(started.marketplaceRpcBudget, coalesced.marketplaceRpcBudget);
+
+  exhaust = false;
+  const later = await sync({ faction: 'ONI' }, { rpcAttemptLimit: 2 });
+  assert.equal(later.status, undefined);
+  assert.notEqual(later.marketplaceRpcTelemetry.runId, started.marketplaceRpcTelemetry.runId);
 });

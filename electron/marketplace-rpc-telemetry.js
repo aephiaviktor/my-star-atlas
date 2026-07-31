@@ -5,6 +5,7 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 
 const DEFAULT_SAMPLE_LIMIT = 50;
 const MAX_SAMPLE_LIMIT = 100;
+const DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT = 300;
 const COUNTER_KEYS = Object.freeze([
   'logicalOperations', 'rpcAttempts', 'retries', 'fallbackCalls', 'cacheHits', 'cacheMisses',
 ]);
@@ -24,6 +25,40 @@ function normalizeMethod(value) {
 
 function normalizeProvider(value) {
   return value === 'main' || value === 'fallback' ? value : 'unknown';
+}
+
+class MarketplaceRpcBudgetExhaustedError extends Error {
+  constructor(operation, method) {
+    super('marketplace_rpc_budget_exhausted');
+    this.name = 'MarketplaceRpcBudgetExhaustedError';
+    this.operation = normalizeOperation(operation);
+    this.method = normalizeMethod(method);
+  }
+}
+
+function isMarketplaceRpcBudgetExhaustedError(error) {
+  return error instanceof MarketplaceRpcBudgetExhaustedError
+    || error?.name === 'MarketplaceRpcBudgetExhaustedError';
+}
+
+function createMarketplaceRpcAttemptBudget({ limit = DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT } = {}) {
+  const numericLimit = Number(limit);
+  const resolvedLimit = Number.isFinite(numericLimit)
+    ? Math.max(0, Math.floor(numericLimit))
+    : DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT;
+  let used = 0;
+  let exhaustion = null;
+  return {
+    admit(operation, method) {
+      if (used >= resolvedLimit) {
+        exhaustion ||= new MarketplaceRpcBudgetExhaustedError(operation, method);
+        throw exhaustion;
+      }
+      used += 1;
+    },
+    getExhaustion() { return exhaustion; },
+    snapshot() { return { limit: resolvedLimit, used }; },
+  };
 }
 
 function normalizeRunId(value) {
@@ -128,7 +163,7 @@ function createMarketplaceRpcTelemetry({ runId, maxSamples = DEFAULT_SAMPLE_LIMI
   };
 }
 
-function createMarketplaceRpcInstrumentation(telemetry) {
+function createMarketplaceRpcInstrumentation(telemetry, { attemptBudget } = {}) {
   if (!telemetry || typeof telemetry.recordLogical !== 'function' || typeof telemetry.recordAttempt !== 'function') {
     throw new TypeError('Marketplace RPC telemetry collector is required.');
   }
@@ -155,7 +190,17 @@ function createMarketplaceRpcInstrumentation(telemetry) {
     });
   }
 
-  return { runLogical, recordAttempt };
+  function admitAttempt({ method, provider, fallback = false } = {}) {
+    const active = callContext.getStore();
+    attemptBudget?.admit(active?.operation || 'UNKNOWN', method);
+    recordAttempt({ method, provider, fallback });
+  }
+
+  function getBudgetExhaustion() {
+    return attemptBudget?.getExhaustion() || null;
+  }
+
+  return { runLogical, recordAttempt, admitAttempt, getBudgetExhaustion };
 }
 
 function wrapMarketplaceConnection(connection, { instrumentation, operation } = {}) {
@@ -170,7 +215,13 @@ function wrapMarketplaceConnection(connection, { instrumentation, operation } = 
       const method = typeof prop === 'string' ? prop : 'unknown';
       return (...args) => instrumentation.runLogical(
         { operation, method },
-        () => value.apply(target, args),
+        async () => {
+          try {
+            return await value.apply(target, args);
+          } catch (error) {
+            throw instrumentation.getBudgetExhaustion?.() || error;
+          }
+        },
       );
     },
   });
@@ -182,4 +233,8 @@ module.exports = {
   wrapMarketplaceConnection,
   DEFAULT_SAMPLE_LIMIT,
   MAX_SAMPLE_LIMIT,
+  DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
+  MarketplaceRpcBudgetExhaustedError,
+  isMarketplaceRpcBudgetExhaustedError,
+  createMarketplaceRpcAttemptBudget,
 };

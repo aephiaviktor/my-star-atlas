@@ -9,6 +9,7 @@ const {
 } = require('../electron/local-market-trades');
 const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions, resolveLocalMarketStartIso, createLocalMarketPacer, computeTxFeeAtlas, DEFAULT_REQUESTS_PER_SECOND } = require('../electron/local-market-scanner');
 const crypto = require('node:crypto');
+const { MarketplaceRpcBudgetExhaustedError } = require('../electron/marketplace-rpc-telemetry');
 const bs58Module = require('bs58');
 const bs58 = bs58Module.default || bs58Module;
 
@@ -328,4 +329,59 @@ test('allows overriding the market tag so future GM trades can share the measure
   const line = formatLocalMarketInfluxLine({ id: 'sig:1', signature: 'sig', timestamp: '2026-07-25T01:00:00Z', wallet: 'wallet', starbase: 'UST-1', asset: 'Food', side: 'buy', quantity: 1, settledAtlas: 1, unitPriceAtlas: 1 }, { faction: 'USTUR', profile: 'USTUR', market: 'GM' });
   assert.match(line, /^marketplace,/);
   assert.match(line, /market=GM/);
+});
+
+test('signature exhaustion preserves incoming cursors and returns bounded partial state', async () => {
+  const connection = {
+    async getSignaturesForAddress(address) {
+      if (String(address) === 'wallet-1') return [];
+      throw new MarketplaceRpcBudgetExhaustedError('LM', 'getSignaturesForAddress');
+    },
+  };
+  const result = await scanLocalMarketTrades(connection, {
+    trackedWallets: ['wallet-1', 'wallet-2'],
+    walletCursors: { 'wallet-1': 'cursor-1', 'wallet-2': 'cursor-2' },
+    orderCursors: { 'order-1': 'order-cursor' },
+    activeOrderIds: ['order-1'],
+    startIso: '2026-07-24T00:00:00Z',
+  });
+
+  assert.equal(result.exhaustion.operation, 'LM');
+  assert.deepEqual(result.walletCursors, { 'wallet-1': 'cursor-1', 'wallet-2': 'cursor-2' });
+  assert.deepEqual(result.orderCursors, { 'order-1': 'order-cursor' });
+  assert.equal(result.stats.signatureRequests, 1);
+  assert.equal('exhaustion' in JSON.parse(JSON.stringify({ walletCursors: result.walletCursors })), false);
+});
+
+test('transaction exhaustion retains decoded trades but preserves incoming cursors', async () => {
+  const first = tx({
+    signature: 'decoded-before-budget', wallet: 'wallet-1', assetMint: 'certificate-1',
+    assetBefore: 0, assetAfter: 12, atlasBefore: 10, atlasAfter: 10,
+  });
+  let parsedCalls = 0;
+  const connection = {
+    async getSignaturesForAddress() {
+      return [
+        { signature: 'decoded-before-budget', blockTime: first.blockTime, err: null },
+        { signature: 'blocked-by-budget', blockTime: first.blockTime + 1, err: null },
+      ];
+    },
+    async getParsedTransaction() {
+      parsedCalls += 1;
+      if (parsedCalls === 1) return first;
+      throw new MarketplaceRpcBudgetExhaustedError('LM', 'getParsedTransaction');
+    },
+  };
+  const result = await scanLocalMarketTrades(connection, {
+    trackedWallets: ['wallet-1'], walletCursors: { 'wallet-1': 'prior-wallet-cursor' },
+    marketAssetsByMint: { 'certificate-1': { starbase: 'UST-1', asset: 'Food' } },
+    startIso: '2026-07-15T00:00:00Z',
+  });
+
+  assert.equal(result.exhaustion.method, 'getParsedTransaction');
+  assert.equal(result.trades.length, 1);
+  assert.equal(result.trades[0].signature, 'decoded-before-budget');
+  assert.deepEqual(result.walletCursors, { 'wallet-1': 'prior-wallet-cursor' });
+  assert.deepEqual(result.orderCursors, {});
+  assert.equal(result.stats.transactionRequests, 1);
 });

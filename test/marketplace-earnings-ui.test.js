@@ -233,3 +233,37 @@ test('Marketplace scheduler uses hourly guarded background synchronization', () 
   assert.match(renderer, /setInterval\(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS\)/);
   assert.match(renderer, /function runMarketplaceBackgroundSync\(\) \{\s*if \(!latestSettings \|\| !getActivePlayerProfile\(latestSettings\)\) return Promise\.resolve\(\);\s*return refreshMarketplace\(\{ sync: true \}\);\s*\}/);
 });
+
+test('Marketplace budget exhaustion still loads only the requested cached snapshot', async () => {
+  const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
+  const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
+  const rendered = [];
+  let snapshotCalls = 0;
+  const context = {
+    latestSettings: { faction: 'ONI', playerProfiles: { ONI: 'oni-profile' } },
+    getFormPayload: () => ({}), normalizeFaction: (value) => value,
+    getActivePlayerProfile: () => 'oni-profile', renderEarningsMarketplaceLoading: () => {},
+    setText: () => {}, earningsMarketplaceSyncStatus: {},
+    api: {
+      syncMarketplace: async () => ({
+        ok: true, status: 'budget_exhausted', resumable: true, partial: true,
+        faction: 'ONI', marketplaceRpcBudget: { status: 'exhausted', limit: 300, used: 300, operation: 'LM', method: 'getParsedTransaction' },
+      }),
+      getMarketplaceSnapshot: async (settings) => {
+        snapshotCalls += 1;
+        return { ok: true, faction: settings.faction, localMarketTrades: [{ id: 'oni-cached' }] };
+      },
+    },
+    latestEarningsResult: null, renderEarningsMarketplace: (result) => rendered.push(result),
+    console: { error: () => {} }, Promise,
+  };
+  vm.runInNewContext(`${renderer.slice(sourceStart, sourceEnd)}\nthis.refreshMarketplace = refreshMarketplace;`, context);
+
+  await context.refreshMarketplace({ sync: true });
+  assert.equal(snapshotCalls, 1);
+  assert.equal(rendered.length, 1);
+  assert.equal(rendered[0].faction, 'ONI');
+  assert.equal(rendered[0].localMarketTrades[0].id, 'oni-cached');
+  assert.match(renderer, /const MARKETPLACE_SYNC_INTERVAL_MS = 60 \* 60 \* 1000/);
+  assert.match(renderer, /refreshMarketplace\(\{ sync: false \}\)/);
+});

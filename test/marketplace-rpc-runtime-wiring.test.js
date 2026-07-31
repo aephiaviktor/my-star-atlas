@@ -5,10 +5,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { Connection, PublicKey } = require('@solana/web3.js');
 const {
   createMarketplaceRpcTelemetry,
   createMarketplaceRpcInstrumentation,
   wrapMarketplaceConnection,
+  isMarketplaceRpcBudgetExhaustedError,
+  createMarketplaceRpcAttemptBudget,
 } = require('../electron/marketplace-rpc-telemetry');
 
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
@@ -50,6 +53,7 @@ function createHarness({ status, platformFetch, acquireRpcSlot }) {
     fetch: platformFetch || (async () => ({ ok: true })),
     sharedRpcLimiter: null,
     isRpcRateLimitError: () => false,
+    isMarketplaceRpcBudgetExhaustedError,
   };
   vm.runInNewContext([
     functionSource('resolveSolanaConnectionRoutes', 'createSolanaConnection'),
@@ -59,13 +63,14 @@ function createHarness({ status, platformFetch, acquireRpcSlot }) {
   return { ...context, instances };
 }
 
-async function runLogicalCall(harness, settings, mode) {
+async function runLogicalCall(harness, settings, mode, attemptLimit = null) {
   const telemetry = createMarketplaceRpcTelemetry({ runId: 'runtime-wiring' });
-  const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
+  const attemptBudget = attemptLimit == null ? undefined : createMarketplaceRpcAttemptBudget({ limit: attemptLimit });
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry, { attemptBudget });
   const connection = harness.createSolanaConnection(settings, { instrumentation });
   const wrapped = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
   await wrapped.getAccountInfo(mode);
-  return { snapshot: telemetry.finish(), instances: harness.instances };
+  return { snapshot: telemetry.finish(), instances: harness.instances, budget: attemptBudget?.snapshot() || null };
 }
 
 test('Marketplace runtime labels all four provider configurations without retaining URLs', async () => {
@@ -123,8 +128,9 @@ test('Marketplace runtime attributes retry and main-to-fallback attempts to one 
       return { ok: true };
     },
   });
-  const { snapshot } = await runLogicalCall(harness, { useRpcLimiter: true }, 'retry');
+  const { snapshot, budget } = await runLogicalCall(harness, { useRpcLimiter: true }, 'retry', 3);
 
+  assert.deepEqual(budget, { limit: 3, used: 3 });
   assert.deepEqual(snapshot.totals, {
     logicalOperations: 1, rpcAttempts: 3, retries: 1, fallbackCalls: 2, cacheHits: 0, cacheMisses: 0,
   });
@@ -172,3 +178,86 @@ test('Marketplace sync failure IPC result carries the sealed telemetry snapshot'
   assert.match(main, /telemetryAttached = error\.marketplaceRpcTelemetry === marketplaceRpcTelemetry/);
   assert.match(main, /wrapped\.marketplaceRpcTelemetry = marketplaceRpcTelemetry/);
 });
+
+test('Marketplace budget stops exactly before transport limit plus one', async () => {
+  let fetchCalls = 0;
+  const harness = createHarness({
+    status: { providers: { main: { url: 'https://main.invalid' }, fallback: {} } },
+    platformFetch: async () => { fetchCalls += 1; return { ok: true }; },
+  });
+  const telemetry = createMarketplaceRpcTelemetry({ runId: 'exact-limit' });
+  const attemptBudget = createMarketplaceRpcAttemptBudget({ limit: 2 });
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry, { attemptBudget });
+  const connection = harness.createSolanaConnection({ useRpcLimiter: true }, { instrumentation });
+  const wrapped = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
+
+  await wrapped.getAccountInfo('retry');
+  await assert.rejects(wrapped.getAccountInfo(), isMarketplaceRpcBudgetExhaustedError);
+  assert.equal(fetchCalls, 2);
+  assert.deepEqual(attemptBudget.snapshot(), { limit: 2, used: 2 });
+  assert.equal(telemetry.finish().totals.rpcAttempts, 2);
+});
+
+test('Marketplace budget exhaustion bypasses provider fallback', async () => {
+  const urls = [];
+  const harness = createHarness({
+    status: { providers: { main: { url: 'https://main.invalid' }, fallback: { url: 'https://fallback.invalid' } } },
+    platformFetch: async (url) => { urls.push(url); return { ok: true }; },
+  });
+  const telemetry = createMarketplaceRpcTelemetry({ runId: 'no-budget-fallback' });
+  const attemptBudget = createMarketplaceRpcAttemptBudget({ limit: 0 });
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry, { attemptBudget });
+  const connection = harness.createSolanaConnection({ useRpcLimiter: true }, { instrumentation });
+  const wrapped = wrapMarketplaceConnection(connection, { instrumentation, operation: 'GM' });
+
+  await assert.rejects(wrapped.getAccountInfo(), isMarketplaceRpcBudgetExhaustedError);
+  assert.deepEqual(urls, []);
+  assert.equal(telemetry.finish().totals.rpcAttempts, 0);
+});
+
+function createRealConnectionHarness({ fallback }) {
+  const urls = [];
+  const context = {
+    Connection,
+    DEFAULT_RPC_URL: 'https://default.invalid',
+    getRpcLimiterStatus: () => ({ providers: {
+      main: { url: 'https://main.invalid' },
+      fallback: fallback ? { url: 'https://fallback.invalid' } : {},
+    } }),
+    isUsableSharedRpcUrl: Boolean,
+    acquireRpcSlot: async () => {},
+    getRpcMethodLabel: (init) => JSON.parse(String(init?.body || '{}')).method,
+    fetch: async (url) => { urls.push(String(url)); throw new Error('transport must not run'); },
+    sharedRpcLimiter: null,
+    isRpcRateLimitError: () => false,
+    isMarketplaceRpcBudgetExhaustedError,
+  };
+  vm.runInNewContext([
+    functionSource('resolveSolanaConnectionRoutes', 'createSolanaConnection'),
+    functionSource('createSolanaConnection', 'getProgramAccountsV2', true),
+    'this.createSolanaConnection = createSolanaConnection;',
+  ].join('\n'), context);
+  return { context, urls };
+}
+
+for (const scenario of [
+  { name: 'two-provider', fallback: true, operation: 'LM' },
+  { name: 'single-provider', fallback: false, operation: 'GM' },
+]) {
+  test(`real Connection restores typed exhaustion for ${scenario.name} getAccountInfo`, async () => {
+    const { context, urls } = createRealConnectionHarness(scenario);
+    const telemetry = createMarketplaceRpcTelemetry({ runId: `real-${scenario.name}` });
+    const attemptBudget = createMarketplaceRpcAttemptBudget({ limit: 0 });
+    const instrumentation = createMarketplaceRpcInstrumentation(telemetry, { attemptBudget });
+    const connection = context.createSolanaConnection({ useRpcLimiter: true }, { instrumentation });
+    const wrapped = wrapMarketplaceConnection(connection, { instrumentation, operation: scenario.operation });
+
+    const error = await wrapped.getAccountInfo(new PublicKey('11111111111111111111111111111111')).catch((caught) => caught);
+    assert.equal(isMarketplaceRpcBudgetExhaustedError(error), true);
+    assert.equal(error.operation, scenario.operation);
+    assert.equal(error.method, 'getAccountInfo');
+    assert.deepEqual(urls, []);
+    assert.deepEqual(attemptBudget.snapshot(), { limit: 0, used: 0 });
+    assert.equal(telemetry.finish().totals.rpcAttempts, 0);
+  });
+}
