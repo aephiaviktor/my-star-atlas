@@ -38,6 +38,11 @@ const {
   dedupeMarketplaceRows,
   deriveMarketplaceUnionKey,
 } = require('./marketplace-trade-compat');
+const { deriveMarketplaceTradeId } = require('./marketplace-v2-point');
+const {
+  recordMarketplacePublicationHold,
+  resolveMarketplaceDiscoveryCursors,
+} = require('./marketplace-publication-checkpoint');
 const { STARBASE_REGISTRY } = require('./starbase-registry');
 const { ASSET_REGISTRY } = require('./asset-registry');
 const {
@@ -4089,7 +4094,64 @@ function resolveMarketplaceCheckpointCursors(checkpoint, scanned) {
   if (scanned.exhaustion) {
     return { walletCursors: checkpoint.walletCursors, orderCursors: checkpoint.orderCursors };
   }
+  if (Number(scanned.stats?.transactionMisses || 0) > 0) {
+    return { walletCursors: checkpoint.walletCursors, orderCursors: scanned.orderCursors };
+  }
   return { walletCursors: scanned.walletCursors, orderCursors: scanned.orderCursors };
+}
+
+function marketplaceCursorSnapshot(walletCursors, orderCursors, activeOrderIds, archivedOrderIds) {
+  return { walletCursors, orderCursors, activeOrderIds, archivedOrderIds };
+}
+
+function marketplaceTradeHoldCandidate(trade, { market, faction, profileScope, cursorInputSnapshot, cursorOutputSnapshot }) {
+  const logicalKey = deriveMarketplaceTradeId({
+    market, faction, profileScope, executionSignature: trade.signature,
+    rawMint: trade.rawMint, side: trade.side, quantity: trade.quantity,
+  });
+  const currentRank = String(trade.orderId || '').trim() || String(trade.creationSignature || '').trim() || Number(trade.txFeeAtlas || 0) !== 0
+    ? 'enriched' : 'fallback';
+  const mutableId = String(trade.id || '').trim();
+  return {
+    market, kind: 'trade', logicalKeyOrSourceId: logicalKey,
+    eventId: null, currentRevisionId: null, currentRank,
+    currentMutableIds: mutableId ? [mutableId] : [],
+    candidateTimestamp: new Date(trade.timestamp).toISOString(),
+    candidateSnapshot: {
+      id: mutableId, timestamp: trade.timestamp, marketplace: market, faction, profileScope,
+      starbase: trade.starbase || '', asset: trade.asset || '', side: trade.side,
+      wallet: trade.wallet || '', quantity: trade.quantity, settledAtlas: trade.settledAtlas,
+      grossAtlas: trade.grossAtlas ?? trade.settledAtlas, marketplaceFeeAtlas: trade.marketplaceFeeAtlas ?? 0,
+      txFeeAtlas: trade.txFeeAtlas ?? 0, netAtlas: trade.netAtlas ?? trade.settledAtlas, unitPriceAtlas: trade.unitPriceAtlas,
+      signature: trade.signature, creationSignature: trade.creationSignature || '', rawMint: trade.rawMint,
+      certificateMint: trade.certificateMint || '', orderId: trade.orderId || '',
+    },
+    cursorInputSnapshot, cursorOutputSnapshot,
+  };
+}
+
+function marketplaceFlowHoldCandidate(event, { cursorInputSnapshot, cursorOutputSnapshot }) {
+  return {
+    market: 'GM', kind: 'asset_flow', logicalKeyOrSourceId: String(event.id),
+    eventId: null, currentRevisionId: null, currentRank: 'asset_flow', currentMutableIds: [],
+    observedFlowIds: [String(event.id)], candidateTimestamp: new Date(event.timestamp).toISOString(),
+    candidateSnapshot: {
+      id: event.id, type: event.type || 'transfer', timestamp: event.timestamp, origin: event.origin || '',
+      destination: event.destination || '', asset: event.asset || '', quantity: event.quantity,
+      cargoCost: event.cargoCost ?? 0,
+    },
+    cursorInputSnapshot, cursorOutputSnapshot,
+  };
+}
+
+async function recordMarketplaceCandidateHolds(candidates) {
+  for (const candidate of candidates) {
+    const result = await recordMarketplacePublicationHold({ installationRoot: getAppRoot(), candidate });
+    if (result.status !== 'hold_recorded' && result.status !== 'hold_updated' && result.status !== 'hold_unchanged') {
+      return { ok: false, code: 'publication_hold_write_failed' };
+    }
+  }
+  return { ok: true, code: null };
 }
 
 async function fetchLocalMarketTrades(settings, connection) {
@@ -4133,14 +4195,17 @@ async function fetchLocalMarketTrades(settings, connection) {
   const anchorMs = Math.max(checkpointNewestMs, Number.isFinite(influxNewestMs) ? influxNewestMs : 0, startMs);
   const overlapStart = new Date(Math.max(startMs, anchorMs - 60 * 60 * 1000)).toISOString();
   const needsTradeEnrichment = checkpoint.tradeEnrichmentVersion < 1;
+  const cursorInputSnapshot = marketplaceCursorSnapshot(
+    needsTradeEnrichment ? {} : checkpoint.walletCursors,
+    needsTradeEnrichment ? {} : checkpoint.orderCursors,
+    checkpoint.activeOrderIds,
+    checkpoint.archivedOrderIds,
+  );
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
     marketAssetsByMint,
     knownOrders: checkpoint.orders,
-    walletCursors: needsTradeEnrichment ? {} : checkpoint.walletCursors,
-    orderCursors: needsTradeEnrichment ? {} : checkpoint.orderCursors,
-    activeOrderIds: checkpoint.activeOrderIds,
-    archivedOrderIds: checkpoint.archivedOrderIds,
+    ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
     startIso: needsTradeEnrichment ? startIso : overlapStart,
     addressFactory: (value) => new PublicKey(value),
@@ -4179,7 +4244,32 @@ async function fetchLocalMarketTrades(settings, connection) {
   } catch (error) {
     publishError = String(error?.message || error || 'local_market_influx_write_failed');
   }
-  const persistedCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
+  const checkpointCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
+  const cursorOutputSnapshot = {
+    walletCursors: checkpointCursors.walletCursors,
+    orderCursors: checkpointCursors.orderCursors,
+    activeOrderIds: scanned.activeOrderIds,
+    archivedOrderIds: scanned.archivedOrderIds,
+  };
+  let holdResult;
+  try {
+    holdResult = await recordMarketplaceCandidateHolds(trades.map((trade) => marketplaceTradeHoldCandidate(trade, {
+      market: 'LM', faction, profileScope: profileName, cursorInputSnapshot, cursorOutputSnapshot,
+    })));
+  } catch (_error) {
+    holdResult = { ok: false, code: 'publication_hold_write_failed' };
+  }
+  const resolvedCursors = await resolveMarketplaceDiscoveryCursors({
+    installationRoot: getAppRoot(), market: 'LM', kinds: ['trade'],
+    cursorInputSnapshot, cursorOutputSnapshot,
+    transactionMisses: scanned.stats.transactionMisses,
+    holdWriteSucceeded: holdResult.ok,
+  });
+  const persistedCursors = resolvedCursors.cursorSnapshot;
+  if (!holdResult.ok) publishError = [publishError, holdResult.code].filter(Boolean).join('; ');
+  else if (!['held', 'released', 'transaction_misses'].includes(resolvedCursors.status)) {
+    publishError = [publishError, 'publication_hold_resolution_failed'].filter(Boolean).join('; ');
+  }
   await writeJsonAtomic(filePath, {
     schemaVersion: 2,
     faction,
@@ -4188,8 +4278,6 @@ async function fetchLocalMarketTrades(settings, connection) {
     orders: scanned.orders,
     trades,
     ...persistedCursors,
-    activeOrderIds: scanned.activeOrderIds,
-    archivedOrderIds: scanned.archivedOrderIds,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     marketplaceBackfilled: checkpoint.marketplaceBackfilled === true,
     tradeEnrichmentVersion: !scanned.exhaustion && scanned.stats.transactionMisses === 0 && !publishError ? 1 : checkpoint.tradeEnrichmentVersion,
@@ -4237,14 +4325,17 @@ async function fetchGlobalMarketTrades(settings, connection) {
   const assetsByMint = Object.fromEntries(ASSET_REGISTRY.map((asset) => [asset.mint, asset]));
   const starbasesByKey = Object.fromEntries(STARBASE_REGISTRY.map((starbase) => [starbase.publicKey, starbase.name]));
   const atlasPerSol = await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null);
+  const cursorInputSnapshot = marketplaceCursorSnapshot(
+    checkpoint.assetFlowBackfilled ? checkpoint.walletCursors : {},
+    checkpoint.orderCursors,
+    checkpoint.activeOrderIds,
+    checkpoint.archivedOrderIds,
+  );
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
     marketAssetsByMint: buildGlobalMarketAssetMap(),
     knownOrders: checkpoint.orders,
-    walletCursors: checkpoint.assetFlowBackfilled ? checkpoint.walletCursors : {},
-    orderCursors: checkpoint.orderCursors,
-    activeOrderIds: checkpoint.activeOrderIds,
-    archivedOrderIds: checkpoint.archivedOrderIds,
+    ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
     startIso: overlapStart,
     addressFactory: (value) => new PublicKey(value),
@@ -4276,11 +4367,38 @@ async function fetchGlobalMarketTrades(settings, connection) {
   } catch (error) {
     publishError = String(error?.message || error || 'gm_market_influx_write_failed');
   }
-  const persistedCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
+  const checkpointCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
+  const cursorOutputSnapshot = {
+    walletCursors: checkpointCursors.walletCursors,
+    orderCursors: checkpointCursors.orderCursors,
+    activeOrderIds: scanned.activeOrderIds,
+    archivedOrderIds: scanned.archivedOrderIds,
+  };
+  let holdResult;
+  try {
+    holdResult = await recordMarketplaceCandidateHolds([
+      ...trades.map((trade) => marketplaceTradeHoldCandidate(trade, {
+        market: 'GM', faction: 'GLOBAL', profileScope: 'GLOBAL', cursorInputSnapshot, cursorOutputSnapshot,
+      })),
+      ...assetFlows.map((event) => marketplaceFlowHoldCandidate(event, { cursorInputSnapshot, cursorOutputSnapshot })),
+    ]);
+  } catch (_error) {
+    holdResult = { ok: false, code: 'publication_hold_write_failed' };
+  }
+  const resolvedCursors = await resolveMarketplaceDiscoveryCursors({
+    installationRoot: getAppRoot(), market: 'GM', kinds: ['trade', 'asset_flow'],
+    cursorInputSnapshot, cursorOutputSnapshot,
+    transactionMisses: scanned.stats.transactionMisses,
+    holdWriteSucceeded: holdResult.ok,
+  });
+  const persistedCursors = resolvedCursors.cursorSnapshot;
+  if (!holdResult.ok) publishError = [publishError, holdResult.code].filter(Boolean).join('; ');
+  else if (!['held', 'released', 'transaction_misses'].includes(resolvedCursors.status)) {
+    publishError = [publishError, 'publication_hold_resolution_failed'].filter(Boolean).join('; ');
+  }
   await writeJsonAtomic(filePath, {
     schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets,
     orders: scanned.orders, trades, assetFlows, ...persistedCursors,
-    activeOrderIds: scanned.activeOrderIds, archivedOrderIds: scanned.archivedOrderIds,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(), publishedFlowIds: Array.from(checkpoint.publishedFlowIds).sort(), marketplaceBackfilled: true,
     assetFlowBackfilled: !scanned.exhaustion && publishError === '',
   });

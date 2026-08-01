@@ -25,10 +25,10 @@ function loadCheckpointCursorResolver() {
   return context.resolve;
 }
 
-test('Marketplace exhaustion preserves durable migration cursors without persisting its marker', () => {
-  assert.match(main, /walletCursors: needsTradeEnrichment \? \{\} : checkpoint\.walletCursors/);
-  assert.match(main, /walletCursors: checkpoint\.assetFlowBackfilled \? checkpoint\.walletCursors : \{\}/);
-  assert.equal((main.match(/const persistedCursors = resolveMarketplaceCheckpointCursors\(checkpoint, scanned\)/g) || []).length, 2);
+test('Marketplace cursor inputs preserve durable migration and asset-flow behavior without persisting exhaustion markers', () => {
+  assert.match(main, /needsTradeEnrichment \? \{\} : checkpoint\.walletCursors/);
+  assert.match(main, /checkpoint\.assetFlowBackfilled \? checkpoint\.walletCursors : \{\}/);
+  assert.equal((main.match(/const checkpointCursors = resolveMarketplaceCheckpointCursors\(checkpoint, scanned\)/g) || []).length, 2);
   const resolve = loadCheckpointCursorResolver();
   const checkpoint = {
     walletCursors: { walletA: 'durable-wallet' },
@@ -46,15 +46,33 @@ test('Marketplace exhaustion preserves durable migration cursors without persist
   }
 });
 
-test('Marketplace completed scans retain returned cursor behavior', () => {
+test('Marketplace completed scans retain returned cursors while transaction misses retain prior wallet cursors', () => {
   const resolve = loadCheckpointCursorResolver();
-  const persisted = resolve(
-    { walletCursors: { old: 'wallet' }, orderCursors: { old: 'order' } },
-    { walletCursors: { next: 'wallet' }, orderCursors: { next: 'order' }, exhaustion: null },
-  );
+  const checkpoint = { walletCursors: { old: 'wallet' }, orderCursors: { old: 'order' } };
+  const persisted = resolve(checkpoint, {
+    walletCursors: { next: 'wallet' }, orderCursors: { next: 'order' }, exhaustion: null, stats: { transactionMisses: 0 },
+  });
   assert.deepEqual(JSON.parse(JSON.stringify(persisted)), {
     walletCursors: { next: 'wallet' }, orderCursors: { next: 'order' },
   });
+  const missed = resolve(checkpoint, {
+    walletCursors: { next: 'wallet' }, orderCursors: { next: 'order' }, exhaustion: null, stats: { transactionMisses: 2 },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(missed)), {
+    walletCursors: { old: 'wallet' }, orderCursors: { next: 'order' },
+  });
+});
+
+test('Marketplace holds are durable before cursor checkpoint writes and no production v2 publication is connected', () => {
+  for (const functionName of ['fetchLocalMarketTrades', 'fetchGlobalMarketTrades']) {
+    const start = main.indexOf(`async function ${functionName}`);
+    const end = main.indexOf(functionName === 'fetchLocalMarketTrades' ? 'async function fetchGlobalMarketTrades' : 'let marketplaceSyncActive', start);
+    const body = main.slice(start, end);
+    assert.ok(body.indexOf('recordMarketplaceCandidateHolds') < body.indexOf('writeJsonAtomic(filePath'));
+    assert.match(body, /resolveMarketplaceDiscoveryCursors/);
+    assert.doesNotMatch(body, /createMarketplacePublicationCoordinator|publishMarketplaceCandidates|stageMarketplaceOutboxV2|marketplace_v2|resolveExactPoint/);
+  }
+  assert.match(main, /publication_hold_write_failed/);
 });
 
 test('Marketplace sync returns separate partial LM and GM RPC summaries without settings', async () => {
