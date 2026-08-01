@@ -26,18 +26,24 @@ function code(callback) {
 function hashTuple(tuple) { return crypto.createHash('sha256').update(JSON.stringify(tuple), 'utf8').digest('hex'); }
 function options(storageRoot, extra = {}) { return { storageRoot, ...BASE, now: () => NOW, ...extra }; }
 
-test('exports exactly the authorized Gate 2 API', () => {
+test('exports exactly the authorized Gate 3 API', () => {
   assert.deepEqual(Object.keys(api).sort(), [
     'MARKETPLACE_OUTBOX_V2_DIRECTORY', 'MARKETPLACE_OUTBOX_V2_LOCK_OPTIONS', 'MARKETPLACE_OUTBOX_V2_SCHEMA_VERSION',
+    'MARKETPLACE_OUTBOX_V2_EVENT_TYPES', 'MARKETPLACE_OUTBOX_V2_REVISION_STATES', 'MARKETPLACE_OUTBOX_V2_LIMITS', 'MARKETPLACE_OUTBOX_V2_RETRY_POLICY',
     'canonicalizeMarketplaceDestination', 'canonicalizeMarketplaceInfluxBaseUrl',
     'configureMarketplaceOutboxV2Destination', 'createMarketplaceOutboxV2Document',
     'deriveMarketplaceDestinationHash', 'deriveMarketplaceGenerationFingerprint',
     'deriveMarketplaceGenerationId', 'deriveMarketplaceOrganizationHash',
+    'deriveMarketplaceAssetFlowIdentityHash', 'deriveMarketplaceOutboxV2EventId', 'deriveMarketplaceOutboxV2PayloadHash',
+    'deriveMarketplaceOutboxV2RevisionId', 'deriveMarketplaceOutboxV2AttemptId',
     'finalizeMarketplaceOutboxV2Organization', 'loadMarketplaceOutboxV2',
     'mutateMarketplaceOutboxV2', 'resolveMarketplaceOutboxV2Paths',
     'setMarketplaceOutboxV2PublishedOnly', 'validateMarketplaceApplicationProfile',
     'validateMarketplaceInstallationId', 'validateMarketplaceOutboxV2Document',
-    'verifyMarketplaceOutboxV2Destination',
+    'validateMarketplaceOutboxV2Event', 'validateMarketplaceOutboxV2Revision',
+    'verifyMarketplaceOutboxV2Destination', 'stageMarketplaceOutboxV2TradeRevision', 'stageMarketplaceOutboxV2AssetFlow',
+    'listMarketplaceOutboxV2Pending', 'claimMarketplaceOutboxV2Revision', 'markMarketplaceOutboxV2Published',
+    'recordMarketplaceOutboxV2FailedAttempt', 'inspectMarketplaceOutboxV2Posting', 'reconcileMarketplaceOutboxV2Revision',
   ].sort());
   assert.equal(api.MARKETPLACE_OUTBOX_V2_SCHEMA_VERSION, 2);
   assert.equal(api.MARKETPLACE_OUTBOX_V2_DIRECTORY, 'marketplace-outbox-v2');
@@ -171,14 +177,14 @@ test('empty active destination replacement freezes old generation and creates on
   assert.equal(changed.document.documentRevision, 2);
 }));
 
-test('event-bearing destination replacement is blocked before unsupported event schema replacement', async () => withTemp(async (storageRoot) => {
+test('malformed enabled events are rejected before destination replacement', async () => withTemp(async (storageRoot) => {
   const configured = await api.configureMarketplaceOutboxV2Destination(options(storageRoot, { baseUrl: 'https://one.example', bucket: 'One', authConfigured: true }));
   const paths = api.resolveMarketplaceOutboxV2Paths({ storageRoot, ...BASE });
   const document = structuredClone(configured.document);
   document.generations[document.activeGenerationId].events.example = { future: true };
   await fs.writeFile(paths.documentPath, `${JSON.stringify(document, null, 2)}\n`);
   const result = await api.configureMarketplaceOutboxV2Destination(options(storageRoot, { baseUrl: 'https://two.example', bucket: 'Two', authConfigured: true }));
-  assert.equal(result.status, 'destination_change_blocked');
+  assert.equal(result.status, 'invalid_document');
 }));
 
 test('verification distinguishes every destination state without mutation', async () => withTemp(async (storageRoot) => {
