@@ -122,6 +122,10 @@ test('Optimization exposes Upgrading after Scanning with date filters, table, an
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
   for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-process-evidence-body']) assert.match(html, new RegExp(`id="${id}"`));
   assert.match(html, /Process automation evidence/);
+  assert.match(html, /class="optimization-analytics-card optimization-upgrading-primary-chart-card"[\s\S]*?id="optimization-upgrading-redemption-chart"/);
+  assert.match(html, /id="optimization-upgrading-forecast-chart"[\s\S]*?id="optimization-upgrading-error-chart"/);
+  assert.match(html, /<section class="optimization-analytics-card">\s*<h3>Forecast error by snapshot hour<\/h3>/);
+  assert.match(fs.readFileSync('electron/renderer.css', 'utf8'), /\.optimization-upgrading-primary-chart-card\s*\{\s*grid-column:\s*1 \/ -1;/);
   assert.match(html, /How to read this page/);
   assert.match(html, /optimization-process-evidence-wrap/);
   assert.match(html, /optimization-upgrading-page-guide[\s\S]*earnings-metric-guide-item/);

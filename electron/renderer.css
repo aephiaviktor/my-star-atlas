@@ -301,7 +301,8 @@ select:focus {
 }
 .optimization-analytics-card h3 { margin: 0 0 8px; color: var(--accent); font-size: 14px; }
 .optimization-analytics-summary-card,
-.optimization-analytics-ranking-card { grid-column: 1 / -1; }
+.optimization-analytics-ranking-card,
+.optimization-upgrading-primary-chart-card { grid-column: 1 / -1; }
 .optimization-analytics-metrics {
   display: grid;
   grid-template-columns: repeat(6, minmax(100px, 1fr));
