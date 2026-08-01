@@ -87,17 +87,19 @@ test('Marketplace sync discovers current player orders and persists incremental 
   assert.match(main, /schemaVersion: 2/);
 });
 
-test('Marketplace reads use supported Flux queries instead of Influx SQL', () => {
+test('Marketplace reads use separate supported v1 and v2 Flux queries instead of Influx SQL', () => {
   assert.match(main, /_measurement == "marketplace"/);
+  assert.match(main, /_measurement == "marketplace_v2"/);
   assert.match(main, /pivot\(rowKey: \["_time", "tradeId"\]/);
+  assert.match(main, /pivot\(rowKey: \["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"\]/);
   assert.doesNotMatch(main, /queryInfluxSql|type:\s*['"]sql['"]/);
 });
 
-test('legacy Marketplace rows are rescanned once and enriched rows replace fallback duplicates', () => {
+test('legacy Marketplace rows are rescanned once and compatibility dedupe replaces fallback duplicates', () => {
   assert.match(main, /tradeEnrichmentVersion/);
   assert.match(main, /needsTradeEnrichment \? \{\} : checkpoint\.walletCursors/);
   assert.match(main, /prior\.signature === trade\.signature/);
-  assert.match(main, /!current\.orderId && trade\.orderId/);
+  assert.match(main, /dedupeMarketplaceRows/);
 });
 
 test('GM sync includes handler and additional wallets while remaining global and ATLAS-only', () => {
@@ -112,7 +114,7 @@ test('GM sync includes handler and additional wallets while remaining global and
 
 test('Marketplace Influx read includes selected profile pubkey rows and global GM rows', () => {
   assert.match(main, /r\.profile == "\$\{escapeFluxString\(profileName\)\}" or r\.profile == "\$\{escapeFluxString\(profile\)\}"/);
-  assert.match(main, /or r\.faction == "GLOBAL"/);
+  assert.match(main, /r\.market == "GM" and r\.faction == "GLOBAL" and r\.profile == "GLOBAL"/);
 });
 
 test('ONI and MUD earnings accept second-instance SDU tags', () => {
