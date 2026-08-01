@@ -7306,8 +7306,6 @@ async function refreshScanningOptimizationAnalyticsData({ force = false } = {}) 
   if(optimizationAnalyticsStatus) optimizationAnalyticsStatus.textContent = 'Loading complete optimization-event history and current earnings prices...';
   const result = await api.getScanningOptimization({
     faction,
-    start: optimizationFilterIso(optimizationStartFilter),
-    stop: optimizationFilterIso(optimizationStopFilter, true),
     fleet: '__all__', eventType: '__all__', operation: '__all__', status: '__all__',
     offset: 0, limit: 5000, analytics: true,
   });
@@ -8164,14 +8162,6 @@ fleetSearchInput.addEventListener('input', renderFleetSearch);
 
 for (const filter of [optimizationStartFilter, optimizationStopFilter, optimizationFleetFilter, optimizationExperimentFilter, optimizationEventFilter, optimizationOperationFilter, optimizationParameterFilter]) {
   filter?.addEventListener('change', () => refreshScanningOptimization());
-}
-for (const filter of [optimizationStartFilter, optimizationStopFilter]) {
-  filter?.addEventListener('change', () => {
-    optimizationAnalyticsRows = [];
-    optimizationAnalyticsLoadedFaction = '';
-    optimizationAnalyticsPrices = null;
-    if(currentOptimizationView === 'analytics' && currentOptimizationSubtab === 'scanning') refreshScanningOptimizationAnalyticsData({ force: true });
-  });
 }
 for (const filter of [optimizationUpgradingStartFilter, optimizationUpgradingStopFilter]) {
   filter?.addEventListener('change', () => refreshUpgradingOptimization());

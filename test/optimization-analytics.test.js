@@ -270,12 +270,23 @@ test('analytics requests may load complete scan history without enlarging Data p
   const main = fs.readFileSync(mainPath, 'utf8');
   assert.match(main, /payload\.analytics === true \? 5000 : 500/);
   const renderer = fs.readFileSync(rendererPath, 'utf8');
-  assert.match(renderer, /eventType: '__all__'/);
-  assert.match(renderer, /limit: 5000, analytics: true/);
+  const analyticsRefreshStart = renderer.indexOf('async function refreshScanningOptimizationAnalyticsData');
+  const analyticsRefreshEnd = renderer.indexOf('async function refreshScanningOptimization(', analyticsRefreshStart);
+  assert.notEqual(analyticsRefreshStart, -1);
+  assert.notEqual(analyticsRefreshEnd, -1);
+  const analyticsRefresh = renderer.slice(analyticsRefreshStart, analyticsRefreshEnd);
+  assert.match(analyticsRefresh, /eventType: '__all__'/);
+  assert.match(analyticsRefresh, /limit: 5000, analytics: true/);
+  assert.doesNotMatch(analyticsRefresh, /optimizationStartFilter|optimizationStopFilter/, 'Analytics history must not inherit Data date filters');
   assert.match(main, /payload\.analytics === true[\s\S]*fetchCurrentEarningsPrices/);
   assert.match(renderer, /prices: optimizationAnalyticsPrices/);
   assert.match(main, /pivot[\s\S]*\$\{experimentFilter\}/);
   assert.match(main, /r\.experimentId ==/);
   assert.match(renderer, /experimentId,\n    offset/);
   assert.match(renderer, /fleet, experimentId, eventType, operation, optimizationParameter/);
+});
+
+test('Scanning Data date changes do not invalidate or reload Analytics history', () => {
+  const renderer = fs.readFileSync(rendererPath, 'utf8');
+  assert.doesNotMatch(renderer, /for \(const filter of \[optimizationStartFilter, optimizationStopFilter\]\) \{[\s\S]*?optimizationAnalyticsRows = \[\];[\s\S]*?refreshScanningOptimizationAnalyticsData/);
 });
