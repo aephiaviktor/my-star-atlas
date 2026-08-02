@@ -1,12 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const keyModule = require('./earnings-' + 'cache-key');
 const buildBreakevenKey = keyModule['build' + 'EarningsCacheKey'];
-const { createEarningsCacheState, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS } = require('./earnings-cache-state');
+const { createEarningsCacheState, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS, CONSUMPTION_MINING_CACHE_FRESHNESS_MS } = require('./earnings-cache-state');
 
 const breakevenCacheState = createEarningsCacheState();
 const upgradingCacheState = createEarningsCacheState({ freshnessMs: UPGRADING_CACHE_FRESHNESS_MS });
 const consumptionUpgradingCacheState = createEarningsCacheState({ freshnessMs: CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS });
 const consumptionScanningCacheState = createEarningsCacheState({ freshnessMs: CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS });
+const consumptionMiningCacheState = createEarningsCacheState({ freshnessMs: CONSUMPTION_MINING_CACHE_FRESHNESS_MS });
 
 function breakevenCacheDescriptor({ faction, playerProfile, filters = {} } = {}) {
   return {
@@ -78,6 +79,25 @@ function consumptionScanningCacheKey(input) {
   return buildBreakevenKey(consumptionScanningCacheDescriptor(input));
 }
 
+function consumptionMiningCacheDescriptor({ faction, playerProfile, starbaseFilter = '', fleetFilter = '' } = {}) {
+  return {
+    schemaVersion: '1',
+    faction,
+    playerProfile,
+    section: 'consumption',
+    subtab: 'mining',
+    datasetScope: 'mining-consumption-31d',
+    filters: {
+      starbaseFilter: String(starbaseFilter || '').trim(),
+      fleetFilter: String(fleetFilter || '').trim(),
+    },
+  };
+}
+
+function consumptionMiningCacheKey(input) {
+  return buildBreakevenKey(consumptionMiningCacheDescriptor(input));
+}
+
 contextBridge.exposeInMainWorld('myStarAtlas', {
   getProfileName: () => ipcRenderer.invoke('app:get-profile-name'),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
@@ -107,6 +127,19 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getInventory: (payload) => ipcRenderer.invoke('inventory:daily', payload),
   getScanningOptimization: (payload) => ipcRenderer.invoke('optimization:scanning', payload),
   getUpgradingOptimization: (payload) => ipcRenderer.invoke('optimization:upgrading', payload),
+  consumptionMiningCache: {
+    buildKey: (input) => consumptionMiningCacheKey(input),
+    inspect: (input) => {
+      const key = consumptionMiningCacheKey(input);
+      return { key, entry: consumptionMiningCacheState.inspect(key) };
+    },
+    ensure: (input, loader) => {
+      if (typeof loader !== 'function') return Promise.reject(new TypeError('loader must be a function'));
+      const key = consumptionMiningCacheKey(input);
+      return consumptionMiningCacheState.ensureData(key, loader, { force: input?.force === true })
+        .then((entry) => ({ key, entry }));
+    },
+  },
   consumptionScanningCache: {
     buildKey: (input) => consumptionScanningCacheKey(input),
     inspect: (input) => {
