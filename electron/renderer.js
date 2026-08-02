@@ -1014,7 +1014,7 @@ async function runFactionBackgroundPrefetch(generation, faction) {
     { key: 'consumption-mining', cached: () => Boolean(getCachedFilterResult(faction, 'consMining', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consMining', await api.getDailyConsumptionMining({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
     { key: 'consumption-cargo', cached: () => Boolean(getCachedFilterResult(faction, 'consCargo', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consCargo', await api.getDailyConsumptionCargo({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
     { key: 'consumption-crafting', cached: () => Boolean(getCachedFilterResult(faction, 'consCrafting', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consCrafting', await api.getDailyConsumptionCrafting({ ...settings, starbaseFilter: '', recipeFilter: '' }), '', '') },
-    { key: 'consumption-upgrading', cached: () => Boolean(getCachedFilterResult(faction, 'consUpgrading', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consUpgrading', await api.getDailyConsumptionUpgrading({ ...settings, starbaseFilter: '', componentFilter: '' }), '', '') },
+    { key: 'consumption-upgrading', cached: () => isConsumptionUpgradingCacheFresh(settings, '', ''), load: () => refreshConsUpgrading({ settings, starbaseFilter: '', componentFilter: '' }) },
     { key: 'consumption-total', cached: () => Boolean(getCachedFilterResult(faction, 'consTotal', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consTotal', await api.getDailyConsumptionTotal({ ...settings, starbaseFilter: '', assetFilter: '' }), '', '') },
     { key: 'pcr', cached: () => Boolean(getCachedFactionResult(faction, 'pcr')), load: async () => { const result = await api.getPcrCharts(settings); if (result?.ok) setCachedFactionResult(faction, 'pcr', result); } },
     { key: 'inventory', cached: () => Boolean(getCachedFactionResult(faction, 'inventory::__all__')), load: async () => { const result = await api.getInventory({ ...settings, starbaseFilter: '__all__' }); if (result?.ok) setCachedFactionResult(faction, 'inventory::__all__', result); } },
@@ -2448,30 +2448,74 @@ function renderConsUpgrading(result) {
   }
 }
 
-async function refreshConsUpgrading() {
-  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
-    renderConsUpgradingEmpty('Awaiting Influx connection');
-    return;
+function getConsumptionUpgradingCacheInput(settings = latestSettings || getFormPayload(), componentFilter = selectedConsUpgradingComponent, starbaseFilter = selectedConsUpgradingStarbase, force = false) {
+  return {
+    faction: normalizeFaction(settings?.faction),
+    playerProfile: getActivePlayerProfile(settings),
+    componentFilter: String(componentFilter || ''),
+    starbaseFilter: String(starbaseFilter || ''),
+    force,
+  };
+}
+
+function isConsumptionUpgradingCacheFresh(settings, componentFilter, starbaseFilter) {
+  const input = getConsumptionUpgradingCacheInput(settings, componentFilter, starbaseFilter);
+  if (!input.playerProfile) return false;
+  return api.consumptionUpgradingCache.inspect(input)?.entry?.status === 'ready';
+}
+
+function isActiveConsumptionUpgradingContext(key, generation) {
+  if (currentSection !== 'production' || currentSubtab !== 'consumption' || currentConsumptionSubtab !== 'upgrading') return false;
+  const input = getConsumptionUpgradingCacheInput();
+  if (!input.playerProfile || api.consumptionUpgradingCache.buildKey(input) !== key) return false;
+  const current = api.consumptionUpgradingCache.inspect(input);
+  return current?.key === key && current?.entry?.generation === generation;
+}
+
+async function refreshConsUpgrading({
+  force = false,
+  settings = latestSettings || getFormPayload(),
+  componentFilter = selectedConsUpgradingComponent,
+  starbaseFilter = selectedConsUpgradingStarbase,
+} = {}) {
+  if (!hasInfluxSettings(settings)) {
+    if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'upgrading') {
+      renderConsUpgradingEmpty('Awaiting Influx connection');
+    }
+    return null;
   }
 
-  const faction = normalizeFaction(latestSettings?.faction);
-  const cached = getCachedFilterResult(faction, 'consUpgrading', selectedConsUpgradingStarbase, selectedConsUpgradingComponent);
-  if (cached) {
-    renderConsUpgrading(cached);
-  } else {
+  const input = getConsumptionUpgradingCacheInput(settings, componentFilter, starbaseFilter, force);
+  if (!input.playerProfile) {
+    if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'upgrading') {
+      renderConsUpgradingEmpty(`No ${input.faction} player profile configured`);
+    }
+    return null;
+  }
+  const initial = api.consumptionUpgradingCache.inspect(input);
+  const displayable = initial?.entry?.value || initial?.entry?.lastGoodValue;
+  const initialGeneration = initial?.entry?.generation;
+  if (displayable && isActiveConsumptionUpgradingContext(initial.key, initialGeneration)) {
+    renderConsUpgrading(displayable);
+  } else if (!displayable && currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'upgrading') {
     renderConsUpgradingEmpty('Loading upgrading consumption...');
   }
-  try {
-    const result = await api.getDailyConsumptionUpgrading({
-      ...(latestSettings || getFormPayload()),
-      starbaseFilter: selectedConsUpgradingStarbase,
-      componentFilter: selectedConsUpgradingComponent,
-    });
-    renderConsUpgrading(result);
-  } catch (error) {
-    console.error(error);
-    if (!cached) renderConsUpgradingEmpty('Influx unavailable');
-  }
+
+  const requestSettings = {
+    ...settings,
+    starbaseFilter: input.starbaseFilter,
+    componentFilter: input.componentFilter,
+  };
+  const settled = await api.consumptionUpgradingCache.ensure(input, async () => {
+    const result = await api.getDailyConsumptionUpgrading(requestSettings);
+    if (result?.ok === false) throw new Error(result.error || 'Upgrading consumption failed');
+    return result;
+  });
+  if (!isActiveConsumptionUpgradingContext(settled.key, settled.entry.generation)) return settled;
+  const value = settled.entry.value || settled.entry.lastGoodValue;
+  if (value) renderConsUpgrading(value);
+  else renderConsUpgradingEmpty(settled.entry.error?.message || 'Influx unavailable');
+  return settled;
 }
 
 /* ---- Consumption: Scanning ---- */
@@ -7671,7 +7715,7 @@ function refreshVisibleProductionSubtab() {
       latestConsMiningResult ? Promise.resolve() : refreshConsMining(),
       latestConsCargoResult ? Promise.resolve() : refreshConsCargo(),
       latestConsCraftingResult ? Promise.resolve() : refreshConsCrafting(),
-      latestConsUpgradingResult ? Promise.resolve() : refreshConsUpgrading(),
+      refreshConsUpgrading(),
       latestConsTotalResult ? Promise.resolve() : refreshConsTotal(),
     ]);
   }
@@ -7717,7 +7761,7 @@ function refreshCurrentVisibleData() {
   if (currentSubtab === 'consumption') {
     if (currentConsumptionSubtab === 'mining') return refreshConsMining();
     if (currentConsumptionSubtab === 'crafting') return refreshConsCrafting();
-    if (currentConsumptionSubtab === 'upgrading') return refreshConsUpgrading();
+    if (currentConsumptionSubtab === 'upgrading') return refreshConsUpgrading({ force: true });
     if (currentConsumptionSubtab === 'scanning') return refreshConsScanning();
     if (currentConsumptionSubtab === 'cargo') return refreshConsCargo();
     return refreshConsTotal();
@@ -7750,7 +7794,7 @@ function setActiveSubtab(subtab) {
     if (!latestConsMiningResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsMining();
     if (!latestConsCargoResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsCargo();
     if (!latestConsCraftingResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsCrafting();
-    if (!latestConsUpgradingResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsUpgrading();
+    if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsUpgrading();
     if (!latestConsTotalResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsTotal();
   }
   if (subtab === 'pct-charts') {
@@ -8006,8 +8050,13 @@ factionButtons.forEach((button) => {
     if (cachedConsMining) renderConsMining(cachedConsMining);
     const cachedConsCrafting = getCachedFilterResult(faction, 'consCrafting', selectedConsCraftingStarbase, selectedConsCraftingRecipe);
     if (cachedConsCrafting) renderConsCrafting(cachedConsCrafting);
-    const cachedConsUpgrading = getCachedFilterResult(faction, 'consUpgrading', selectedConsUpgradingStarbase, selectedConsUpgradingComponent);
-    if (cachedConsUpgrading) renderConsUpgrading(cachedConsUpgrading);
+    // Consumption Upgrading is profile- and filter-keyed in the canonical
+    // preload cache. Never render its legacy faction-only cache here: after a
+    // same-faction profile change it may belong to the previous profile.
+    if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'upgrading') {
+      renderConsUpgradingEmpty('Loading upgrading consumption...');
+      void refreshConsUpgrading({ settings: nextSettings });
+    }
     const cachedConsTotal = getCachedFilterResult(faction, 'consTotal', selectedConsTotalStarbase, selectedConsTotalAsset);
     if (cachedConsTotal) renderConsTotal(cachedConsTotal);
     const cachedPcr = getCachedFactionResult(faction, 'pcr');
@@ -8084,6 +8133,7 @@ document.querySelectorAll('.consumption-subtab-button').forEach((button) => {
     document.querySelectorAll('[data-consumption-panel]').forEach((panel) => {
       panel.classList.toggle('active', panel.dataset.consumptionPanel === currentConsumptionSubtab);
     });
+    if (currentConsumptionSubtab === 'upgrading') refreshConsUpgrading();
   });
 });
 
@@ -8244,7 +8294,7 @@ form.addEventListener('submit', async (event) => {
     refreshDailyProduction();
     refreshConsMining();
     refreshConsCrafting();
-    refreshConsUpgrading();
+    refreshConsUpgrading({ force: true });
     refreshConsScanning();
     refreshConsCargo();
     refreshConsTotal();

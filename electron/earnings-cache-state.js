@@ -2,6 +2,7 @@
 
 const BREAKEVEN_CACHE_FRESHNESS_MS = 15 * 60 * 1000;
 const UPGRADING_CACHE_FRESHNESS_MS = BREAKEVEN_CACHE_FRESHNESS_MS;
+const CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS = UPGRADING_CACHE_FRESHNESS_MS;
 
 function safeError(error) {
   if (!error) return null;
@@ -91,4 +92,4 @@ function createEarningsCacheState({ now = Date.now, freshnessMs = BREAKEVEN_CACH
   return { inspect, ensureData, invalidate };
 }
 
-module.exports = { BREAKEVEN_CACHE_FRESHNESS_MS, UPGRADING_CACHE_FRESHNESS_MS, createEarningsCacheState };
+module.exports = { BREAKEVEN_CACHE_FRESHNESS_MS, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS, createEarningsCacheState };

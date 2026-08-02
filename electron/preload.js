@@ -1,10 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const keyModule = require('./earnings-' + 'cache-key');
 const buildBreakevenKey = keyModule['build' + 'EarningsCacheKey'];
-const { createEarningsCacheState, UPGRADING_CACHE_FRESHNESS_MS } = require('./earnings-cache-state');
+const { createEarningsCacheState, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS } = require('./earnings-cache-state');
 
 const breakevenCacheState = createEarningsCacheState();
 const upgradingCacheState = createEarningsCacheState({ freshnessMs: UPGRADING_CACHE_FRESHNESS_MS });
+const consumptionUpgradingCacheState = createEarningsCacheState({ freshnessMs: CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS });
 
 function breakevenCacheDescriptor({ faction, playerProfile, filters = {} } = {}) {
   return {
@@ -38,6 +39,25 @@ function upgradingCacheKey(input) {
   return buildBreakevenKey(upgradingCacheDescriptor(input));
 }
 
+function consumptionUpgradingCacheDescriptor({ faction, playerProfile, componentFilter = '', starbaseFilter = '' } = {}) {
+  return {
+    schemaVersion: '1',
+    faction,
+    playerProfile,
+    section: 'consumption',
+    subtab: 'upgrading',
+    datasetScope: 'upgrade-consumption-31d',
+    filters: {
+      componentFilter: String(componentFilter || ''),
+      starbaseFilter: String(starbaseFilter || ''),
+    },
+  };
+}
+
+function consumptionUpgradingCacheKey(input) {
+  return buildBreakevenKey(consumptionUpgradingCacheDescriptor(input));
+}
+
 contextBridge.exposeInMainWorld('myStarAtlas', {
   getProfileName: () => ipcRenderer.invoke('app:get-profile-name'),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
@@ -67,6 +87,19 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getInventory: (payload) => ipcRenderer.invoke('inventory:daily', payload),
   getScanningOptimization: (payload) => ipcRenderer.invoke('optimization:scanning', payload),
   getUpgradingOptimization: (payload) => ipcRenderer.invoke('optimization:upgrading', payload),
+  consumptionUpgradingCache: {
+    buildKey: (input) => consumptionUpgradingCacheKey(input),
+    inspect: (input) => {
+      const key = consumptionUpgradingCacheKey(input);
+      return { key, entry: consumptionUpgradingCacheState.inspect(key) };
+    },
+    ensure: (input, loader) => {
+      if (typeof loader !== 'function') return Promise.reject(new TypeError('loader must be a function'));
+      const key = consumptionUpgradingCacheKey(input);
+      return consumptionUpgradingCacheState.ensureData(key, loader, { force: input?.force === true })
+        .then((entry) => ({ key, entry }));
+    },
+  },
   upgradingCache: {
     buildKey: (input) => upgradingCacheKey(input),
     inspect: (input) => {
