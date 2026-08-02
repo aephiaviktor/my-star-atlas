@@ -1686,7 +1686,7 @@ function renderSduChart(result) {
 
   for (const day of days) {
     const value = Number(day.value) || 0;
-    const height = Math.max(3, Math.round((value / maxValue) * 75));
+    const height = Math.max(3, Math.round((value / maxValue) * 100));
     const bar = document.createElement('div');
     bar.className = 'resource-chart-bar';
     bar.title = `${day.label}: ${formatWholeNumber(value)} SDU`;
@@ -1794,7 +1794,7 @@ function renderMiningCharts(result) {
     bars.appendChild(createYAxis(maxValue));
     for (const day of material.days) {
       const value = Number(day.value) || 0;
-      const height = Math.max(3, Math.round((value / maxValue) * 75));
+      const height = Math.max(3, Math.round((value / maxValue) * 100));
       const bar = document.createElement('div');
       bar.className = 'resource-chart-bar';
       bar.title = `${day.label}: ${formatWholeNumber(value)}`;
@@ -1878,7 +1878,7 @@ function createCraftingBarCard(step, index) {
   bars.appendChild(createYAxis(maxValue));
   for (const day of step.days) {
     const value = Number(day.value) || 0;
-    const height = Math.max(3, Math.round((value / maxValue) * 75));
+    const height = Math.max(3, Math.round((value / maxValue) * 100));
     const bar = document.createElement('div');
     bar.className = 'resource-chart-bar';
     bar.title = `${day.label}: ${formatWholeNumber(value)}`;
@@ -4057,7 +4057,7 @@ function createConsumptionBarCard(asset, fallbackIndex, options = {}) {
   bars.appendChild(createYAxis(maxValue));
   for (const day of asset.days) {
     const value = Number(day.value) || 0;
-    const height = Math.max(3, Math.round((value / maxValue) * 75));
+    const height = Math.max(3, Math.round((value / maxValue) * 100));
     const bar = document.createElement('div');
     bar.className = 'resource-chart-bar';
     bar.title = `${day.label}: ${formatWholeNumber(value)}`;
