@@ -24,16 +24,17 @@ test('faction switching preserves secure-setting readiness', async () => {
   assert.match(renderer, /setFormValues\(saved\);\s*updateSettingsStatus\(saved\);/);
 });
 
-test('RPC limiter UI exposes only the current shared URL through the blur control', async () => {
+test('RPC limiter UI exposes only the current provider URLs through the blur control', async () => {
   const html = await fs.readFile(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
   const main = await fs.readFile(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   const css = await fs.readFile(path.join(__dirname, '..', 'electron', 'renderer.css'), 'utf8');
-  assert.match(html, /class="sensitive-field" id="rpc-limiter-current-url"/);
+  assert.match(html, /class="sensitive-field" id="rpc-limiter-main-url"/);
+  assert.match(html, /class="sensitive-field" id="rpc-limiter-fallback-url"/);
   assert.doesNotMatch(html, /class="sensitive-field" name="aephiaApiKey"/);
   assert.doesNotMatch(html, /class="sensitive-field" name="influxAuthToken"/);
   assert.doesNotMatch(html, /class="sensitive-field" name="rpcUrl"/);
   assert.match(main, /sharedRpcLimiter\.wait\('rpc:shared'/);
   assert.match(main, /fetch: async \(info, init\)/);
-  assert.match(main, /no Current RPC Limiter URL is configured/);
+  assert.match(main, /no RPC Limiter URLs are configured/);
   assert.doesNotMatch(css, /sensitive-hidden \.sensitive-field:focus/);
 });
