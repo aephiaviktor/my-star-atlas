@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const keyModule = require('./earnings-' + 'cache-key');
 const buildBreakevenKey = keyModule['build' + 'EarningsCacheKey'];
-const { createEarningsCacheState, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS, CONSUMPTION_MINING_CACHE_FRESHNESS_MS, CONSUMPTION_CARGO_CACHE_FRESHNESS_MS, CONSUMPTION_CRAFTING_CACHE_FRESHNESS_MS } = require('./earnings-cache-state');
+const { createEarningsCacheState, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS, CONSUMPTION_MINING_CACHE_FRESHNESS_MS, CONSUMPTION_CARGO_CACHE_FRESHNESS_MS, CONSUMPTION_CRAFTING_CACHE_FRESHNESS_MS, CONSUMPTION_TOTAL_CACHE_FRESHNESS_MS } = require('./earnings-cache-state');
 
 const breakevenCacheState = createEarningsCacheState();
 const upgradingCacheState = createEarningsCacheState({ freshnessMs: UPGRADING_CACHE_FRESHNESS_MS });
@@ -10,6 +10,7 @@ const consumptionScanningCacheState = createEarningsCacheState({ freshnessMs: CO
 const consumptionMiningCacheState = createEarningsCacheState({ freshnessMs: CONSUMPTION_MINING_CACHE_FRESHNESS_MS });
 const consumptionCargoCacheState = createEarningsCacheState({ freshnessMs: CONSUMPTION_CARGO_CACHE_FRESHNESS_MS });
 const consumptionCraftingCacheState = createEarningsCacheState({ freshnessMs: CONSUMPTION_CRAFTING_CACHE_FRESHNESS_MS });
+const consumptionTotalCacheState = createEarningsCacheState({ freshnessMs: CONSUMPTION_TOTAL_CACHE_FRESHNESS_MS });
 
 function breakevenCacheDescriptor({ faction, playerProfile, filters = {} } = {}) {
   return {
@@ -124,6 +125,18 @@ function consumptionCraftingCacheKey(input) {
   return buildBreakevenKey(consumptionCraftingCacheDescriptor(input));
 }
 
+function consumptionTotalCacheDescriptor({ faction, playerProfile, starbaseFilter = '', assetFilter = '' } = {}) {
+  return {
+    schemaVersion: '1', faction, playerProfile, section: 'consumption', subtab: 'total',
+    datasetScope: 'total-consumption-31d',
+    filters: { starbaseFilter: String(starbaseFilter || '').trim(), assetFilter: String(assetFilter || '').trim() },
+  };
+}
+
+function consumptionTotalCacheKey(input) {
+  return buildBreakevenKey(consumptionTotalCacheDescriptor(input));
+}
+
 contextBridge.exposeInMainWorld('myStarAtlas', {
   getProfileName: () => ipcRenderer.invoke('app:get-profile-name'),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
@@ -153,6 +166,15 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getInventory: (payload) => ipcRenderer.invoke('inventory:daily', payload),
   getScanningOptimization: (payload) => ipcRenderer.invoke('optimization:scanning', payload),
   getUpgradingOptimization: (payload) => ipcRenderer.invoke('optimization:upgrading', payload),
+  consumptionTotalCache: {
+    buildKey: (input) => consumptionTotalCacheKey(input),
+    inspect: (input) => { const key = consumptionTotalCacheKey(input); return { key, entry: consumptionTotalCacheState.inspect(key) }; },
+    ensure: (input, loader) => {
+      if (typeof loader !== 'function') return Promise.reject(new TypeError('loader must be a function'));
+      const key = consumptionTotalCacheKey(input);
+      return consumptionTotalCacheState.ensureData(key, loader, { force: input?.force === true }).then((entry) => ({ key, entry }));
+    },
+  },
   consumptionCraftingCache: {
     buildKey: (input) => consumptionCraftingCacheKey(input),
     inspect: (input) => { const key = consumptionCraftingCacheKey(input); return { key, entry: consumptionCraftingCacheState.inspect(key) }; },

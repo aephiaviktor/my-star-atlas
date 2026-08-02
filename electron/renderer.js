@@ -1015,7 +1015,7 @@ async function runFactionBackgroundPrefetch(generation, faction) {
     { key: 'consumption-cargo', cached: () => isConsumptionCargoCacheFresh(settings, '', ''), load: () => refreshConsCargo({ settings, starbaseFilter: '', fleetFilter: '' }) },
     { key: 'consumption-crafting', cached: () => isConsumptionCraftingCacheFresh(settings, '', ''), load: () => refreshConsCrafting({ settings, starbaseFilter: '', recipeFilter: '' }) },
     { key: 'consumption-upgrading', cached: () => isConsumptionUpgradingCacheFresh(settings, '', ''), load: () => refreshConsUpgrading({ settings, starbaseFilter: '', componentFilter: '' }) },
-    { key: 'consumption-total', cached: () => Boolean(getCachedFilterResult(faction, 'consTotal', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consTotal', await api.getDailyConsumptionTotal({ ...settings, starbaseFilter: '', assetFilter: '' }), '', '') },
+    { key: 'consumption-total', cached: () => isConsumptionTotalCacheFresh(settings, '', ''), load: () => refreshConsTotal({ settings, starbaseFilter: '', assetFilter: '' }) },
     { key: 'pcr', cached: () => Boolean(getCachedFactionResult(faction, 'pcr')), load: async () => { const result = await api.getPcrCharts(settings); if (result?.ok) setCachedFactionResult(faction, 'pcr', result); } },
     { key: 'inventory', cached: () => Boolean(getCachedFactionResult(faction, 'inventory::__all__')), load: async () => { const result = await api.getInventory({ ...settings, starbaseFilter: '__all__' }); if (result?.ok) setCachedFactionResult(faction, 'inventory::__all__', result); } },
     { key: 'earnings', cached: () => Boolean(getCachedFactionResult(faction, 'earnings')) || !getActivePlayerProfile(settings), load: async () => { const result = await api.getEarningsSnapshot(settings); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
@@ -2945,30 +2945,62 @@ function renderConsTotal(result) {
   }
 }
 
-async function refreshConsTotal() {
-  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
-    renderConsTotalEmpty('Awaiting Influx connection');
-    return;
-  }
+function getConsumptionTotalCacheInput(settings = latestSettings || getFormPayload(), starbaseFilter = selectedConsTotalStarbase, assetFilter = selectedConsTotalAsset, force = false) {
+  return { faction: normalizeFaction(settings?.faction), playerProfile: getActivePlayerProfile(settings), starbaseFilter: String(starbaseFilter || '').trim(), assetFilter: String(assetFilter || '').trim(), force };
+}
 
-  const faction = normalizeFaction(latestSettings?.faction);
-  const cached = getCachedFilterResult(faction, 'consTotal', selectedConsTotalStarbase, selectedConsTotalAsset);
-  if (cached) {
-    renderConsTotal(cached);
-  } else {
-    renderConsTotalEmpty('Loading total consumption...');
+function isConsumptionTotalCacheFresh(settings, starbaseFilter, assetFilter) {
+  const input = getConsumptionTotalCacheInput(settings, starbaseFilter, assetFilter);
+  return Boolean(input.playerProfile && api.consumptionTotalCache.inspect(input)?.entry?.status === 'ready');
+}
+
+function isActiveConsumptionTotalContext(key, generation) {
+  if (currentSection !== 'production' || currentSubtab !== 'consumption' || currentConsumptionSubtab !== 'total') return false;
+  const input = getConsumptionTotalCacheInput();
+  if (!input.playerProfile || api.consumptionTotalCache.buildKey(input) !== key) return false;
+  const current = api.consumptionTotalCache.inspect(input);
+  return current?.key === key && current?.entry?.generation === generation;
+}
+
+async function refreshConsTotal({ force = false, settings = latestSettings || getFormPayload(), starbaseFilter = selectedConsTotalStarbase, assetFilter = selectedConsTotalAsset } = {}) {
+  if (!hasInfluxSettings(settings)) {
+    if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'total') renderConsTotalEmpty('Awaiting Influx connection');
+    return null;
   }
-  try {
-    const result = await api.getDailyConsumptionTotal({
-      ...(latestSettings || getFormPayload()),
-      starbaseFilter: selectedConsTotalStarbase,
-      assetFilter: selectedConsTotalAsset,
-    });
-    renderConsTotal(result);
-  } catch (error) {
-    console.error(error);
-    if (!cached) renderConsTotalEmpty('Influx unavailable');
+  const input = getConsumptionTotalCacheInput(settings, starbaseFilter, assetFilter, force);
+  if (!input.playerProfile) {
+    if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'total') renderConsTotalEmpty(`No ${input.faction} player profile configured`);
+    return null;
   }
+  const initial = api.consumptionTotalCache.inspect(input);
+  const displayable = initial?.entry?.value || initial?.entry?.lastGoodValue;
+  if (displayable && isActiveConsumptionTotalContext(initial.key, initial.entry?.generation)) {
+    renderConsTotal(displayable);
+    const resultingInput = getConsumptionTotalCacheInput();
+    if (api.consumptionTotalCache.buildKey(resultingInput) !== initial.key) {
+      const resulting = api.consumptionTotalCache.inspect(resultingInput);
+      if (!resulting?.entry?.value && !resulting?.entry?.lastGoodValue) renderConsTotalEmpty('Loading total consumption...');
+      return refreshConsTotal();
+    }
+  } else if (!displayable && currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'total') renderConsTotalEmpty('Loading total consumption...');
+  const requestSettings = { ...settings, starbaseFilter: input.starbaseFilter, assetFilter: input.assetFilter };
+  const settled = await api.consumptionTotalCache.ensure(input, async () => {
+    const result = await api.getDailyConsumptionTotal(requestSettings);
+    if (result?.ok === false) throw new Error(result.error || 'Total consumption failed');
+    return result;
+  });
+  if (!isActiveConsumptionTotalContext(settled.key, settled.entry.generation)) return settled;
+  const value = settled.entry.value || settled.entry.lastGoodValue;
+  if (value) {
+    renderConsTotal(value);
+    const resultingInput = getConsumptionTotalCacheInput();
+    if (api.consumptionTotalCache.buildKey(resultingInput) !== settled.key) {
+      const resulting = api.consumptionTotalCache.inspect(resultingInput);
+      if (!resulting?.entry?.value && !resulting?.entry?.lastGoodValue) renderConsTotalEmpty('Loading total consumption...');
+      return refreshConsTotal();
+    }
+  } else renderConsTotalEmpty(settled.entry.error?.message || 'Influx unavailable');
+  return settled;
 }
 
 /* ---- PCR Charts ---- */
@@ -7842,7 +7874,7 @@ function refreshVisibleProductionSubtab() {
       refreshConsCargo(),
       refreshConsCrafting(),
       refreshConsUpgrading(),
-      latestConsTotalResult ? Promise.resolve() : refreshConsTotal(),
+      refreshConsTotal(),
     ]);
   }
   if (currentSubtab === 'pct-charts') return latestPcrResult ? Promise.resolve() : refreshPcrCharts();
@@ -7890,7 +7922,8 @@ function refreshCurrentVisibleData() {
     if (currentConsumptionSubtab === 'upgrading') return refreshConsUpgrading({ force: true });
     if (currentConsumptionSubtab === 'scanning') return refreshConsScanning({ force: true });
     if (currentConsumptionSubtab === 'cargo') return refreshConsCargo({ force: true });
-    return refreshConsTotal();
+    if (currentConsumptionSubtab === 'total') return refreshConsTotal({ force: true });
+    return Promise.resolve();
   }
   return Promise.resolve();
 }
@@ -7921,7 +7954,7 @@ function setActiveSubtab(subtab) {
     if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsCargo();
     if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsCrafting();
     if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsUpgrading();
-    if (!latestConsTotalResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsTotal();
+    if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsTotal();
   }
   if (subtab === 'pct-charts') {
     if (!latestPcrResult && hasInfluxSettings(latestSettings || getFormPayload())) {
@@ -8199,8 +8232,10 @@ factionButtons.forEach((button) => {
       renderConsUpgradingEmpty('Loading upgrading consumption...');
       void refreshConsUpgrading({ settings: nextSettings });
     }
-    const cachedConsTotal = getCachedFilterResult(faction, 'consTotal', selectedConsTotalStarbase, selectedConsTotalAsset);
-    if (cachedConsTotal) renderConsTotal(cachedConsTotal);
+    if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'total') {
+      renderConsTotalEmpty('Loading total consumption...');
+      void refreshConsTotal({ settings: nextSettings });
+    }
     const cachedPcr = getCachedFactionResult(faction, 'pcr');
     if (cachedPcr) renderPcrCharts(cachedPcr);
 
@@ -8280,6 +8315,7 @@ document.querySelectorAll('.consumption-subtab-button').forEach((button) => {
     if (currentConsumptionSubtab === 'upgrading') refreshConsUpgrading();
     if (currentConsumptionSubtab === 'cargo') refreshConsCargo();
     if (currentConsumptionSubtab === 'crafting') refreshConsCrafting();
+    if (currentConsumptionSubtab === 'total') refreshConsTotal();
   });
 });
 
@@ -8443,7 +8479,7 @@ form.addEventListener('submit', async (event) => {
     refreshConsUpgrading({ force: true });
     refreshConsScanning({ force: true });
     refreshConsCargo({ force: true });
-    refreshConsTotal();
+    refreshConsTotal({ force: true });
     if (currentSection === 'optimization') {
       if (currentOptimizationSubtab === 'upgrading') refreshUpgradingOptimization();
       else refreshScanningOptimization();

@@ -63,15 +63,6 @@ test('same-faction profile and filter changes cannot accept legacy or delayed mi
   assert.doesNotMatch(refresh,/latestConsUpgradingResult|getCachedFilterResult|renderConsUpgrading\([^dv]/);
 });
 
-test('faction-switch legacy rendering for the remaining unmigrated Consumption subtabs is unchanged', () => {
-  const factionSwitch=between('// Render cached data immediately if available','saveStatus.textContent = `Switching to ${clickedFaction}...`');
-  for (const [cache, render] of [['consTotal','renderConsTotal']]) {
-    assert.match(factionSwitch,new RegExp(`getCachedFilterResult\\(faction, '${cache}'`));
-    assert.match(factionSwitch,new RegExp(`if \\(cachedCons.*\\) ${render}`));
-  }
-  for(const name of ['refreshConsScanning','refreshConsMining','refreshConsCargo','refreshConsCrafting','refreshConsTotal']) assert.match(renderer,new RegExp(name));
-});
-
 test('other five Consumption loaders and existing IPC shape remain present', () => {
   for(const name of ['refreshConsScanning','refreshConsMining','refreshConsCargo','refreshConsCrafting','refreshConsTotal']) assert.match(renderer,new RegExp(name));
   assert.doesNotMatch(renderer,/CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS|900000/);
