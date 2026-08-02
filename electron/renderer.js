@@ -5594,7 +5594,7 @@ function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'ships') return createShipsCell(entry);
   if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
-  if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
+  if (columnId === 'txsDaily') return createTextCell(entry.txsDaily == null ? 'N/A' : formatWholeNumber(entry.txsDaily));
   if (columnId === 'starbase') return createTextCell(entry.starbase);
   if (columnId === 'rawMaterial') return createTextCell(entry.rawMaterial);
   if (columnId === 'mined') return createTextCell(formatWholeNumber(entry.mined || 0));
