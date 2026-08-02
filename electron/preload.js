@@ -1,9 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const keyModule = require('./earnings-' + 'cache-key');
 const buildBreakevenKey = keyModule['build' + 'EarningsCacheKey'];
-const { createEarningsCacheState } = require('./earnings-cache-state');
+const { createEarningsCacheState, UPGRADING_CACHE_FRESHNESS_MS } = require('./earnings-cache-state');
 
 const breakevenCacheState = createEarningsCacheState();
+const upgradingCacheState = createEarningsCacheState({ freshnessMs: UPGRADING_CACHE_FRESHNESS_MS });
 
 function breakevenCacheDescriptor({ faction, playerProfile, filters = {} } = {}) {
   return {
@@ -19,6 +20,22 @@ function breakevenCacheDescriptor({ faction, playerProfile, filters = {} } = {})
 
 function breakevenCacheKey(input) {
   return buildBreakevenKey(breakevenCacheDescriptor(input));
+}
+
+function upgradingCacheDescriptor({ faction, playerProfile, filters = {} } = {}) {
+  return {
+    schemaVersion: '1',
+    faction,
+    playerProfile,
+    section: 'earnings',
+    subtab: 'upgrading',
+    datasetScope: 'upgrading-ledger',
+    filters,
+  };
+}
+
+function upgradingCacheKey(input) {
+  return buildBreakevenKey(upgradingCacheDescriptor(input));
 }
 
 contextBridge.exposeInMainWorld('myStarAtlas', {
@@ -50,6 +67,19 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getInventory: (payload) => ipcRenderer.invoke('inventory:daily', payload),
   getScanningOptimization: (payload) => ipcRenderer.invoke('optimization:scanning', payload),
   getUpgradingOptimization: (payload) => ipcRenderer.invoke('optimization:upgrading', payload),
+  upgradingCache: {
+    buildKey: (input) => upgradingCacheKey(input),
+    inspect: (input) => {
+      const key = upgradingCacheKey(input);
+      return { key, entry: upgradingCacheState.inspect(key) };
+    },
+    ensure: (input, loader) => {
+      if (typeof loader !== 'function') return Promise.reject(new TypeError('loader must be a function'));
+      const key = upgradingCacheKey(input);
+      return upgradingCacheState.ensureData(key, loader, { force: input?.force === true })
+        .then((entry) => ({ key, entry }));
+    },
+  },
   breakevenCache: {
     buildKey: (input) => breakevenCacheKey(input),
     inspect: (input) => {

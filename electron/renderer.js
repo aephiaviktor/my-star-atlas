@@ -329,6 +329,7 @@ let latestSettings = null;
 let latestFleetResult = null;
 let latestEarningsResult = null;
 let latestBreakevenResult = null;
+let latestUpgradingResult = null;
 let latestOptimizationResult = null;
 let optimizationRows = [];
 let optimizationAnalyticsRows = [];
@@ -5448,10 +5449,12 @@ function setEarningsChartMode(subtab, mode) {
   if (mode !== 'total' && mode !== 'perCrew') return;
   earningsChartMode[subtab] = mode;
   applyEarningsChartModeState(subtab);
-  if (!latestEarningsResult && !(subtab === 'breakeven' && latestBreakevenResult)) return;
+  if (!latestEarningsResult
+      && !(subtab === 'breakeven' && latestBreakevenResult)
+      && !(subtab === 'upgrading' && latestUpgradingResult)) return;
   if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
   else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
-  else if (subtab === 'upgrading') renderEarningsUpgrading(latestEarningsResult);
+  else if (subtab === 'upgrading') renderEarningsUpgrading(latestUpgradingResult);
   else if (subtab === 'breakeven') renderEarningsBreakeven(latestBreakevenResult);
   else renderEarnings(latestEarningsResult);
 }
@@ -5674,7 +5677,6 @@ function renderEarnings(result) {
     renderEarningsMiningEmpty(result?.error || 'Earnings sync failed');
     renderEarningsCargoEmpty(result?.error || 'Earnings sync failed');
     renderEarningsCraftingEmpty(result?.error || 'Earnings sync failed');
-    renderEarningsUpgradingEmpty(result?.error || 'Earnings sync failed');
     setEarningsStatus('Earnings sync failed');
     setEarningsMiningStatus('Earnings sync failed');
     setEarningsCargoStatus('Earnings sync failed');
@@ -5743,7 +5745,6 @@ function renderEarnings(result) {
     renderEarningsMining(result);
     renderEarningsCargo(result);
     renderEarningsCrafting(result);
-    renderEarningsUpgrading(result);
     renderEarningsMarketplace(result);
     return;
   }
@@ -5763,7 +5764,6 @@ function renderEarnings(result) {
   renderEarningsMining(result);
   renderEarningsCargo(result);
   renderEarningsCrafting(result);
-  renderEarningsUpgrading(result);
   renderEarningsMarketplace(result);
 }
 
@@ -6350,6 +6350,56 @@ async function refreshMarketplace({ sync = false } = {}) {
 function runMarketplaceBackgroundSync() {
   if (!latestSettings || !getActivePlayerProfile(latestSettings)) return Promise.resolve();
   return refreshMarketplace({ sync: true });
+}
+
+function getUpgradingCacheInput(settings = latestSettings || getFormPayload(), force = false) {
+  return {
+    faction: normalizeFaction(settings?.faction),
+    playerProfile: getActivePlayerProfile(settings),
+    filters: {},
+    force,
+  };
+}
+
+function isActiveUpgradingContext(key, generation) {
+  if (currentSection !== 'earnings' || currentEarningsSubtab !== 'upgrading') return false;
+  const input = getUpgradingCacheInput();
+  if (!input.playerProfile || api.upgradingCache.buildKey(input) !== key) return false;
+  const current = api.upgradingCache.inspect(input);
+  return current?.key === key && current?.entry?.generation === generation;
+}
+
+async function refreshEarningsUpgrading({ force = false } = {}) {
+  const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: 'upgrading' };
+  const input = getUpgradingCacheInput(settings, force);
+  if (!input.playerProfile) {
+    latestUpgradingResult = null;
+    renderEarningsUpgradingEmpty(`No ${input.faction} player profile configured`);
+    return null;
+  }
+  const initial = api.upgradingCache.inspect(input);
+  const displayable = initial?.entry?.value || initial?.entry?.lastGoodValue;
+  if (displayable) {
+    latestUpgradingResult = displayable;
+    renderEarningsUpgrading(displayable);
+  } else {
+    renderEarningsUpgradingEmpty('Loading Upgrading ledger data...');
+  }
+  const settled = await api.upgradingCache.ensure(input, async () => {
+    const result = await api.getEarningsSnapshot(settings);
+    if (result?.ok === false) throw new Error(result.error || 'Upgrading snapshot failed');
+    return result;
+  });
+  if (!isActiveUpgradingContext(settled.key, settled.entry.generation)) return settled;
+  const value = settled.entry.value || settled.entry.lastGoodValue;
+  if (value) {
+    latestUpgradingResult = value;
+    renderEarningsUpgrading(value);
+  } else {
+    latestUpgradingResult = null;
+    renderEarningsUpgradingEmpty(settled.entry.error?.message || 'Upgrading data unavailable');
+  }
+  return settled;
 }
 
 function getBreakevenCacheInput(settings = latestSettings || getFormPayload(), force = false) {
@@ -7599,6 +7649,7 @@ function setActiveSection(section) {
   updateTitle();
   if (section === 'fleet' && !latestFleetResult) refreshFleets();
   if (section === 'earnings' && currentEarningsSubtab === 'breakeven') refreshBreakeven();
+  else if (section === 'earnings' && currentEarningsSubtab === 'upgrading') refreshEarningsUpgrading();
   else if (section === 'earnings' && !latestEarningsResult) refreshEarnings();
   if (section === 'optimization') {
     if (currentOptimizationSubtab === 'upgrading') refreshUpgradingOptimization();
@@ -7633,6 +7684,7 @@ function refreshVisibleFactionViews() {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') {
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven();
+    if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading();
     return currentEarningsSubtab === 'marketplace' ? refreshMarketplace({ sync: true }) : refreshEarnings();
   }
   if (currentSection === 'optimization') {
@@ -7648,6 +7700,7 @@ function refreshCurrentVisibleData() {
   if (currentSection === 'earnings') {
     if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: true });
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven({ force: true });
+    if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading({ force: true });
     return refreshEarnings();
   }
   if (currentSection === 'optimization') {
@@ -7747,6 +7800,10 @@ function setActiveEarningsSubtab(subtab) {
   }
   if (subtab === 'breakeven') {
     refreshBreakeven();
+    return;
+  }
+  if (subtab === 'upgrading') {
+    refreshEarningsUpgrading();
     return;
   }
   if ((subtab === 'scanning' || subtab === 'mining' || subtab === 'cargo' || subtab === 'crafting') && !latestEarningsResult) {
@@ -8255,7 +8312,7 @@ for (const button of document.querySelectorAll('[data-earnings-cost-basis]')) {
       sibling.setAttribute('aria-pressed', String(active));
     }
     if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
-    else renderEarningsUpgrading(latestEarningsResult);
+    else renderEarningsUpgrading(latestUpgradingResult);
   });
 }
 

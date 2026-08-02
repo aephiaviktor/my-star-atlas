@@ -1,6 +1,7 @@
 'use strict';
 
 const BREAKEVEN_CACHE_FRESHNESS_MS = 15 * 60 * 1000;
+const UPGRADING_CACHE_FRESHNESS_MS = BREAKEVEN_CACHE_FRESHNESS_MS;
 
 function safeError(error) {
   if (!error) return null;
@@ -25,8 +26,9 @@ function snapshot(entry, now) {
   };
 }
 
-function createEarningsCacheState({ now = Date.now } = {}) {
+function createEarningsCacheState({ now = Date.now, freshnessMs = BREAKEVEN_CACHE_FRESHNESS_MS } = {}) {
   if (typeof now !== 'function') throw new TypeError('now must be a function');
+  if (!Number.isFinite(freshnessMs) || freshnessMs < 0) throw new TypeError('freshnessMs must be non-negative');
   const entries = new Map();
   const generations = new Map();
 
@@ -66,7 +68,7 @@ function createEarningsCacheState({ now = Date.now } = {}) {
         entry.status = 'ready';
         entry.lastGoodValue = value;
         entry.fetchedAt = fetchedAt;
-        entry.staleAt = fetchedAt + BREAKEVEN_CACHE_FRESHNESS_MS;
+        entry.staleAt = fetchedAt + freshnessMs;
         entry.error = null;
         entry.inFlightPromise = null;
         return snapshot(entry, now());
@@ -89,4 +91,4 @@ function createEarningsCacheState({ now = Date.now } = {}) {
   return { inspect, ensureData, invalidate };
 }
 
-module.exports = { BREAKEVEN_CACHE_FRESHNESS_MS, createEarningsCacheState };
+module.exports = { BREAKEVEN_CACHE_FRESHNESS_MS, UPGRADING_CACHE_FRESHNESS_MS, createEarningsCacheState };
