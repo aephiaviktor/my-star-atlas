@@ -157,7 +157,7 @@ test('production integration is limited to the two authorized fetch paths with n
   const global = functionBody('fetchGlobalMarketTrades', 'let marketplaceSyncActive');
   for (const body of [local, global]) {
     assert.match(body, /publishMarketplaceCandidateSet/);
-    assert.match(body, /resolveMarketplaceDiscoveryCursors/);
+    assert.match(body, /commitSafeCursor/);
     assert.doesNotMatch(body, /writeInfluxLines\(/);
     assert.doesNotMatch(body, /formatLocalMarketInfluxLine\(/);
   }
@@ -169,14 +169,71 @@ test('checkpoint IDs are durable before hold completion and cursor release for L
   const local = functionBody('fetchLocalMarketTrades', 'async function fetchGlobalMarketTrades');
   const global = functionBody('fetchGlobalMarketTrades', 'let marketplaceSyncActive');
   for (const body of [local, global]) {
-    const firstCheckpoint = body.indexOf('await writeJsonAtomic(filePath, checkpointDocument)');
+    const safeCheckpoint = body.indexOf('commitSafeCursor: () => writeJsonAtomic(filePath, safeCheckpointDocument)');
     const completion = body.indexOf('completeMarketplacePublicationHolds');
-    const releasedCursorResolution = body.lastIndexOf('resolveMarketplaceDiscoveryCursors');
     const finalCheckpoint = body.lastIndexOf('await writeJsonAtomic(filePath');
-    assert.ok(firstCheckpoint > 0 && firstCheckpoint < completion);
-    assert.ok(completion < releasedCursorResolution);
-    assert.ok(releasedCursorResolution < finalCheckpoint);
+    assert.ok(safeCheckpoint > 0 && safeCheckpoint < completion);
+    assert.ok(completion < finalCheckpoint);
+    assert.match(body, /\.\.\.cursorOutputSnapshot/);
   }
+});
+
+test('safe cursor is committed after durable retry holds and staging but before publish transport', () => {
+  const start = main.indexOf('async function publishMarketplaceCandidateSet');
+  const end = main.indexOf('async function completeMarketplacePublicationHolds', start);
+  const body = main.slice(start, end);
+  const firstHold = body.indexOf('recordMarketplacePublicationHold');
+  const stageOnly = body.indexOf('const stagingCoordinator');
+  const safeCheckpoint = body.indexOf('await commitSafeCursor()');
+  const publishingCoordinator = body.indexOf('const coordinator = createMarketplacePublicationCoordinator', stageOnly);
+  assert.ok(firstHold > 0 && firstHold < stageOnly);
+  assert.ok(stageOnly < safeCheckpoint && safeCheckpoint < publishingCoordinator);
+  assert.match(body, /fetchImpl: publicationSettings\.canPost && !stagingFailed \? fetch : undefined/);
+  assert.match(body, /error: 'safe_cursor_checkpoint_failed', safeCursorCommitted: false/);
+});
+
+test('complete retry holds persist exact normalized input and permit restart reconstruction', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'msa-gate8-retry-'));
+  try {
+    const publicationInput = {
+      eventType: 'trade', identity: { market: 'LM', faction: 'USTUR', profileScope: 'USTUR', executionSignature: 'sig', rawMint: 'mint', side: 'buy', quantity: 2 },
+      pointTimestampNs: '1784941200000000000', sourceVersion: 'fallback_v1',
+      fields: { fallbackQuantity: 2 },
+    };
+    const made = await checkpoint.recordMarketplacePublicationHold({
+      installationRoot: root, now: '2026-08-01T00:00:00.000Z',
+      candidate: {
+        market: 'LM', kind: 'trade', logicalKeyOrSourceId: 'logical', currentRank: 'fallback', currentMutableIds: ['mutable'],
+        candidateTimestamp: '2026-08-01T00:00:00.000Z', candidateSnapshot: { timestamp: '2026-08-01T00:00:00.000Z', publicationInputs: [{ currentId: 'mutable', representationRank: 'fallback', record: publicationInput }] },
+        cursorInputSnapshot: {}, cursorOutputSnapshot: { walletCursors: { wallet: 'safe' } },
+      },
+    });
+    assert.equal(made.status, 'hold_recorded');
+    assert.deepEqual(made.hold.candidateSnapshot.publicationInputs[0].record, publicationInput);
+    assert.equal(made.hold.candidateSnapshot.currentRank, 'fallback');
+    assert.deepEqual(made.hold.candidateSnapshot.currentMutableIds, ['mutable']);
+    assert.match(main, /candidateSnapshot\?\.publicationInputs/);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('publication and release failures preserve the already-committed safe cursor', () => {
+  const local = functionBody('fetchLocalMarketTrades', 'async function fetchGlobalMarketTrades');
+  const global = functionBody('fetchGlobalMarketTrades', 'let marketplaceSyncActive');
+  for (const body of [local, global]) {
+    assert.match(body, /commitSafeCursor: \(\) => writeJsonAtomic\(filePath, safeCheckpointDocument\)/);
+    assert.match(body, /\.\.\.checkpointDocument, savedAt: new Date\(\)\.toISOString\(\), \.\.\.cursorOutputSnapshot/);
+    const afterSafeCommit = body.slice(body.indexOf('if (!publication.safeCursorCommitted)'));
+    assert.doesNotMatch(afterSafeCommit, /\.\.\.cursorInputSnapshot/);
+  }
+});
+
+test('GM trades and flows form one atomic cursor-safety boundary', () => {
+  const global = functionBody('fetchGlobalMarketTrades', 'let marketplaceSyncActive');
+  assert.equal((global.match(/commitSafeCursor:/g) || []).length, 1);
+  assert.match(global, /\.\.\.trades\.map[\s\S]*\.\.\.assetFlows\.map[\s\S]*commitSafeCursor/);
+  assert.match(global, /publishedTradeIds:[\s\S]*publishedFlowIds:[\s\S]*\.\.\.cursorOutputSnapshot/);
 });
 
 test('all candidates stage before first POST and one staging failure blocks every POST', async () => {
@@ -303,7 +360,8 @@ test('restart and sync recovery use durable outbox and holds without scanner row
   const recoveryStart = main.indexOf('async function recoverMarketplacePublication');
   const recoveryEnd = main.indexOf('async function fetchLocalMarketTrades', recoveryStart);
   const recovery = main.slice(recoveryStart, recoveryEnd);
-  assert.match(recovery, /publishMarketplaceCandidates\(\{ settings: coordinatorSettings, candidates: \[\] \}\)/);
+  assert.match(recovery, /publishMarketplaceCandidates\(\{ settings: coordinatorSettings, candidates: retryCandidates \}\)/);
+  assert.match(recovery, /candidateSnapshot\?\.publicationInputs/);
   assert.match(recovery, /loadMarketplacePublicationHolds/);
   assert.match(recovery, /loadMarketplaceOutboxV2/);
   assert.match(recovery, /persistRecoveredMarketplaceIds/);
@@ -321,7 +379,7 @@ test('backfill, enrichment, and GM trade-flow cursor interlock formulas remain e
   assert.match(local, /scanned\.stats\.transactionMisses === 0 && publishError === '' && publication\.allEnrichableComplete/);
   assert.match(global, /marketplaceBackfilledNext = publication\.allTradeCurrentComplete && tradeHoldsCompleted && !hasActiveTradeHold/);
   assert.match(global, /assetFlowBackfilledNext = scanned\.stats\.transactionMisses === 0 && publishError === ''/);
-  assert.match(global, /market: 'GM', kinds: \['trade', 'asset_flow'\]/);
+  assert.match(global, /\.\.\.trades\.map[\s\S]*\.\.\.assetFlows\.map/);
   assert.match(global, /tradeEnrichmentVersion: checkpoint\.tradeEnrichmentVersion/);
 });
 

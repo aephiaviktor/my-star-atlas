@@ -69,7 +69,7 @@ test('Marketplace v2 publication checkpoints IDs before hold completion and curs
     const end = main.indexOf(functionName === 'fetchLocalMarketTrades' ? 'async function fetchGlobalMarketTrades' : 'let marketplaceSyncActive', start);
     const body = main.slice(start, end);
     assert.match(body, /publishMarketplaceCandidateSet/);
-    assert.match(body, /resolveMarketplaceDiscoveryCursors/);
+    assert.match(body, /commitSafeCursor/);
     assert.ok(body.indexOf('writeJsonAtomic(filePath, checkpointDocument)') < body.indexOf('completeMarketplacePublicationHolds'));
     assert.doesNotMatch(body, /writeInfluxLines\(|formatLocalMarketInfluxLine\(/);
   }

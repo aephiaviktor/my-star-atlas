@@ -4092,7 +4092,7 @@ function marketplaceCursorSnapshot(walletCursors, orderCursors, activeOrderIds, 
   return { walletCursors, orderCursors, activeOrderIds, archivedOrderIds };
 }
 
-function marketplaceTradeHoldCandidate(trade, { market, faction, profileScope, cursorInputSnapshot, cursorOutputSnapshot }) {
+function marketplaceTradeHoldCandidate(trade, { market, faction, profileScope, cursorInputSnapshot, cursorOutputSnapshot }, publicationInputs = []) {
   const logicalKey = deriveMarketplaceTradeId({
     market, faction, profileScope, executionSignature: trade.signature,
     rawMint: trade.rawMint, side: trade.side, quantity: trade.quantity,
@@ -4113,12 +4113,13 @@ function marketplaceTradeHoldCandidate(trade, { market, faction, profileScope, c
       txFeeAtlas: trade.txFeeAtlas ?? 0, netAtlas: trade.netAtlas ?? trade.settledAtlas, unitPriceAtlas: trade.unitPriceAtlas,
       signature: trade.signature, creationSignature: trade.creationSignature || '', rawMint: trade.rawMint,
       certificateMint: trade.certificateMint || '', orderId: trade.orderId || '',
+      publicationInputs,
     },
     cursorInputSnapshot, cursorOutputSnapshot,
   };
 }
 
-function marketplaceFlowHoldCandidate(event, { cursorInputSnapshot, cursorOutputSnapshot }) {
+function marketplaceFlowHoldCandidate(event, { cursorInputSnapshot, cursorOutputSnapshot }, publicationInputs = []) {
   return {
     market: 'GM', kind: 'asset_flow', logicalKeyOrSourceId: String(event.id),
     eventId: null, currentRevisionId: null, currentRank: 'asset_flow', currentMutableIds: [],
@@ -4127,6 +4128,7 @@ function marketplaceFlowHoldCandidate(event, { cursorInputSnapshot, cursorOutput
       id: event.id, type: event.type || 'transfer', timestamp: event.timestamp, origin: event.origin || '',
       destination: event.destination || '', asset: event.asset || '', quantity: event.quantity,
       cargoCost: event.cargoCost ?? 0,
+      publicationInputs,
     },
     cursorInputSnapshot, cursorOutputSnapshot,
   };
@@ -4378,7 +4380,7 @@ async function resolveMarketplaceExactPoint(settings, exact) {
   }
 }
 
-async function publishMarketplaceCandidateSet(settings, candidates, holdContext) {
+async function publishMarketplaceCandidateSet(settings, candidates, holdContext, { commitSafeCursor } = {}) {
   const groups = groupMarketplacePublicationCandidates(candidates);
   const stagedCandidates = [];
   const representativeByGroupRank = new Map();
@@ -4401,9 +4403,88 @@ async function publishMarketplaceCandidateSet(settings, candidates, holdContext)
   const publicationSettings = marketplacePublicationSettings(settings, organization);
   const canStage = Boolean(publicationSettings.baseUrl && publicationSettings.bucket);
   const coordinatorSettings = canStage ? publicationSettings : { ...publicationSettings, token: '' };
+  let durable = true;
+  const preRecordedHolds = new Map();
+  for (const [logicalKey, rows] of groups) {
+    const current = rows.find((row) => row.representationRank === 'enriched') || rows[rows.length - 1];
+    const candidate = current.record.eventType === 'asset_flow'
+      ? marketplaceFlowHoldCandidate(current.source, holdContext, rows.map((row) => ({ currentId: row.currentId, representationRank: row.representationRank, record: row.record })))
+      : marketplaceTradeHoldCandidate(current.source, holdContext, rows.map((row) => ({ currentId: row.currentId, representationRank: row.representationRank, record: row.record })));
+    const currentRank = current.representationRank || 'asset_flow';
+    candidate.currentMutableIds = current.record.eventType === 'trade'
+      ? Array.from(new Set(rows.filter((row) => (row.representationRank || 'asset_flow') === currentRank)
+        .map((row) => row.currentId).filter(Boolean))).sort() : [];
+    candidate.observedMutableIdsByRank = Object.fromEntries(Array.from(new Set(rows.map((row) => row.representationRank || 'asset_flow')))
+      .map((rank) => [rank, current.record.eventType === 'trade'
+        ? Array.from(new Set(rows.filter((row) => (row.representationRank || 'asset_flow') === rank)
+          .map((row) => row.currentId).filter(Boolean))).sort() : []]));
+    const recorded = await recordMarketplacePublicationHold({ installationRoot: getAppRoot(), candidate });
+    if (!['hold_recorded', 'hold_updated', 'hold_unchanged'].includes(recorded.status)) durable = false;
+    else preRecordedHolds.set(logicalKey, recorded.hold.holdId);
+  }
+  const stagingCoordinator = createMarketplacePublicationCoordinator();
+  let staging;
+  try {
+    staging = await stagingCoordinator.publishMarketplaceCandidates({ settings: coordinatorSettings, candidates: stagedCandidates });
+  } catch (error) {
+    staging = { results: stagedCandidates.map(() => ({ outcome: 'stage_failed', detailCode: marketplacePublicationErrorCode(error?.code || error?.message) })) };
+  }
+  const stagedOutbox = await loadMarketplaceOutboxV2({
+    storageRoot: publicationSettings.storageRoot,
+    installationId: publicationSettings.installationId,
+    applicationProfile: publicationSettings.applicationProfile,
+  });
+  const stagedDocument = stagedOutbox.status === 'loaded' ? stagedOutbox.document : null;
+  for (const [logicalKey, rows] of groups) {
+    const current = rows.find((row) => row.representationRank === 'enriched') || rows[rows.length - 1];
+    const event = findMarketplaceOutboxEvent(stagedDocument, current);
+    if (!event) continue; // The complete pre-stage retry hold remains authoritative.
+    const currentRank = current.representationRank || 'asset_flow';
+    const currentRows = rows.filter((row) => (row.representationRank || 'asset_flow') === currentRank);
+    const observedMutableIdsByRevision = {};
+    const observedMutableIdsByRank = {};
+    for (const row of rows) {
+      const rank = row.representationRank || 'asset_flow';
+      const revision = Object.values(event.revisions || {}).find((value) => value.revisionKind === rank);
+      const ids = row.record.eventType === 'trade' ? rows.filter((value) => (value.representationRank || 'asset_flow') === rank)
+        .map((value) => value.currentId).filter(Boolean) : [];
+      if (revision) observedMutableIdsByRevision[revision.revisionId] = Array.from(new Set(ids)).sort();
+      observedMutableIdsByRank[rank] = Array.from(new Set(ids)).sort();
+    }
+    const candidate = current.record.eventType === 'asset_flow'
+      ? marketplaceFlowHoldCandidate(current.source, holdContext, rows.map((row) => ({ currentId: row.currentId, representationRank: row.representationRank, record: row.record })))
+      : marketplaceTradeHoldCandidate(current.source, holdContext, rows.map((row) => ({ currentId: row.currentId, representationRank: row.representationRank, record: row.record })));
+    candidate.eventId = event.eventId;
+    candidate.currentRevisionId = event.currentRevisionId;
+    candidate.currentRank = currentRank;
+    candidate.currentMutableIds = current.record.eventType === 'trade'
+      ? Array.from(new Set(currentRows.map((value) => value.currentId).filter(Boolean))).sort() : [];
+    candidate.observedMutableIdsByRevision = observedMutableIdsByRevision;
+    candidate.observedMutableIdsByRank = observedMutableIdsByRank;
+    const recorded = await recordMarketplacePublicationHold({ installationRoot: getAppRoot(), candidate });
+    if (!['hold_recorded', 'hold_updated', 'hold_unchanged'].includes(recorded.status)) durable = false;
+    else preRecordedHolds.set(logicalKey, recorded.hold.holdId);
+  }
+  if (!durable || preRecordedHolds.size !== groups.size) {
+    return {
+      publishedTradeIds: new Set(), publishedFlowIds: new Set(), holdIdsToComplete: [], tradeHoldIdsToComplete: [], flowHoldIdsToComplete: [],
+      allCurrentComplete: false, allTradeCurrentComplete: false, allFlowCurrentComplete: false, allEnrichableComplete: false,
+      error: 'publication_hold_write_failed', safeCursorCommitted: false,
+    };
+  }
+  try {
+    if (typeof commitSafeCursor === 'function') await commitSafeCursor();
+  } catch (_error) {
+    return {
+      publishedTradeIds: new Set(), publishedFlowIds: new Set(), holdIdsToComplete: [], tradeHoldIdsToComplete: [], flowHoldIdsToComplete: [],
+      allCurrentComplete: false, allTradeCurrentComplete: false, allFlowCurrentComplete: false, allEnrichableComplete: false,
+      error: 'safe_cursor_checkpoint_failed', safeCursorCommitted: false,
+    };
+  }
+  const stagingFailed = (staging.results || []).some((result) => result.outcome === 'stage_failed' && result.detailCode !== 'not_configured');
   const coordinator = createMarketplacePublicationCoordinator({
-    fetchImpl: publicationSettings.canPost ? fetch : undefined,
-    resolveExactPoint: (exact) => resolveMarketplaceExactPoint(settings, exact),
+    fetchImpl: publicationSettings.canPost && !stagingFailed ? fetch : undefined,
+    resolveExactPoint: stagingFailed ? undefined : (exact) => resolveMarketplaceExactPoint(settings, exact),
   });
   let publication;
   try {
@@ -4480,8 +4561,8 @@ async function publishMarketplaceCandidateSet(settings, candidates, holdContext)
     });
 
     const candidate = current.record.eventType === 'asset_flow'
-      ? marketplaceFlowHoldCandidate(current.source, holdContext)
-      : marketplaceTradeHoldCandidate(current.source, holdContext);
+      ? marketplaceFlowHoldCandidate(current.source, holdContext, rows.map((row) => ({ currentId: row.currentId, representationRank: row.representationRank, record: row.record })))
+      : marketplaceTradeHoldCandidate(current.source, holdContext, rows.map((row) => ({ currentId: row.currentId, representationRank: row.representationRank, record: row.record })));
     candidate.eventId = event?.eventId || null;
     candidate.currentRevisionId = currentRevisionId;
     candidate.currentRank = current.representationRank || 'asset_flow';
@@ -4511,7 +4592,7 @@ async function publishMarketplaceCandidateSet(settings, candidates, holdContext)
   return {
     publishedTradeIds, publishedFlowIds, holdIdsToComplete, tradeHoldIdsToComplete, flowHoldIdsToComplete,
     allCurrentComplete, allTradeCurrentComplete, allFlowCurrentComplete, allEnrichableComplete,
-    error: Array.from(new Set(errors)).sort().join('; '),
+    error: Array.from(new Set(errors)).sort().join('; '), safeCursorCommitted: true,
   };
 }
 
@@ -4579,9 +4660,18 @@ async function recoverMarketplacePublication(settings) {
     fetchImpl: publicationSettings.canPost ? fetch : undefined,
     resolveExactPoint: (exact) => resolveMarketplaceExactPoint(settings, exact),
   });
+  const retryHolds = await loadMarketplacePublicationHolds({ installationRoot: getAppRoot() });
+  const retryCandidates = retryHolds.status === 'loaded' ? Object.values(retryHolds.document.holds)
+    .filter((hold) => hold.state !== 'released' && hold.state !== 'abandoned' && Array.isArray(hold.candidateSnapshot?.publicationInputs))
+    .flatMap((hold) => hold.candidateSnapshot.publicationInputs.map((input) => ({
+      logicalKey: hold.logicalKeyOrSourceId,
+      currentId: input.currentId,
+      representationRank: hold.kind === 'asset_flow' ? undefined : input.representationRank,
+      record: input.record,
+    }))) : [];
   // Empty-candidate publication drains durable pending work and reconciles
   // posting work; it does not depend on scanner rows surviving a restart.
-  try { await coordinator.publishMarketplaceCandidates({ settings: coordinatorSettings, candidates: [] }); }
+  try { await coordinator.publishMarketplaceCandidates({ settings: coordinatorSettings, candidates: retryCandidates }); }
   catch (_error) { /* durable outbox and holds remain authoritative */ }
   const [holds, outbox] = await Promise.all([
     loadMarketplacePublicationHolds({ installationRoot: getAppRoot() }),
@@ -4593,8 +4683,32 @@ async function recoverMarketplacePublication(settings) {
   ]);
   if (holds.status !== 'loaded' || outbox.status !== 'loaded') return { status: 'recovery_idle' };
   let recovered = 0;
-  for (const hold of Object.values(holds.document.holds)) {
-    if (hold.state === 'released' || hold.state === 'abandoned' || !hold.eventId || !hold.currentRevisionId) continue;
+  for (let hold of Object.values(holds.document.holds)) {
+    if (hold.state === 'released' || hold.state === 'abandoned') continue;
+    if (!hold.eventId || !hold.currentRevisionId) {
+      const currentInput = (hold.candidateSnapshot?.publicationInputs || []).find((input) => hold.kind === 'asset_flow'
+        || input.representationRank === hold.candidateSnapshot.currentRank);
+      const event = currentInput && findMarketplaceOutboxEvent(outbox.document, {
+        logicalKey: hold.logicalKeyOrSourceId, record: currentInput.record,
+      });
+      const revisionId = event?.currentRevisionId;
+      if (event && revisionId) {
+        const observedMutableIdsByRevision = {};
+        if (hold.kind === 'trade') {
+          for (const input of hold.candidateSnapshot.publicationInputs || []) {
+            const revision = Object.values(event.revisions || {}).find((value) => value.revisionKind === input.representationRank);
+            if (revision) observedMutableIdsByRevision[revision.revisionId] = hold.observedMutableIdsByRank?.[input.representationRank] || [];
+          }
+        }
+        const updated = await updateMarketplacePublicationHold({
+          installationRoot: getAppRoot(), holdId: hold.holdId,
+          eventId: event.eventId, currentRevisionId: revisionId,
+          observedMutableIdsByRevision,
+        });
+        if (updated.status === 'hold_updated') hold = updated.hold;
+      }
+    }
+    if (!hold.eventId || !hold.currentRevisionId) continue;
     const found = findMarketplaceOutboxRevision(outbox.document, hold.eventId, hold.currentRevisionId);
     if (!found) continue;
     const publishedTradeIds = [];
@@ -4729,51 +4843,40 @@ async function fetchLocalMarketTrades(settings, connection) {
     activeOrderIds: scanned.activeOrderIds,
     archivedOrderIds: scanned.archivedOrderIds,
   };
+  const safeCheckpointDocument = {
+    schemaVersion: 2, faction, profile, savedAt: new Date().toISOString(),
+    orders: scanned.orders, trades, ...cursorOutputSnapshot,
+    publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
+    marketplaceBackfilled: false, tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
+  };
   const publication = await publishMarketplaceCandidateSet(
     settings,
     publicationRepresentations.map((trade) => marketplaceTradePublicationCandidate(trade, { market: 'LM', faction, profileScope: profileName })),
     { market: 'LM', faction, profileScope: profileName, cursorInputSnapshot, cursorOutputSnapshot },
+    { commitSafeCursor: () => writeJsonAtomic(filePath, safeCheckpointDocument) },
   );
+  if (!publication.safeCursorCommitted) return {
+    trades, error: publication.error,
+    rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
+    exhaustion: scanned.exhaustion || null,
+  };
   for (const id of publication.publishedTradeIds) checkpoint.publishedTradeIds.add(id);
   let publishError = publication.error;
-  const heldCursors = await resolveMarketplaceDiscoveryCursors({
-    installationRoot: getAppRoot(), market: 'LM', kinds: ['trade'],
-    cursorInputSnapshot, cursorOutputSnapshot,
-    transactionMisses: scanned.stats.transactionMisses,
-    holdWriteSucceeded: !publishError.includes('publication_hold_write_failed'),
-  });
-  if (!['held', 'released', 'transaction_misses'].includes(heldCursors.status)) {
-    publishError = [publishError, 'publication_hold_resolution_failed'].filter(Boolean).join('; ');
-  }
   const checkpointDocument = {
-    schemaVersion: 2,
-    faction,
-    profile,
-    savedAt: new Date().toISOString(),
-    orders: scanned.orders,
-    trades,
-    ...heldCursors.cursorSnapshot,
+    ...safeCheckpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
-    marketplaceBackfilled: false,
-    tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
   };
   // The durable checkpoint containing the applicable mutable IDs is written
   // before any hold can be completed or released.
   await writeJsonAtomic(filePath, checkpointDocument);
   const holdsCompleted = await completeMarketplacePublicationHolds(publication.holdIdsToComplete);
-  const resolvedCursors = await resolveMarketplaceDiscoveryCursors({
-    installationRoot: getAppRoot(), market: 'LM', kinds: ['trade'],
-    cursorInputSnapshot, cursorOutputSnapshot,
-    transactionMisses: scanned.stats.transactionMisses,
-    holdWriteSucceeded: !publishError.includes('publication_hold_write_failed'),
-  });
   const hasActiveTradeHold = await hasActiveMarketplacePublicationHolds('LM', ['trade']);
   const marketplaceBackfilledNext = publication.allCurrentComplete && holdsCompleted && !hasActiveTradeHold;
   const tradeEnrichmentVersionNext = marketplaceBackfilledNext
     && scanned.stats.transactionMisses === 0 && publishError === '' && publication.allEnrichableComplete
     ? 1 : checkpoint.tradeEnrichmentVersion;
   await writeJsonAtomic(filePath, {
-    ...checkpointDocument, savedAt: new Date().toISOString(), ...resolvedCursors.cursorSnapshot,
+    ...checkpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
     marketplaceBackfilled: marketplaceBackfilledNext,
     tradeEnrichmentVersion: tradeEnrichmentVersionNext,
   });
@@ -4854,6 +4957,14 @@ async function fetchGlobalMarketTrades(settings, connection) {
     activeOrderIds: scanned.activeOrderIds,
     archivedOrderIds: scanned.archivedOrderIds,
   };
+  const safeCheckpointDocument = {
+    schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets,
+    orders: scanned.orders, trades, assetFlows, ...cursorOutputSnapshot,
+    publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
+    publishedFlowIds: Array.from(checkpoint.publishedFlowIds).sort(),
+    marketplaceBackfilled: false, assetFlowBackfilled: false,
+    tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
+  };
   // Trades and flows are passed to one coordinator invocation so every
   // candidate is durably staged before the first POST. Results remain keyed
   // by their individual logical event and are never collapsed to one Boolean.
@@ -4863,22 +4974,19 @@ async function fetchGlobalMarketTrades(settings, connection) {
       market: gmLegacyReadScope.market, faction: gmLegacyReadScope.faction, profileScope: gmLegacyReadScope.profile,
     })),
     ...assetFlows.map(marketplaceFlowPublicationCandidate),
-  ], { market: 'GM', faction: 'GLOBAL', profileScope: 'GLOBAL', cursorInputSnapshot, cursorOutputSnapshot });
+  ], { market: 'GM', faction: 'GLOBAL', profileScope: 'GLOBAL', cursorInputSnapshot, cursorOutputSnapshot }, {
+    commitSafeCursor: () => writeJsonAtomic(filePath, safeCheckpointDocument),
+  });
+  if (!publication.safeCursorCommitted) return {
+    trades, assetFlows, error: publication.error,
+    rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
+    exhaustion: scanned.exhaustion || null,
+  };
   for (const id of publication.publishedTradeIds) checkpoint.publishedTradeIds.add(id);
   for (const id of publication.publishedFlowIds) checkpoint.publishedFlowIds.add(id);
   let publishError = publication.error;
-  const heldCursors = await resolveMarketplaceDiscoveryCursors({
-    installationRoot: getAppRoot(), market: 'GM', kinds: ['trade', 'asset_flow'],
-    cursorInputSnapshot, cursorOutputSnapshot,
-    transactionMisses: scanned.stats.transactionMisses,
-    holdWriteSucceeded: !publishError.includes('publication_hold_write_failed'),
-  });
-  if (!['held', 'released', 'transaction_misses'].includes(heldCursors.status)) {
-    publishError = [publishError, 'publication_hold_resolution_failed'].filter(Boolean).join('; ');
-  }
   const checkpointDocument = {
-    schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets,
-    orders: scanned.orders, trades, assetFlows, ...heldCursors.cursorSnapshot,
+    ...safeCheckpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     publishedFlowIds: Array.from(checkpoint.publishedFlowIds).sort(),
     marketplaceBackfilled: false,
@@ -4888,12 +4996,6 @@ async function fetchGlobalMarketTrades(settings, connection) {
   await writeJsonAtomic(filePath, checkpointDocument);
   const tradeHoldsCompleted = await completeMarketplacePublicationHolds(publication.tradeHoldIdsToComplete);
   const flowHoldsCompleted = await completeMarketplacePublicationHolds(publication.flowHoldIdsToComplete);
-  const resolvedCursors = await resolveMarketplaceDiscoveryCursors({
-    installationRoot: getAppRoot(), market: 'GM', kinds: ['trade', 'asset_flow'],
-    cursorInputSnapshot, cursorOutputSnapshot,
-    transactionMisses: scanned.stats.transactionMisses,
-    holdWriteSucceeded: !publishError.includes('publication_hold_write_failed'),
-  });
   const [hasActiveTradeHold, hasActiveFlowHold] = await Promise.all([
     hasActiveMarketplacePublicationHolds('GM', ['trade']),
     hasActiveMarketplacePublicationHolds('GM', ['asset_flow']),
@@ -4902,7 +5004,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
   const assetFlowBackfilledNext = scanned.stats.transactionMisses === 0 && publishError === ''
     && publication.allFlowCurrentComplete && flowHoldsCompleted && !hasActiveFlowHold;
   await writeJsonAtomic(filePath, {
-    ...checkpointDocument, savedAt: new Date().toISOString(), ...resolvedCursors.cursorSnapshot,
+    ...checkpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
     marketplaceBackfilled: marketplaceBackfilledNext,
     assetFlowBackfilled: assetFlowBackfilledNext,
   });
