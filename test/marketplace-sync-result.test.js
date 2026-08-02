@@ -63,14 +63,15 @@ test('Marketplace completed scans retain returned cursors while transaction miss
   });
 });
 
-test('Marketplace holds are durable before cursor checkpoint writes and no production v2 publication is connected', () => {
+test('Marketplace v2 publication checkpoints IDs before hold completion and cursor release', () => {
   for (const functionName of ['fetchLocalMarketTrades', 'fetchGlobalMarketTrades']) {
     const start = main.indexOf(`async function ${functionName}`);
     const end = main.indexOf(functionName === 'fetchLocalMarketTrades' ? 'async function fetchGlobalMarketTrades' : 'let marketplaceSyncActive', start);
     const body = main.slice(start, end);
-    assert.ok(body.indexOf('recordMarketplaceCandidateHolds') < body.indexOf('writeJsonAtomic(filePath'));
+    assert.match(body, /publishMarketplaceCandidateSet/);
     assert.match(body, /resolveMarketplaceDiscoveryCursors/);
-    assert.doesNotMatch(body, /createMarketplacePublicationCoordinator|publishMarketplaceCandidates|stageMarketplaceOutboxV2|marketplace_v2|resolveExactPoint/);
+    assert.ok(body.indexOf('writeJsonAtomic(filePath, checkpointDocument)') < body.indexOf('completeMarketplacePublicationHolds'));
+    assert.doesNotMatch(body, /writeInfluxLines\(|formatLocalMarketInfluxLine\(/);
   }
   assert.match(main, /publication_hold_write_failed/);
 });
@@ -91,6 +92,7 @@ test('Marketplace sync returns separate partial LM and GM RPC summaries without 
   const context = {
     input,
     marketplaceSyncActive: null,
+    recoverMarketplacePublication: async () => ({ status: 'recovery_idle' }),
     normalizeSettings: (value) => value,
     readSettings: async () => { throw new Error('unexpected readSettings call'); },
     normalizeFaction: (value) => value,
@@ -178,6 +180,7 @@ test('Marketplace sync seals telemetry on unexpected failure and coalesces calle
   const context = {
     input: { faction: 'ONI' },
     marketplaceSyncActive: null,
+    recoverMarketplacePublication: async () => ({ status: 'recovery_idle' }),
     normalizeSettings: (value) => value,
     readSettings: async () => ({}),
     normalizeFaction: (value) => value,
@@ -237,6 +240,7 @@ test('Marketplace sync preserves telemetry for primitive and frozen errors', asy
     const context = {
       input: { faction: 'MUD' },
       marketplaceSyncActive: null,
+      recoverMarketplacePublication: async () => ({ status: 'recovery_idle' }),
       normalizeSettings: (value) => value,
       readSettings: async () => ({}),
       normalizeFaction: (value) => value,
@@ -286,6 +290,7 @@ test('Marketplace sync returns bounded resumable exhaustion with partial LM data
   const context = {
     input: { faction: 'MUD', rpcUrl: 'https://secret.invalid' },
     marketplaceSyncActive: null,
+    recoverMarketplacePublication: async () => ({ status: 'recovery_idle' }),
     normalizeSettings: (value) => value,
     readSettings: async () => ({}),
     normalizeFaction: (value) => value,
@@ -341,6 +346,7 @@ test('Marketplace stops before GM when completed LM consumes the shared budget',
   let gmCalls = 0;
   const context = {
     input: { faction: 'ONI' }, marketplaceSyncActive: null,
+    recoverMarketplacePublication: async () => ({ status: 'recovery_idle' }),
     normalizeSettings: (value) => value, readSettings: async () => ({}), normalizeFaction: (value) => value,
     createMarketplaceRpcTelemetry, createMarketplaceRpcInstrumentation, wrapMarketplaceConnection,
     createMarketplaceRpcAttemptBudget, DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,

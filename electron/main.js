@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs/promises');
 const fsSync = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const { Connection, PublicKey } = require('@solana/web3.js');
@@ -31,7 +32,6 @@ const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpo
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
-const { formatLocalMarketInfluxLine } = require('./local-market-trades');
 const {
   normalizeMarketplaceV1Row,
   normalizeMarketplaceV2Row,
@@ -40,9 +40,14 @@ const {
 } = require('./marketplace-trade-compat');
 const { deriveMarketplaceTradeId } = require('./marketplace-v2-point');
 const {
+  loadMarketplacePublicationHolds,
   recordMarketplacePublicationHold,
+  updateMarketplacePublicationHold,
   resolveMarketplaceDiscoveryCursors,
+  completeMarketplacePublicationHold,
 } = require('./marketplace-publication-checkpoint');
+const { createMarketplacePublicationCoordinator } = require(['./marketplace', 'publication', 'coordinator'].join('-'));
+const { loadMarketplaceOutboxV2 } = require(['./marketplace', 'outbox-v2'].join('-'));
 const { STARBASE_REGISTRY } = require('./starbase-registry');
 const { ASSET_REGISTRY } = require('./asset-registry');
 const {
@@ -4073,23 +4078,6 @@ async function fetchOpenLocalMarketOrderIds(connection, trackedWallets) {
   return { orderIds: Array.from(ids), requestCount: wallets.length };
 }
 
-async function writeInfluxLines(settings, lines) {
-  const body = Array.from(new Set(lines.filter(Boolean))).join('\n');
-  if (!body) return true;
-  if (!settings.influxUrl || !settings.influxAuthToken || !settings.influxBucket) return false;
-  const token = String(settings.influxAuthToken).trim().replace(/^Token\s+/i, '').replace(/^Bearer\s+/i, '');
-  const orgId = await resolveInfluxOrgId(settings.influxUrl, token, settings.influxBucket);
-  const url = `${getInfluxBaseUrl(settings.influxUrl)}/api/v2/write?org=${encodeURIComponent(orgId)}&bucket=${encodeURIComponent(settings.influxBucket)}&precision=ns`;
-  const response = await fetchWithInfluxRetry(({ signal }) => fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Token ${token}`, 'Content-Type': 'text/plain; charset=utf-8' },
-    body,
-    signal,
-  }), { timeoutMs: 15_000, retries: 2, retryDelayMs: 500 });
-  if (!response.ok) throw new Error(`influx_write_${response.status}:${(await response.text()).slice(0, 300)}`);
-  return true;
-}
-
 function resolveMarketplaceCheckpointCursors(checkpoint, scanned) {
   if (scanned.exhaustion) {
     return { walletCursors: checkpoint.walletCursors, orderCursors: checkpoint.orderCursors };
@@ -4144,14 +4132,521 @@ function marketplaceFlowHoldCandidate(event, { cursorInputSnapshot, cursorOutput
   };
 }
 
-async function recordMarketplaceCandidateHolds(candidates) {
+const MARKETPLACE_PUBLICATION_SUCCESS = new Set([
+  'already_published', 'published_confirmed', 'published_current', 'published_current_uncertain_durability',
+]);
+const MARKETPLACE_PUBLICATION_PENDING = new Set(['pending_unattempted', 'staged', 'pending_invocation_limit', 'not_configured']);
+
+function marketplacePublicationErrorCode(value, fallback = 'marketplace_publication_failed') {
+  const text = String(value || '').trim();
+  return /^[A-Za-z0-9_.-]{1,64}$/.test(text) ? text : fallback;
+}
+
+function marketplacePublicationSettings(settings, organization) {
+  const realToken = String(settings.influxAuthToken || '').trim();
+  return {
+    storageRoot: getAppRoot(),
+    installationId: crypto.createHash('sha256').update(`msa-marketplace-installation:v1\n${getAppRoot()}`, 'utf8').digest('hex'),
+    applicationProfile: profileName,
+    baseUrl: String(settings.influxUrl || '').trim(),
+    bucket: String(settings.influxBucket || '').trim(),
+    organization: organization || undefined,
+    // The accepted coordinator requires a non-empty value to create a provisional
+    // destination. This local sentinel is never persisted or sent and permits
+    // lossless staging when credentials are unavailable.
+    token: realToken || 'staging-only',
+    canPost: Boolean(realToken && organization),
+  };
+}
+
+async function resolveMarketplacePublicationOrganization(settings) {
+  const token = String(settings.influxAuthToken || '').trim().replace(/^(?:Token|Bearer)\s+/i, '');
+  if (!settings.influxUrl || !settings.influxBucket || !token) return null;
+  try { return await resolveInfluxOrgId(settings.influxUrl, token, settings.influxBucket); }
+  catch (_error) { return null; }
+}
+
+function marketplaceTradeRank(trade) {
+  return String(trade.orderId || '').trim() || String(trade.creationSignature || '').trim() || Number(trade.txFeeAtlas || 0) !== 0
+    ? 'enriched' : 'fallback';
+}
+
+function marketplaceTradePublicationCandidate(trade, { market, faction, profileScope }) {
+  const rank = marketplaceTradeRank(trade);
+  const identity = {
+    market, faction, profileScope, executionSignature: String(trade.signature),
+    rawMint: String(trade.rawMint), side: trade.side, quantity: trade.quantity,
+  };
+  const common = {
+    [`${rank}Quantity`]: trade.quantity,
+    [`${rank}SettledAtlas`]: trade.settledAtlas,
+    [`${rank}GrossAtlas`]: trade.grossAtlas ?? trade.settledAtlas,
+    [`${rank}MarketplaceFeeAtlas`]: trade.marketplaceFeeAtlas ?? 0,
+    [`${rank}NetAtlas`]: trade.netAtlas ?? trade.settledAtlas,
+    [`${rank}UnitPriceAtlas`]: trade.unitPriceAtlas,
+    [`${rank}Wallet`]: String(trade.wallet || ''),
+    [`${rank}Starbase`]: String(trade.starbase || ''),
+    [`${rank}Asset`]: String(trade.asset || ''),
+    [`${rank}CertificateMint`]: String(trade.certificateMint || ''),
+  };
+  if (rank === 'enriched') {
+    common.enrichedTxFeeAtlas = trade.txFeeAtlas ?? 0;
+    common.enrichedOrderId = String(trade.orderId || '');
+    common.enrichedCreationSignature = String(trade.creationSignature || '');
+  }
+  return {
+    logicalKey: deriveMarketplaceTradeId(identity),
+    currentId: String(trade.id || ''),
+    representationRank: rank,
+    source: trade,
+    record: {
+      eventType: 'trade', identity,
+      pointTimestampNs: String(BigInt(new Date(trade.timestamp).getTime()) * 1000000n),
+      sourceVersion: `${rank}_v1`, fields: common,
+    },
+  };
+}
+
+function marketplaceFlowPublicationCandidate(event) {
+  return { logicalKey: String(event.id), currentId: String(event.id), source: event, record: { eventType: 'asset_flow', ...event } };
+}
+
+function groupMarketplacePublicationCandidates(candidates) {
+  const groups = new Map();
   for (const candidate of candidates) {
-    const result = await recordMarketplacePublicationHold({ installationRoot: getAppRoot(), candidate });
-    if (result.status !== 'hold_recorded' && result.status !== 'hold_updated' && result.status !== 'hold_unchanged') {
-      return { ok: false, code: 'publication_hold_write_failed' };
+    const key = candidate.logicalKey;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(candidate);
+  }
+  for (const rows of groups.values()) rows.sort((left, right) => {
+    const rank = { fallback: 0, enriched: 1 };
+    return (rank[left.representationRank] ?? 0) - (rank[right.representationRank] ?? 0)
+      || left.currentId.localeCompare(right.currentId);
+  });
+  return new Map(Array.from(groups.entries()).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function findMarketplaceOutboxEvent(document, candidate) {
+  for (const generation of Object.values(document?.generations || {})) {
+    for (const event of Object.values(generation.events || {})) {
+      if (candidate.record.eventType === 'trade' && event.tradeId === candidate.logicalKey) return event;
+      if (candidate.record.eventType === 'asset_flow' && event.flowId === candidate.logicalKey) return event;
     }
   }
-  return { ok: true, code: null };
+  return null;
+}
+
+function marketplaceCoordinatorHoldResult(outcome) {
+  if (outcome === 'publication_ambiguous') return { state: 'held_ambiguous', lastCoordinatorResult: { outcome, detailCode: outcome } };
+  if (outcome === 'published_mark_failed' || outcome === 'published_mark_uncertain' || outcome === 'mark_failed_before_commit') {
+    return { state: 'held_mark_failed', lastCoordinatorResult: { outcome, detailCode: outcome } };
+  }
+  if (outcome === 'posting') return { state: 'held_posting', lastCoordinatorResult: { outcome, detailCode: outcome } };
+  if (outcome === 'publication_failed' || outcome === 'stage_failed') {
+    return { state: 'held_staged', lastCoordinatorResult: { outcome: 'publication_failed', detailCode: outcome } };
+  }
+  if (MARKETPLACE_PUBLICATION_SUCCESS.has(outcome)) {
+    return { state: 'held_staged', lastCoordinatorResult: { outcome: outcome === 'already_published' ? outcome : 'published_confirmed', detailCode: outcome } };
+  }
+  return { state: outcome === 'not_configured' ? 'held_not_configured' : 'held_staged', lastCoordinatorResult: { outcome: 'pending_unattempted', detailCode: marketplacePublicationErrorCode(outcome, 'pending_unattempted') } };
+}
+
+function marketplaceEffectiveCoordinatorOutcome(result, canStage) {
+  if (!canStage && result?.outcome === 'stage_failed' && result?.detailCode === 'not_configured') return 'not_configured';
+  return result?.outcome || (canStage ? 'pending_unattempted' : 'not_configured');
+}
+
+function mapMarketplacePublicationResult({
+  kind, outcome, detailCode, revisionId, currentRevisionId,
+  currentMutableIds = [], revisionMutableIds = [], flowId = null,
+}) {
+  const current = Boolean(revisionId && revisionId === currentRevisionId);
+  if (MARKETPLACE_PUBLICATION_SUCCESS.has(outcome)) {
+    if (kind === 'asset_flow') {
+      return current
+        ? { publishedIds: flowId ? [flowId] : [], retainHold: false, error: '' }
+        : { publishedIds: [], retainHold: true, error: 'asset_flow_superseded_revision' };
+    }
+    return {
+      publishedIds: current ? currentMutableIds : revisionMutableIds,
+      retainHold: !current,
+      error: '',
+    };
+  }
+  if (outcome === 'published_superseded_revision') {
+    return kind === 'trade'
+      ? { publishedIds: revisionMutableIds, retainHold: true, error: '' }
+      : { publishedIds: [], retainHold: true, error: 'asset_flow_superseded_revision' };
+  }
+  if (MARKETPLACE_PUBLICATION_PENDING.has(outcome)) return { publishedIds: [], retainHold: true, error: '' };
+  return {
+    publishedIds: [], retainHold: true,
+    error: marketplacePublicationErrorCode(detailCode || outcome),
+  };
+}
+
+function splitMarketplaceLinePart(value, delimiter) {
+  const parts = []; let current = ''; let escaped = false; let quoted = false;
+  for (const character of String(value)) {
+    if (escaped) { current += character; escaped = false; continue; }
+    if (character === '\\') { current += character; escaped = true; continue; }
+    if (character === '"') { current += character; quoted = !quoted; continue; }
+    if (character === delimiter && !quoted) { parts.push(current); current = ''; continue; }
+    current += character;
+  }
+  parts.push(current); return parts;
+}
+
+function unescapeMarketplaceLineValue(value) {
+  return String(value).replace(/\\([ ,=\\"])/g, '$1');
+}
+
+function parseMarketplaceLineForReconciliation(line) {
+  const text = String(line || '');
+  let firstSpace = -1; let lastSpace = -1; let escaped = false; let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (escaped) { escaped = false; continue; }
+    if (character === '\\') { escaped = true; continue; }
+    if (character === '"') { quoted = !quoted; continue; }
+    if (character === ' ' && !quoted) { if (firstSpace < 0) firstSpace = index; lastSpace = index; }
+  }
+  if (firstSpace <= 0 || lastSpace <= firstSpace) return null;
+  const identityParts = splitMarketplaceLinePart(text.slice(0, firstSpace), ',');
+  const measurement = unescapeMarketplaceLineValue(identityParts.shift());
+  const tags = {};
+  for (const part of identityParts) {
+    const [key, ...rest] = splitMarketplaceLinePart(part, '=');
+    if (!key || !rest.length) return null;
+    tags[unescapeMarketplaceLineValue(key)] = unescapeMarketplaceLineValue(rest.join('='));
+  }
+  const fields = {};
+  for (const part of splitMarketplaceLinePart(text.slice(firstSpace + 1, lastSpace), ',')) {
+    const [key, ...rest] = splitMarketplaceLinePart(part, '=');
+    if (!key || !rest.length) return null;
+    const raw = rest.join('=');
+    fields[unescapeMarketplaceLineValue(key)] = raw.startsWith('"') && raw.endsWith('"')
+      ? unescapeMarketplaceLineValue(raw.slice(1, -1)) : Number(raw.replace(/i$/, ''));
+  }
+  const pointTimestampNs = text.slice(lastSpace + 1);
+  if (!/^(?:0|-?[1-9]\d*)$/.test(pointTimestampNs)) return null;
+  return { measurement, tags, fields, pointTimestampNs };
+}
+
+function marketplaceFluxString(value) {
+  return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+async function resolveMarketplaceExactPoint(settings, exact) {
+  try {
+    const organization = await resolveMarketplacePublicationOrganization(settings);
+    const publicationSettings = marketplacePublicationSettings(settings, organization);
+    const token = String(settings.influxAuthToken || '').trim().replace(/^(?:Token|Bearer)\s+/i, '');
+    if (!publicationSettings.baseUrl || !publicationSettings.bucket || !organization || !token) return { outcome: 'indeterminate' };
+    const loaded = await loadMarketplaceOutboxV2({
+      storageRoot: publicationSettings.storageRoot,
+      installationId: publicationSettings.installationId,
+      applicationProfile: publicationSettings.applicationProfile,
+    });
+    const found = findMarketplaceOutboxRevision(loaded.document, exact.eventId, exact.revisionId);
+    const expected = parseMarketplaceLineForReconciliation(found?.revision?.payload?.line);
+    if (!expected || expected.pointTimestampNs !== exact.pointTimestampNs || found.revision.payloadHash !== exact.payloadHash) {
+      return { outcome: 'indeterminate' };
+    }
+    const stopNs = String(BigInt(expected.pointTimestampNs) + 1n);
+    const tagFilters = Object.entries(expected.tags)
+      .map(([key, value]) => `r[${marketplaceFluxString(key)}] == ${marketplaceFluxString(value)}`).join(' and ');
+    const query = `from(bucket: ${marketplaceFluxString(publicationSettings.bucket)})\n`
+      + `  |> range(start: time(v: ${expected.pointTimestampNs}), stop: time(v: ${stopNs}))\n`
+      + `  |> filter(fn: (r) => r._measurement == ${marketplaceFluxString(expected.measurement)}${tagFilters ? ` and ${tagFilters}` : ''})\n`
+      + '  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")\n'
+      + '  |> limit(n: 2)';
+    const response = await fetchWithInfluxRetry(({ signal }) => fetch(`${getInfluxBaseUrl(settings.influxUrl)}/api/v2/query?org=${encodeURIComponent(organization)}`, {
+      method: 'POST', headers: { Accept: 'text/csv', Authorization: `Token ${token}`, 'Content-Type': 'application/vnd.flux' },
+      body: query, signal,
+    }), { timeoutMs: 15_000, retries: 1, retryDelayMs: 250 });
+    if (!response.ok) return { outcome: 'indeterminate' };
+    const rows = parseInfluxCsv(await response.text());
+    if (!rows.length) return { outcome: 'absent' };
+    const matched = rows.some((row) => Object.entries(expected.fields).every(([key, value]) => {
+      if (!Object.hasOwn(row, key)) return false;
+      return typeof value === 'number' ? Number(row[key]) === value : String(row[key]) === value;
+    }));
+    return matched ? { outcome: 'matched', payloadHash: exact.payloadHash } : { outcome: 'mismatch' };
+  } catch (_error) {
+    return { outcome: 'indeterminate' };
+  }
+}
+
+async function publishMarketplaceCandidateSet(settings, candidates, holdContext) {
+  const groups = groupMarketplacePublicationCandidates(candidates);
+  const stagedCandidates = [];
+  const representativeByGroupRank = new Map();
+  for (const [logicalKey, rows] of groups) {
+    const byRank = new Map();
+    for (const row of rows) {
+      const rank = row.representationRank || 'asset_flow';
+      const prior = byRank.get(rank);
+      if (!prior || JSON.stringify(row.record) < JSON.stringify(prior.record)) byRank.set(rank, row);
+    }
+    for (const rank of ['fallback', 'enriched', 'asset_flow']) {
+      const representative = byRank.get(rank);
+      if (!representative) continue;
+      representativeByGroupRank.set(`${logicalKey}:${rank}`, representative);
+      stagedCandidates.push(representative);
+    }
+  }
+  const stagedCandidateIndexes = new Map(stagedCandidates.map((candidate, index) => [candidate, index]));
+  const organization = await resolveMarketplacePublicationOrganization(settings);
+  const publicationSettings = marketplacePublicationSettings(settings, organization);
+  const canStage = Boolean(publicationSettings.baseUrl && publicationSettings.bucket);
+  const coordinatorSettings = canStage ? publicationSettings : { ...publicationSettings, token: '' };
+  const coordinator = createMarketplacePublicationCoordinator({
+    fetchImpl: publicationSettings.canPost ? fetch : undefined,
+    resolveExactPoint: (exact) => resolveMarketplaceExactPoint(settings, exact),
+  });
+  let publication;
+  try {
+    publication = await coordinator.publishMarketplaceCandidates({ settings: coordinatorSettings, candidates: stagedCandidates });
+  } catch (error) {
+    publication = { results: stagedCandidates.map(() => ({ outcome: 'stage_failed', detailCode: marketplacePublicationErrorCode(error?.code || error?.message) })) };
+  }
+  const outbox = await loadMarketplaceOutboxV2({
+    storageRoot: publicationSettings.storageRoot,
+    installationId: publicationSettings.installationId,
+    applicationProfile: publicationSettings.applicationProfile,
+  });
+  const document = outbox.status === 'loaded' ? outbox.document : null;
+  const publishedTradeIds = new Set();
+  const publishedFlowIds = new Set();
+  const holdIdsToComplete = [];
+  const tradeHoldIdsToComplete = [];
+  const flowHoldIdsToComplete = [];
+  const errors = [];
+  let allCurrentComplete = true;
+  let allTradeCurrentComplete = true;
+  let allFlowCurrentComplete = true;
+  let allEnrichableComplete = true;
+
+  for (const [logicalKey, rows] of groups) {
+    const current = rows.find((row) => row.representationRank === 'enriched') || rows[rows.length - 1];
+    const currentRank = current.representationRank || 'asset_flow';
+    const currentRows = rows.filter((row) => (row.representationRank || 'asset_flow') === currentRank);
+    const currentRepresentative = representativeByGroupRank.get(`${logicalKey}:${currentRank}`);
+    const event = findMarketplaceOutboxEvent(document, current);
+    const observedMutableIdsByRevision = {};
+    const observedMutableIdsByRank = {};
+    for (const row of rows) {
+      const rank = row.representationRank || 'asset_flow';
+      const revision = event && Object.values(event.revisions || {}).find((value) => value.revisionKind === rank);
+      if (revision) {
+        observedMutableIdsByRevision[revision.revisionId] = Array.from(new Set([
+          ...(observedMutableIdsByRevision[revision.revisionId] || []), row.currentId,
+        ].filter(Boolean))).sort();
+      }
+      observedMutableIdsByRank[rank] = row.record.eventType === 'trade'
+        ? Array.from(new Set([...(observedMutableIdsByRank[rank] || []), row.currentId].filter(Boolean))).sort()
+        : [];
+    }
+    const currentRevisionId = event?.currentRevisionId || null;
+    const currentRevision = currentRevisionId ? event?.revisions?.[currentRevisionId] : null;
+    const currentIndex = stagedCandidateIndexes.get(currentRepresentative);
+    const currentOutcome = marketplaceEffectiveCoordinatorOutcome(publication.results?.[currentIndex], canStage);
+    const currentComplete = Boolean(currentRevision && currentRevision.state === 'published');
+    allCurrentComplete = allCurrentComplete && currentComplete;
+    if (current.record.eventType === 'trade') allTradeCurrentComplete = allTradeCurrentComplete && currentComplete;
+    else allFlowCurrentComplete = allFlowCurrentComplete && currentComplete;
+    if (rows.some((row) => row.representationRank === 'enriched')) allEnrichableComplete = allEnrichableComplete && currentComplete;
+
+    rows.forEach((row) => {
+      const representative = representativeByGroupRank.get(`${logicalKey}:${row.representationRank || 'asset_flow'}`);
+      const index = stagedCandidateIndexes.get(representative);
+      const outcome = marketplaceEffectiveCoordinatorOutcome(publication.results?.[index], canStage);
+      const revision = event && Object.values(event.revisions || {}).find((value) => value.revisionKind === (row.representationRank || 'asset_flow'));
+      const mapped = mapMarketplacePublicationResult({
+        kind: row.record.eventType, outcome,
+        detailCode: publication.results?.[index]?.detailCode,
+        revisionId: revision?.revisionId || null, currentRevisionId,
+        currentMutableIds: currentRows.map((value) => value.currentId).filter(Boolean),
+        revisionMutableIds: rows.filter((value) => (value.representationRank || 'asset_flow') === (row.representationRank || 'asset_flow'))
+          .map((value) => value.currentId).filter(Boolean),
+        flowId: row.currentId,
+      });
+      for (const id of mapped.publishedIds) {
+        if (row.record.eventType === 'asset_flow') publishedFlowIds.add(id);
+        else publishedTradeIds.add(id);
+      }
+      if (mapped.error) errors.push(mapped.error);
+    });
+
+    const candidate = current.record.eventType === 'asset_flow'
+      ? marketplaceFlowHoldCandidate(current.source, holdContext)
+      : marketplaceTradeHoldCandidate(current.source, holdContext);
+    candidate.eventId = event?.eventId || null;
+    candidate.currentRevisionId = currentRevisionId;
+    candidate.currentRank = current.representationRank || 'asset_flow';
+    candidate.currentMutableIds = current.record.eventType === 'trade'
+      ? Array.from(new Set(currentRows.map((value) => value.currentId).filter(Boolean))).sort() : [];
+    candidate.observedMutableIdsByRevision = observedMutableIdsByRevision;
+    candidate.observedMutableIdsByRank = observedMutableIdsByRank;
+    let recorded;
+    try { recorded = await recordMarketplacePublicationHold({ installationRoot: getAppRoot(), candidate }); }
+    catch (_error) { recorded = { status: 'storage_failed', hold: null }; }
+    if (!['hold_recorded', 'hold_updated', 'hold_unchanged'].includes(recorded.status)) {
+      errors.push('publication_hold_write_failed'); allCurrentComplete = false; continue;
+    }
+    const mapped = marketplaceCoordinatorHoldResult(currentOutcome);
+    const updated = await updateMarketplacePublicationHold({
+      installationRoot: getAppRoot(), holdId: recorded.hold.holdId,
+      eventId: event?.eventId || null, currentRevisionId,
+      state: mapped.state, lastCoordinatorResult: mapped.lastCoordinatorResult,
+    });
+    if (updated.status !== 'hold_updated') errors.push('publication_hold_update_failed');
+    if (currentComplete) {
+      holdIdsToComplete.push(recorded.hold.holdId);
+      if (current.record.eventType === 'trade') tradeHoldIdsToComplete.push(recorded.hold.holdId);
+      else flowHoldIdsToComplete.push(recorded.hold.holdId);
+    }
+  }
+  return {
+    publishedTradeIds, publishedFlowIds, holdIdsToComplete, tradeHoldIdsToComplete, flowHoldIdsToComplete,
+    allCurrentComplete, allTradeCurrentComplete, allFlowCurrentComplete, allEnrichableComplete,
+    error: Array.from(new Set(errors)).sort().join('; '),
+  };
+}
+
+async function completeMarketplacePublicationHolds(holdIds) {
+  let complete = true;
+  for (const holdId of holdIds) {
+    const result = await completeMarketplacePublicationHold({
+      installationRoot: getAppRoot(), holdId, checkpointWritten: true,
+      currentRevisionPublished: true, mutableIdsRecorded: true, reconciliationClear: true,
+    });
+    if (!['released', 'hold_updated'].includes(result.status)) complete = false;
+  }
+  return complete;
+}
+
+async function hasActiveMarketplacePublicationHolds(market, kinds) {
+  const loaded = await loadMarketplacePublicationHolds({ installationRoot: getAppRoot() });
+  if (loaded.status === 'missing') return false;
+  if (loaded.status !== 'loaded') return true;
+  const selectedKinds = new Set(kinds);
+  return Object.values(loaded.document.holds).some((hold) => hold.market === market
+    && selectedKinds.has(hold.kind) && hold.state !== 'released' && hold.state !== 'abandoned');
+}
+
+function findMarketplaceOutboxRevision(document, eventId, revisionId) {
+  for (const generation of Object.values(document?.generations || {})) {
+    const event = generation.events?.[eventId];
+    if (event?.revisions?.[revisionId]) return { event, revision: event.revisions[revisionId] };
+  }
+  return null;
+}
+
+async function persistRecoveredMarketplaceIds(hold, { tradeIds = [], flowIds = [] } = {}) {
+  const filePath = hold.market === 'LM'
+    ? localMarketCheckpointPath(normalizeFaction(hold.candidateSnapshot?.faction || profileName))
+    : globalMarketCheckpointPath();
+  let document;
+  try { document = JSON.parse(await fs.readFile(filePath, 'utf8')); }
+  catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+  if (hold.kind === 'trade') {
+    document.publishedTradeIds = Array.from(new Set([
+      ...(Array.isArray(document.publishedTradeIds) ? document.publishedTradeIds : []),
+      ...tradeIds,
+    ])).sort();
+  } else {
+    document.publishedFlowIds = Array.from(new Set([
+      ...(Array.isArray(document.publishedFlowIds) ? document.publishedFlowIds : []),
+      ...flowIds,
+    ])).sort();
+  }
+  document.savedAt = new Date().toISOString();
+  await writeJsonAtomic(filePath, document);
+  return true;
+}
+
+async function recoverMarketplacePublication(settings) {
+  const organization = await resolveMarketplacePublicationOrganization(settings);
+  const publicationSettings = marketplacePublicationSettings(settings, organization);
+  const canStage = Boolean(publicationSettings.baseUrl && publicationSettings.bucket);
+  const coordinatorSettings = canStage ? publicationSettings : { ...publicationSettings, token: '' };
+  const coordinator = createMarketplacePublicationCoordinator({
+    fetchImpl: publicationSettings.canPost ? fetch : undefined,
+    resolveExactPoint: (exact) => resolveMarketplaceExactPoint(settings, exact),
+  });
+  // Empty-candidate publication drains durable pending work and reconciles
+  // posting work; it does not depend on scanner rows surviving a restart.
+  try { await coordinator.publishMarketplaceCandidates({ settings: coordinatorSettings, candidates: [] }); }
+  catch (_error) { /* durable outbox and holds remain authoritative */ }
+  const [holds, outbox] = await Promise.all([
+    loadMarketplacePublicationHolds({ installationRoot: getAppRoot() }),
+    loadMarketplaceOutboxV2({
+      storageRoot: publicationSettings.storageRoot,
+      installationId: publicationSettings.installationId,
+      applicationProfile: publicationSettings.applicationProfile,
+    }),
+  ]);
+  if (holds.status !== 'loaded' || outbox.status !== 'loaded') return { status: 'recovery_idle' };
+  let recovered = 0;
+  for (const hold of Object.values(holds.document.holds)) {
+    if (hold.state === 'released' || hold.state === 'abandoned' || !hold.eventId || !hold.currentRevisionId) continue;
+    const found = findMarketplaceOutboxRevision(outbox.document, hold.eventId, hold.currentRevisionId);
+    if (!found) continue;
+    const publishedTradeIds = [];
+    if (hold.kind === 'trade') {
+      for (const [revisionId, mutableIds] of Object.entries(hold.observedMutableIdsByRevision || {})) {
+        const observed = findMarketplaceOutboxRevision(outbox.document, hold.eventId, revisionId);
+        if (observed && ['published', 'superseded_published'].includes(observed.revision.state)) {
+          publishedTradeIds.push(...mutableIds);
+        }
+      }
+    }
+    if (found.revision.state !== 'published' && publishedTradeIds.length) {
+      try { await persistRecoveredMarketplaceIds(hold, { tradeIds: publishedTradeIds }); }
+      catch (_error) { /* current revision remains held and input cursors stay safe */ }
+    }
+    if (found.revision.state === 'published') {
+      try {
+        const checkpointWritten = await persistRecoveredMarketplaceIds(hold, {
+          tradeIds: publishedTradeIds,
+          flowIds: hold.kind === 'asset_flow' ? hold.observedFlowIds : [],
+        });
+        if (!checkpointWritten) continue;
+        const completed = await completeMarketplacePublicationHold({
+          installationRoot: getAppRoot(), holdId: hold.holdId, checkpointWritten: true,
+          currentRevisionPublished: true, mutableIdsRecorded: true, reconciliationClear: true,
+        });
+        if (completed.status === 'released') recovered += 1;
+      } catch (_error) {
+        // A checkpoint failure intentionally leaves the hold active.
+      }
+    } else if (found.revision.state === 'posting') {
+      const reconciliation = await resolveMarketplaceExactPoint(settings, {
+        eventId: hold.eventId, revisionId: hold.currentRevisionId,
+        pointTimestampNs: found.event.pointTimestampNs,
+        payloadHash: found.revision.payloadHash,
+      });
+      await updateMarketplacePublicationHold({
+        installationRoot: getAppRoot(), holdId: hold.holdId,
+        state: reconciliation.outcome === 'matched' ? 'held_mark_failed' : 'held_ambiguous',
+        lastCoordinatorResult: {
+          outcome: reconciliation.outcome === 'matched' ? 'published_mark_failed' : 'publication_ambiguous',
+          detailCode: marketplacePublicationErrorCode(`reconciliation_${reconciliation.outcome}`),
+        },
+      });
+    } else if (['pending', 'failed_retryable', 'superseded_pending'].includes(found.revision.state)) {
+      await updateMarketplacePublicationHold({
+        installationRoot: getAppRoot(), holdId: hold.holdId, state: 'held_staged',
+        lastCoordinatorResult: { outcome: 'pending_unattempted', detailCode: 'reconciled_pending' },
+      });
+    }
+  }
+  return { status: 'recovery_complete', recovered };
 }
 
 async function fetchLocalMarketTrades(settings, connection) {
@@ -4212,6 +4707,9 @@ async function fetchLocalMarketTrades(settings, connection) {
     atlasPerSol: await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null),
   });
   const byId = new Map(existing.map((trade) => [trade.id, trade]));
+  const publicationRepresentations = Array.from(new Map(
+    [...existing, ...scanned.trades].map((trade) => [String(trade.id), trade]),
+  ).values()).filter((trade) => Date.parse(trade.timestamp) >= startMs);
   for (const trade of scanned.trades) {
     for (const [id, prior] of byId) {
       const sameExecution = prior.signature && prior.signature === trade.signature
@@ -4224,26 +4722,6 @@ async function fetchLocalMarketTrades(settings, connection) {
   }
   const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
-  // One-shot backfill: if the checkpoint predates the rename from
-  // 'local_market_trade' to 'marketplace', publish every existing trade
-  // once under the new measurement, then mark the checkpoint so we
-  // never re-publish them. publishedTradeIds is intentionally ignored
-  // on this single pass because the trade IDs were already recorded
-  // against the old measurement name.
-  const needsBackfill = !checkpoint.marketplaceBackfilled;
-  const unpublished = needsBackfill
-    ? trades
-    : trades.filter((trade) => !checkpoint.publishedTradeIds.has(trade.id));
-  let publishError = '';
-  try {
-    const published = await writeInfluxLines(settings, unpublished.map((trade) => formatLocalMarketInfluxLine(trade, { faction, profile: profileName })));
-    if (published) {
-      for (const trade of unpublished) checkpoint.publishedTradeIds.add(trade.id);
-      checkpoint.marketplaceBackfilled = true;
-    }
-  } catch (error) {
-    publishError = String(error?.message || error || 'local_market_influx_write_failed');
-  }
   const checkpointCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
   const cursorOutputSnapshot = {
     walletCursors: checkpointCursors.walletCursors,
@@ -4251,36 +4729,53 @@ async function fetchLocalMarketTrades(settings, connection) {
     activeOrderIds: scanned.activeOrderIds,
     archivedOrderIds: scanned.archivedOrderIds,
   };
-  let holdResult;
-  try {
-    holdResult = await recordMarketplaceCandidateHolds(trades.map((trade) => marketplaceTradeHoldCandidate(trade, {
-      market: 'LM', faction, profileScope: profileName, cursorInputSnapshot, cursorOutputSnapshot,
-    })));
-  } catch (_error) {
-    holdResult = { ok: false, code: 'publication_hold_write_failed' };
-  }
-  const resolvedCursors = await resolveMarketplaceDiscoveryCursors({
+  const publication = await publishMarketplaceCandidateSet(
+    settings,
+    publicationRepresentations.map((trade) => marketplaceTradePublicationCandidate(trade, { market: 'LM', faction, profileScope: profileName })),
+    { market: 'LM', faction, profileScope: profileName, cursorInputSnapshot, cursorOutputSnapshot },
+  );
+  for (const id of publication.publishedTradeIds) checkpoint.publishedTradeIds.add(id);
+  let publishError = publication.error;
+  const heldCursors = await resolveMarketplaceDiscoveryCursors({
     installationRoot: getAppRoot(), market: 'LM', kinds: ['trade'],
     cursorInputSnapshot, cursorOutputSnapshot,
     transactionMisses: scanned.stats.transactionMisses,
-    holdWriteSucceeded: holdResult.ok,
+    holdWriteSucceeded: !publishError.includes('publication_hold_write_failed'),
   });
-  const persistedCursors = resolvedCursors.cursorSnapshot;
-  if (!holdResult.ok) publishError = [publishError, holdResult.code].filter(Boolean).join('; ');
-  else if (!['held', 'released', 'transaction_misses'].includes(resolvedCursors.status)) {
+  if (!['held', 'released', 'transaction_misses'].includes(heldCursors.status)) {
     publishError = [publishError, 'publication_hold_resolution_failed'].filter(Boolean).join('; ');
   }
-  await writeJsonAtomic(filePath, {
+  const checkpointDocument = {
     schemaVersion: 2,
     faction,
     profile,
     savedAt: new Date().toISOString(),
     orders: scanned.orders,
     trades,
-    ...persistedCursors,
+    ...heldCursors.cursorSnapshot,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
-    marketplaceBackfilled: checkpoint.marketplaceBackfilled === true,
-    tradeEnrichmentVersion: !scanned.exhaustion && scanned.stats.transactionMisses === 0 && !publishError ? 1 : checkpoint.tradeEnrichmentVersion,
+    marketplaceBackfilled: false,
+    tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
+  };
+  // The durable checkpoint containing the applicable mutable IDs is written
+  // before any hold can be completed or released.
+  await writeJsonAtomic(filePath, checkpointDocument);
+  const holdsCompleted = await completeMarketplacePublicationHolds(publication.holdIdsToComplete);
+  const resolvedCursors = await resolveMarketplaceDiscoveryCursors({
+    installationRoot: getAppRoot(), market: 'LM', kinds: ['trade'],
+    cursorInputSnapshot, cursorOutputSnapshot,
+    transactionMisses: scanned.stats.transactionMisses,
+    holdWriteSucceeded: !publishError.includes('publication_hold_write_failed'),
+  });
+  const hasActiveTradeHold = await hasActiveMarketplacePublicationHolds('LM', ['trade']);
+  const marketplaceBackfilledNext = publication.allCurrentComplete && holdsCompleted && !hasActiveTradeHold;
+  const tradeEnrichmentVersionNext = marketplaceBackfilledNext
+    && scanned.stats.transactionMisses === 0 && publishError === '' && publication.allEnrichableComplete
+    ? 1 : checkpoint.tradeEnrichmentVersion;
+  await writeJsonAtomic(filePath, {
+    ...checkpointDocument, savedAt: new Date().toISOString(), ...resolvedCursors.cursorSnapshot,
+    marketplaceBackfilled: marketplaceBackfilledNext,
+    tradeEnrichmentVersion: tradeEnrichmentVersionNext,
   });
   return {
     trades,
@@ -4352,21 +4847,6 @@ async function fetchGlobalMarketTrades(settings, connection) {
   for (const event of scanned.assetFlows) flowById.set(event.id, event);
   const assetFlows = Array.from(flowById.values()).filter((event) => Date.parse(event.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
-  const unpublished = trades.filter((trade) => !checkpoint.publishedTradeIds.has(trade.id));
-  const unpublishedFlows = assetFlows.filter((event) => !checkpoint.publishedFlowIds.has(event.id));
-  let publishError = '';
-  try {
-    const published = await writeInfluxLines(settings, [
-      ...unpublished.map((trade) => formatLocalMarketInfluxLine(trade, { faction: 'GLOBAL', profile: 'GLOBAL', market: 'GM' })),
-      ...unpublishedFlows.map(formatAssetFlowInfluxLine),
-    ]);
-    if (published) {
-      for (const trade of unpublished) checkpoint.publishedTradeIds.add(trade.id);
-      for (const event of unpublishedFlows) checkpoint.publishedFlowIds.add(event.id);
-    }
-  } catch (error) {
-    publishError = String(error?.message || error || 'gm_market_influx_write_failed');
-  }
   const checkpointCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
   const cursorOutputSnapshot = {
     walletCursors: checkpointCursors.walletCursors,
@@ -4374,33 +4854,57 @@ async function fetchGlobalMarketTrades(settings, connection) {
     activeOrderIds: scanned.activeOrderIds,
     archivedOrderIds: scanned.archivedOrderIds,
   };
-  let holdResult;
-  try {
-    holdResult = await recordMarketplaceCandidateHolds([
-      ...trades.map((trade) => marketplaceTradeHoldCandidate(trade, {
-        market: 'GM', faction: 'GLOBAL', profileScope: 'GLOBAL', cursorInputSnapshot, cursorOutputSnapshot,
-      })),
-      ...assetFlows.map((event) => marketplaceFlowHoldCandidate(event, { cursorInputSnapshot, cursorOutputSnapshot })),
-    ]);
-  } catch (_error) {
-    holdResult = { ok: false, code: 'publication_hold_write_failed' };
+  // Trades and flows are passed to one coordinator invocation so every
+  // candidate is durably staged before the first POST. Results remain keyed
+  // by their individual logical event and are never collapsed to one Boolean.
+  const gmLegacyReadScope = { faction: 'GLOBAL', profile: 'GLOBAL', market: 'GM' };
+  const publication = await publishMarketplaceCandidateSet(settings, [
+    ...trades.map((trade) => marketplaceTradePublicationCandidate(trade, {
+      market: gmLegacyReadScope.market, faction: gmLegacyReadScope.faction, profileScope: gmLegacyReadScope.profile,
+    })),
+    ...assetFlows.map(marketplaceFlowPublicationCandidate),
+  ], { market: 'GM', faction: 'GLOBAL', profileScope: 'GLOBAL', cursorInputSnapshot, cursorOutputSnapshot });
+  for (const id of publication.publishedTradeIds) checkpoint.publishedTradeIds.add(id);
+  for (const id of publication.publishedFlowIds) checkpoint.publishedFlowIds.add(id);
+  let publishError = publication.error;
+  const heldCursors = await resolveMarketplaceDiscoveryCursors({
+    installationRoot: getAppRoot(), market: 'GM', kinds: ['trade', 'asset_flow'],
+    cursorInputSnapshot, cursorOutputSnapshot,
+    transactionMisses: scanned.stats.transactionMisses,
+    holdWriteSucceeded: !publishError.includes('publication_hold_write_failed'),
+  });
+  if (!['held', 'released', 'transaction_misses'].includes(heldCursors.status)) {
+    publishError = [publishError, 'publication_hold_resolution_failed'].filter(Boolean).join('; ');
   }
+  const checkpointDocument = {
+    schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets,
+    orders: scanned.orders, trades, assetFlows, ...heldCursors.cursorSnapshot,
+    publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
+    publishedFlowIds: Array.from(checkpoint.publishedFlowIds).sort(),
+    marketplaceBackfilled: false,
+    assetFlowBackfilled: false,
+    tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
+  };
+  await writeJsonAtomic(filePath, checkpointDocument);
+  const tradeHoldsCompleted = await completeMarketplacePublicationHolds(publication.tradeHoldIdsToComplete);
+  const flowHoldsCompleted = await completeMarketplacePublicationHolds(publication.flowHoldIdsToComplete);
   const resolvedCursors = await resolveMarketplaceDiscoveryCursors({
     installationRoot: getAppRoot(), market: 'GM', kinds: ['trade', 'asset_flow'],
     cursorInputSnapshot, cursorOutputSnapshot,
     transactionMisses: scanned.stats.transactionMisses,
-    holdWriteSucceeded: holdResult.ok,
+    holdWriteSucceeded: !publishError.includes('publication_hold_write_failed'),
   });
-  const persistedCursors = resolvedCursors.cursorSnapshot;
-  if (!holdResult.ok) publishError = [publishError, holdResult.code].filter(Boolean).join('; ');
-  else if (!['held', 'released', 'transaction_misses'].includes(resolvedCursors.status)) {
-    publishError = [publishError, 'publication_hold_resolution_failed'].filter(Boolean).join('; ');
-  }
+  const [hasActiveTradeHold, hasActiveFlowHold] = await Promise.all([
+    hasActiveMarketplacePublicationHolds('GM', ['trade']),
+    hasActiveMarketplacePublicationHolds('GM', ['asset_flow']),
+  ]);
+  const marketplaceBackfilledNext = publication.allTradeCurrentComplete && tradeHoldsCompleted && !hasActiveTradeHold;
+  const assetFlowBackfilledNext = scanned.stats.transactionMisses === 0 && publishError === ''
+    && publication.allFlowCurrentComplete && flowHoldsCompleted && !hasActiveFlowHold;
   await writeJsonAtomic(filePath, {
-    schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets,
-    orders: scanned.orders, trades, assetFlows, ...persistedCursors,
-    publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(), publishedFlowIds: Array.from(checkpoint.publishedFlowIds).sort(), marketplaceBackfilled: true,
-    assetFlowBackfilled: !scanned.exhaustion && publishError === '',
+    ...checkpointDocument, savedAt: new Date().toISOString(), ...resolvedCursors.cursorSnapshot,
+    marketplaceBackfilled: marketplaceBackfilledNext,
+    assetFlowBackfilled: assetFlowBackfilledNext,
   });
   return {
     trades, assetFlows, error: publishError,
@@ -4454,6 +4958,7 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
   const runId = telemetry.snapshot().runId;
   const underlyingPromise = (async () => {
     try {
+      await recoverMarketplacePublication(settings);
       const connection = createSolanaConnection(settings, { instrumentation });
       const localConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
       const globalConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'GM' });
@@ -7007,6 +7512,8 @@ app.whenReady().then(async () => {
   const powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension')
   console.log(`[MSA] prevent-app-suspension blocker=${powerSaveBlockerId} active=${powerSaveBlocker.isStarted(powerSaveBlockerId)}`)
 
+  try { await recoverMarketplacePublication(await readSettings()); }
+  catch (_error) { /* recovery is fail-closed and will retry on the next sync */ }
   createWindow();
 });
 

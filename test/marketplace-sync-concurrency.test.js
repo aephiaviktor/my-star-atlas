@@ -21,6 +21,7 @@ const functionSource = main.slice(start, end);
 function createContext(overrides = {}) {
   return {
     marketplaceSyncActive: null,
+    recoverMarketplacePublication: async () => ({ status: 'recovery_idle' }),
     normalizeSettings: (value) => value,
     readSettings: async () => ({}),
     normalizeFaction: (value) => value,
