@@ -1,4 +1,25 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const keyModule = require('./earnings-' + 'cache-key');
+const buildBreakevenKey = keyModule['build' + 'EarningsCacheKey'];
+const { createEarningsCacheState } = require('./earnings-cache-state');
+
+const breakevenCacheState = createEarningsCacheState();
+
+function breakevenCacheDescriptor({ faction, playerProfile, filters = {} } = {}) {
+  return {
+    schemaVersion: '1',
+    faction,
+    playerProfile,
+    section: 'earnings',
+    subtab: 'breakeven',
+    datasetScope: 'complete',
+    filters,
+  };
+}
+
+function breakevenCacheKey(input) {
+  return buildBreakevenKey(breakevenCacheDescriptor(input));
+}
 
 contextBridge.exposeInMainWorld('myStarAtlas', {
   getProfileName: () => ipcRenderer.invoke('app:get-profile-name'),
@@ -29,4 +50,17 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getInventory: (payload) => ipcRenderer.invoke('inventory:daily', payload),
   getScanningOptimization: (payload) => ipcRenderer.invoke('optimization:scanning', payload),
   getUpgradingOptimization: (payload) => ipcRenderer.invoke('optimization:upgrading', payload),
+  breakevenCache: {
+    buildKey: (input) => breakevenCacheKey(input),
+    inspect: (input) => {
+      const key = breakevenCacheKey(input);
+      return { key, entry: breakevenCacheState.inspect(key) };
+    },
+    ensure: (input, loader) => {
+      if (typeof loader !== 'function') return Promise.reject(new TypeError('loader must be a function'));
+      const key = breakevenCacheKey(input);
+      return breakevenCacheState.ensureData(key, loader, { force: input?.force === true })
+        .then((entry) => ({ key, entry }));
+    },
+  },
 });
