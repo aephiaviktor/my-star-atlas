@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { BREAKEVEN_CACHE_FRESHNESS_MS, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS, CONSUMPTION_MINING_CACHE_FRESHNESS_MS, CONSUMPTION_CARGO_CACHE_FRESHNESS_MS, createEarningsCacheState } = require('../electron/earnings-cache-state');
+const { BREAKEVEN_CACHE_FRESHNESS_MS, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS, CONSUMPTION_MINING_CACHE_FRESHNESS_MS, CONSUMPTION_CARGO_CACHE_FRESHNESS_MS, CONSUMPTION_CRAFTING_CACHE_FRESHNESS_MS, createEarningsCacheState } = require('../electron/earnings-cache-state');
 
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => { resolve=a; reject=b; }); return { promise, resolve, reject }; };
 const flush = () => new Promise((resolve) => setImmediate(resolve));
@@ -13,6 +13,7 @@ test('freshness constant and exact boundary use successful completion time', asy
   assert.equal(CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS, 900000);
   assert.equal(CONSUMPTION_MINING_CACHE_FRESHNESS_MS, 900000);
   assert.equal(CONSUMPTION_CARGO_CACHE_FRESHNESS_MS, 900000);
+  assert.equal(CONSUMPTION_CRAFTING_CACHE_FRESHNESS_MS, 900000);
   let now = 1000;
   const cache = createEarningsCacheState({ now: () => now });
   const pending = deferred();

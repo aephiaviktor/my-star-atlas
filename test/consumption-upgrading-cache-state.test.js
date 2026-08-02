@@ -65,7 +65,7 @@ test('same-faction profile and filter changes cannot accept legacy or delayed mi
 
 test('faction-switch legacy rendering for the remaining unmigrated Consumption subtabs is unchanged', () => {
   const factionSwitch=between('// Render cached data immediately if available','saveStatus.textContent = `Switching to ${clickedFaction}...`');
-  for (const [cache, render] of [['consCrafting','renderConsCrafting'],['consTotal','renderConsTotal']]) {
+  for (const [cache, render] of [['consTotal','renderConsTotal']]) {
     assert.match(factionSwitch,new RegExp(`getCachedFilterResult\\(faction, '${cache}'`));
     assert.match(factionSwitch,new RegExp(`if \\(cachedCons.*\\) ${render}`));
   }
