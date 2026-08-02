@@ -1010,7 +1010,7 @@ async function runFactionBackgroundPrefetch(generation, faction) {
     { key: 'mining', cached: () => Boolean(getCachedFilterResult(faction, 'mining', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'mining', await api.getDailyMining({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
     { key: 'crafting', cached: () => Boolean(getCachedFilterResult(faction, 'crafting', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'crafting', await api.getDailyCrafting({ ...settings, starbaseFilter: '', recipeFilter: '' }), '', '') },
     { key: 'production', cached: () => Boolean(getCachedFilterResult(faction, 'production', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'production', await api.getDailyProduction({ ...settings, starbaseFilter: '', assetFilter: '' }), '', '') },
-    { key: 'consumption-scanning', cached: () => Boolean(getCachedFilterResult(faction, 'consScanning', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consScanning', await api.getDailyConsumptionScanning({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
+    { key: 'consumption-scanning', cached: () => isConsumptionScanningCacheFresh(settings, '', ''), load: () => refreshConsScanning({ settings, starbaseFilter: '', fleetFilter: '' }) },
     { key: 'consumption-mining', cached: () => Boolean(getCachedFilterResult(faction, 'consMining', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consMining', await api.getDailyConsumptionMining({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
     { key: 'consumption-cargo', cached: () => Boolean(getCachedFilterResult(faction, 'consCargo', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consCargo', await api.getDailyConsumptionCargo({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
     { key: 'consumption-crafting', cached: () => Boolean(getCachedFilterResult(faction, 'consCrafting', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'consCrafting', await api.getDailyConsumptionCrafting({ ...settings, starbaseFilter: '', recipeFilter: '' }), '', '') },
@@ -2601,30 +2601,74 @@ function renderConsScanning(result) {
   }
 }
 
-async function refreshConsScanning() {
-  if (!hasInfluxSettings(latestSettings || getFormPayload())) {
-    renderConsScanningEmpty('Awaiting Influx connection');
-    return;
+function getConsumptionScanningCacheInput(settings = latestSettings || getFormPayload(), starbaseFilter = selectedConsScanningStarbase, fleetFilter = selectedConsScanningFleet, force = false) {
+  return {
+    faction: normalizeFaction(settings?.faction),
+    playerProfile: getActivePlayerProfile(settings),
+    starbaseFilter: String(starbaseFilter || ''),
+    fleetFilter: String(fleetFilter || ''),
+    force,
+  };
+}
+
+function isConsumptionScanningCacheFresh(settings, starbaseFilter, fleetFilter) {
+  const input = getConsumptionScanningCacheInput(settings, starbaseFilter, fleetFilter);
+  if (!input.playerProfile) return false;
+  return api.consumptionScanningCache.inspect(input)?.entry?.status === 'ready';
+}
+
+function isActiveConsumptionScanningContext(key, generation) {
+  if (currentSection !== 'production' || currentSubtab !== 'consumption' || currentConsumptionSubtab !== 'scanning') return false;
+  const input = getConsumptionScanningCacheInput();
+  if (!input.playerProfile || api.consumptionScanningCache.buildKey(input) !== key) return false;
+  const current = api.consumptionScanningCache.inspect(input);
+  return current?.key === key && current?.entry?.generation === generation;
+}
+
+async function refreshConsScanning({
+  force = false,
+  settings = latestSettings || getFormPayload(),
+  starbaseFilter = selectedConsScanningStarbase,
+  fleetFilter = selectedConsScanningFleet,
+} = {}) {
+  if (!hasInfluxSettings(settings)) {
+    if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'scanning') {
+      renderConsScanningEmpty('Awaiting Influx connection');
+    }
+    return null;
   }
 
-  const faction = normalizeFaction(latestSettings?.faction);
-  const cached = getCachedFilterResult(faction, 'consScanning', selectedConsScanningStarbase, selectedConsScanningFleet);
-  if (cached) {
-    renderConsScanning(cached);
-  } else {
+  const input = getConsumptionScanningCacheInput(settings, starbaseFilter, fleetFilter, force);
+  if (!input.playerProfile) {
+    if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'scanning') {
+      renderConsScanningEmpty(`No ${input.faction} player profile configured`);
+    }
+    return null;
+  }
+  const initial = api.consumptionScanningCache.inspect(input);
+  const displayable = initial?.entry?.value || initial?.entry?.lastGoodValue;
+  const initialGeneration = initial?.entry?.generation;
+  if (displayable && isActiveConsumptionScanningContext(initial.key, initialGeneration)) {
+    renderConsScanning(displayable);
+  } else if (!displayable && currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'scanning') {
     renderConsScanningEmpty('Loading scanning consumption...');
   }
-  try {
-    const result = await api.getDailyConsumptionScanning({
-      ...(latestSettings || getFormPayload()),
-      starbaseFilter: selectedConsScanningStarbase,
-      fleetFilter: selectedConsScanningFleet,
-    });
-    renderConsScanning(result);
-  } catch (error) {
-    console.error(error);
-    if (!cached) renderConsScanningEmpty('Influx unavailable');
-  }
+
+  const requestSettings = {
+    ...settings,
+    starbaseFilter: input.starbaseFilter,
+    fleetFilter: input.fleetFilter,
+  };
+  const settled = await api.consumptionScanningCache.ensure(input, async () => {
+    const result = await api.getDailyConsumptionScanning(requestSettings);
+    if (result?.ok === false) throw new Error(result.error || 'Scanning consumption failed');
+    return result;
+  });
+  if (!isActiveConsumptionScanningContext(settled.key, settled.entry.generation)) return settled;
+  const value = settled.entry.value || settled.entry.lastGoodValue;
+  if (value) renderConsScanning(value);
+  else renderConsScanningEmpty(settled.entry.error?.message || 'Influx unavailable');
+  return settled;
 }
 
 /* ---- Consumption: Cargo ---- */
@@ -7711,7 +7755,7 @@ function refreshVisibleProductionSubtab() {
   if (currentSubtab === 'production') return latestProductionResult ? Promise.resolve() : refreshDailyProduction();
   if (currentSubtab === 'consumption') {
     return Promise.all([
-      latestConsScanningResult ? Promise.resolve() : refreshConsScanning(),
+      refreshConsScanning(),
       latestConsMiningResult ? Promise.resolve() : refreshConsMining(),
       latestConsCargoResult ? Promise.resolve() : refreshConsCargo(),
       latestConsCraftingResult ? Promise.resolve() : refreshConsCrafting(),
@@ -7762,7 +7806,7 @@ function refreshCurrentVisibleData() {
     if (currentConsumptionSubtab === 'mining') return refreshConsMining();
     if (currentConsumptionSubtab === 'crafting') return refreshConsCrafting();
     if (currentConsumptionSubtab === 'upgrading') return refreshConsUpgrading({ force: true });
-    if (currentConsumptionSubtab === 'scanning') return refreshConsScanning();
+    if (currentConsumptionSubtab === 'scanning') return refreshConsScanning({ force: true });
     if (currentConsumptionSubtab === 'cargo') return refreshConsCargo();
     return refreshConsTotal();
   }
@@ -7790,7 +7834,7 @@ function setActiveSubtab(subtab) {
     refreshDailyProduction();
   }
   if (subtab === 'consumption') {
-    if (!latestConsScanningResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsScanning();
+    if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsScanning();
     if (!latestConsMiningResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsMining();
     if (!latestConsCargoResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsCargo();
     if (!latestConsCraftingResult && hasInfluxSettings(latestSettings || getFormPayload())) refreshConsCrafting();
@@ -8046,6 +8090,12 @@ factionButtons.forEach((button) => {
     if (cachedProduction) renderProductionCharts(cachedProduction);
     const cachedInventory = getCachedFactionResult(faction, 'inventory::__all__');
     if (cachedInventory) renderInventory(cachedInventory);
+    // Consumption Scanning is canonical profile/filter keyed. Clear any
+    // incompatible prior DOM and ensure the next identity immediately.
+    if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'scanning') {
+      renderConsScanningEmpty('Loading scanning consumption...');
+      void refreshConsScanning({ settings: nextSettings });
+    }
     const cachedConsMining = getCachedFilterResult(faction, 'consMining', selectedConsMiningStarbase, selectedConsMiningFleet);
     if (cachedConsMining) renderConsMining(cachedConsMining);
     const cachedConsCrafting = getCachedFilterResult(faction, 'consCrafting', selectedConsCraftingStarbase, selectedConsCraftingRecipe);
@@ -8133,6 +8183,7 @@ document.querySelectorAll('.consumption-subtab-button').forEach((button) => {
     document.querySelectorAll('[data-consumption-panel]').forEach((panel) => {
       panel.classList.toggle('active', panel.dataset.consumptionPanel === currentConsumptionSubtab);
     });
+    if (currentConsumptionSubtab === 'scanning') refreshConsScanning();
     if (currentConsumptionSubtab === 'upgrading') refreshConsUpgrading();
   });
 });
@@ -8295,7 +8346,7 @@ form.addEventListener('submit', async (event) => {
     refreshConsMining();
     refreshConsCrafting();
     refreshConsUpgrading({ force: true });
-    refreshConsScanning();
+    refreshConsScanning({ force: true });
     refreshConsCargo();
     refreshConsTotal();
     if (currentSection === 'optimization') {

@@ -1,11 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const keyModule = require('./earnings-' + 'cache-key');
 const buildBreakevenKey = keyModule['build' + 'EarningsCacheKey'];
-const { createEarningsCacheState, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS } = require('./earnings-cache-state');
+const { createEarningsCacheState, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS } = require('./earnings-cache-state');
 
 const breakevenCacheState = createEarningsCacheState();
 const upgradingCacheState = createEarningsCacheState({ freshnessMs: UPGRADING_CACHE_FRESHNESS_MS });
 const consumptionUpgradingCacheState = createEarningsCacheState({ freshnessMs: CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS });
+const consumptionScanningCacheState = createEarningsCacheState({ freshnessMs: CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS });
 
 function breakevenCacheDescriptor({ faction, playerProfile, filters = {} } = {}) {
   return {
@@ -58,6 +59,25 @@ function consumptionUpgradingCacheKey(input) {
   return buildBreakevenKey(consumptionUpgradingCacheDescriptor(input));
 }
 
+function consumptionScanningCacheDescriptor({ faction, playerProfile, starbaseFilter = '', fleetFilter = '' } = {}) {
+  return {
+    schemaVersion: '1',
+    faction,
+    playerProfile,
+    section: 'consumption',
+    subtab: 'scanning',
+    datasetScope: 'scan-consumption-31d',
+    filters: {
+      starbaseFilter: String(starbaseFilter || ''),
+      fleetFilter: String(fleetFilter || ''),
+    },
+  };
+}
+
+function consumptionScanningCacheKey(input) {
+  return buildBreakevenKey(consumptionScanningCacheDescriptor(input));
+}
+
 contextBridge.exposeInMainWorld('myStarAtlas', {
   getProfileName: () => ipcRenderer.invoke('app:get-profile-name'),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
@@ -87,6 +107,19 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getInventory: (payload) => ipcRenderer.invoke('inventory:daily', payload),
   getScanningOptimization: (payload) => ipcRenderer.invoke('optimization:scanning', payload),
   getUpgradingOptimization: (payload) => ipcRenderer.invoke('optimization:upgrading', payload),
+  consumptionScanningCache: {
+    buildKey: (input) => consumptionScanningCacheKey(input),
+    inspect: (input) => {
+      const key = consumptionScanningCacheKey(input);
+      return { key, entry: consumptionScanningCacheState.inspect(key) };
+    },
+    ensure: (input, loader) => {
+      if (typeof loader !== 'function') return Promise.reject(new TypeError('loader must be a function'));
+      const key = consumptionScanningCacheKey(input);
+      return consumptionScanningCacheState.ensureData(key, loader, { force: input?.force === true })
+        .then((entry) => ({ key, entry }));
+    },
+  },
   consumptionUpgradingCache: {
     buildKey: (input) => consumptionUpgradingCacheKey(input),
     inspect: (input) => {
