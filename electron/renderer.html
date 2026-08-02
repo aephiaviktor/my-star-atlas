@@ -856,7 +856,7 @@
                   <select id="optimization-analytics-experiment"><option value="__latest__">Latest experiment</option></select>
                 </label>
                 <label class="activity-filter">Chart metric
-                  <select id="optimization-analytics-metric"><option value="averageScanChance">Average Scan Chance</option><option value="sduPerHour">SDU / hour</option><option value="sduPerScan">SDU / scan</option><option value="scanSuccessRate">Scan success rate</option></select>
+                  <select id="optimization-analytics-metric"><option value="averageScanChance">Average Scan Chance</option><option value="sduPerDay">SDU / day</option><option value="sduPerScan">SDU / scan</option><option value="scanSuccessRate">Scan success rate</option></select>
                 </label>
               </div>
               <div class="fleet-sync-status" id="optimization-analytics-status">Load scanning optimization data to calculate analytics</div>
@@ -885,7 +885,7 @@
                   </div>
                   <div class="fleet-table-wrap optimization-analytics-ranking-wrap">
                     <table class="fleet-table optimization-table optimization-analytics-ranking">
-                      <thead id="optimization-analytics-ranking-head"><tr><th data-optimization-analytics-sort="blockIndex" data-label="Block">Block</th><th data-optimization-analytics-sort="parameter" data-label="Parameter">Parameter</th><th data-optimization-analytics-sort="value" data-label="Value">Value</th><th data-optimization-analytics-sort="scans" data-label="Scans">Scans</th><th data-optimization-analytics-sort="averageScanChance" data-label="Avg Scan Chance">Avg Scan Chance</th><th data-optimization-analytics-sort="sduPerHour" data-label="SDU / hour">SDU / hour</th><th data-optimization-analytics-sort="netAtlasPerHour" data-label="Net ATLAS / hour">Net ATLAS / hour</th><th data-optimization-analytics-sort="pausedSeconds" data-label="Paused">Paused</th><th data-optimization-analytics-sort="movementSeconds" data-label="Movement">Movement</th><th data-optimization-analytics-sort="opportunityCostMovementSeconds" data-label="Opportunity Cost">Opportunity Cost</th><th data-optimization-analytics-sort="elapsedSeconds" data-label="Elapsed">Elapsed</th></tr></thead>
+                      <thead id="optimization-analytics-ranking-head"><tr><th data-optimization-analytics-sort="blockIndex" data-label="Block">Block</th><th data-optimization-analytics-sort="parameter" data-label="Parameter">Parameter</th><th data-optimization-analytics-sort="value" data-label="Value">Value</th><th data-optimization-analytics-sort="scans" data-label="Scans">Scans</th><th data-optimization-analytics-sort="averageScanChance" data-label="Avg Scan Chance">Avg Scan Chance</th><th data-optimization-analytics-sort="sduPerDay" data-label="SDU / day">SDU / day</th><th data-optimization-analytics-sort="netAtlasPerDay" data-label="Net ATLAS / day">Net ATLAS / day</th><th data-optimization-analytics-sort="pausedSeconds" data-label="Paused">Paused</th><th data-optimization-analytics-sort="movementSeconds" data-label="Movement">Movement</th><th data-optimization-analytics-sort="opportunityCostMovementSeconds" data-label="Opportunity Cost">Opportunity Cost</th><th data-optimization-analytics-sort="elapsedSeconds" data-label="Elapsed">Elapsed</th></tr></thead>
                       <tbody id="optimization-analytics-ranking"><tr class="empty-row"><td colspan="11">Awaiting scan results</td></tr></tbody>
                     </table>
                   </div>
@@ -895,6 +895,7 @@
                   <div class="earnings-metric-guide-list">
                     <article class="earnings-metric-guide-item">
                       <h4>Experiment summary</h4>
+                      <p><strong>Daily rates: </strong>SDU / day and Net ATLAS / day are 24-hour equivalents based on active experimental time.</p>
                       <p>Shows the selected scanning experiment, its available analyzable scan-result records, and the experiment-level economics derived from those rows.</p>
                       <p class="earnings-metric-guide-formula"><strong>Formula: </strong>Selected experiment rows, optionally limited to Optimization data, grouped by the experiment ID and selected start date.</p>
                       <p><strong>Interpretation: </strong>Use this as the data-quality check before trusting the charts. Runtime progress can be higher than analyzable rows when older scan results were not stored in telemetry.</p>

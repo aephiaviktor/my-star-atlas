@@ -6718,6 +6718,7 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
       hasPauseTelemetry: Object.prototype.hasOwnProperty.call(row, 'pauseSeconds'),
       pauseCount: Number(row?.pauseCount || 0),
       pauseSeconds: Number(row?.pauseSeconds || 0),
+      resupplyExcludedSeconds: Number(row?.resupplyExcludedSeconds || 0),
       txCostSol: Number(row?.txCostSol || 0),
       txSuccess: row?.success === true || String(row?.success).toLowerCase() === 'true',
       scanSuccess: Number(row?.sduFound || 0) > 0,
@@ -6762,16 +6763,18 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
     const startedAtMs = events.length ? Math.min(...events.map((event) => event.timeMs)) : null;
     const latestAtMs = events.length ? Math.max(...events.map((event) => event.timeMs)) : null;
     const boundaryAtMs = nextStartByKey.get(key);
-    const elapsedSeconds = Number.isFinite(startedAtMs)
+    const rawElapsedSeconds = Number.isFinite(startedAtMs)
       ? Math.max(0, ((Number.isFinite(boundaryAtMs) ? boundaryAtMs : latestAtMs) - startedAtMs) / 1000)
       : estimatedHours * 3600;
+    const resupplyExcludedSeconds = group.samples.reduce((sum, sample) => sum + sample.resupplyExcludedSeconds, 0);
+    const elapsedSeconds = Math.max(0, rawElapsedSeconds - resupplyExcludedSeconds);
     const effectiveHours = elapsedSeconds > 0 ? elapsedSeconds / 3600 : estimatedHours;
     const chances = group.samples.map((sample) => sample.chance).filter(Number.isFinite);
     const hasPauseTelemetry = group.samples.every((sample) => sample.hasPauseTelemetry);
     const pauseCount = hasPauseTelemetry ? group.samples.reduce((sum, sample) => sum + sample.pauseCount, 0) : null;
     const pausedSeconds = hasPauseTelemetry ? group.samples.reduce((sum, sample) => sum + sample.pauseSeconds, 0) : null;
     const movementTransactions = events.filter(({ row }) => ['WARP', 'SUBWARP'].includes(String(row?.operation || '').toUpperCase()));
-    const movementEvents = events.filter(({ row }) => String(row?.movementPhase || '').toLowerCase() === 'start');
+    const movementEvents = events.filter(({ row }) => String(row?.movementPhase || '').toLowerCase() === 'start' && !(row?.resupplyExcluded === true || String(row?.resupplyExcluded).toLowerCase() === 'true'));
     const hasMovementTelemetry = movementTransactions.length === 0 || movementEvents.length > 0;
     const movementSeconds = hasMovementTelemetry ? movementEvents.reduce((sum, { row }) => sum + Number(row?.movementSeconds || 0), 0) : null;
     const cooldownOverlapSeconds = hasMovementTelemetry ? movementEvents.reduce((sum, { row }) => sum + Number(row?.cooldownOverlapSeconds || 0), 0) : null;
@@ -6780,6 +6783,7 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
     const burnedFuel = hasMovementTelemetry ? movementEvents.reduce((sum, { row }) => sum + Number(row?.burnedFuel || 0), 0) : null;
     const txCostsBySignature = new Map();
     for(const { row, timeMs } of events) {
+      if(row?.resupplyExcluded === true || String(row?.resupplyExcluded).toLowerCase() === 'true') continue;
       const cost = Number(row?.txCostSol || 0);
       if(!Number.isFinite(cost) || cost <= 0) continue;
       const signature = String(row?.signature || '').trim();
@@ -6801,6 +6805,7 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
       averageScanChance: chances.length ? chances.reduce((sum, value) => sum + value, 0) / chances.length : null,
       sduPerScan: scans ? totalSdu / scans : 0,
       sduPerHour: effectiveHours > 0 ? totalSdu / effectiveHours : 0,
+      sduPerDay: effectiveHours > 0 ? totalSdu / effectiveHours * 24 : 0,
       txSuccessRate: scans ? successfulTransactions / scans * 100 : 0,
       scanSuccessRate: successfulTransactions ? successfulScans / successfulTransactions * 100 : 0,
       elapsedSeconds,
@@ -6819,6 +6824,8 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
       totalCostAtlas,
       netAtlas,
       netAtlasPerHour: Number.isFinite(netAtlas) && effectiveHours > 0 ? netAtlas / effectiveHours : null,
+      netAtlasPerDay: Number.isFinite(netAtlas) && effectiveHours > 0 ? netAtlas / effectiveHours * 24 : null,
+      resupplyExcludedSeconds,
     };
   }).sort((a, b) => (a.blockIndex ?? Number.MAX_SAFE_INTEGER) - (b.blockIndex ?? Number.MAX_SAFE_INTEGER) || a.parameter.localeCompare(b.parameter) || Number(a.value) - Number(b.value) || String(a.value).localeCompare(String(b.value)));
   return {
@@ -6856,7 +6863,8 @@ function getScanningOptimizationChartMetric(sample, group, metric) {
   if(metric === 'averageScanChance') return Number.isFinite(sample.chance) ? sample.chance : group.averageScanChance;
   if(metric === 'sduPerScan') return sample.sdu;
   if(metric === 'scanSuccessRate') return sample.scanSuccess ? 100 : 0;
-  if(metric === 'netAtlasPerHour') return group.netAtlasPerHour;
+  if(metric === 'netAtlasPerDay') return group.netAtlasPerDay;
+  if(metric === 'sduPerDay') return sample.cycleHours > 0 ? sample.sdu / sample.cycleHours * 24 : group.sduPerDay;
   return sample.cycleHours > 0 ? sample.sdu / sample.cycleHours : group.sduPerHour;
 }
 
@@ -7108,12 +7116,12 @@ function renderScanningOptimizationAnalytics() {
   }, { scans: 0, totalSdu: 0, elapsedSeconds: 0, chanceWeighted: 0, chanceScans: 0, pausedSeconds: 0, movementSeconds: 0, opportunityCostMovementSeconds: 0, grossRevenueAtlas: 0, foodCostAtlas: 0, fuelCostAtlas: 0, txCostAtlas: 0, totalCostAtlas: 0, netAtlas: 0 });
   const elapsedHours = totals.elapsedSeconds / 3600;
   const averageScanChance = totals.chanceScans ? totals.chanceWeighted / totals.chanceScans : null;
-  const sduPerHour = elapsedHours > 0 ? totals.totalSdu / elapsedHours : 0;
-  const netAtlasPerHour = elapsedHours > 0 && Number.isFinite(totals.netAtlas) ? totals.netAtlas / elapsedHours : null;
+  const sduPerDay = elapsedHours > 0 ? totals.totalSdu / elapsedHours * 24 : 0;
+  const netAtlasPerDay = elapsedHours > 0 && Number.isFinite(totals.netAtlas) ? totals.netAtlas / elapsedHours * 24 : null;
   const metrics = [
     ['Average Scan Chance', Number.isFinite(averageScanChance) ? `${averageScanChance.toFixed(2)}%` : '--'],
-    ['SDU / hour', sduPerHour.toFixed(2)],
-    ['Net ATLAS / hour', Number.isFinite(netAtlasPerHour) ? formatAtlas(netAtlasPerHour, 2) : '--'],
+    ['SDU / day', sduPerDay.toFixed(2)],
+    ['Net ATLAS / day', Number.isFinite(netAtlasPerDay) ? formatAtlas(netAtlasPerDay, 2) : '--'],
     ['Paused Time', formatOptimizationAnalyticsDuration(totals.pausedSeconds)],
     ['Movement Time', formatOptimizationAnalyticsDuration(totals.movementSeconds)],
     ['Opportunity-Cost Movement', formatOptimizationAnalyticsDuration(totals.opportunityCostMovementSeconds)],
@@ -7153,8 +7161,8 @@ function renderScanningOptimizationAnalytics() {
       group.value,
       group.scans,
       Number.isFinite(group.averageScanChance) ? `${group.averageScanChance.toFixed(2)}%` : '--',
-      group.sduPerHour.toFixed(2),
-      Number.isFinite(group.netAtlasPerHour) ? formatAtlas(group.netAtlasPerHour, 2) : '--',
+      group.sduPerDay.toFixed(2),
+      Number.isFinite(group.netAtlasPerDay) ? formatAtlas(group.netAtlasPerDay, 2) : '--',
       formatOptimizationAnalyticsDuration(group.pausedSeconds),
       formatOptimizationAnalyticsDuration(group.movementSeconds),
       formatOptimizationAnalyticsDuration(group.opportunityCostMovementSeconds),

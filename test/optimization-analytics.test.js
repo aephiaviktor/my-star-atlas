@@ -199,7 +199,7 @@ test('scanning analytics ranks one selected parameter and charts all its values'
   assert.match(html, /id="optimization-experiment-filter"/);
   assert.match(html, />Scan success rate</);
   assert.match(html, />Average Scan Chance</);
-  assert.match(html, />Net ATLAS \/ hour</);
+  assert.match(html, />Net ATLAS \/ day</);
   assert.match(html, />Opportunity Cost</);
   assert.match(html, /id="optimization-analytics-economics"/);
   assert.match(html, /id="optimization-analytics-ranking-head"/);
