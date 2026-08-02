@@ -1374,6 +1374,51 @@ function resetFactionScopedState() {
   invSelectedStarbase = '__all__';
 }
 
+function resetLegacyFleetState() {
+  latestFleetResult = null;
+  for (const cache of factionCache.values()) delete cache.fleet;
+}
+
+function resetLegacyEarningsState() {
+  latestEarningsResult = null;
+  for (const cache of factionCache.values()) delete cache.earnings;
+}
+
+function resetLegacyOptimizationState() {
+  latestOptimizationResult = null;
+  optimizationRows = [];
+  optimizationAnalyticsRows = [];
+  optimizationAnalyticsLoadedFaction = '';
+  optimizationAnalyticsPrices = null;
+  latestUpgradingOptimizationResult = null;
+  optimizationUpgradingRows = [];
+  for (const cache of factionCache.values()) {
+    for (const key of Object.keys(cache)) {
+      if (key.includes(':optimizationScanning:') || key.includes(':optimizationUpgrading:')) delete cache[key];
+    }
+  }
+}
+
+function resetLegacyInfluxPrimaryState() {
+  latestSduResult = null;
+  latestMiningResult = null;
+  latestCraftingResult = null;
+  latestProductionResult = null;
+  latestConsMiningResult = null;
+  latestConsCraftingResult = null;
+  latestConsUpgradingResult = null;
+  latestConsScanningResult = null;
+  latestConsCargoResult = null;
+  latestConsTotalResult = null;
+  latestPcrResult = null;
+  latestInventoryResult = null;
+  for (const cache of factionCache.values()) {
+    for (const key of Object.keys(cache)) {
+      if (key === 'pcr' || key.startsWith('inventory::') || /^(?:sdu|mining|crafting|production|consMining|consCrafting|consUpgrading|consScanning|consCargo|consTotal)$/.test(key) || /:(?:sdu|mining|crafting|production|consMining|consCrafting|consUpgrading|consScanning|consCargo|consTotal):/.test(key)) delete cache[key];
+    }
+  }
+}
+
 function updateTitle() {
   document.querySelectorAll('[data-toolbar-section]').forEach((group) => {
     group.hidden = group.dataset.toolbarSection !== currentSection;
@@ -7867,16 +7912,7 @@ function refreshVisibleProductionSubtab() {
   if (currentSubtab === 'mining') return latestMiningResult ? Promise.resolve() : refreshDailyMining();
   if (currentSubtab === 'crafting') return latestCraftingResult ? Promise.resolve() : refreshDailyCrafting();
   if (currentSubtab === 'production') return latestProductionResult ? Promise.resolve() : refreshDailyProduction();
-  if (currentSubtab === 'consumption') {
-    return Promise.all([
-      refreshConsScanning(),
-      refreshConsMining(),
-      refreshConsCargo(),
-      refreshConsCrafting(),
-      refreshConsUpgrading(),
-      refreshConsTotal(),
-    ]);
-  }
+  if (currentSubtab === 'consumption') return refreshVisibleConsumptionIdentity();
   if (currentSubtab === 'pct-charts') return latestPcrResult ? Promise.resolve() : refreshPcrCharts();
   if (currentSubtab === 'inventory') return latestInventoryResult ? Promise.resolve() : refreshInventory();
   return Promise.resolve();
@@ -7894,6 +7930,40 @@ function refreshVisibleFactionViews() {
     return currentOptimizationView === 'analytics' ? refreshScanningOptimizationAnalyticsData() : refreshScanningOptimization();
   }
   if (currentSection === 'production') return refreshVisibleProductionSubtab();
+  return Promise.resolve();
+}
+
+
+function refreshVisibleConsumptionIdentity({ force = false } = {}) {
+  if (currentConsumptionSubtab === 'scanning') return refreshConsScanning({ force });
+  if (currentConsumptionSubtab === 'mining') return refreshConsMining({ force });
+  if (currentConsumptionSubtab === 'cargo') return refreshConsCargo({ force });
+  if (currentConsumptionSubtab === 'crafting') return refreshConsCrafting({ force });
+  if (currentConsumptionSubtab === 'upgrading') return refreshConsUpgrading({ force });
+  if (currentConsumptionSubtab === 'total') return refreshConsTotal({ force });
+  return Promise.resolve();
+}
+
+function refreshVisibleIdentity({ force = false } = {}) {
+  if (currentSection === 'fleet') return refreshFleets();
+  if (currentSection === 'earnings') {
+    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: true });
+    if (currentEarningsSubtab === 'breakeven') return refreshBreakeven({ force });
+    if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading({ force });
+    return refreshEarnings();
+  }
+  if (currentSection === 'optimization') {
+    if (currentOptimizationSubtab === 'upgrading') return refreshUpgradingOptimization({ force });
+    return currentOptimizationView === 'analytics' ? refreshScanningOptimizationAnalyticsData({ force }) : refreshScanningOptimization({ force });
+  }
+  if (currentSection !== 'production') return Promise.resolve();
+  if (currentSubtab === 'consumption') return refreshVisibleConsumptionIdentity({ force });
+  if (currentSubtab === 'scanning') return refreshDailySdu();
+  if (currentSubtab === 'mining') return refreshDailyMining();
+  if (currentSubtab === 'crafting') return refreshDailyCrafting();
+  if (currentSubtab === 'production') return refreshDailyProduction();
+  if (currentSubtab === 'pct-charts') return refreshPcrCharts();
+  if (currentSubtab === 'inventory') return refreshInventory();
   return Promise.resolve();
 }
 
@@ -7949,12 +8019,7 @@ function setActiveSubtab(subtab) {
     refreshDailyProduction();
   }
   if (subtab === 'consumption') {
-    if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsScanning();
-    if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsMining();
-    if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsCargo();
-    if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsCrafting();
-    if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsUpgrading();
-    if (hasInfluxSettings(latestSettings || getFormPayload())) refreshConsTotal();
+    if (hasInfluxSettings(latestSettings || getFormPayload())) refreshVisibleConsumptionIdentity();
   }
   if (subtab === 'pct-charts') {
     if (!latestPcrResult && hasInfluxSettings(latestSettings || getFormPayload())) {
@@ -8458,41 +8523,102 @@ sendRpcLimiterButton.addEventListener('click', async () => {
   }
 });
 
+function classifySettingsImpact(previous, submitted, saved) {
+  const secretReplacement = (key) => String(submitted?.[key] || '').trim().length > 0;
+  const factionChanged = normalizeFaction(previous?.faction) !== normalizeFaction(saved?.faction);
+  const profileChanged = getActivePlayerProfile(previous) !== getActivePlayerProfile(saved);
+  const influxConnectionChanged = previous?.influxUrl !== saved?.influxUrl || secretReplacement('influxAuthToken');
+  const influxBucketChanged = previous?.influxBucket !== saved?.influxBucket;
+  const optimizationBucketChanged = previous?.influxOptimizationBucket !== saved?.influxOptimizationBucket;
+  const aephiaSourceChanged = secretReplacement('aephiaApiKey');
+  const rpcSourceChanged = previous?.useRpcLimiter !== saved?.useRpcLimiter || secretReplacement('rpcUrl');
+  const influxSourceChanged = influxConnectionChanged || influxBucketChanged;
+  const earningsSourceChanged = aephiaSourceChanged || rpcSourceChanged;
+  const dataChanged = factionChanged || profileChanged || influxSourceChanged || optimizationBucketChanged || earningsSourceChanged;
+  return { factionChanged, profileChanged, influxConnectionChanged, influxBucketChanged, optimizationBucketChanged, aephiaSourceChanged, rpcSourceChanged, influxSourceChanged, earningsSourceChanged, dataChanged };
+}
+
+function getVisibleDataset() {
+  if (currentSection === 'fleet') return 'fleet';
+  if (currentSection === 'earnings') return currentEarningsSubtab === 'marketplace' ? 'marketplace' : 'earnings';
+  if (currentSection === 'optimization') return 'optimization';
+  if (currentSection === 'production') return currentSubtab === 'consumption' ? 'production-consumption' : 'production';
+  return 'none';
+}
+
+function isVisibleDatasetAffected(impact, visibleDataset = getVisibleDataset()) {
+  if (impact.factionChanged || impact.profileChanged) return true;
+  if (visibleDataset === 'fleet') return impact.rpcSourceChanged;
+  if (visibleDataset === 'earnings') return impact.influxConnectionChanged || impact.influxBucketChanged || impact.aephiaSourceChanged || impact.rpcSourceChanged;
+  if (visibleDataset === 'optimization') return impact.influxConnectionChanged || impact.optimizationBucketChanged;
+  if (visibleDataset === 'production' || visibleDataset === 'production-consumption') return impact.influxConnectionChanged || impact.influxBucketChanged;
+  return false;
+}
+
+function getLegacyResetPlan(impact) {
+  return {
+    identity: impact.factionChanged || impact.profileChanged,
+    fleet: impact.rpcSourceChanged,
+    earnings: impact.influxConnectionChanged || impact.influxBucketChanged || impact.aephiaSourceChanged || impact.rpcSourceChanged,
+    optimization: impact.influxConnectionChanged || impact.optimizationBucketChanged,
+    influxPrimary: impact.influxConnectionChanged || impact.influxBucketChanged,
+  };
+}
+
+function resetLegacyStateForImpact(impact) {
+  const plan = getLegacyResetPlan(impact);
+  if (plan.identity) {
+    resetFactionScopedState();
+    return;
+  }
+  if (plan.fleet) resetLegacyFleetState();
+  if (plan.earnings) resetLegacyEarningsState();
+  if (plan.optimization) resetLegacyOptimizationState();
+  if (plan.influxPrimary) resetLegacyInfluxPrimaryState();
+}
+
+async function applySettingsSave(submitted, orchestrationGeneration) {
+  const previous = latestSettings || {};
+  const saved = await api.saveSettings(submitted);
+  if (orchestrationGeneration !== settingsSaveGeneration) return saved;
+  const impact = classifySettingsImpact(previous, submitted, saved);
+  const visibleDataset = getVisibleDataset();
+  const visibleAffected = isVisibleDatasetAffected(impact, visibleDataset);
+  ++factionPrefetchGeneration;
+  if (impact.influxSourceChanged) api.settingsCacheControl.markInfluxSourceChanged();
+  else if (impact.earningsSourceChanged) api.settingsCacheControl.markEarningsSourceChanged();
+  resetLegacyStateForImpact(impact);
+  latestSettings = saved;
+  setFormValues(saved);
+  updateFactionButtons(saved);
+  updateSettingsStatus(saved);
+  if (impact.dataChanged) {
+    if (visibleAffected) {
+      const force = impact.influxSourceChanged || impact.optimizationBucketChanged || impact.earningsSourceChanged;
+      await refreshVisibleIdentity({ force });
+    }
+    if (orchestrationGeneration === settingsSaveGeneration) {
+      const generation = ++factionPrefetchGeneration;
+      void runFactionBackgroundPrefetch(generation, normalizeFaction(saved.faction));
+    }
+  }
+  return saved;
+}
+
+let settingsSaveGeneration = 0;
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   saveStatus.textContent = 'Saving...';
+  const generation = ++settingsSaveGeneration;
   try {
-    const saved = await api.saveSettings(getFormPayload());
-    latestSettings = saved;
-    setFormValues(saved);
-    updateFactionButtons(saved);
-    updateSettingsStatus(saved);
-    resetFactionScopedState();
-    refreshFleets();
-    refreshEarnings();
-    refreshDailySdu();
-    refreshDailyMining();
-    refreshDailyCrafting();
-    refreshDailyProduction();
-    refreshConsMining({ force: true });
-    refreshConsCrafting({ force: true });
-    refreshConsUpgrading({ force: true });
-    refreshConsScanning({ force: true });
-    refreshConsCargo({ force: true });
-    refreshConsTotal({ force: true });
-    if (currentSection === 'optimization') {
-      if (currentOptimizationSubtab === 'upgrading') refreshUpgradingOptimization();
-      else refreshScanningOptimization();
-    }
+    await applySettingsSave(getFormPayload(), generation);
+    if (generation !== settingsSaveGeneration) return;
     saveStatus.textContent = 'Saved';
-    setTimeout(() => {
-      if (saveStatus.textContent === 'Saved') {
-        saveStatus.textContent = '';
-      }
-    }, 2200);
+    setTimeout(() => { if (saveStatus.textContent === 'Saved') saveStatus.textContent = ''; }, 2200);
   } catch (error) {
     console.error(error);
-    saveStatus.textContent = 'Save failed';
+    if (generation === settingsSaveGeneration) saveStatus.textContent = 'Save failed';
   }
 });
 

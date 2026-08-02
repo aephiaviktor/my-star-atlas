@@ -74,3 +74,65 @@ test('different keys isolate data and superseded generations cannot overwrite ne
   old.resolve('old'); await oldRequest; await flush();
   assert.equal(cache.inspect('same').value, 'new'); assert.equal(cache.inspect('same').generation, 2);
 });
+
+test('markAllStale preserves last good timestamps and makes entries retryable', async () => {
+  let now = 10;
+  const cache = createEarningsCacheState({ now: () => now });
+  await cache.ensureData('ready', () => Promise.resolve({ version: 1 }));
+  const before = cache.inspect('ready');
+  const initial = deferred();
+  const missingRequest = cache.ensureData('missing', () => initial.promise);
+  await Promise.resolve();
+
+  cache.markAllStale();
+  const stale = cache.inspect('ready');
+  assert.equal(stale.status, 'stale');
+  assert.deepEqual(stale.value, before.value);
+  assert.equal(stale.fetchedAt, before.fetchedAt);
+  assert.equal(stale.staleAt, before.staleAt);
+  assert.equal(stale.inFlight, false);
+  assert.equal(cache.inspect('missing').status, 'missing');
+  assert.equal(cache.inspect('missing').inFlight, false);
+
+  initial.resolve('obsolete');
+  await missingRequest;
+  assert.equal(cache.inspect('missing').status, 'missing');
+  assert.equal(cache.inspect('missing').value, null);
+});
+
+test('markAllStale detaches old requests and old completion cannot clear a newer promise', async () => {
+  const cache = createEarningsCacheState({ now: () => 100 });
+  await cache.ensureData('k', () => Promise.resolve('last-good'));
+  const old = deferred();
+  const oldRequest = cache.ensureData('k', () => old.promise, { force: true });
+  await Promise.resolve();
+  cache.markAllStale();
+  const newer = deferred();
+  const newRequest = cache.ensureData('k', () => newer.promise);
+  await Promise.resolve();
+  assert.equal(cache.inspect('k').inFlight, true);
+
+  old.resolve('obsolete');
+  await oldRequest;
+  assert.equal(cache.inspect('k').inFlight, true);
+  assert.equal(cache.inspect('k').status, 'stale');
+  assert.equal(cache.inspect('k').value, 'last-good');
+
+  newer.resolve('authoritative');
+  await newRequest;
+  assert.equal(cache.inspect('k').status, 'ready');
+  assert.equal(cache.inspect('k').value, 'authoritative');
+});
+
+test('failed revalidation leaves source-invalidated last good state stale', async () => {
+  const cache = createEarningsCacheState({ now: () => 50 });
+  await cache.ensureData('k', () => Promise.resolve('good'));
+  const before = cache.inspect('k');
+  cache.markAllStale();
+  const failed = await cache.ensureData('k', () => Promise.reject(new Error('new source unavailable')));
+  assert.equal(failed.status, 'stale');
+  assert.equal(failed.value, 'good');
+  assert.equal(failed.fetchedAt, before.fetchedAt);
+  assert.equal(failed.staleAt, before.staleAt);
+  assert.equal(failed.error.message, 'new source unavailable');
+});

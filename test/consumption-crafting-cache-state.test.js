@@ -21,9 +21,9 @@ test('all Crafting entry points converge and legacy state cannot suppress canoni
   assert.match(refresh,/consumptionCraftingCache\.inspect\(input\)/); assert.match(refresh,/consumptionCraftingCache\.ensure\(input/); assert.match(refresh,/getDailyConsumptionCrafting\(requestSettings\)/);
   assert.doesNotMatch(refresh,/getCachedFilterResult|latestConsCraftingResult/);
   const parent=between('function refreshVisibleProductionSubtab','function refreshVisibleFactionViews');
-  assert.match(parent,/refreshConsCrafting\(\)/); assert.doesNotMatch(parent,/latestConsCraftingResult \? Promise\.resolve/);
+  assert.match(parent,/currentSubtab === 'consumption'\) return refreshVisibleConsumptionIdentity\(\)/);
   const setActive=between('function setActiveSubtab','function setActiveEarningsSubtab');
-  assert.match(setActive,/subtab === 'consumption'.*refreshConsCrafting\(\)/s); assert.doesNotMatch(setActive,/!latestConsCraftingResult.*refreshConsCrafting/);
+  assert.match(setActive,/subtab === 'consumption'.*refreshVisibleConsumptionIdentity\(\)/s);
   const internal=between('// Consumption subtab switching','// Consumption — Crafting filters');
   assert.match(internal,/currentConsumptionSubtab === 'crafting'\) refreshConsCrafting\(\)/);
   const prefetch=between('async function runFactionBackgroundPrefetch','function loadVisibleThenPrefetch');
@@ -33,8 +33,8 @@ test('all Crafting entry points converge and legacy state cannot suppress canoni
 test('manual refresh and settings save force canonical Crafting revalidation', () => {
   const manual=between('function refreshCurrentVisibleData','function setActiveSubtab');
   assert.match(manual,/currentConsumptionSubtab === 'crafting'\) return refreshConsCrafting\(\{ force: true \}\)/);
-  const save=between("form.addEventListener('submit'","testInfluxButton.addEventListener");
-  assert.match(save,/refreshConsCrafting\(\{ force: true \}\)/);
+  const save=between('async function applySettingsSave',"form.addEventListener('submit'");
+  assert.match(save,/await refreshVisibleIdentity\(\{ force \}\)/);
 });
 
 test('profile/filter/view/key/generation guard blocks obsolete renderer mutations', () => {

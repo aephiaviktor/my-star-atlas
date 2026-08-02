@@ -21,9 +21,9 @@ test('all Scanning entry points converge and legacy state cannot suppress canoni
   assert.match(refresh,/consumptionScanningCache\.inspect\(input\)/); assert.match(refresh,/consumptionScanningCache\.ensure\(input/); assert.match(refresh,/getDailyConsumptionScanning\(requestSettings\)/);
   assert.doesNotMatch(refresh,/getCachedFilterResult|latestConsScanningResult/);
   const parent=between('function refreshVisibleProductionSubtab','function refreshVisibleFactionViews');
-  assert.match(parent,/refreshConsScanning\(\)/); assert.doesNotMatch(parent,/latestConsScanningResult \? Promise\.resolve/);
+  assert.match(parent,/currentSubtab === 'consumption'\) return refreshVisibleConsumptionIdentity\(\)/);
   const setActive=between('function setActiveSubtab','function setActiveEarningsSubtab');
-  assert.match(setActive,/subtab === 'consumption'.*refreshConsScanning\(\)/s); assert.doesNotMatch(setActive,/!latestConsScanningResult.*refreshConsScanning/);
+  assert.match(setActive,/subtab === 'consumption'.*refreshVisibleConsumptionIdentity\(\)/s);
   const internal=between('// Consumption subtab switching','// Consumption — Mining filters');
   assert.match(internal,/currentConsumptionSubtab === 'scanning'\) refreshConsScanning\(\)/);
   const prefetch=between('async function runFactionBackgroundPrefetch','function loadVisibleThenPrefetch');
@@ -33,8 +33,8 @@ test('all Scanning entry points converge and legacy state cannot suppress canoni
 test('manual refresh and settings save force canonical Scanning revalidation', () => {
   const manual=between('function refreshCurrentVisibleData','function setActiveSubtab');
   assert.match(manual,/currentConsumptionSubtab === 'scanning'\) return refreshConsScanning\(\{ force: true \}\)/);
-  const save=between("form.addEventListener('submit'","testInfluxButton.addEventListener");
-  assert.match(save,/refreshConsScanning\(\{ force: true \}\)/);
+  const save=between('async function applySettingsSave',"form.addEventListener('submit'");
+  assert.match(save,/await refreshVisibleIdentity\(\{ force \}\)/);
 });
 
 test('profile/filter/view/key/generation guard blocks obsolete renderer mutations', () => {

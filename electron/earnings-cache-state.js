@@ -16,9 +16,11 @@ function safeError(error) {
 
 function snapshot(entry, now) {
   if (!entry) return null;
-  const status = entry.lastGoodValue !== null && entry.staleAt !== null && now >= entry.staleAt
-    ? 'stale'
-    : entry.status;
+  const status = entry.invalidated
+    ? (entry.lastGoodValue === null ? 'missing' : 'stale')
+    : entry.lastGoodValue !== null && entry.staleAt !== null && now >= entry.staleAt
+      ? 'stale'
+      : entry.status;
   return {
     status,
     value: entry.lastGoodValue,
@@ -63,6 +65,7 @@ function createEarningsCacheState({ now = Date.now, freshnessMs = BREAKEVEN_CACH
       error: null,
       generation,
       inFlightPromise: null,
+      invalidated: Boolean(entry?.invalidated),
     };
     entries.set(key, entry);
 
@@ -76,6 +79,7 @@ function createEarningsCacheState({ now = Date.now, freshnessMs = BREAKEVEN_CACH
         entry.fetchedAt = fetchedAt;
         entry.staleAt = fetchedAt + freshnessMs;
         entry.error = null;
+        entry.invalidated = false;
         entry.inFlightPromise = null;
         return snapshot(entry, now());
       }, (error) => {
@@ -94,7 +98,19 @@ function createEarningsCacheState({ now = Date.now, freshnessMs = BREAKEVEN_CACH
     return generations.get(key) || 0;
   }
 
-  return { inspect, ensureData, invalidate };
+  function markAllStale() {
+    for (const [key, entry] of entries) {
+      const generation = (generations.get(key) || 0) + 1;
+      generations.set(key, generation);
+      entry.generation = generation;
+      entry.status = entry.lastGoodValue === null ? 'missing' : 'stale';
+      entry.invalidated = true;
+      entry.inFlightPromise = null;
+      entry.error = null;
+    }
+  }
+
+  return { inspect, ensureData, invalidate, markAllStale };
 }
 
 module.exports = { BREAKEVEN_CACHE_FRESHNESS_MS, UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_UPGRADING_CACHE_FRESHNESS_MS, CONSUMPTION_SCANNING_CACHE_FRESHNESS_MS, CONSUMPTION_MINING_CACHE_FRESHNESS_MS, CONSUMPTION_CARGO_CACHE_FRESHNESS_MS, CONSUMPTION_CRAFTING_CACHE_FRESHNESS_MS, CONSUMPTION_TOTAL_CACHE_FRESHNESS_MS, createEarningsCacheState };

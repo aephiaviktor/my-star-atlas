@@ -21,9 +21,9 @@ test('all Mining entry points converge and legacy state cannot suppress canonica
   assert.match(refresh,/consumptionMiningCache\.inspect\(input\)/); assert.match(refresh,/consumptionMiningCache\.ensure\(input/); assert.match(refresh,/getDailyConsumptionMining\(requestSettings\)/);
   assert.doesNotMatch(refresh,/getCachedFilterResult|latestConsMiningResult/);
   const parent=between('function refreshVisibleProductionSubtab','function refreshVisibleFactionViews');
-  assert.match(parent,/refreshConsMining\(\)/); assert.doesNotMatch(parent,/latestConsMiningResult \? Promise\.resolve/);
+  assert.match(parent,/currentSubtab === 'consumption'\) return refreshVisibleConsumptionIdentity\(\)/);
   const setActive=between('function setActiveSubtab','function setActiveEarningsSubtab');
-  assert.match(setActive,/subtab === 'consumption'.*refreshConsMining\(\)/s); assert.doesNotMatch(setActive,/!latestConsMiningResult.*refreshConsMining/);
+  assert.match(setActive,/subtab === 'consumption'.*refreshVisibleConsumptionIdentity\(\)/s);
   const internal=between('// Consumption subtab switching','// Consumption — Mining filters');
   assert.match(internal,/currentConsumptionSubtab === 'mining'\) refreshConsMining\(\)/);
   const prefetch=between('async function runFactionBackgroundPrefetch','function loadVisibleThenPrefetch');
@@ -33,8 +33,8 @@ test('all Mining entry points converge and legacy state cannot suppress canonica
 test('manual refresh and settings save force canonical Mining revalidation', () => {
   const manual=between('function refreshCurrentVisibleData','function setActiveSubtab');
   assert.match(manual,/currentConsumptionSubtab === 'mining'\) return refreshConsMining\(\{ force: true \}\)/);
-  const save=between("form.addEventListener('submit'","testInfluxButton.addEventListener");
-  assert.match(save,/refreshConsMining\(\{ force: true \}\)/);
+  const save=between('async function applySettingsSave',"form.addEventListener('submit'");
+  assert.match(save,/await refreshVisibleIdentity\(\{ force \}\)/);
 });
 
 test('profile/filter/view/key/generation guard blocks obsolete renderer mutations', () => {

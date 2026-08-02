@@ -166,6 +166,15 @@ contextBridge.exposeInMainWorld('myStarAtlas', {
   getInventory: (payload) => ipcRenderer.invoke('inventory:daily', payload),
   getScanningOptimization: (payload) => ipcRenderer.invoke('optimization:scanning', payload),
   getUpgradingOptimization: (payload) => ipcRenderer.invoke('optimization:upgrading', payload),
+  settingsCacheControl: {
+    markInfluxSourceChanged: () => {
+      for (const state of [breakevenCacheState, upgradingCacheState, consumptionUpgradingCacheState, consumptionScanningCacheState, consumptionMiningCacheState, consumptionCargoCacheState, consumptionCraftingCacheState, consumptionTotalCacheState]) state.markAllStale();
+    },
+    markEarningsSourceChanged: () => {
+      breakevenCacheState.markAllStale();
+      upgradingCacheState.markAllStale();
+    },
+  },
   consumptionTotalCache: {
     buildKey: (input) => consumptionTotalCacheKey(input),
     inspect: (input) => { const key = consumptionTotalCacheKey(input); return { key, entry: consumptionTotalCacheState.inspect(key) }; },

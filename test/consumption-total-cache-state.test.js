@@ -29,9 +29,9 @@ test('all Total entry points converge and legacy state cannot suppress canonical
   assert.match(refresh,/consumptionTotalCache\.inspect\(input\)/); assert.match(refresh,/consumptionTotalCache\.ensure\(input/); assert.match(refresh,/getDailyConsumptionTotal\(requestSettings\)/);
   assert.doesNotMatch(refresh,/getCachedFilterResult|latestConsTotalResult/);
   const parent=between('function refreshVisibleProductionSubtab','function refreshVisibleFactionViews');
-  assert.match(parent,/refreshConsTotal\(\)/); assert.doesNotMatch(parent,/latestConsTotalResult \? Promise\.resolve/);
+  assert.match(parent,/currentSubtab === 'consumption'\) return refreshVisibleConsumptionIdentity\(\)/);
   const setActive=between('function setActiveSubtab','function setActiveEarningsSubtab');
-  assert.match(setActive,/subtab === 'consumption'.*refreshConsTotal\(\)/s); assert.doesNotMatch(setActive,/!latestConsTotalResult.*refreshConsTotal/);
+  assert.match(setActive,/subtab === 'consumption'.*refreshVisibleConsumptionIdentity\(\)/s);
   const internal=between('// Consumption subtab switching','// Consumption — Mining filters');
   assert.match(internal,/currentConsumptionSubtab === 'total'\) refreshConsTotal\(\)/);
   const prefetch=between('async function runFactionBackgroundPrefetch','function loadVisibleThenPrefetch');
@@ -41,8 +41,8 @@ test('all Total entry points converge and legacy state cannot suppress canonical
 test('manual refresh and settings save force canonical Total revalidation', () => {
   const manual=between('function refreshCurrentVisibleData','function setActiveSubtab');
   assert.match(manual,/currentConsumptionSubtab === 'total'\) return refreshConsTotal\(\{ force: true \}\)/);
-  const save=between("form.addEventListener('submit'","testInfluxButton.addEventListener");
-  assert.match(save,/refreshConsTotal\(\{ force: true \}\)/);
+  const save=between('async function applySettingsSave',"form.addEventListener('submit'");
+  assert.match(save,/await refreshVisibleIdentity\(\{ force \}\)/);
 });
 
 test('profile/filter/view/key/generation guard blocks obsolete renderer mutations', () => {

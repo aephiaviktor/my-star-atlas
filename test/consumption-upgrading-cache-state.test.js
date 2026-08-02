@@ -25,7 +25,7 @@ test('all existing entry points converge on canonical ensure and legacy cache ca
   const activation=between('// Consumption subtab switching','// Consumption — Mining filters');
   assert.match(activation,/currentConsumptionSubtab === 'upgrading'\) refreshConsUpgrading\(\)/);
   const parent=between('function refreshVisibleProductionSubtab','function refreshVisibleFactionViews');
-  assert.match(parent,/refreshConsUpgrading\(\)/); assert.doesNotMatch(parent,/latestConsUpgradingResult \? Promise\.resolve/);
+  assert.match(parent,/currentSubtab === 'consumption'\) return refreshVisibleConsumptionIdentity\(\)/);
   const prefetch=between('async function runFactionBackgroundPrefetch','function loadVisibleThenPrefetch');
   assert.match(prefetch,/consumption-upgrading.*isConsumptionUpgradingCacheFresh.*refreshConsUpgrading\(\{ settings, starbaseFilter: '', componentFilter: '' \}\)/s);
 });
@@ -33,8 +33,8 @@ test('all existing entry points converge on canonical ensure and legacy cache ca
 test('manual refresh and settings save force canonical revalidation', () => {
   const manual=between('function refreshCurrentVisibleData','function setActiveSubtab');
   assert.match(manual,/currentConsumptionSubtab === 'upgrading'\) return refreshConsUpgrading\(\{ force: true \}\)/);
-  const save=between("form.addEventListener('submit'","testInfluxButton.addEventListener");
-  assert.match(save,/refreshConsUpgrading\(\{ force: true \}\)/);
+  const save=between('async function applySettingsSave',"form.addEventListener('submit'");
+  assert.match(save,/await refreshVisibleIdentity\(\{ force \}\)/);
 });
 
 test('late context responses require parent, internal view, identity, filters, key and generation', () => {
