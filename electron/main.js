@@ -3655,14 +3655,19 @@ function parseRpcUrlForLimiter(rawValue) {
 }
 
 async function sendSettingsToRpcLimiter(payload) {
-  const { rpcBaseUrl, apiKey } = parseRpcUrlForLimiter(payload.rpcUrl);
+  const replacementRpcUrl = String(payload.rpcUrl || '').trim();
   // The Main vs Fallback checkbox: unchecked (default) writes to 'main';
   // checked writes to 'fallback'. The user assigns the URL they just
   // pasted to one of the two provider slots.
   const role = payload.providerRole === 'fallback' ? 'fallback' : 'main';
-  const requestsPerSecond = Number(payload.rpcRequestsPerSecond);
-  if (!Number.isFinite(requestsPerSecond) || requestsPerSecond <= 0) {
-    throw new Error('Requests / sec must be a positive number.');
+  let parsedProvider = null;
+  let requestsPerSecond = null;
+  if (replacementRpcUrl) {
+    parsedProvider = parseRpcUrlForLimiter(replacementRpcUrl);
+    requestsPerSecond = Number(payload.rpcRequestsPerSecond);
+    if (!Number.isFinite(requestsPerSecond) || requestsPerSecond <= 0) {
+      throw new Error('Requests / sec must be a positive number.');
+    }
   }
   const paths = resolveRpcLimiterPaths();
   fsSync.mkdirSync(path.dirname(paths.lockfile), { recursive: true });
@@ -3674,21 +3679,29 @@ async function sendSettingsToRpcLimiter(payload) {
   });
   try {
     const state = readRpcLimiterState(paths.stateFile, Date.now());
-    state.enabled = true;
     state.providers = state.providers || { main: {}, fallback: {} };
-    state.providers[role] = {
-      ...(state.providers[role] || {}),
-      rpcBaseUrl,
-      apiKey,
-      // Reset health metrics on re-configuration.
-      failures: 0,
-      cooldownUntilMs: null,
-    };
-    state.buckets ||= {};
-    state.buckets['rpc:shared'] = {
-      ...(state.buckets['rpc:shared'] || { nextSlotMs: 0 }),
-      intervalMs: Math.max(1, Math.round(1000 / requestsPerSecond)),
-    };
+    if (!replacementRpcUrl) {
+      state.providers[role] = {};
+      if (role === 'main') {
+        delete state.rpcBaseUrl;
+        delete state.apiKey;
+      }
+      state.enabled = Boolean(state.providers.main?.rpcBaseUrl || state.providers.fallback?.rpcBaseUrl);
+    } else {
+      state.enabled = true;
+      state.providers[role] = {
+        ...(state.providers[role] || {}),
+        ...parsedProvider,
+        // Reset health metrics on re-configuration.
+        failures: 0,
+        cooldownUntilMs: null,
+      };
+      state.buckets ||= {};
+      state.buckets['rpc:shared'] = {
+        ...(state.buckets['rpc:shared'] || { nextSlotMs: 0 }),
+        intervalMs: Math.max(1, Math.round(1000 / requestsPerSecond)),
+      };
+    }
     state.updatedBy = 'My Star Atlas';
     state.updatedAt = new Date().toISOString();
     bumpRpcLimiterRevision(state);
@@ -7322,7 +7335,7 @@ function handleTrustedIpc(channel, handler) {
   ipcMain.handle(channel, async (event, ...args) => {
     assertTrustedSender(event, mainWindow?.webContents, rendererUrl);
     args.forEach((arg) => validateIpcPayload(arg));
-    const hydratedArgs = channel === 'settings:save'
+    const hydratedArgs = channel === 'settings:save' || channel === 'rpc-limiter:send-settings'
       ? args
       : await Promise.all(args.map((arg) => (
         arg && typeof arg === 'object' && !Array.isArray(arg)
@@ -7340,10 +7353,7 @@ handleTrustedIpc('updates:download-and-restart', () => downloadUpdateAndRestart(
 handleTrustedIpc('settings:get', async () => redactSettings(await readSettings()));
 handleTrustedIpc('settings:save', async (_event, payload) => redactSettings(await writeSettings(payload)));
 handleTrustedIpc('rpc-limiter:get-status', () => getRpcLimiterStatus());
-handleTrustedIpc('rpc-limiter:send-settings', async (_event, payload) => {
-  const hydrated = await hydrateSecureSettings(payload);
-  return sendSettingsToRpcLimiter(hydrated);
-});
+handleTrustedIpc('rpc-limiter:send-settings', async (_event, payload) => sendSettingsToRpcLimiter(payload));
 handleTrustedIpc('fleet:list', async (_event, payload) => {
   try {
     return await fetchProfileFleets(payload);

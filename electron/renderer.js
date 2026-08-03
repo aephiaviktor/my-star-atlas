@@ -8515,7 +8515,9 @@ sendRpcLimiterButton.addEventListener('click', async () => {
       providerRole: payload.providerRole,
     });
     renderRpcLimiterStatus(status);
-    saveStatus.textContent = 'RPC limiter settings updated';
+    const rpcLimiterSlot = payload.providerRole === 'fallback' ? 'Fallback' : 'Main';
+    const rpcLimiterAction = String(payload.rpcUrl || '').trim() ? 'updated' : 'cleared';
+    saveStatus.textContent = `RPC limiter ${rpcLimiterSlot} slot ${rpcLimiterAction}`;
   } catch (error) {
     saveStatus.textContent = `RPC limiter update failed: ${error?.message || String(error)}`;
   } finally {

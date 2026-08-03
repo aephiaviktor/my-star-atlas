@@ -41,5 +41,17 @@ test('RPC limiter UI exposes only the current provider URLs through the blur con
   assert.match(main, /const role = payload\.providerRole === 'fallback' \? 'fallback' : 'main';/);
   assert.doesNotMatch(main, /parseBooleanSetting\(payload\.providerRole\)/);
   assert.match(main, /state\.providers\[role\] = \{/);
+  assert.match(main, /const replacementRpcUrl = String\(payload\.rpcUrl \|\| ''\)\.trim\(\);/);
+  assert.match(main, /if \(!replacementRpcUrl\) \{\s*state\.providers\[role\] = \{\};/);
+  assert.match(main, /if \(role === 'main'\) \{\s*delete state\.rpcBaseUrl;\s*delete state\.apiKey;/);
+  assert.match(main, /state\.enabled = Boolean\(state\.providers\.main\?\.rpcBaseUrl \|\| state\.providers\.fallback\?\.rpcBaseUrl\);/);
+  assert.match(main, /if \(replacementRpcUrl\) \{\s*parsedProvider = parseRpcUrlForLimiter\(replacementRpcUrl\);[\s\S]*?Requests \/ sec must be a positive number/);
+  assert.match(main, /if \(!replacementRpcUrl\) \{[\s\S]*?state\.providers\[role\] = \{\};[\s\S]*?\} else \{[\s\S]*?state\.buckets\['rpc:shared'\] = \{/);
+  assert.match(main, /channel === 'settings:save' \|\| channel === 'rpc-limiter:send-settings'/);
+  assert.match(main, /handleTrustedIpc\('rpc-limiter:send-settings', async \(_event, payload\) => sendSettingsToRpcLimiter\(payload\)\);/);
+  assert.match(html, /Leave the URL empty to clear the selected Main or Fallback slot\./);
+  assert.match(renderer, /const rpcLimiterSlot = payload\.providerRole === 'fallback' \? 'Fallback' : 'Main';/);
+  assert.match(renderer, /const rpcLimiterAction = String\(payload\.rpcUrl \|\| ''\)\.trim\(\) \? 'updated' : 'cleared';/);
+  assert.match(renderer, /`RPC limiter \$\{rpcLimiterSlot\} slot \$\{rpcLimiterAction\}`/);
   assert.doesNotMatch(css, /sensitive-hidden \.sensitive-field:focus/);
 });
