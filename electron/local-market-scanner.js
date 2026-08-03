@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const bs58Module = require('bs58');
 const { decodeLocalMarketTrade } = require('./local-market-trades');
 const { isMarketplaceRpcBudgetExhaustedError } = require('./marketplace-rpc-telemetry');
+const { recordTelemetryCounter } = require('./telemetry-context');
 
 const bs58 = bs58Module.default || bs58Module;
 const DEFAULT_START_ISO = '2026-07-24T00:00:00.000Z';
@@ -159,6 +160,7 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
   for (const address of Array.from(new Set(addresses.map(String).filter(Boolean)))) {
     let before;
     const until = String(cursors[address] || '');
+    if (until) recordTelemetryCounter('cursorResumes');
     let newestSignature = '';
     for (let page = 0; page < maxPages; page += 1) {
       if (pacer) await pacer();
@@ -179,7 +181,10 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
       for (const row of rows || []) {
         const timestampMs = Number(row.blockTime) * 1000;
         if (Number.isFinite(timestampMs) && timestampMs < startMs) { reachedStart = true; continue; }
-        if (!row.err && row.signature) signatures.set(row.signature, row);
+        if (!row.err && row.signature) {
+          if (signatures.has(row.signature)) recordTelemetryCounter('preventedDuplicates');
+          signatures.set(row.signature, row);
+        }
       }
       if (reachedStart || !rows?.length || rows.length < 1000) break;
       before = rows[rows.length - 1]?.signature;
@@ -206,7 +211,10 @@ async function fetchTransactions(connection, rows, pacer, stats) {
     }
     if (stats) stats.transactionRequests += 1;
     if (transaction) transactions.push({ ...transaction, signature, blockTime: transaction.blockTime ?? row.blockTime });
-    else if (stats) stats.transactionMisses += 1;
+    else {
+      if (stats) stats.transactionMisses += 1;
+      recordTelemetryCounter('transactionMisses');
+    }
   }
   return transactions;
 }
@@ -275,7 +283,7 @@ async function scanLocalMarketTrades(connection, {
       return partialResult([], error);
     }
     stats.transactionRequests += 1;
-    if (!transaction) { stats.transactionMisses += 1; continue; }
+    if (!transaction) { stats.transactionMisses += 1; recordTelemetryCounter('transactionMisses'); continue; }
     const enriched = decodeLocalMarketOrder({ ...transaction, signature: order.creationSignature }, { trackedWallets, marketAssetsByMint, atlasPerSol });
     if (enriched) ordersById.set(enriched.orderId, enriched);
   }

@@ -35,7 +35,7 @@ test('RPC limiter UI exposes only the current provider URLs through the blur con
   assert.doesNotMatch(html, /class="sensitive-field" name="influxAuthToken"/);
   assert.doesNotMatch(html, /class="sensitive-field" name="rpcUrl"/);
   assert.match(main, /sharedRpcLimiter\.wait\('rpc:shared'/);
-  assert.match(main, /fetch: async \(info, init\)/);
+  assert.match(main, /fetch: telemetryFetchFactory\(fetch, \{/);
   assert.match(main, /no RPC Limiter URLs are configured/);
   assert.match(renderer, /providerRole: data\.get\('providerRole'\) \? 'fallback' : 'main'/);
   assert.match(main, /const role = payload\.providerRole === 'fallback' \? 'fallback' : 'main';/);
@@ -54,4 +54,10 @@ test('RPC limiter UI exposes only the current provider URLs through the blur con
   assert.match(renderer, /const rpcLimiterAction = String\(payload\.rpcUrl \|\| ''\)\.trim\(\) \? 'updated' : 'cleared';/);
   assert.match(renderer, /`RPC limiter \$\{rpcLimiterSlot\} slot \$\{rpcLimiterAction\}`/);
   assert.doesNotMatch(css, /sensitive-hidden \.sensitive-field:focus/);
+  const telemetryFiles = await Promise.all([
+    'telemetry-context.js', 'telemetry-ledger.js', 'telemetry-rpc-fetch.js', 'telemetry-reporter.js',
+  ].map((name) => fs.readFile(path.join(__dirname, '..', 'electron', name), 'utf8')));
+  const persistedSchema = telemetryFiles.join('\n');
+  assert.doesNotMatch(persistedSchema, /dimensions\.(?:url|apiKey|headers|body|params|response|wallet|username|hostname)/i);
+  assert.doesNotMatch(persistedSchema, /context\.(?:url|apiKey|headers|body|params|response|wallet)/i);
 });

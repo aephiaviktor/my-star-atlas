@@ -48,13 +48,17 @@ function createRpcFetcher({
     return Math.round(random() * Math.min(MAX_BACKOFF_MS, 500 * 2 ** attempt));
   };
 
-  return async function fetchWithRpcBackoff(url, init, { logLabel = 'rpc' } = {}) {
+  return async function fetchWithRpcBackoff(url, init, { logLabel = 'rpc', onAttemptStart, onAttemptFinish } = {}) {
     let lastError = null;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       let response;
+      let hookToken;
+      try { hookToken = onAttemptStart?.({ attempt }); } catch (_) { /* telemetry hooks are inert */ }
       try {
         response = await fetchImpl(url, init);
+        try { onAttemptFinish?.({ attempt, token: hookToken, outcome: response?.ok ? 'success' : 'failure' }); } catch (_) { /* inert */ }
       } catch (error) {
+        try { onAttemptFinish?.({ attempt, token: hookToken, outcome: 'failure' }); } catch (_) { /* inert */ }
         if (!isRetriableNetworkError(error) || attempt + 1 >= maxAttempts) throw error;
         lastError = error;
         const wait = backoffMs(attempt, null);

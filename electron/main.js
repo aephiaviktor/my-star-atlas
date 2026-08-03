@@ -24,6 +24,16 @@ const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
 const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher } = require('./rpc-resilience');
+const { createTelemetryLedger } = require('./telemetry-ledger');
+const {
+  normalizeContext: normalizeTelemetryContext,
+  setTelemetryRecorder,
+  runFeature,
+  runLogicalOperation,
+  runWithTelemetryContext,
+  recordTelemetryCounter,
+} = require('./telemetry-context');
+const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./telemetry-rpc-fetch');
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
@@ -90,6 +100,8 @@ const baseUserData = path.join(process.env.HOME || process.env.USERPROFILE, '.co
 const appIconPath = path.join(__dirname, 'assets', 'aephia-logo.png');
 
 app.setPath('userData', path.join(baseUserData, 'profiles', profileName));
+const telemetryLedger = createTelemetryLedger({ userDataPath: app.getPath('userData'), profile: profileName });
+setTelemetryRecorder(telemetryLedger);
 app.setName(`My Star Atlas - ${profileName}`);
 if (typeof app.setDesktopName === 'function') {
   app.setDesktopName(`my-star-atlas-${profileName}.desktop`);
@@ -5384,28 +5396,39 @@ function resolveSolanaConnectionRoutes(settings) {
 
 function createSolanaConnection(settings, { instrumentation } = {}) {
   const routes = resolveSolanaConnectionRoutes(settings);
+  const telemetryFetchFactory = typeof createTelemetryFetch === 'function'
+    ? createTelemetryFetch
+    : (fetchImpl, { providerRole, fallback, admit }) => async (info, init) => {
+      const method = getRpcMethodLabel(init);
+      await admit?.({ method, provider: providerRole, fallback });
+      return fetchImpl(info, init);
+    };
+  const telemetryConnectionWrapper = typeof wrapRpcConnection === 'function' ? wrapRpcConnection : (connection) => connection;
   const createConnectionConfig = (provider, fallback) => ({
     commitment: 'confirmed',
     disableRetryOnRateLimit: false,
-    fetch: async (info, init) => {
-      const method = getRpcMethodLabel(init);
-      await acquireRpcSlot(settings, method);
-      instrumentation?.admitAttempt({ method, provider, fallback });
-      return fetch(info, init);
-    },
+    fetch: telemetryFetchFactory(fetch, {
+      providerRole: settings?.useRpcLimiter ? provider : 'direct',
+      fallback,
+      admit: async ({ method }) => {
+        await acquireRpcSlot(settings, method);
+        if (settings?.useRpcLimiter && typeof recordTelemetryCounter === 'function') recordTelemetryCounter('limiterAdmissions');
+        instrumentation?.admitAttempt({ method, provider, fallback });
+      },
+    }),
   });
   const primary = new Connection(
     routes.primaryUrl,
     createConnectionConfig(routes.primaryProvider, false),
   );
   const fallbackUrl = routes.fallbackUrl;
-  if (!fallbackUrl || fallbackUrl === routes.primaryUrl) return primary;
+  if (!fallbackUrl || fallbackUrl === routes.primaryUrl) return telemetryConnectionWrapper(primary);
 
   // Two-provider failover: try the primary (main) on every call, and on
   // any thrown error fall through to the secondary (fallback) URL. This
   // mirrors the createFailoverConnection shape used by the other bots.
   const fallback = new Connection(fallbackUrl, createConnectionConfig('fallback', true));
-  return new Proxy(primary, {
+  const failoverConnection = new Proxy(primary, {
     get(target, prop, receiver) {
       const primaryFn = Reflect.get(target, prop, receiver);
       if (typeof primaryFn !== 'function') return primaryFn;
@@ -5439,6 +5462,7 @@ function createSolanaConnection(settings, { instrumentation } = {}) {
       };
     },
   });
+  return telemetryConnectionWrapper(failoverConnection);
 }
 
 async function getProgramAccountsV2(rpcUrl, programId, config, options = {}) {
@@ -5446,8 +5470,16 @@ async function getProgramAccountsV2(rpcUrl, programId, config, options = {}) {
   const accounts = [];
   let paginationKey = null;
   do {
-    await acquireRpcSlot(settings, 'getProgramAccountsV2');
-    const response = await fetchWithRpcBackoff(
+    const response = await runLogicalOperation({ rpcMethod: 'getProgramAccountsV2' }, async () => {
+      try {
+        await acquireRpcSlot(settings, 'getProgramAccountsV2');
+      } catch (error) {
+        recordTelemetryCounter('limiterStops');
+        throw error;
+      }
+      if (settings?.useRpcLimiter) recordTelemetryCounter('limiterAdmissions');
+      recordTelemetryCounter('paginationPages');
+      return fetchWithRpcBackoff(
       rpcUrl,
       {
         method: 'POST',
@@ -5468,8 +5500,12 @@ async function getProgramAccountsV2(rpcUrl, programId, config, options = {}) {
         }),
         signal: AbortSignal.timeout(30000),
       },
-      { logLabel: 'getProgramAccountsV2' }
-    );
+      {
+        logLabel: 'getProgramAccountsV2',
+        ...rawAttemptHooks({ providerRole: settings?.useRpcLimiter ? (options.providerRole || 'unknown') : 'direct' }),
+      }
+      );
+    });
     const payload = await response.json();
     if (payload?.error) {
       const error = new Error(payload.error.message || 'getProgramAccountsV2 failed');
@@ -5556,7 +5592,7 @@ async function fetchProfileFleetsUncached(payload) {
         },
       ],
     },
-    { settings }
+    { settings, providerRole: resolveSolanaConnectionRoutes(settings).primaryProvider }
   );
   const managedAccounts = await getFilteredProgramAccounts(
     connection,
@@ -5574,7 +5610,7 @@ async function fetchProfileFleetsUncached(payload) {
         },
       ],
     },
-    { settings }
+    { settings, providerRole: resolveSolanaConnectionRoutes(settings).primaryProvider }
   );
 
   const fleetMap = new Map();
@@ -5599,7 +5635,10 @@ async function fetchProfileFleetsUncached(payload) {
     fleets
       .filter((fleet) => fleet.relationship === 'managed' || fleet.relationship === 'owned-managed')
       .map(async (fleet) => {
-        const rentalEnd = await readRentalEndDate(connection, fleet.key);
+        const rentalEnd = await runWithTelemetryContext(
+          { suboperation: 'rental-data' },
+          () => readRentalEndDate(connection, fleet.key),
+        );
         const rentalEndLabel = formatShortDate(rentalEnd);
         fleet.rentalEndsAt = rentalEnd ? rentalEnd.toISOString() : null;
         fleet.ownership = rentalEndLabel ? `Rented until ${rentalEndLabel}` : 'Rented';
@@ -5627,9 +5666,17 @@ async function fetchProfileFleets(payload) {
   const key = `${getSelectedPlayerProfile(settings)}\n${getRpcUrl(settings)}`;
   const now = Date.now();
   const cached = profileFleetCache.get(key);
-  if (cached?.data && cached.expiresAt > now) return cached.data;
-  if (cached?.pending) return cached.pending;
-  const pending = fetchProfileFleetsUncached(settings)
+  if (cached?.data && cached.expiresAt > now) {
+    recordTelemetryCounter('cacheHits', 1, { suboperation: 'fleet-discovery' });
+    return cached.data;
+  }
+  recordTelemetryCounter('cacheMisses', 1, { suboperation: 'fleet-discovery' });
+  if (cached?.pending) {
+    recordTelemetryCounter('inFlightCoalesced', 1, { suboperation: 'fleet-discovery' });
+    recordTelemetryCounter('preventedDuplicates', 1, { suboperation: 'fleet-discovery' });
+    return cached.pending;
+  }
+  const pending = runWithTelemetryContext({ suboperation: 'fleet-discovery' }, () => fetchProfileFleetsUncached(settings))
     .then((data) => {
       profileFleetCache.set(key, { data, expiresAt: Date.now() + PROFILE_FLEET_CACHE_TTL_MS, pending: null });
       return data;
@@ -7354,7 +7401,18 @@ handleTrustedIpc('settings:get', async () => redactSettings(await readSettings()
 handleTrustedIpc('settings:save', async (_event, payload) => redactSettings(await writeSettings(payload)));
 handleTrustedIpc('rpc-limiter:get-status', () => getRpcLimiterStatus());
 handleTrustedIpc('rpc-limiter:send-settings', async (_event, payload) => sendSettingsToRpcLimiter(payload));
-handleTrustedIpc('fleet:list', async (_event, payload) => {
+
+function runTelemetryFeature(payload, feature, callback) {
+  const safe = normalizeTelemetryContext({
+    profile: profileName,
+    faction: normalizeFaction(payload?.faction),
+    feature,
+    trigger: payload?.trigger,
+  });
+  return runFeature(safe, callback);
+}
+
+handleTrustedIpc('fleet:list', async (_event, payload) => runTelemetryFeature(payload, 'Fleet discovery', async () => {
   try {
     return await fetchProfileFleets(payload);
   } catch (error) {
@@ -7364,8 +7422,8 @@ handleTrustedIpc('fleet:list', async (_event, payload) => {
       checkedAt: new Date().toISOString(),
     };
   }
-});
-handleTrustedIpc('earnings:snapshot', async (_event, payload) => {
+}));
+handleTrustedIpc('earnings:snapshot', async (_event, payload) => runTelemetryFeature(payload, 'Earnings', async () => {
   try {
     return await fetchEarningsSnapshot(payload);
   } catch (error) {
@@ -7375,9 +7433,9 @@ handleTrustedIpc('earnings:snapshot', async (_event, payload) => {
       checkedAt: new Date().toISOString(),
     };
   }
-});
+}));
 handleTrustedIpc('marketplace:snapshot', async (_event, payload) => fetchMarketplaceSnapshot(payload));
-handleTrustedIpc('marketplace:sync', async (_event, payload) => {
+handleTrustedIpc('marketplace:sync', async (_event, payload) => runTelemetryFeature(payload, 'Other', async () => {
   try {
     return await syncMarketplaceTrades(payload);
   } catch (error) {
@@ -7389,7 +7447,7 @@ handleTrustedIpc('marketplace:sync', async (_event, payload) => {
       checkedAt: new Date().toISOString(),
     };
   }
-});
+}));
 handleTrustedIpc('influx:test', async (_event, payload) => {
   try {
     return await testInfluxConnection(payload);
@@ -7564,12 +7622,21 @@ handleTrustedIpc('optimization:upgrading', async (_event, payload) => {
 });
 
 app.whenReady().then(async () => {
+  void telemetryLedger.start().catch(() => {});
   const powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension')
   console.log(`[MSA] prevent-app-suspension blocker=${powerSaveBlockerId} active=${powerSaveBlocker.isStarted(powerSaveBlockerId)}`)
 
   try { await recoverMarketplacePublication(await readSettings()); }
   catch (_error) { /* recovery is fail-closed and will retry on the next sync */ }
   createWindow();
+});
+
+let telemetryQuitFlushStarted = false;
+app.on('before-quit', (event) => {
+  if (telemetryQuitFlushStarted) return;
+  telemetryQuitFlushStarted = true;
+  event.preventDefault();
+  telemetryLedger.stop().finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => {

@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { setTelemetryRecorder } = require('../electron/telemetry-context');
+const { wrapRpcConnection } = require('../electron/telemetry-rpc-fetch');
 const {
   createMarketplaceRpcTelemetry,
   createMarketplaceRpcInstrumentation,
@@ -176,6 +178,20 @@ test('Marketplace Connection wrappers record logical and wire methods without re
   assert.equal(result.operations.LM.methods.getMultipleAccounts.rpcAttempts, 1);
   assert.equal(JSON.stringify(result).includes('rpc-secret'), false);
   assert.equal(JSON.stringify(result).includes('wallet-secret'), false);
+});
+
+test('Marketplace compatibility telemetry bridges feature context without durable logical double counting', async () => {
+  const durable = [];
+  setTelemetryRecorder({ record(event) { durable.push(event); }, flush() {} });
+  const telemetry = createMarketplaceRpcTelemetry({ runId: 'bridge-once' });
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
+  const connection = wrapRpcConnection({ async getAccountInfo() { return { ok: true }; } });
+  const wrapped = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
+  assert.deepEqual(await wrapped.getAccountInfo('synthetic'), { ok: true });
+  assert.equal(telemetry.finish().totals.logicalOperations, 1);
+  assert.equal(durable.filter((event) => event.type === 'logical-start').length, 1);
+  assert.equal(durable.find((event) => event.type === 'logical-start').context.feature, 'Marketplace LM');
+  setTelemetryRecorder(null);
 });
 
 test('Marketplace attempt budget retains the exact first refused sentinel', () => {

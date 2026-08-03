@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { AsyncLocalStorage } = require('node:async_hooks');
+const { runWithTelemetryContext } = require('./telemetry-context');
 
 const DEFAULT_SAMPLE_LIMIT = 50;
 const MAX_SAMPLE_LIMIT = 100;
@@ -213,7 +214,10 @@ function wrapMarketplaceConnection(connection, { instrumentation, operation } = 
       const value = Reflect.get(target, prop, receiver);
       if (typeof value !== 'function') return value;
       const method = typeof prop === 'string' ? prop : 'unknown';
-      return (...args) => instrumentation.runLogical(
+      return (...args) => runWithTelemetryContext({
+        feature: operation === 'LM' ? 'Marketplace LM' : operation === 'GM' ? 'Marketplace GM' : 'Other',
+        suboperation: 'marketplace-scan',
+      }, () => instrumentation.runLogical(
         { operation, method },
         async () => {
           try {
@@ -222,7 +226,7 @@ function wrapMarketplaceConnection(connection, { instrumentation, operation } = 
             throw instrumentation.getBudgetExhaustion?.() || error;
           }
         },
-      );
+      ));
     },
   });
 }

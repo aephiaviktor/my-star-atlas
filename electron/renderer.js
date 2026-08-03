@@ -971,6 +971,21 @@ const PCR_RATIO_REFERENCE = 1.0;
 // Per-faction caching for instant switching and per-filter caching
 const factionCache = new Map();
 let factionPrefetchGeneration = 0;
+const TELEMETRY_TRIGGERS = new Set(['startup', 'background', 'navigation', 'manual', 'settings', 'unknown']);
+let rendererTelemetryTrigger = 'unknown';
+function normalizeTelemetryTrigger(value) {
+  return TELEMETRY_TRIGGERS.has(value) ? value : 'unknown';
+}
+function setNextRendererTelemetryTrigger(trigger) {
+  rendererTelemetryTrigger = normalizeTelemetryTrigger(trigger);
+}
+function clearRendererTelemetryTrigger() { rendererTelemetryTrigger = 'unknown'; }
+function captureRendererTelemetryTrigger(fallback = 'unknown') {
+  const captured = rendererTelemetryTrigger === 'unknown' ? normalizeTelemetryTrigger(fallback) : rendererTelemetryTrigger;
+  rendererTelemetryTrigger = 'unknown';
+  return captured;
+}
+function withTelemetryTrigger(payload, trigger) { return { ...payload, trigger: normalizeTelemetryTrigger(trigger) }; }
 
 function getCachedFactionResult(faction, key) {
   const cache = factionCache.get(faction);
@@ -991,12 +1006,17 @@ function cachePrefetchedFilterResult(faction, section, result, ...filters) {
 }
 
 async function runFactionBackgroundPrefetch(generation, faction) {
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'background';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   if (!hasInfluxSettings(latestSettings || getFormPayload())) return;
   const settings = {
     ...(latestSettings || getFormPayload()),
     faction,
     playerProfiles: { ...((latestSettings || getFormPayload()).playerProfiles || {}) },
   };
+  settings.trigger = telemetryTrigger;
   const tasks = [
     {
       key: 'fleet',
@@ -1037,10 +1057,15 @@ async function runFactionBackgroundPrefetch(generation, faction) {
 function loadVisibleThenPrefetch(loader) {
   const generation = ++factionPrefetchGeneration;
   const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   return Promise.resolve()
-    .then(loader)
+    .then(() => { setNextRendererTelemetryTrigger(telemetryTrigger); return loader(); })
     .finally(() => {
       if (generation === factionPrefetchGeneration && faction === normalizeFaction((latestSettings || getFormPayload()).faction)) {
+        setNextRendererTelemetryTrigger(telemetryTrigger);
         void runFactionBackgroundPrefetch(generation, faction);
       }
     });
@@ -2281,6 +2306,10 @@ async function refreshConsMining({
   starbaseFilter = selectedConsMiningStarbase,
   fleetFilter = selectedConsMiningFleet,
 } = {}) {
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   if (!hasInfluxSettings(settings)) {
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'mining') {
       renderConsMiningEmpty('Awaiting Influx connection');
@@ -2309,6 +2338,7 @@ async function refreshConsMining({
     starbaseFilter: input.starbaseFilter,
     fleetFilter: input.fleetFilter,
   };
+  requestSettings.trigger = telemetryTrigger;
   const settled = await api.consumptionMiningCache.ensure(input, async () => {
     const result = await api.getDailyConsumptionMining(requestSettings);
     if (result?.ok === false) throw new Error(result.error || 'Mining consumption failed');
@@ -2428,6 +2458,10 @@ function isActiveConsumptionCraftingContext(key, generation) {
 }
 
 async function refreshConsCrafting({ force = false, settings = latestSettings || getFormPayload(), starbaseFilter = selectedConsCraftingStarbase, recipeFilter = selectedConsCraftingRecipe } = {}) {
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   if (!hasInfluxSettings(settings)) {
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'crafting') renderConsCraftingEmpty('Awaiting Influx connection');
     return null;
@@ -2449,6 +2483,7 @@ async function refreshConsCrafting({ force = false, settings = latestSettings ||
     }
   } else if (!displayable && currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'crafting') renderConsCraftingEmpty('Loading crafting consumption...');
   const requestSettings = { ...settings, starbaseFilter: input.starbaseFilter, recipeFilter: input.recipeFilter };
+  requestSettings.trigger = telemetryTrigger;
   const settled = await api.consumptionCraftingCache.ensure(input, async () => {
     const result = await api.getDailyConsumptionCrafting(requestSettings);
     if (result?.ok === false) throw new Error(result.error || 'Crafting consumption failed');
@@ -2587,6 +2622,10 @@ async function refreshConsUpgrading({
   componentFilter = selectedConsUpgradingComponent,
   starbaseFilter = selectedConsUpgradingStarbase,
 } = {}) {
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   if (!hasInfluxSettings(settings)) {
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'upgrading') {
       renderConsUpgradingEmpty('Awaiting Influx connection');
@@ -2615,6 +2654,7 @@ async function refreshConsUpgrading({
     starbaseFilter: input.starbaseFilter,
     componentFilter: input.componentFilter,
   };
+  requestSettings.trigger = telemetryTrigger;
   const settled = await api.consumptionUpgradingCache.ensure(input, async () => {
     const result = await api.getDailyConsumptionUpgrading(requestSettings);
     if (result?.ok === false) throw new Error(result.error || 'Upgrading consumption failed');
@@ -2740,6 +2780,10 @@ async function refreshConsScanning({
   starbaseFilter = selectedConsScanningStarbase,
   fleetFilter = selectedConsScanningFleet,
 } = {}) {
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   if (!hasInfluxSettings(settings)) {
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'scanning') {
       renderConsScanningEmpty('Awaiting Influx connection');
@@ -2768,6 +2812,7 @@ async function refreshConsScanning({
     starbaseFilter: input.starbaseFilter,
     fleetFilter: input.fleetFilter,
   };
+  requestSettings.trigger = telemetryTrigger;
   const settled = await api.consumptionScanningCache.ensure(input, async () => {
     const result = await api.getDailyConsumptionScanning(requestSettings);
     if (result?.ok === false) throw new Error(result.error || 'Scanning consumption failed');
@@ -2881,6 +2926,10 @@ function isActiveConsumptionCargoContext(key, generation) {
 }
 
 async function refreshConsCargo({ force = false, settings = latestSettings || getFormPayload(), starbaseFilter = selectedConsCargoStarbase, fleetFilter = selectedConsCargoFleet } = {}) {
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   if (!hasInfluxSettings(settings)) {
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'cargo') renderConsCargoEmpty('Awaiting Influx connection');
     return null;
@@ -2895,6 +2944,7 @@ async function refreshConsCargo({ force = false, settings = latestSettings || ge
   if (displayable && isActiveConsumptionCargoContext(initial.key, initial.entry?.generation)) renderConsCargo(displayable);
   else if (!displayable && currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'cargo') renderConsCargoEmpty('Loading cargo consumption...');
   const requestSettings = { ...settings, starbaseFilter: input.starbaseFilter, fleetFilter: input.fleetFilter };
+  requestSettings.trigger = telemetryTrigger;
   const settled = await api.consumptionCargoCache.ensure(input, async () => {
     const result = await api.getDailyConsumptionCargo(requestSettings);
     if (result?.ok === false) throw new Error(result.error || 'Cargo consumption failed');
@@ -3008,6 +3058,10 @@ function isActiveConsumptionTotalContext(key, generation) {
 }
 
 async function refreshConsTotal({ force = false, settings = latestSettings || getFormPayload(), starbaseFilter = selectedConsTotalStarbase, assetFilter = selectedConsTotalAsset } = {}) {
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   if (!hasInfluxSettings(settings)) {
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'total') renderConsTotalEmpty('Awaiting Influx connection');
     return null;
@@ -3029,6 +3083,7 @@ async function refreshConsTotal({ force = false, settings = latestSettings || ge
     }
   } else if (!displayable && currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'total') renderConsTotalEmpty('Loading total consumption...');
   const requestSettings = { ...settings, starbaseFilter: input.starbaseFilter, assetFilter: input.assetFilter };
+  requestSettings.trigger = telemetryTrigger;
   const settled = await api.consumptionTotalCache.ensure(input, async () => {
     const result = await api.getDailyConsumptionTotal(requestSettings);
     if (result?.ok === false) throw new Error(result.error || 'Total consumption failed');
@@ -4610,7 +4665,11 @@ function renderFleets(result) {
 }
 
 async function refreshFleets() {
-  const settings = latestSettings || getFormPayload();
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
+  const settings = { ...(latestSettings || getFormPayload()), trigger: telemetryTrigger };
   const faction = normalizeFaction(settings.faction);
   if (!getActivePlayerProfile(settings)) {
     latestFleetResult = null;
@@ -6570,7 +6629,12 @@ const marketplaceRefreshInFlight = new Map();
 const MARKETPLACE_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 
 async function refreshMarketplace({ sync = false } = {}) {
-  const settings = latestSettings || getFormPayload();
+  const pendingTelemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  const telemetryTrigger = pendingTelemetryTrigger === 'unknown' && sync ? 'background' : pendingTelemetryTrigger;
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
+  const settings = { ...(latestSettings || getFormPayload()), trigger: telemetryTrigger };
   const faction = normalizeFaction(settings.faction);
   if (marketplaceRefreshInFlight.has(faction)) return marketplaceRefreshInFlight.get(faction);
   const promise = (async () => {
@@ -6617,7 +6681,12 @@ function isActiveUpgradingContext(key, generation) {
 }
 
 async function refreshEarningsUpgrading({ force = false } = {}) {
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: 'upgrading' };
+  settings.trigger = telemetryTrigger;
   const input = getUpgradingCacheInput(settings, force);
   if (!input.playerProfile) {
     latestUpgradingResult = null;
@@ -6667,7 +6736,12 @@ function isActiveBreakevenContext(key, generation) {
 }
 
 async function refreshBreakeven({ force = false } = {}) {
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: 'breakeven' };
+  settings.trigger = telemetryTrigger;
   const input = getBreakevenCacheInput(settings, force);
   if (!input.playerProfile) {
     latestBreakevenResult = null;
@@ -6700,9 +6774,14 @@ async function refreshBreakeven({ force = false } = {}) {
 }
 
 async function refreshEarnings() {
+  const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   if (earningsRefreshInFlight) return earningsRefreshInFlight;
   const refreshPromise = (async () => {
     const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: currentEarningsSubtab };
+  settings.trigger = telemetryTrigger;
     const context = {
       faction: normalizeFaction(settings?.faction),
       playerProfile: getActivePlayerProfile(settings),
@@ -8101,21 +8180,23 @@ async function loadInitialState() {
   updateSettingsStatus(settings);
   void checkForUpdates();
   initInventory();
+  setNextRendererTelemetryTrigger('startup');
   await loadVisibleThenPrefetch(refreshVisibleFactionViews);
+  setNextRendererTelemetryTrigger('startup');
   void runMarketplaceBackgroundSync();
   setInterval(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS);
 }
 
 document.querySelectorAll('.nav-button').forEach((button) => {
-  button.addEventListener('click', () => setActiveSection(button.dataset.section));
+  button.addEventListener('click', () => { setNextRendererTelemetryTrigger('navigation'); setActiveSection(button.dataset.section); });
 });
 
 document.querySelectorAll('.subtab-button[data-subtab]').forEach((button) => {
-  button.addEventListener('click', () => setActiveSubtab(button.dataset.subtab));
+  button.addEventListener('click', () => { setNextRendererTelemetryTrigger('navigation'); setActiveSubtab(button.dataset.subtab); });
 });
 
 document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
-  button.addEventListener('click', () => setActiveEarningsSubtab(button.dataset.earningsSubtab));
+  button.addEventListener('click', () => { setNextRendererTelemetryTrigger('navigation'); setActiveEarningsSubtab(button.dataset.earningsSubtab); });
 });
 
 earningsMarketplaceSideButtons.forEach((button) => {
@@ -8274,20 +8355,24 @@ factionButtons.forEach((button) => {
     // incompatible prior DOM and ensure the next identity immediately.
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'scanning') {
       renderConsScanningEmpty('Loading scanning consumption...');
+      if (typeof setNextRendererTelemetryTrigger === 'function') setNextRendererTelemetryTrigger('settings');
       void refreshConsScanning({ settings: nextSettings });
     }
     // Consumption Mining is canonical profile/filter keyed. Clear any
     // incompatible prior DOM and ensure the next identity immediately.
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'mining') {
       renderConsMiningEmpty('Loading mining consumption...');
+      if (typeof setNextRendererTelemetryTrigger === 'function') setNextRendererTelemetryTrigger('settings');
       void refreshConsMining({ settings: nextSettings });
     }
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'cargo') {
       renderConsCargoEmpty('Loading cargo consumption...');
+      if (typeof setNextRendererTelemetryTrigger === 'function') setNextRendererTelemetryTrigger('settings');
       void refreshConsCargo({ settings: nextSettings });
     }
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'crafting') {
       renderConsCraftingEmpty('Loading crafting consumption...');
+      if (typeof setNextRendererTelemetryTrigger === 'function') setNextRendererTelemetryTrigger('settings');
       void refreshConsCrafting({ settings: nextSettings });
     }
     // Consumption Upgrading is profile- and filter-keyed in the canonical
@@ -8295,10 +8380,12 @@ factionButtons.forEach((button) => {
     // same-faction profile change it may belong to the previous profile.
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'upgrading') {
       renderConsUpgradingEmpty('Loading upgrading consumption...');
+      if (typeof setNextRendererTelemetryTrigger === 'function') setNextRendererTelemetryTrigger('settings');
       void refreshConsUpgrading({ settings: nextSettings });
     }
     if (currentSection === 'production' && currentSubtab === 'consumption' && currentConsumptionSubtab === 'total') {
       renderConsTotalEmpty('Loading total consumption...');
+      if (typeof setNextRendererTelemetryTrigger === 'function') setNextRendererTelemetryTrigger('settings');
       void refreshConsTotal({ settings: nextSettings });
     }
     const cachedPcr = getCachedFactionResult(faction, 'pcr');
@@ -8310,6 +8397,7 @@ factionButtons.forEach((button) => {
       latestSettings = saved;
       setFormValues(saved);
       updateSettingsStatus(saved);
+      if (typeof setNextRendererTelemetryTrigger === 'function') setNextRendererTelemetryTrigger('settings');
       await loadVisibleThenPrefetch(refreshVisibleFactionViews);
       saveStatus.textContent = `${clickedFaction} selected`;
       setTimeout(() => {
@@ -8375,6 +8463,7 @@ document.querySelectorAll('.consumption-subtab-button').forEach((button) => {
     document.querySelectorAll('[data-consumption-panel]').forEach((panel) => {
       panel.classList.toggle('active', panel.dataset.consumptionPanel === currentConsumptionSubtab);
     });
+    setNextRendererTelemetryTrigger('navigation');
     if (currentConsumptionSubtab === 'mining') refreshConsMining();
     if (currentConsumptionSubtab === 'scanning') refreshConsScanning();
     if (currentConsumptionSubtab === 'upgrading') refreshConsUpgrading();
@@ -8455,6 +8544,7 @@ refreshDataButton?.addEventListener('click', async () => {
   refreshDataButton.disabled = true;
   refreshDataButton.textContent = 'Refreshing...';
   try {
+    setNextRendererTelemetryTrigger('manual');
     await refreshCurrentVisibleData();
   } finally {
     refreshDataButton.disabled = false;
@@ -8597,10 +8687,12 @@ async function applySettingsSave(submitted, orchestrationGeneration) {
   if (impact.dataChanged) {
     if (visibleAffected) {
       const force = impact.influxSourceChanged || impact.optimizationBucketChanged || impact.earningsSourceChanged;
+      if (typeof setNextRendererTelemetryTrigger === 'function') setNextRendererTelemetryTrigger('settings');
       await refreshVisibleIdentity({ force });
     }
     if (orchestrationGeneration === settingsSaveGeneration) {
       const generation = ++factionPrefetchGeneration;
+      if (typeof setNextRendererTelemetryTrigger === 'function') setNextRendererTelemetryTrigger('settings');
       void runFactionBackgroundPrefetch(generation, normalizeFaction(saved.faction));
     }
   }

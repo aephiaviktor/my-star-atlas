@@ -87,7 +87,7 @@ test('settings save loads only an affected visible dataset, then starts bounded 
   const save = between('async function applySettingsSave', "form.addEventListener('submit'");
   assert.match(save, /const visibleDataset = getVisibleDataset\(\)/);
   assert.match(save, /const visibleAffected = isVisibleDatasetAffected\(impact, visibleDataset\)/);
-  assert.match(save, /if \(visibleAffected\)[^]*await refreshVisibleIdentity\(\{ force \}\)/);
+  assert.match(save, /if \(visibleAffected\)[^]*setNextRendererTelemetryTrigger\('settings'\)[^]*await refreshVisibleIdentity\(\{ force \}\)/);
   assert.ok(save.indexOf('await refreshVisibleIdentity') < save.indexOf('runFactionBackgroundPrefetch'));
   assert.match(save, /const force = impact\.influxSourceChanged \|\| impact\.optimizationBucketChanged \|\| impact\.earningsSourceChanged/);
   assert.doesNotMatch(save, /resetFactionScopedState\(\).*influxSourceChanged|refreshMarketplace/);
@@ -221,6 +221,6 @@ test('prefetch remains sequential, token-cancelled and preserves Consumption ord
 });
 
 test('version and authorized two-file correction boundary remain explicit', () => {
-  assert.equal(require('../package.json').version, '0.6.109');
+  assert.equal(require('../package.json').version, '0.6.110');
   assert.doesNotMatch(renderer, /settingsCacheControl\[[^\]]+\]/);
 });
