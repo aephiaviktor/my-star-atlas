@@ -27,6 +27,7 @@ test('faction switching preserves secure-setting readiness', async () => {
 test('RPC limiter UI exposes only the current provider URLs through the blur control', async () => {
   const html = await fs.readFile(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
   const main = await fs.readFile(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  const renderer = await fs.readFile(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
   const css = await fs.readFile(path.join(__dirname, '..', 'electron', 'renderer.css'), 'utf8');
   assert.match(html, /class="sensitive-field" id="rpc-limiter-main-url"/);
   assert.match(html, /class="sensitive-field" id="rpc-limiter-fallback-url"/);
@@ -36,5 +37,9 @@ test('RPC limiter UI exposes only the current provider URLs through the blur con
   assert.match(main, /sharedRpcLimiter\.wait\('rpc:shared'/);
   assert.match(main, /fetch: async \(info, init\)/);
   assert.match(main, /no RPC Limiter URLs are configured/);
+  assert.match(renderer, /providerRole: data\.get\('providerRole'\) \? 'fallback' : 'main'/);
+  assert.match(main, /const role = payload\.providerRole === 'fallback' \? 'fallback' : 'main';/);
+  assert.doesNotMatch(main, /parseBooleanSetting\(payload\.providerRole\)/);
+  assert.match(main, /state\.providers\[role\] = \{/);
   assert.doesNotMatch(css, /sensitive-hidden \.sensitive-field:focus/);
 });

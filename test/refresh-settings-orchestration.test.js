@@ -221,6 +221,6 @@ test('prefetch remains sequential, token-cancelled and preserves Consumption ord
 });
 
 test('version and authorized two-file correction boundary remain explicit', () => {
-  assert.equal(require('../package.json').version, '0.6.107');
+  assert.equal(require('../package.json').version, '0.6.108');
   assert.doesNotMatch(renderer, /settingsCacheControl\[[^\]]+\]/);
 });

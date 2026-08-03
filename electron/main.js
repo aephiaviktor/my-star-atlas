@@ -3659,7 +3659,7 @@ async function sendSettingsToRpcLimiter(payload) {
   // The Main vs Fallback checkbox: unchecked (default) writes to 'main';
   // checked writes to 'fallback'. The user assigns the URL they just
   // pasted to one of the two provider slots.
-  const role = parseBooleanSetting(payload.providerRole) ? 'fallback' : 'main';
+  const role = payload.providerRole === 'fallback' ? 'fallback' : 'main';
   const requestsPerSecond = Number(payload.rpcRequestsPerSecond);
   if (!Number.isFinite(requestsPerSecond) || requestsPerSecond <= 0) {
     throw new Error('Requests / sec must be a positive number.');
