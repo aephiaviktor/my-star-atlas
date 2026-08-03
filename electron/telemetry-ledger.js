@@ -65,11 +65,12 @@ function validDimensions(value) {
   return JSON.stringify(value) === JSON.stringify(persistedDimensions(value));
 }
 function validRuntime(value) {
-  const allowed = new Set(['sessionId', 'startedAt', 'progressAt', 'cleanStopAt', 'clockReversal', 'openLogicalOperations', 'openWireAttempts', 'telemetryWriteFailures']);
+  const allowed = new Set(['sessionId', 'startedAt', 'progressAt', 'coveredThrough', 'cleanStopAt', 'clockReversal', 'openLogicalOperations', 'openWireAttempts', 'telemetryWriteFailures']);
   return value && typeof value === 'object' && !Array.isArray(value)
     && Object.keys(value).every((key) => allowed.has(key))
     && /^[a-f0-9]{32}$/.test(String(value.sessionId || ''))
     && Number.isFinite(Date.parse(value.startedAt)) && Number.isFinite(Date.parse(value.progressAt))
+    && Number.isFinite(Date.parse(value.coveredThrough))
     && (value.cleanStopAt == null || Number.isFinite(Date.parse(value.cleanStopAt)))
     && typeof value.clockReversal === 'boolean'
     && ['openLogicalOperations', 'openWireAttempts', 'telemetryWriteFailures'].every((key) => Number.isSafeInteger(Number(value[key] || 0)) && Number(value[key] || 0) >= 0);
@@ -216,8 +217,11 @@ function createTelemetryLedger({ userDataPath, profile = 'unknown', now = Date.n
   }
 
   async function flushNow({ cleanStop = false } = {}) {
-    installation ||= await ensureInstallation(root, now);
     const captured = new Map(pending); pending.clear();
+    // This cutoff is captured synchronously with detaching the batch. Events
+    // accepted after this point remain pending for the next flush.
+    const coveredThrough = new Date(now()).toISOString();
+    installation ||= await ensureInstallation(root, now);
     const progressAt = new Date(now()).toISOString();
     try {
       await withSharedLock(root, async () => {
@@ -235,13 +239,14 @@ function createTelemetryLedger({ userDataPath, profile = 'unknown', now = Date.n
           const prior = day.runtime.find((entry) => entry.sessionId === sessionId);
           if (prior) {
             prior.progressAt = progressAt;
+            prior.coveredThrough = Date.parse(coveredThrough) > Date.parse(prior.coveredThrough) ? coveredThrough : prior.coveredThrough;
             prior.cleanStopAt = cleanStop ? progressAt : prior.cleanStopAt;
             prior.clockReversal ||= clockReversal;
             prior.openLogicalOperations = openLogicalOperations;
             prior.openWireAttempts = openWireAttempts;
             prior.telemetryWriteFailures = writeFailures;
           } else day.runtime.push({
-            sessionId, startedAt: sessionStartedAt, progressAt, cleanStopAt: cleanStop ? progressAt : null,
+            sessionId, startedAt: sessionStartedAt, progressAt, coveredThrough, cleanStopAt: cleanStop ? progressAt : null,
             clockReversal, openLogicalOperations, openWireAttempts, telemetryWriteFailures: writeFailures,
           });
           day.runtime = day.runtime.slice(-64);
@@ -278,9 +283,19 @@ async function pruneRetention({ root, activityRoot, snapshotsRoot, now = Date.no
   for (const entry of await fs.readdir(activityRoot, { withFileTypes: true }).catch(() => [])) {
     if (entry.isFile() && /^\d{4}-\d{2}-\d{2}\.json$/.test(entry.name) && entry.name.slice(0, 10) < cutoffDate) await fs.rm(path.join(activityRoot, entry.name), { force: true });
   }
-  const snapshots = (await fs.readdir(snapshotsRoot, { withFileTypes: true }).catch(() => []))
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.json')).map((entry) => entry.name).sort();
-  for (const name of snapshots.slice(0, Math.max(0, snapshots.length - MAX_SNAPSHOTS))) await fs.rm(path.join(snapshotsRoot, name), { force: true });
+  const snapshotEntries = [];
+  for (const entry of await fs.readdir(snapshotsRoot, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+    let createdAt = Number.NEGATIVE_INFINITY;
+    try {
+      const marker = await readJson(path.join(snapshotsRoot, entry.name));
+      const parsed = Date.parse(marker?.createdAt);
+      if (Number.isFinite(parsed)) createdAt = parsed;
+    } catch (_) { /* malformed markers sort oldest and remain bounded */ }
+    snapshotEntries.push({ name: entry.name, createdAt });
+  }
+  snapshotEntries.sort((a, b) => a.createdAt - b.createdAt || a.name.localeCompare(b.name));
+  for (const entry of snapshotEntries.slice(0, Math.max(0, snapshotEntries.length - MAX_SNAPSHOTS))) await fs.rm(path.join(snapshotsRoot, entry.name), { force: true });
 }
 
 module.exports = {

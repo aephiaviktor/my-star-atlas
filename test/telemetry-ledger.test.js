@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { createTelemetryLedger, ensureInstallation, writeAtomicDurable, COMPLETED_RETENTION_DAYS, MAX_SNAPSHOTS } = require('../electron/telemetry-ledger');
+const { createTelemetryLedger, ensureInstallation, writeAtomicDurable, pruneRetention, COMPLETED_RETENTION_DAYS, MAX_SNAPSHOTS } = require('../electron/telemetry-ledger');
 
 async function temporary() { return fs.mkdtemp(path.join(os.tmpdir(), 'msa-telemetry-')); }
 
@@ -52,4 +52,21 @@ test('UTC minute buckets are DST-independent and split at midnight', async (t) =
 
 test('retention constants enforce current plus fourteen completed days and thirty-two markers', () => {
   assert.equal(COMPLETED_RETENTION_DAYS, 14); assert.equal(MAX_SNAPSHOTS, 32);
+});
+
+test('snapshot retention keeps the newest createdAt values regardless of boundary or random suffix order', async (t) => {
+  const root = await temporary(); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const activityRoot = path.join(root, 'activity'); const snapshotsRoot = path.join(root, 'snapshots');
+  await fs.mkdir(activityRoot); await fs.mkdir(snapshotsRoot);
+  for (let index = 0; index < 35; index += 1) {
+    const boundaryPrefix = index === 34 ? '20200101000000000' : '20260803000000000';
+    const suffix = String(999999 - index).padStart(12, '0');
+    await fs.writeFile(path.join(snapshotsRoot, `${boundaryPrefix}-${suffix}.json`), JSON.stringify({ createdAt: new Date(Date.parse('2026-08-03T00:00:00Z') + index).toISOString() }));
+  }
+  await fs.writeFile(path.join(snapshotsRoot, 'malformed.json'), '{');
+  await pruneRetention({ root, activityRoot, snapshotsRoot, now: Date.parse('2026-08-03T01:00:00Z') });
+  const remaining = await fs.readdir(snapshotsRoot);
+  assert.equal(remaining.length, 32);
+  assert.ok(remaining.some((name) => name.startsWith('20200101')), 'later-created old-boundary marker must remain');
+  assert.equal(remaining.includes('malformed.json'), false, 'malformed marker is bounded as oldest');
 });
