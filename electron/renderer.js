@@ -96,6 +96,7 @@ const optimizationAnalyticsTooltip = document.querySelector('#optimization-analy
 const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
 const optimizationUpgradingMarginChart = document.querySelector('#optimization-upgrading-margin-chart');
 const optimizationUpgradingEfficiencyChart = document.querySelector('#optimization-upgrading-efficiency-chart');
+const optimizationUpgradingEfficiencyLegend = document.querySelector('#optimization-upgrading-efficiency-legend');
 const optimizationUpgradingRedemptionChart = document.querySelector('#optimization-upgrading-redemption-chart');
 const optimizationUpgradingForecastChart = document.querySelector('#optimization-upgrading-forecast-chart');
 const optimizationUpgradingErrorChart = document.querySelector('#optimization-upgrading-error-chart');
@@ -7834,6 +7835,8 @@ const upgradingMarginComponents = Object.freeze([
 const upgradingFactionColors = Object.freeze({ MUD: '#ef4444', ONI: '#3b82f6', USTUR: '#f59e0b' });
 const upgradingDurationSeconds = Object.freeze({ 'Power Source': 15, Framework: 12, Electromagnet: 16, Electronics: 14, 'Field Stabilizer': 24, 'Particle Accelerator': 96, 'Radiation Absorber': 48, 'Survey Data Unit': 120, Ink: 60 });
 const upgradingCargoWeight = Object.freeze({ 'Power Source': 2, Framework: 1, Electromagnet: 4, Electronics: 2, 'Field Stabilizer': 6, 'Particle Accelerator': 6, 'Radiation Absorber': 6, 'Survey Data Unit': 1, Ink: 1 });
+const selectedUpgradingEfficiencyComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
+const upgradingFrameworkLimitByFaction = new Map();
 function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000_000_000) {
   const atlasPool = Number(result?.atlasPool), prices = result?.componentPricesAtl || {};
   if (!Number.isFinite(atlasPool) || atlasPool <= 0) return [];
@@ -7854,19 +7857,40 @@ function buildUpgradingEfficiencyRows(result, factionLp) {
     const cargoWeight = Number(upgradingCargoWeight[name]);
     if (!Number.isFinite(gmPrice) || gmPrice <= 0 || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
     const lpPerSecond = lp / durationSeconds;
+    const impliedAtlasValue = atlasPool / factionLp * lp;
     const grossAtlasPerSecond = lpPerSecond * atlasPool / factionLp;
     const netAtlasPerSecond = grossAtlasPerSecond - gmPrice / durationSeconds;
-    const marginPercent = ((atlasPool / factionLp * lp) / gmPrice - 1) * 100;
-    return { name, lp, gmPrice, durationSeconds, cargoWeight, marginPercent, grossAtlasPerSecond, netAtlasPerSecond };
+    const marginPercent = (impliedAtlasValue / gmPrice - 1) * 100;
+    const netAtlasPerCargoUnit = (impliedAtlasValue - gmPrice) / cargoWeight;
+    return { name, lp, gmPrice, durationSeconds, cargoWeight, lpPerSecond, impliedAtlasValue, marginPercent, grossAtlasPerSecond, netAtlasPerSecond, netAtlasPerCargoUnit };
   }).filter(Boolean);
+  return rows;
+}
+
+function markUpgradingDominatedRows(rows) {
   return rows.map((row) => ({ ...row, dominated: rows.some((other) => other !== row && other.marginPercent >= row.marginPercent && other.netAtlasPerSecond >= row.netAtlasPerSecond && other.cargoWeight <= row.cargoWeight && (other.marginPercent > row.marginPercent || other.netAtlasPerSecond > row.netAtlasPerSecond || other.cargoWeight < row.cargoWeight)) }));
+}
+
+function renderUpgradingEfficiencyLegend(rows, analytics) {
+  if (!optimizationUpgradingEfficiencyLegend) return;
+  optimizationUpgradingEfficiencyLegend.replaceChildren();
+  rows.forEach((row, index) => {
+    const button = document.createElement('button');
+    const selected = selectedUpgradingEfficiencyComponents.has(row.name);
+    button.type = 'button'; button.className = `optimization-efficiency-legend-button${selected ? ' selected' : ''}`;
+    button.textContent = row.name === 'Ink' ? 'INK' : row.name; button.style.setProperty('--component-color', getAssetChartColor(row.name, index)); button.setAttribute('aria-pressed', String(selected));
+    button.addEventListener('click', () => { if (selected) selectedUpgradingEfficiencyComponents.delete(row.name); else selectedUpgradingEfficiencyComponents.add(row.name); renderUpgradingEfficiencyChart(analytics); });
+    optimizationUpgradingEfficiencyLegend.append(button);
+  });
 }
 
 function renderUpgradingEfficiencyChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingEfficiencyChart, 760, 340);
   if (!svg) return;
-  const rows = buildUpgradingEfficiencyRows(latestUpgradingOptimizationResult || {}, Number(analytics.latestFactionRedemption?.factionLp));
-  if (!rows.length) return;
+  const allRows = buildUpgradingEfficiencyRows(latestUpgradingOptimizationResult || {}, Number(analytics.latestFactionRedemption?.factionLp));
+  renderUpgradingEfficiencyLegend(allRows, analytics);
+  const rows = markUpgradingDominatedRows(allRows.filter((row) => selectedUpgradingEfficiencyComponents.has(row.name)));
+  if (!rows.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
   const margins = rows.map((row) => row.marginPercent), nets = rows.map((row) => row.netAtlasPerSecond);
   const xPad = Math.max(1, (Math.max(...margins) - Math.min(...margins)) * 0.12), yPad = Math.max(0.000001, (Math.max(...nets) - Math.min(...nets)) * 0.12);
   const minX = Math.min(...margins) - xPad, maxX = Math.max(...margins) + xPad, minY = Math.min(...nets) - yPad, maxY = Math.max(...nets) + yPad;
@@ -7920,29 +7944,41 @@ function renderUpgradingBreakevenTable() {
   if (!optimizationUpgradingBreakevenBody) return;
   optimizationUpgradingBreakevenBody.replaceChildren();
   const result = latestUpgradingOptimizationResult || {};
-  const atlasPool = Number(result.atlasPool);
-  const prices = result.componentPricesAtl || {};
-  const rows = upgradingMarginComponents
-    .map(([name, lp]) => ({ name, lp, gmPrice: Number(prices[String(name).toLowerCase()]), durationSeconds: Number(upgradingDurationSeconds[name]) }))
-    .filter((row) => Number.isFinite(row.gmPrice) && row.gmPrice > 0 && Number.isFinite(atlasPool) && atlasPool > 0)
-    .sort((a, b) => a.lp - b.lp);
+  const factionLp = Number(buildUpgradingOptimizationAnalytics(result).latestFactionRedemption?.factionLp);
+  const rows = buildUpgradingEfficiencyRows(result, factionLp).sort((a, b) => a.lp - b.lp);
   if (!rows.length) {
     const tr = document.createElement('tr'); tr.className = 'empty-row';
-    const td = document.createElement('td'); td.colSpan = 5; td.textContent = 'Component prices unavailable';
+    const td = document.createElement('td'); td.colSpan = 9; td.textContent = 'Component prices or yesterday’s faction LP unavailable';
     tr.append(td); optimizationUpgradingBreakevenBody.append(tr); return;
   }
-  const latestFactionLp = Number(buildUpgradingOptimizationAnalytics(result).latestFactionRedemption?.factionLp);
+  const faction = normalizeFaction(latestSettings?.faction);
+  const updateLimits = () => {
+    const frameworkLimit = Number(upgradingFrameworkLimitByFaction.get(faction));
+    const framework = rows.find((row) => row.name === 'Framework');
+    const hasLimit = Number.isFinite(frameworkLimit) && frameworkLimit >= 0 && framework;
+    const targetNet = hasLimit ? framework.grossAtlasPerSecond - frameworkLimit / framework.durationSeconds : null;
+    for (const cell of optimizationUpgradingBreakevenBody.querySelectorAll('[data-limit-component]')) {
+      if (cell.dataset.limitComponent === 'Framework') continue;
+      if (!Number.isFinite(targetNet)) { cell.textContent = ''; continue; }
+      const row = rows.find((entry) => entry.name === cell.dataset.limitComponent);
+      const limit = row.durationSeconds * (row.grossAtlasPerSecond - targetNet);
+      cell.textContent = limit < 0 ? 'Not achievable' : limit.toLocaleString(undefined, { maximumFractionDigits: 6 });
+    }
+  };
   for (const row of rows) {
     const tr = document.createElement('tr');
-    const name = document.createElement('td'); name.textContent = row.name;
-    const gmPrice = document.createElement('td'); gmPrice.className = 'numeric-cell'; gmPrice.textContent = row.gmPrice.toLocaleString(undefined, { maximumFractionDigits: 6 });
-    const breakeven = document.createElement('td'); breakeven.className = 'numeric-cell'; breakeven.textContent = formatCompactNumber(atlasPool * row.lp / row.gmPrice);
-    const grossValue = Number.isFinite(latestFactionLp) && latestFactionLp > 0 ? row.lp / row.durationSeconds * atlasPool / latestFactionLp : null;
-    const netValue = Number.isFinite(grossValue) ? grossValue - row.gmPrice / row.durationSeconds : null;
-    const gross = document.createElement('td'); gross.className = 'numeric-cell'; gross.textContent = Number.isFinite(grossValue) ? grossValue.toFixed(6) : '--';
-    const net = document.createElement('td'); net.className = 'numeric-cell'; net.textContent = Number.isFinite(netValue) ? netValue.toFixed(6) : '--';
-    tr.append(name, gmPrice, breakeven, gross, net); optimizationUpgradingBreakevenBody.append(tr);
+    const values = [row.name === 'Ink' ? 'INK' : row.name, row.gmPrice.toLocaleString(undefined, { maximumFractionDigits: 6 }), row.lpPerSecond.toFixed(3), formatCompactNumber(Number(result.atlasPool) * row.lp / row.gmPrice), row.grossAtlasPerSecond.toFixed(6), `${row.marginPercent.toFixed(1)}%`, row.netAtlasPerSecond.toFixed(6), row.netAtlasPerCargoUnit.toFixed(6)];
+    values.forEach((value, index) => { const td = document.createElement('td'); td.textContent = value; if (index > 0) td.className = 'numeric-cell'; tr.append(td); });
+    const limitCell = document.createElement('td'); limitCell.className = 'numeric-cell optimization-limit-cell'; limitCell.dataset.limitComponent = row.name;
+    if (row.name === 'Framework') {
+      const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = 'any'; input.className = 'optimization-framework-limit-input'; input.placeholder = 'Enter price'; input.setAttribute('aria-label', 'Framework limit buy price');
+      const saved = upgradingFrameworkLimitByFaction.get(faction); if (saved !== undefined) input.value = String(saved);
+      input.addEventListener('input', () => { const value = input.value.trim(); if (!value) upgradingFrameworkLimitByFaction.delete(faction); else { const parsed = Number(value); if (Number.isFinite(parsed) && parsed >= 0) upgradingFrameworkLimitByFaction.set(faction, parsed); else upgradingFrameworkLimitByFaction.delete(faction); } updateLimits(); });
+      limitCell.append(input);
+    }
+    tr.append(limitCell); optimizationUpgradingBreakevenBody.append(tr);
   }
+  updateLimits();
 }
 
 async function refreshScanningOptimizationAnalyticsData({ force = false } = {}) {
