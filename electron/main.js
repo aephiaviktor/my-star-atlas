@@ -905,7 +905,7 @@ async function fetchUpgradingOptimization(payload = {}) {
   const processBucket = String(settings.influxBucket || bucket).trim();
   const processFactionAliases = factionInfluxAliases[aephiaFaction]?.faction || [faction];
   const processFactionFilter = processFactionAliases.map((value) => `r.faction == "${escapeFluxString(value)}"`).join(' or ');
-  const [aggregateCsv, componentCsv, processCsv, redeemedLpSummary] = await Promise.all([
+  const [aggregateCsv, componentCsv, processCsv, redeemedLpSummary, resources] = await Promise.all([
     queryInfluxFlux(querySettings, base('optimization_upgrading')),
     queryInfluxFlux(querySettings, `from(bucket: "${escapeFluxString(bucket)}")
   |> ${range}
@@ -916,12 +916,19 @@ async function fetchUpgradingOptimization(payload = {}) {
   |> filter(fn: (r) => r._measurement == "lp_upgrade_process_history" and (${processFactionFilter}))
   |> pivot(rowKey: ["_time", "faction", "instance", "profile", "process", "starbase", "component", "recipe", "recipeKey"], columnKey: ["_field"], valueColumn: "_value")`).catch(() => ''),
     fetchRedeemedLpSummaryByDate(settings).catch(() => ({ factionDaily: {}, playerDaily: {} })),
+    fetchAephiaResourceData().catch(() => []),
   ]);
   const rows = mergeUpgradingOptimizationRows(parseInfluxCsv(aggregateCsv), parseInfluxCsv(componentCsv));
   const playerDaily = Object.entries(redeemedLpSummary.playerDaily?.[aephiaFaction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
   const factionDaily = Object.entries(redeemedLpSummary.factionDaily?.[aephiaFaction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
   const processEvidence = summarizeUpgradingProcessHistory(parseInfluxCsv(processCsv));
-  return { ok: true, rows, playerDaily, factionDaily, processEvidence, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
+  const componentPricesAtl = {};
+  for (const resource of resources) {
+    const name = normalizeShipName(resource?.name);
+    const price = Number(resource?.pricingATL?.priceATL);
+    if (name && Number.isFinite(price) && price > 0) componentPricesAtl[name] = price;
+  }
+  return { ok: true, rows, playerDaily, factionDaily, componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, processEvidence, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 
 function getInfluxScopeNote(settings) {

@@ -220,7 +220,7 @@ test('prefetch remains sequential, token-cancelled and preserves Consumption ord
   assert.match(prefetch, /refreshConsTotal\(\{ settings, starbaseFilter: '', assetFilter: '' \}\)/);
 });
 
-test('version and authorized two-file correction boundary remain explicit', () => {
-  assert.equal(require('../package.json').version, '0.6.112');
+test('version and settings cache boundary remain explicit', () => {
+  assert.equal(require('../package.json').version, '0.6.113');
   assert.doesNotMatch(renderer, /settingsCacheControl\[[^\]]+\]/);
 });

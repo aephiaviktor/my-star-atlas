@@ -94,6 +94,7 @@ const optimizationAnalyticsRankingHead = document.querySelector('#optimization-a
 const optimizationAnalyticsRanking = document.querySelector('#optimization-analytics-ranking');
 const optimizationAnalyticsTooltip = document.querySelector('#optimization-analytics-tooltip');
 const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
+const optimizationUpgradingMarginChart = document.querySelector('#optimization-upgrading-margin-chart');
 const optimizationUpgradingRedemptionChart = document.querySelector('#optimization-upgrading-redemption-chart');
 const optimizationUpgradingForecastChart = document.querySelector('#optimization-upgrading-forecast-chart');
 const optimizationUpgradingErrorChart = document.querySelector('#optimization-upgrading-error-chart');
@@ -938,6 +939,7 @@ const assetChartColors = Object.freeze({
   Electromagnet: '#a45c4f',
   'Power Source': '#d6a64a',
   'Particle Accelerator': '#6f8da0',
+  'Radiation Absorber': '#9b6f88',
   'Super Conductor': '#4f9ab2',
   'Strange Emitter': '#b65d9a',
 });
@@ -7800,7 +7802,8 @@ function buildUpgradingOptimizationAnalytics(result, now = new Date()) {
     if(!errors.has(point.hour)) errors.set(point.hour, []); errors.get(point.hour).push(point.value - day.actual);
   }
   const errorByHour = [...errors].sort((a,b) => a[0]-b[0]).map(([hour, values]) => ({ hour, median: optimizationQuantile(values,.5), q25: optimizationQuantile(values,.25), q75: optimizationQuantile(values,.75), count: values.length }));
-  return { scatter, forecasts, errorByHour };
+  const latestFactionRedemption = [...factionByDay].filter(([date, lp]) => date < today && Number.isFinite(lp)).sort((a, b) => a[0].localeCompare(b[0])).at(-1);
+  return { scatter, forecasts, errorByHour, latestFactionRedemption: latestFactionRedemption ? { date: latestFactionRedemption[0], factionLp: latestFactionRedemption[1] } : null };
 }
 
 function getUpgradingComparisonScales(results, now = new Date()) {
@@ -7821,12 +7824,41 @@ function renderUpgradingChartAxes(svg, { minY = 0, maxY = 1, xMax = 24, xTicks =
   return { x, y, width, height, left, right, top, bottom };
 }
 
+
+const upgradingMarginComponents = Object.freeze([
+  ['Power Source', 98], ['Framework', 68], ['Electromagnet', 133], ['Electronics', 92],
+  ['Field Stabilizer', 222], ['Particle Accelerator', 498], ['Radiation Absorber', 331],
+  ['Survey Data Unit', 1325], ['Ink', 100000],
+]);
+const upgradingFactionColors = Object.freeze({ MUD: '#ef4444', ONI: '#3b82f6', USTUR: '#f59e0b' });
+function buildUpgradingMarginSeries(result, xMax = 50_000_000_000) {
+  const atlasPool = Number(result?.atlasPool), prices = result?.componentPricesAtl || {};
+  if (!Number.isFinite(atlasPool) || atlasPool <= 0) return [];
+  return upgradingMarginComponents.map(([name, lp]) => {
+    const price = Number(prices[String(name).toLowerCase()]);
+    if (!Number.isFinite(price) || price <= 0) return null;
+    const points = Array.from({ length: 100 }, (_, index) => { const factionLp = xMax * (index + 1) / 100; return { factionLp, marginPercent: ((atlasPool / factionLp * lp) / price - 1) * 100 }; });
+    return { name, lp, price, points };
+  }).filter(Boolean);
+}
+function renderUpgradingMarginChart(analytics) {
+  const svg = createOptimizationAnalyticsSvg(optimizationUpgradingMarginChart, 760, 340); if (!svg) return;
+  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}); if (!series.length) return;
+  const xMax = 50_000_000_000, values = series.flatMap((entry) => entry.points.map((point) => point.marginPercent));
+  const axes = renderUpgradingChartAxes(svg, { minY: Math.min(-100, ...values), maxY: Math.max(100, ...values), xMax, xTicks: [0, 10e9, 20e9, 30e9, 40e9, 50e9], xLabel: 'Theoretical faction LP redemption', yLabel: 'Component profit margin (%)', height: 340 });
+  appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
+  series.forEach((entry, index) => { const line = appendOptimizationSvg(svg, 'polyline', { points: entry.points.map((point) => `${axes.x(point.factionLp)},${axes.y(point.marginPercent)}`).join(' '), fill: 'none', stroke: getAssetChartColor(entry.name, index), 'stroke-width': 2, class: 'optimization-margin-line' }); bindOptimizationAnalyticsTooltip(line, `${entry.name} · ${entry.lp.toLocaleString()} LP/component · current GM ${entry.price.toLocaleString(undefined, { maximumFractionDigits: 6 })} ATLAS`); });
+  const yesterday = analytics.latestFactionRedemption;
+  if (Number.isFinite(yesterday?.factionLp) && yesterday.factionLp <= xMax) { const faction = normalizeFaction(latestSettings?.faction); const marker = appendOptimizationSvg(svg, 'line', { x1: axes.x(yesterday.factionLp), x2: axes.x(yesterday.factionLp), y1: axes.top, y2: axes.height - axes.bottom, stroke: upgradingFactionColors[faction] || '#45d6c1', 'stroke-width': 3, class: 'optimization-yesterday-line' }); bindOptimizationAnalyticsTooltip(marker, `${yesterday.date} · ${faction === 'USTUR' ? 'UST' : faction} faction redemption ${yesterday.factionLp.toLocaleString()} LP`); }
+}
+
 function renderUpgradingOptimizationAnalytics() {
   const analytics = buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {});
   const comparisonScales = getUpgradingComparisonScales(latestUpgradingComparisonResults.length ? latestUpgradingComparisonResults : [latestUpgradingOptimizationResult || {}]);
   const normalizedFaction = normalizeFaction(latestSettings?.faction);
   const factionLabel = normalizedFaction === 'USTUR' ? 'UST' : normalizedFaction;
   if(optimizationUpgradingAnalyticsStatus) optimizationUpgradingAnalyticsStatus.textContent = `${analytics.scatter.length} completed comparison days · ${analytics.forecasts.length} forecast days · rolling 30 days · UTC`;
+  renderUpgradingMarginChart(analytics);
   let svg=createOptimizationAnalyticsSvg(optimizationUpgradingRedemptionChart,760,340);
   if(svg && analytics.scatter.length){ const maxX=Math.max(1,...analytics.scatter.map(r=>r.factionLp))*1.08,maxY=comparisonScales.playerLpPerCrewMax*1.08; const axes=renderUpgradingChartAxes(svg,{maxY,xMax:maxX,xTicks:[0,maxX/4,maxX/2,maxX*3/4,maxX],xLabel:'Faction LP redeemed',yLabel:'Player LP / avg phantom crew',height:340});
     const meanX=analytics.scatter.reduce((s,r)=>s+r.factionLp,0)/analytics.scatter.length,meanY=analytics.scatter.reduce((s,r)=>s+r.playerLpPerCrew,0)/analytics.scatter.length; const cov=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)*(r.playerLpPerCrew-meanY),0),vx=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)**2,0),vy=analytics.scatter.reduce((s,r)=>s+(r.playerLpPerCrew-meanY)**2,0); const correlation=vx&&vy?cov/Math.sqrt(vx*vy):null;

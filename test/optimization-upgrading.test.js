@@ -120,12 +120,12 @@ test('Optimization exposes Upgrading after Scanning with date filters, table, an
   assert.match(html, /data-optimization-subtab="scanning"[^>]*>Scanning</);
   assert.match(html, /data-optimization-subtab="upgrading"[^>]*>Upgrading</);
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
-  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-process-evidence-body']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-margin-chart', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-process-evidence-body']) assert.match(html, new RegExp(`id="${id}"`));
   assert.match(html, /Process automation evidence/);
-  assert.match(html, /class="optimization-analytics-card optimization-upgrading-primary-chart-card"[\s\S]*?id="optimization-upgrading-redemption-chart"/);
+  assert.match(html, /Component profit margin vs faction LP redemption[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?Faction LP redemption vs player LP per upgrading crew[\s\S]*?id="optimization-upgrading-redemption-chart"/);
   assert.match(html, /id="optimization-upgrading-forecast-chart"[\s\S]*?id="optimization-upgrading-error-chart"/);
   assert.match(html, /<section class="optimization-analytics-card">\s*<h3>Forecast error by snapshot hour<\/h3>/);
-  assert.match(fs.readFileSync('electron/renderer.css', 'utf8'), /\.optimization-upgrading-primary-chart-card\s*\{\s*grid-column:\s*1 \/ -1;/);
+  assert.doesNotMatch(html, /optimization-upgrading-primary-chart-card/);
   assert.match(html, /How to read this page/);
   assert.match(html, /optimization-process-evidence-wrap/);
   assert.match(html, /optimization-upgrading-page-guide[\s\S]*earnings-metric-guide-item/);
@@ -173,4 +173,23 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(css, /\.optimization-process-evidence-wrap\s*\{[\s\S]*?overflow:\s*visible/);
   assert.match(css, /\.optimization-line-hit/);
   assert.match(css, /pointer-events: stroke/);
+});
+
+
+test('component margin chart uses pool share value, current GM price, and latest completed faction redemption', () => {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext([
+    `const upgradingMarginComponents = Object.freeze([['Framework', 68]]);`,
+    extractFunction(renderer, 'buildUpgradingMarginSeries'),
+    'this.build = buildUpgradingMarginSeries;',
+  ].join('\n'), context);
+  const series = context.build({ atlasPool: 2_000_000, componentPricesAtl: { framework: 2 } }, 10_000_000_000);
+  assert.equal(series.length, 1);
+  assert.equal(series[0].points.at(-1).marginPercent, -99.32);
+  assert.match(main, /fetchAephiaResourceData\(\)\.catch/);
+  assert.match(main, /pricingATL\?\.priceATL/);
+  assert.match(main, /atlasPool: UPGRADE_ATLAS_POOLS\[aephiaFaction\]/);
+  assert.match(renderer, /latestFactionRedemption/);
+  for (const component of ['Power Source', 'Framework', 'Electromagnet', 'Electronics', 'Field Stabilizer', 'Particle Accelerator', 'Radiation Absorber', 'Survey Data Unit', 'Ink']) assert.match(renderer, new RegExp(component));
 });
