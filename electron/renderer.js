@@ -95,6 +95,7 @@ const optimizationAnalyticsRanking = document.querySelector('#optimization-analy
 const optimizationAnalyticsTooltip = document.querySelector('#optimization-analytics-tooltip');
 const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
 const optimizationUpgradingMarginChart = document.querySelector('#optimization-upgrading-margin-chart');
+const optimizationUpgradingEfficiencyChart = document.querySelector('#optimization-upgrading-efficiency-chart');
 const optimizationUpgradingRedemptionChart = document.querySelector('#optimization-upgrading-redemption-chart');
 const optimizationUpgradingForecastChart = document.querySelector('#optimization-upgrading-forecast-chart');
 const optimizationUpgradingErrorChart = document.querySelector('#optimization-upgrading-error-chart');
@@ -7814,11 +7815,11 @@ function getUpgradingComparisonScales(results, now = new Date()) {
   };
 }
 
-function renderUpgradingChartAxes(svg, { minY = 0, maxY = 1, xMin = 0, xMax = 24, xTicks = [0,6,12,18,24], xLabel = '', yLabel = '', height = 280 } = {}) {
+function renderUpgradingChartAxes(svg, { minY = 0, maxY = 1, xMin = 0, xMax = 24, xTicks = [0,6,12,18,24], xLabel = '', yLabel = '', height = 280, xFormatter = null, yFormatter = null } = {}) {
   const width=760,left=74,right=16,top=12,bottom=48;
   const x=(value)=>left+(value-xMin)/Math.max(1,xMax-xMin)*(width-left-right); const y=(value)=>top+(maxY-value)/Math.max(1,maxY-minY)*(height-top-bottom);
-  for(let tick=0;tick<=4;tick++){ const value=minY+(maxY-minY)*(4-tick)/4; const yy=top+(height-top-bottom)*tick/4; appendOptimizationSvg(svg,'line',{x1:left,x2:width-right,y1:yy,y2:yy,class:'grid-line'}); appendOptimizationSvg(svg,'text',{x:left-6,y:yy+3,'text-anchor':'end',class:'axis-label'},formatCompactNumber(value)); }
-  for(const value of xTicks) appendOptimizationSvg(svg,'text',{x:x(value),y:height-bottom+16,'text-anchor':'middle',class:'axis-label'},Math.abs(value) >= 1000 ? formatCompactNumber(value) : String(Math.round(value)));
+  for(let tick=0;tick<=4;tick++){ const value=minY+(maxY-minY)*(4-tick)/4; const yy=top+(height-top-bottom)*tick/4; appendOptimizationSvg(svg,'line',{x1:left,x2:width-right,y1:yy,y2:yy,class:'grid-line'}); appendOptimizationSvg(svg,'text',{x:left-6,y:yy+3,'text-anchor':'end',class:'axis-label'},yFormatter ? yFormatter(value) : formatCompactNumber(value)); }
+  for(const value of xTicks) appendOptimizationSvg(svg,'text',{x:x(value),y:height-bottom+16,'text-anchor':'middle',class:'axis-label'},xFormatter ? xFormatter(value) : (Math.abs(value) >= 1000 ? formatCompactNumber(value) : String(Math.round(value))));
   if(xLabel) appendOptimizationSvg(svg,'text',{x:(left+width-right)/2,y:height-5,'text-anchor':'middle',class:'axis-label optimization-axis-title'},xLabel);
   if(yLabel) appendOptimizationSvg(svg,'text',{x:12,y:(top+height-bottom)/2,'text-anchor':'middle',transform:`rotate(-90 12 ${(top+height-bottom)/2})`,class:'axis-label optimization-axis-title'},yLabel);
   return { x, y, width, height, left, right, top, bottom };
@@ -7831,6 +7832,8 @@ const upgradingMarginComponents = Object.freeze([
   ['Survey Data Unit', 1325], ['Ink', 100000],
 ]);
 const upgradingFactionColors = Object.freeze({ MUD: '#ef4444', ONI: '#3b82f6', USTUR: '#f59e0b' });
+const upgradingDurationSeconds = Object.freeze({ 'Power Source': 15, Framework: 12, Electromagnet: 16, Electronics: 14, 'Field Stabilizer': 24, 'Particle Accelerator': 96, 'Radiation Absorber': 48, 'Survey Data Unit': 120, Ink: 60 });
+const upgradingCargoWeight = Object.freeze({ 'Power Source': 2, Framework: 1, Electromagnet: 4, Electronics: 2, 'Field Stabilizer': 6, 'Particle Accelerator': 6, 'Radiation Absorber': 6, 'Survey Data Unit': 1, Ink: 1 });
 function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000_000_000) {
   const atlasPool = Number(result?.atlasPool), prices = result?.componentPricesAtl || {};
   if (!Number.isFinite(atlasPool) || atlasPool <= 0) return [];
@@ -7841,6 +7844,44 @@ function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000
     return { name, lp, price, points };
   }).filter(Boolean);
 }
+function buildUpgradingEfficiencyRows(result, factionLp) {
+  const atlasPool = Number(result?.atlasPool);
+  const prices = result?.componentPricesAtl || {};
+  if (!Number.isFinite(atlasPool) || atlasPool <= 0 || !Number.isFinite(factionLp) || factionLp <= 0) return [];
+  const rows = upgradingMarginComponents.map(([name, lp]) => {
+    const gmPrice = Number(prices[String(name).toLowerCase()]);
+    const durationSeconds = Number(upgradingDurationSeconds[name]);
+    const cargoWeight = Number(upgradingCargoWeight[name]);
+    if (!Number.isFinite(gmPrice) || gmPrice <= 0 || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+    const lpPerSecond = lp / durationSeconds;
+    const grossAtlasPerSecond = lpPerSecond * atlasPool / factionLp;
+    const netAtlasPerSecond = grossAtlasPerSecond - gmPrice / durationSeconds;
+    const marginPercent = ((atlasPool / factionLp * lp) / gmPrice - 1) * 100;
+    return { name, lp, gmPrice, durationSeconds, cargoWeight, marginPercent, grossAtlasPerSecond, netAtlasPerSecond };
+  }).filter(Boolean);
+  return rows.map((row) => ({ ...row, dominated: rows.some((other) => other !== row && other.marginPercent >= row.marginPercent && other.netAtlasPerSecond >= row.netAtlasPerSecond && other.cargoWeight <= row.cargoWeight && (other.marginPercent > row.marginPercent || other.netAtlasPerSecond > row.netAtlasPerSecond || other.cargoWeight < row.cargoWeight)) }));
+}
+
+function renderUpgradingEfficiencyChart(analytics) {
+  const svg = createOptimizationAnalyticsSvg(optimizationUpgradingEfficiencyChart, 760, 340);
+  if (!svg) return;
+  const rows = buildUpgradingEfficiencyRows(latestUpgradingOptimizationResult || {}, Number(analytics.latestFactionRedemption?.factionLp));
+  if (!rows.length) return;
+  const margins = rows.map((row) => row.marginPercent), nets = rows.map((row) => row.netAtlasPerSecond);
+  const xPad = Math.max(1, (Math.max(...margins) - Math.min(...margins)) * 0.12), yPad = Math.max(0.000001, (Math.max(...nets) - Math.min(...nets)) * 0.12);
+  const minX = Math.min(...margins) - xPad, maxX = Math.max(...margins) + xPad, minY = Math.min(...nets) - yPad, maxY = Math.max(...nets) + yPad;
+  const axes = renderUpgradingChartAxes(svg, { minY, maxY, xMin: minX, xMax: maxX, xTicks: [minX, minX + (maxX-minX)/4, minX + (maxX-minX)/2, minX + (maxX-minX)*3/4, maxX], xLabel: 'Profit margin at yesterday’s faction LP (%)', yLabel: 'Net ATLAS/s', height: 340, xFormatter: (value) => value.toFixed(1), yFormatter: (value) => value.toFixed(6) });
+  if (minX <= 0 && maxX >= 0) appendOptimizationSvg(svg, 'line', { x1: axes.x(0), x2: axes.x(0), y1: axes.top, y2: axes.height - axes.bottom, class: 'optimization-zero-line' });
+  if (minY <= 0 && maxY >= 0) appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
+  rows.forEach((row, index) => {
+    const cx = axes.x(row.marginPercent), cy = axes.y(row.netAtlasPerSecond), radius = 5 + Math.sqrt(row.cargoWeight) * 2;
+    const dot = appendOptimizationSvg(svg, 'circle', { cx, cy, r: radius, fill: getAssetChartColor(row.name, index), opacity: row.dominated ? 0.38 : 0.9, stroke: row.dominated ? '#cbd5e1' : '#e8fffb', 'stroke-width': row.dominated ? 1 : 2 });
+    bindOptimizationAnalyticsTooltip(dot, `${row.name} · margin ${row.marginPercent.toFixed(1)}% · gross ${row.grossAtlasPerSecond.toFixed(6)} ATLAS/s · net ${row.netAtlasPerSecond.toFixed(6)} ATLAS/s · cargo ${row.cargoWeight}${row.dominated ? ' · Pareto-dominated' : ' · efficiency frontier'}`);
+    appendOptimizationSvg(svg, 'text', { x: cx + radius + 3, y: cy + 3, class: 'axis-label optimization-efficiency-label' }, row.name);
+    if (row.dominated) { const size = radius * 0.75; appendOptimizationSvg(svg, 'line', { x1: cx-size, y1: cy-size, x2: cx+size, y2: cy+size, class: 'optimization-dominated-cross' }); appendOptimizationSvg(svg, 'line', { x1: cx-size, y1: cy+size, x2: cx+size, y2: cy-size, class: 'optimization-dominated-cross' }); }
+  });
+}
+
 function renderUpgradingMarginChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingMarginChart, 760, 340); if (!svg) return;
   const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}); if (!series.length) return;
@@ -7859,6 +7900,7 @@ function renderUpgradingOptimizationAnalytics() {
   const factionLabel = normalizedFaction === 'USTUR' ? 'UST' : normalizedFaction;
   if(optimizationUpgradingAnalyticsStatus) optimizationUpgradingAnalyticsStatus.textContent = `${analytics.scatter.length} completed comparison days · ${analytics.forecasts.length} forecast days · rolling 30 days · UTC`;
   renderUpgradingMarginChart(analytics);
+  renderUpgradingEfficiencyChart(analytics);
   let svg=createOptimizationAnalyticsSvg(optimizationUpgradingRedemptionChart,760,340);
   if(svg && analytics.scatter.length){ const maxX=Math.max(1,...analytics.scatter.map(r=>r.factionLp))*1.08,maxY=comparisonScales.playerLpPerCrewMax*1.08; const axes=renderUpgradingChartAxes(svg,{maxY,xMax:maxX,xTicks:[0,maxX/4,maxX/2,maxX*3/4,maxX],xLabel:'Faction LP redeemed',yLabel:'Player LP / avg phantom crew',height:340});
     const meanX=analytics.scatter.reduce((s,r)=>s+r.factionLp,0)/analytics.scatter.length,meanY=analytics.scatter.reduce((s,r)=>s+r.playerLpPerCrew,0)/analytics.scatter.length; const cov=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)*(r.playerLpPerCrew-meanY),0),vx=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)**2,0),vy=analytics.scatter.reduce((s,r)=>s+(r.playerLpPerCrew-meanY)**2,0); const correlation=vx&&vy?cov/Math.sqrt(vx*vy):null;
@@ -7881,20 +7923,25 @@ function renderUpgradingBreakevenTable() {
   const atlasPool = Number(result.atlasPool);
   const prices = result.componentPricesAtl || {};
   const rows = upgradingMarginComponents
-    .map(([name, lp]) => ({ name, lp, gmPrice: Number(prices[String(name).toLowerCase()]) }))
+    .map(([name, lp]) => ({ name, lp, gmPrice: Number(prices[String(name).toLowerCase()]), durationSeconds: Number(upgradingDurationSeconds[name]) }))
     .filter((row) => Number.isFinite(row.gmPrice) && row.gmPrice > 0 && Number.isFinite(atlasPool) && atlasPool > 0)
     .sort((a, b) => a.lp - b.lp);
   if (!rows.length) {
     const tr = document.createElement('tr'); tr.className = 'empty-row';
-    const td = document.createElement('td'); td.colSpan = 3; td.textContent = 'Component prices unavailable';
+    const td = document.createElement('td'); td.colSpan = 5; td.textContent = 'Component prices unavailable';
     tr.append(td); optimizationUpgradingBreakevenBody.append(tr); return;
   }
+  const latestFactionLp = Number(buildUpgradingOptimizationAnalytics(result).latestFactionRedemption?.factionLp);
   for (const row of rows) {
     const tr = document.createElement('tr');
     const name = document.createElement('td'); name.textContent = row.name;
     const gmPrice = document.createElement('td'); gmPrice.className = 'numeric-cell'; gmPrice.textContent = row.gmPrice.toLocaleString(undefined, { maximumFractionDigits: 6 });
     const breakeven = document.createElement('td'); breakeven.className = 'numeric-cell'; breakeven.textContent = formatCompactNumber(atlasPool * row.lp / row.gmPrice);
-    tr.append(name, gmPrice, breakeven); optimizationUpgradingBreakevenBody.append(tr);
+    const grossValue = Number.isFinite(latestFactionLp) && latestFactionLp > 0 ? row.lp / row.durationSeconds * atlasPool / latestFactionLp : null;
+    const netValue = Number.isFinite(grossValue) ? grossValue - row.gmPrice / row.durationSeconds : null;
+    const gross = document.createElement('td'); gross.className = 'numeric-cell'; gross.textContent = Number.isFinite(grossValue) ? grossValue.toFixed(6) : '--';
+    const net = document.createElement('td'); net.className = 'numeric-cell'; net.textContent = Number.isFinite(netValue) ? netValue.toFixed(6) : '--';
+    tr.append(name, gmPrice, breakeven, gross, net); optimizationUpgradingBreakevenBody.append(tr);
   }
 }
 

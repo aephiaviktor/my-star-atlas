@@ -946,12 +946,16 @@
                   <h3>Component profit margin vs faction LP redemption</h3>
                   <div id="optimization-upgrading-margin-chart" class="optimization-analytics-chart optimization-upgrading-tall-chart"></div>
                 </section>
-                <section class="optimization-analytics-card optimization-upgrading-breakeven-card">
-                  <h3>Breakeven LP redemption</h3>
+                <section class="optimization-analytics-card">
+                  <h3>Component Efficiency Frontier</h3>
+                  <div id="optimization-upgrading-efficiency-chart" class="optimization-analytics-chart optimization-upgrading-tall-chart"></div>
+                </section>
+                <section class="optimization-analytics-card optimization-upgrading-breakeven-card optimization-analytics-summary-card">
+                  <h3>Breakeven LP</h3>
                   <div class="fleet-table-wrap optimization-upgrading-breakeven-wrap">
                     <table class="fleet-table optimization-table optimization-upgrading-breakeven-table">
-                      <thead><tr><th>Name</th><th>GM price</th><th>Breakeven LP redemption</th></tr></thead>
-                      <tbody id="optimization-upgrading-breakeven-body"><tr class="empty-row"><td colspan="3">Awaiting component prices</td></tr></tbody>
+                      <thead><tr><th>Name</th><th>GM price</th><th>Breakeven LP</th><th>Gross ATLAS/s</th><th>Net ATLAS/s</th></tr></thead>
+                      <tbody id="optimization-upgrading-breakeven-body"><tr class="empty-row"><td colspan="5">Awaiting component prices</td></tr></tbody>
                     </table>
                   </div>
                 </section>
@@ -962,7 +966,8 @@
                     <article class="earnings-metric-guide-item"><h4>Expected Total LP by EOD vs actual</h4><p>Each line follows one day’s hourly forecast. The final dot is the actual faction LP redemption.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Hourly expected_total_lp_eod snapshots are plotted against the final daily faction LP redemption.</p><p><strong>Interpretation: </strong>Distance from the line to the final dot is forecast error at that hour; tighter lines mean the forecast stabilized earlier in the day.</p></article>
                     <article class="earnings-metric-guide-item"><h4>Forecast error by snapshot hour</h4><p>Shows the signed forecast error distribution for each snapshot hour.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Error = expected total LP by EOD - actual faction LP redemption; the line is median error and the band is the middle 50%.</p><p><strong>Interpretation: </strong>Above zero means overestimation; below zero means underestimation. A narrow band means that hour is more reliable.</p></article>
                     <article class="earnings-metric-guide-item"><h4>Component profit margin vs faction LP redemption</h4><p>Shows how each component’s implied redemption value compares with its current GM price across 10B–50B faction LP redemption.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Margin = (((faction ATLAS pool / faction LP redemption) × component LP) / GM price - 1) × 100.</p><p><strong>Interpretation: </strong>Above zero means redemption value exceeds the current GM price; below zero means the GM price is higher. The faction-colored line marks yesterday’s redemption.</p></article>
-                    <article class="earnings-metric-guide-item"><h4>Breakeven LP redemption</h4><p>Lists the faction redemption level where each component’s implied profit margin reaches exactly 0%.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Breakeven faction LP = faction ATLAS pool × component LP / current GM price.</p><p><strong>Interpretation: </strong>Faction redemption below the breakeven level implies a positive component margin; redemption above it implies a negative margin at the displayed GM price.</p></article>
+                    <article class="earnings-metric-guide-item"><h4>Component Efficiency Frontier</h4><p>Compares component return and earning speed at yesterday’s faction LP redemption. Bubble size represents cargo weight; crossed-out points are Pareto-dominated.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>X = profit margin; Y = net ATLAS/s; gross ATLAS/s = LP/s × faction ATLAS pool / faction LP; net ATLAS/s subtracts GM price / upgrade duration.</p><p><strong>Interpretation: </strong>Points farther right and higher are stronger. A crossed-out component is matched or beaten on margin, net ATLAS/s, and cargo weight by another component.</p></article>
+                    <article class="earnings-metric-guide-item"><h4>Breakeven LP</h4><p>Lists the faction redemption level where each component’s implied profit margin reaches exactly 0%, plus earning speed at yesterday’s faction LP redemption.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Breakeven faction LP = faction ATLAS pool × component LP / current GM price. Gross and net ATLAS/s use each component’s fixed upgrade duration.</p><p><strong>Interpretation: </strong>Faction redemption below breakeven implies a positive margin; gross and net ATLAS/s show absolute earning speed rather than percentage return.</p></article>
                   </div>
                 </details>
               </div>

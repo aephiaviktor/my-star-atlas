@@ -120,11 +120,11 @@ test('Optimization exposes Upgrading after Scanning with date filters, table, an
   assert.match(html, /data-optimization-subtab="scanning"[^>]*>Scanning</);
   assert.match(html, /data-optimization-subtab="upgrading"[^>]*>Upgrading</);
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
-  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-margin-chart', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-breakeven-body']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-margin-chart', 'optimization-upgrading-efficiency-chart', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-breakeven-body']) assert.match(html, new RegExp(`id="${id}"`));
   assert.doesNotMatch(html, /Process automation evidence/);
-  assert.match(html, /Breakeven LP redemption/);
+  assert.match(html, />Breakeven LP</);
   assert.match(html, /optimization-upgrading-primary-chart-card[\s\S]*?Faction LP redemption vs player LP per upgrading crew[\s\S]*?id="optimization-upgrading-redemption-chart"/);
-  assert.match(html, /id="optimization-upgrading-error-chart"[\s\S]*?Component profit margin vs faction LP redemption[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?Breakeven LP redemption[\s\S]*?id="optimization-upgrading-breakeven-body"/);
+  assert.match(html, /id="optimization-upgrading-error-chart"[\s\S]*?Component profit margin vs faction LP redemption[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?Component Efficiency Frontier[\s\S]*?id="optimization-upgrading-efficiency-chart"[\s\S]*?optimization-upgrading-breakeven-card optimization-analytics-summary-card[\s\S]*?>Breakeven LP</);
   assert.match(html, /id="optimization-upgrading-forecast-chart"[\s\S]*?id="optimization-upgrading-error-chart"/);
   assert.match(html, /<section class="optimization-analytics-card">\s*<h3>Forecast error by snapshot hour<\/h3>/);
   assert.match(html, /optimization-upgrading-primary-chart-card/);
@@ -196,4 +196,31 @@ test('component margin chart uses pool share value, current GM price, and latest
   assert.match(renderer, /sort\(\(a, b\) => a\.lp - b\.lp\)/);
   assert.match(css, /\.optimization-upgrading-breakeven-table \{ min-width: 0; font-size: 11px; \}/);
   for (const component of ['Power Source', 'Framework', 'Electromagnet', 'Electronics', 'Field Stabilizer', 'Particle Accelerator', 'Radiation Absorber', 'Survey Data Unit', 'Ink']) assert.match(renderer, new RegExp(component));
+});
+
+
+test('component efficiency calculates gross and net ATLAS per second and marks dominated choices', () => {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext([
+    `const upgradingMarginComponents = Object.freeze([['Framework', 68], ['Power Source', 98]]);`,
+    `const upgradingDurationSeconds = Object.freeze({ Framework: 12, 'Power Source': 15 });`,
+    `const upgradingCargoWeight = Object.freeze({ Framework: 1, 'Power Source': 2 });`,
+    extractFunction(renderer, 'buildUpgradingEfficiencyRows'),
+    'this.build = buildUpgradingEfficiencyRows;',
+  ].join('\n'), context);
+  const rows = context.build({ atlasPool: 2_000_000, componentPricesAtl: { framework: 0.003, 'power source': 0.01 } }, 40_000_000_000);
+  const framework = rows.find((row) => row.name === 'Framework');
+  const powerSource = rows.find((row) => row.name === 'Power Source');
+  assert.equal(framework.durationSeconds, 12);
+  assert.equal(framework.cargoWeight, 1);
+  assert.ok(Math.abs(framework.grossAtlasPerSecond - 0.00028333333333333335) < 1e-15);
+  assert.ok(Math.abs(framework.netAtlasPerSecond - 0.00003333333333333333) < 1e-15);
+  assert.equal(framework.dominated, false);
+  assert.equal(powerSource.dominated, true);
+  assert.match(renderer, /optimization-dominated-cross/);
+  assert.match(renderer, /optimization-efficiency-label/);
+  assert.match(renderer, /const latestFactionLp = Number\(buildUpgradingOptimizationAnalytics\(result\)\.latestFactionRedemption/);
+  assert.match(html, /Gross ATLAS\/s/);
+  assert.match(html, /Net ATLAS\/s/);
 });
