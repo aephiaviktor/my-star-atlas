@@ -105,7 +105,7 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(main, /_measurement == "cargo_cycle_completed" and r\._field == "legCount"/);
   assert.match(main, /completedCycleLegs\.set\(cycleId, legCount\)/);
   assert.match(main, /cargoCycles: completedCycleIds\.length/);
-  assert.match(main, /filterCargoAllocationsToCompletedCycles\(fleetScopedCargoAllocationRows, cargoRows\)/);
+  assert.match(main, /filterCargoAllocationsToCompletedCycles\(fleetScopedCargoAllocationRows, compatibilityCargoRows\)/);
   assert.match(main, /cargoLegs: Array\.from\(row\.completedCycleLegs\.values\(\)\)/);
   assert.match(main, /buildCargoVolumeByFleetDayAssignment\(cargoAllocations\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);

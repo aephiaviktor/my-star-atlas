@@ -42,7 +42,12 @@ const { buildCostLedgerResult } = require('./production-ledger-events');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { createAtlasPriceResolver } = require('./atlas-price-resolver');
-const { buildCargoCostPool } = require('./cargo-cost-pool');
+const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
+const {
+  RAW_COST_CUTOVER_MANIFEST_VERSION, buildRawCostFluxQuery, projectRawCostEvents,
+  selectLegacyRawCutover, exporterForFaction, aggregateRawCostsByFleetDay,
+  applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
+} = require('./cargo-cost-source');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
 const {
@@ -6424,6 +6429,14 @@ async function fetchCargoAllocationEarningsRows(settings) {
   return Array.from(grouped.values()).sort((a, b) => b.isoDate.localeCompare(a.isoDate) || a.fleet.localeCompare(b.fleet) || a.asset.localeCompare(b.asset) || a.origin.localeCompare(b.origin) || a.destination.localeCompare(b.destination) || a.assignment.localeCompare(b.assignment));
 }
 
+async function fetchCanonicalRawCargoCosts(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return { records: [], rejected: [], query: '' };
+  const query = buildRawCostFluxQuery(settings.influxBucket);
+  const rows = parseInfluxCsv(await queryInfluxFlux(settings, query));
+  const projected = projectRawCostEvents(rows);
+  return { ...projected, query };
+}
+
 async function fetchEarningsSnapshot(payload) {
   const rawPayload = payload || (await readSettings());
   const settings = normalizeSettings(rawPayload);
@@ -6596,6 +6609,8 @@ async function fetchEarningsSnapshot(payload) {
   let craftingError = '';
   let upgradingRows = [];
   let upgradingError = '';
+  let rawCargoCosts = { records: [], rejected: [], query: '' };
+  let rawCargoCostError = '';
   // Each category already fans out into several Flux queries. Starting all
   // five categories at once overloads the Influx proxy (17+ concurrent
   // queries) and causes 504s, so use bounded category concurrency instead.
@@ -6606,6 +6621,7 @@ async function fetchEarningsSnapshot(payload) {
     () => fetchCargoAllocationEarningsRows(settings),
     () => fetchCraftingEarningsRows(settings),
     () => fetchUpgradingEarningsRows(settings),
+    () => fetchCanonicalRawCargoCosts(settings),
   ];
   const earningsRowResults = new Array(earningsTasks.length);
   let nextEarningsTask = 0;
@@ -6619,7 +6635,7 @@ async function fetchEarningsSnapshot(payload) {
       }
     }
   }));
-  const [scanningResult, miningResult, cargoResult, cargoAllocationResult, craftingResult, upgradingResult] = earningsRowResults;
+  const [scanningResult, miningResult, cargoResult, cargoAllocationResult, craftingResult, upgradingResult, rawCargoCostResult] = earningsRowResults;
   if (scanningResult.status === 'fulfilled') scanningRows = scanningResult.value;
   else scanningError = String(scanningResult.reason?.message || scanningResult.reason || 'scan_rows_unavailable');
   if (miningResult.status === 'fulfilled') miningRows = miningResult.value;
@@ -6632,6 +6648,19 @@ async function fetchEarningsSnapshot(payload) {
   else craftingError = String(craftingResult.reason?.message || craftingResult.reason || 'crafting_rows_unavailable');
   if (upgradingResult.status === 'fulfilled') upgradingRows = upgradingResult.value;
   else upgradingError = String(upgradingResult.reason?.message || upgradingResult.reason || 'upgrading_rows_unavailable');
+  if (rawCargoCostResult.status === 'fulfilled') rawCargoCosts = rawCargoCostResult.value;
+  else rawCargoCostError = String(rawCargoCostResult.reason?.message || rawCargoCostResult.reason || 'raw_cargo_cost_rows_unavailable');
+
+  const compatibilityCargoRows = cargoRows;
+  const rawExporter = exporterForFaction(settings.faction);
+  const cutoverSelection = rawExporter
+    ? selectLegacyRawCutover({ legacyRows: compatibilityCargoRows, rawRecords: rawCargoCosts.records, ...rawExporter })
+    : { cutover: null, legacyRows: cargoRows, rawRecords: [], trackingDisabled: false };
+  const valuedCanonicalRawCosts = await valueCanonicalRawCosts(cutoverSelection.rawRecords, {
+    resolveFuelPrice: (asset, date) => atlasPriceResolver.resolveAtlasPrice(asset, date),
+  });
+  const canonicalRawDailyRows = aggregateRawCostsByFleetDay(valuedCanonicalRawCosts);
+  cargoRows = [...cutoverSelection.legacyRows, ...canonicalRawDailyRows];
 
   const activeFleetKeys = new Set();
   const activeMappedFleetKeys = new Set();
@@ -6771,10 +6800,12 @@ async function fetchEarningsSnapshot(payload) {
     if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
     const fuelPrice = await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate);
     const fuelCostsAtlas = fuelPrice.status === 'complete' ? cargoRow.burnedFuel * fuelPrice.priceATL : null;
-    const txsCostsAtlas = atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null;
+    const canonicalRaw = cargoRow.sourceMode === 'canonical_raw';
+    const txsCostsAtlas = !canonicalRaw && atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null;
     const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
+    const incompleteRawValuation = canonicalRaw && ((Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas)));
     const costParts = [fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
-    const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
+    const totalCostsAtlas = !incompleteRawValuation && costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const netProfitAtlas = Number.isFinite(totalCostsAtlas) ? -totalCostsAtlas : null;
     return {
       ...cargoRow,
@@ -6806,7 +6837,7 @@ async function fetchEarningsSnapshot(payload) {
         : null,
     };
   }));
-  const cargoCostPool = buildCargoCostPool(cargo.map((row) => ({
+  const legacyCargoCostPool = buildCargoCostPool(cargo.filter((row) => row.sourceMode !== 'canonical_raw').map((row) => ({
     fleetAccount: row.fleetAccount || row.fleetName,
     isoDate: row.isoDate,
     assignment: row.assignment,
@@ -6830,22 +6861,27 @@ async function fetchEarningsSnapshot(payload) {
       }] : []),
     ],
   })));
+  const canonicalRawCostPool = buildCanonicalRawCostPool(valuedCanonicalRawCosts, rawCargoCosts.rejected);
+  const cargoCostPool = mergeCargoCostPools(legacyCargoCostPool, canonicalRawCostPool);
   // Scope allocation rows through the already faction-scoped movement fleets,
   // while preserving each fleet and route as separate cost dimensions.
   const scopedCargoFleetLabels = new Set(cargoRows.map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
   const fleetScopedCargoAllocationRows = cargoAllocationRows.filter((row) =>
     scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet))
   );
-  const scopedCargoAllocationRows = filterCargoAllocationsToCompletedCycles(fleetScopedCargoAllocationRows, cargoRows);
-  const enrichedCargoAllocationRows = enrichCargoAllocationRows(
+  const scopedCargoAllocationRows = filterCargoAllocationsToCompletedCycles(fleetScopedCargoAllocationRows, compatibilityCargoRows);
+  let enrichedCargoAllocationRows = enrichCargoAllocationRows(
     scopedCargoAllocationRows,
     fleetByLabel,
     normalizeFleetLabel
   );
+  if (cutoverSelection.cutover) {
+    enrichedCargoAllocationRows = applyRawCostsToCargoAllocations(enrichedCargoAllocationRows, canonicalRawDailyRows, cutoverSelection.cutover);
+  }
   const valueCargoAllocation = async (row) => {
     const fuelPrice = await atlasPriceResolver.resolveAtlasPrice('Fuel', row.isoDate);
     const fuelCostsAtlas = fuelPrice.status === 'complete' ? row.allocatedFuel * fuelPrice.priceATL : null;
-    const txsCostsAtlas = atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
+    const txsCostsAtlas = row.sourceMode !== 'canonical_raw' && atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
     return { fuelPrice, fuelCostsAtlas, txsCostsAtlas };
   };
   const ledgerCargoAllocations = await Promise.all(enrichedCargoAllocationRows.map(async (row) => {
@@ -7352,6 +7388,13 @@ async function fetchEarningsSnapshot(payload) {
     miningError,
     cargoError,
     cargoAllocationError,
+    rawCargoCostError,
+    rawCargoCostQuery: rawCargoCosts.query,
+    rawCargoCostCutoverManifestVersion: RAW_COST_CUTOVER_MANIFEST_VERSION,
+    rawCargoCostCutoverUtc: cutoverSelection.cutover,
+    rawCargoCostTrackingDisabled: cutoverSelection.trackingDisabled,
+    rawCargoCostRecordCount: valuedCanonicalRawCosts.length,
+    rawCargoCostRejectedCount: rawCargoCosts.rejected.length,
     activeMiningFleetCount: activeMiningFleetKeys.size,
     activeMappedMiningFleetCount: activeMappedMiningFleetKeys.size,
     miningRowCount: mining.length,

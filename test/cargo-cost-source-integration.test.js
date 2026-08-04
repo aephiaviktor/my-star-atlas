@@ -1,0 +1,30 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const main = fs.readFileSync(path.join(__dirname, '..', 'electron/main.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '..', 'electron/cargo-cost-source.js'), 'utf8');
+const price = fs.readFileSync(path.join(__dirname, '..', 'electron/atlas-price-resolver.js'), 'utf8');
+
+test('earnings snapshot uses existing Influx path and bounded worker cadence for raw points', () => {
+  assert.match(main, /fetchCanonicalRawCargoCosts/);
+  assert.match(main, /queryInfluxFlux\(settings, query\)/);
+  assert.match(main, /\(\) => fetchCanonicalRawCargoCosts\(settings\)/);
+  assert.doesNotMatch(source, /fetch\(|Connection\(|setInterval|setTimeout|price.*fetch|RPC/i);
+});
+
+test('cutover is applied before authoritative cargo totals and allocation valuation', () => {
+  const selection = main.indexOf('selectLegacyRawCutover');
+  const cargoProjection = main.indexOf('const activeCargoFleetKeys');
+  const allocation = main.indexOf('enrichedCargoAllocationRows = applyRawCostsToCargoAllocations');
+  assert.ok(selection >= 0 && selection < cargoProjection);
+  assert.ok(allocation > cargoProjection);
+  assert.match(main, /cargoRows = \[\.\.\.cutoverSelection\.legacyRows, \.\.\.canonicalRawDailyRows\]/);
+});
+
+test('frozen price seed remains exactly July 6 through August 4', () => {
+  assert.match(price, /INITIAL_SEED_START_UTC = '2026-07-06'/);
+  assert.match(price, /INITIAL_SEED_END_UTC = '2026-08-04'/);
+  assert.doesNotMatch(source, /aephia_historical|captureCurrentPriceSeeds|INITIAL_SEED_END_UTC/);
+});
