@@ -7995,7 +7995,7 @@ function renderUpgradingBreakevenTable() {
     }
   };
   for (const row of rows) {
-    const tr=document.createElement('tr'); const values=[row.name==='Ink'?'INK':row.name,row.gmPrice.toLocaleString(undefined,{maximumFractionDigits:6}),row.lpPerSecond.toFixed(3),formatCompactNumber(Number(result.atlasPool)*row.lp/row.gmPrice),row.grossAtlasPerSecond.toFixed(6),`${row.marginPercent.toFixed(1)}%`,row.netAtlasPerSecond.toFixed(6),row.netAtlasPerCargoUnit.toFixed(6)];
+    const tr=document.createElement('tr'); const values=[row.name==='Ink'?'INK':row.name,row.gmPrice.toLocaleString(undefined,{maximumFractionDigits:6}),row.lpPerSecond.toFixed(1),formatCompactNumber(Number(result.atlasPool)*row.lp/row.gmPrice),row.grossAtlasPerSecond.toFixed(6),`${row.marginPercent.toFixed(1)}%`,row.netAtlasPerSecond.toFixed(6),row.netAtlasPerCargoUnit.toFixed(6)];
     values.forEach((value,index)=>{const td=document.createElement('td');td.textContent=value;if(index>0)td.className='numeric-cell';tr.append(td);});
     const cell=document.createElement('td');cell.className='numeric-cell optimization-limit-cell';const input=document.createElement('input');input.type='number';input.min='0';input.step='any';input.className='optimization-framework-limit-input';input.placeholder='Enter price';input.dataset.limitComponent=row.name;input.setAttribute('aria-label',`${row.name} limit buy price`);
     input.addEventListener('input',()=>{const value=input.value.trim(),price=Number(value);if(value&&Number.isFinite(price)&&price>0)upgradingLimitAnchorByFaction.set(faction,{name:row.name,price});else upgradingLimitAnchorByFaction.delete(faction);updateLimits(row.name);renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(result));});
