@@ -166,7 +166,7 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(html, /id="optimization-upgrading-breakeven-head"/);
   assert.match(renderer, /upgradingTime:`\$\{row\.durationSeconds\}s`/);
   assert.match(renderer, /lpValue:row\.lp\.toLocaleString\(\)/);
-  assert.match(renderer, /factionLp:factionLp\.toLocaleString\(\)/);
+  assert.match(renderer, /factionLp:formatCompactNumber\(factionLp\)/);
   assert.match(renderer, /expected_total_lp_eod/);
   assert.match(renderer, /points\.sort\(\(a,b\) => a\.hour-b\.hour\)\.slice\(1\)/);
   assert.match(renderer, /bindOptimizationAnalyticsTooltip\(snapshot/);
