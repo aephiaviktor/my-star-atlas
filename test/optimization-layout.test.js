@@ -17,10 +17,6 @@ test('optimization table has visible scrollbar tracks and thumbs', () => {
   assert.match(css, /\.optimization-surface > \.fleet-table-wrap::\-webkit-scrollbar-thumb/);
 });
 
-test('upgrading process evidence grows with its table instead of overlapping the page guide', () => {
-  assert.match(css, /\.optimization-process-evidence-wrap\s*\{[^}]*max-height:\s*none;[^}]*overflow:\s*visible;/s);
-});
-
 test('optimization toolbar stacks primary tabs above indented secondary tabs', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
   assert.match(html, /class="optimization-tab-row optimization-primary-tabs"[\s\S]*data-optimization-subtab="scanning"[\s\S]*data-optimization-subtab="upgrading"/);

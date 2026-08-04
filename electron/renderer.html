@@ -930,13 +930,9 @@
                   <h3>Upgrading LP analysis</h3>
                   <p id="optimization-upgrading-analytics-status" class="optimization-analytics-note">Awaiting upgrading history</p>
                 </section>
-                <section class="optimization-analytics-card">
+                <section class="optimization-analytics-card optimization-upgrading-primary-chart-card">
                   <h3>Faction LP redemption vs player LP per upgrading crew</h3>
                   <div id="optimization-upgrading-redemption-chart" class="optimization-analytics-chart optimization-upgrading-tall-chart"></div>
-                </section>
-                <section class="optimization-analytics-card">
-                  <h3>Component profit margin vs faction LP redemption</h3>
-                  <div id="optimization-upgrading-margin-chart" class="optimization-analytics-chart optimization-upgrading-tall-chart"></div>
                 </section>
                 <section class="optimization-analytics-card">
                   <h3>Expected Total LP by EOD vs actual</h3>
@@ -946,13 +942,16 @@
                   <h3>Forecast error by snapshot hour</h3>
                   <div id="optimization-upgrading-error-chart" class="optimization-analytics-chart"></div>
                 </section>
-                <section class="optimization-analytics-card optimization-analytics-summary-card">
-                  <h3>Process automation evidence</h3>
-                  <p class="optimization-analytics-note">Exact repeat chains for the selected faction. A link matches profile, starbase, recipe, quantity, and duration.</p>
-                  <div class="fleet-table-wrap optimization-analytics-ranking-wrap optimization-process-evidence-wrap">
-                    <table class="fleet-table optimization-table optimization-analytics-ranking">
-                      <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-                      <tbody id="optimization-upgrading-process-evidence-body"><tr class="empty-row"><td colspan="2">Awaiting process history</td></tr></tbody>
+                <section class="optimization-analytics-card">
+                  <h3>Component profit margin vs faction LP redemption</h3>
+                  <div id="optimization-upgrading-margin-chart" class="optimization-analytics-chart optimization-upgrading-tall-chart"></div>
+                </section>
+                <section class="optimization-analytics-card optimization-upgrading-breakeven-card">
+                  <h3>Breakeven LP redemption</h3>
+                  <div class="fleet-table-wrap optimization-upgrading-breakeven-wrap">
+                    <table class="fleet-table optimization-table optimization-upgrading-breakeven-table">
+                      <thead><tr><th>Name</th><th>GM price</th><th>Breakeven LP redemption</th></tr></thead>
+                      <tbody id="optimization-upgrading-breakeven-body"><tr class="empty-row"><td colspan="3">Awaiting component prices</td></tr></tbody>
                     </table>
                   </div>
                 </section>
@@ -962,9 +961,8 @@
                     <article class="earnings-metric-guide-item"><h4>Faction LP redemption vs player LP per upgrading crew</h4><p>Each dot is one completed UTC day comparing total faction redemption with this player’s LP per average hourly phantom crew.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Player LP per crew = daily player LP / average hourly phantom crew; correlation compares that value with faction LP redeemed that day.</p><p><strong>Interpretation: </strong>Higher correlation means the player’s upgrading pace moves with the faction’s redemption pattern; it is directional evidence, not proof by itself.</p></article>
                     <article class="earnings-metric-guide-item"><h4>Expected Total LP by EOD vs actual</h4><p>Each line follows one day’s hourly forecast. The final dot is the actual faction LP redemption.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Hourly expected_total_lp_eod snapshots are plotted against the final daily faction LP redemption.</p><p><strong>Interpretation: </strong>Distance from the line to the final dot is forecast error at that hour; tighter lines mean the forecast stabilized earlier in the day.</p></article>
                     <article class="earnings-metric-guide-item"><h4>Forecast error by snapshot hour</h4><p>Shows the signed forecast error distribution for each snapshot hour.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Error = expected total LP by EOD - actual faction LP redemption; the line is median error and the band is the middle 50%.</p><p><strong>Interpretation: </strong>Above zero means overestimation; below zero means underestimation. A narrow band means that hour is more reliable.</p></article>
-                    <article class="earnings-metric-guide-item"><h4>Process automation evidence</h4><p>Summarizes exact repeated upgrading process chains for the selected faction.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Snapshots are deduplicated by process ID; a predecessor link requires the same profile, starbase, recipe, quantity, and duration, with the next process starting after the prior one ends.</p><p><strong>Interpretation: </strong>Repeated short restart gaps support automation classification, but matching chains are evidence rather than a final verdict.</p></article>
-                    <article class="earnings-metric-guide-item"><h4>Restart percentiles</h4><p>Shows the distribution of matched restart gaps.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>p80 means 80% of matched restart gaps are at or below that value; ≤120 sec and ≤300 sec rows show direct shares.</p><p><strong>Interpretation: </strong>Fast repetition is automation evidence. It does not prove the player used automation on every process.</p></article>
-                    <article class="earnings-metric-guide-item"><h4>Detected restart gap</h4><p>Finds the faction-specific restart gap where observations shift from very fast repeats to slower restarts.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>The page finds the largest relative jump between adjacent restart times in the central 20–90% of each faction’s observations; the lower edge becomes the provisional threshold.</p><p><strong>Interpretation: </strong>Restarts at or below the threshold are classified as probably automated; slower restarts are unconfirmed, not automatically manual.</p></article>
+                    <article class="earnings-metric-guide-item"><h4>Component profit margin vs faction LP redemption</h4><p>Shows how each component’s implied redemption value compares with its current GM price across 10B–50B faction LP redemption.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Margin = (((faction ATLAS pool / faction LP redemption) × component LP) / GM price - 1) × 100.</p><p><strong>Interpretation: </strong>Above zero means redemption value exceeds the current GM price; below zero means the GM price is higher. The faction-colored line marks yesterday’s redemption.</p></article>
+                    <article class="earnings-metric-guide-item"><h4>Breakeven LP redemption</h4><p>Lists the faction redemption level where each component’s implied profit margin reaches exactly 0%.</p><p class="earnings-metric-guide-formula"><strong>Formula: </strong>Breakeven faction LP = faction ATLAS pool × component LP / current GM price.</p><p><strong>Interpretation: </strong>Faction redemption below the breakeven level implies a positive component margin; redemption above it implies a negative margin at the displayed GM price.</p></article>
                   </div>
                 </details>
               </div>

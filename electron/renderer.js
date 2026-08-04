@@ -98,7 +98,7 @@ const optimizationUpgradingMarginChart = document.querySelector('#optimization-u
 const optimizationUpgradingRedemptionChart = document.querySelector('#optimization-upgrading-redemption-chart');
 const optimizationUpgradingForecastChart = document.querySelector('#optimization-upgrading-forecast-chart');
 const optimizationUpgradingErrorChart = document.querySelector('#optimization-upgrading-error-chart');
-const optimizationUpgradingProcessEvidenceBody = document.querySelector('#optimization-upgrading-process-evidence-body');
+const optimizationUpgradingBreakevenBody = document.querySelector('#optimization-upgrading-breakeven-body');
 const earningsSyncStatus = document.querySelector('#earnings-sync-status');
 const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
@@ -7871,45 +7871,31 @@ function renderUpgradingOptimizationAnalytics() {
   if(svg&&forecastValues.length){const min=Math.min(...forecastValues),max=Math.max(...forecastValues),pad=Math.max(1,(max-min)*.08),axes=renderUpgradingChartAxes(svg,{minY:Math.max(0,min-pad),maxY:max+pad,xLabel:'Snapshot hour (UTC)',yLabel:'Expected total LP by EOD',height:340}); const totalDays=analytics.forecasts.length; analytics.forecasts.forEach((day,index)=>{const isToday=day.today; const recency=totalDays>1?(totalDays-1-index)/(totalDays-1):1; const alpha=0.3+recency*0.7; const color=isToday?'#f59e0b':`rgba(69, 214, 193, ${alpha.toFixed(3)})`; const pointsAttr=day.points.map(p=>`${axes.x(p.hour)},${axes.y(p.value)}`).join(' '); const line=appendOptimizationSvg(svg,'polyline',{points:pointsAttr,fill:'none',stroke:color,'stroke-width':isToday?3.5:2,class:'optimization-forecast-line'}); appendOptimizationSvg(line,'title',{},`${day.day}${isToday?' (today)':''}`); const firstValue=day.points[0]?.value; const lastValue=day.points.at(-1)?.value; const actualText=Number.isFinite(day.actual)?day.actual.toLocaleString():'not final'; const daySummary=`${day.day}${isToday?' (today)':''} · ${day.points.length} snapshots · range ${Number.isFinite(firstValue)?firstValue.toLocaleString():'?'} → ${Number.isFinite(lastValue)?lastValue.toLocaleString():'?'} LP · actual final ${actualText} LP`; const hitArea=appendOptimizationSvg(svg,'polyline',{points:pointsAttr,class:'optimization-line-hit','stroke-width':16}); bindOptimizationAnalyticsTooltip(hitArea,daySummary); for(const point of day.points){const snapshot=appendOptimizationSvg(svg,'circle',{cx:axes.x(point.hour),cy:axes.y(point.value),r:5,fill:color}); const actual=Number.isFinite(day.actual)?`${day.actual.toLocaleString()} LP`:'not final'; const error=Number.isFinite(day.actual)?`${(point.value-day.actual).toLocaleString()} LP`:'not available'; bindOptimizationAnalyticsTooltip(snapshot,`${day.day} · ${String(point.hour).padStart(2,'0')}:00 UTC · expected ${point.value.toLocaleString()} LP · actual final ${actual} · forecast error ${error}`);} if(Number.isFinite(day.actual)){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(24),cy:axes.y(day.actual),r:4,fill:color,class:'mean-marker'});bindOptimizationAnalyticsTooltip(dot,`${day.day} · final ${factionLabel} faction LP redemption · ${day.actual.toLocaleString()} LP`);}});}
   svg=createOptimizationAnalyticsSvg(optimizationUpgradingErrorChart);
   if(svg&&analytics.errorByHour.length){const bound=comparisonScales.forecastErrorBound*1.1,axes=renderUpgradingChartAxes(svg,{minY:-bound,maxY:bound,xMax:23,xTicks:[0,6,12,18,23],xLabel:'Snapshot hour (UTC)',yLabel:'Forecast error (LP)'}); appendOptimizationSvg(svg,'line',{x1:axes.left,x2:axes.width-axes.right,y1:axes.y(0),y2:axes.y(0),class:'optimization-zero-line'}); const polygon=[...analytics.errorByHour.map(r=>`${axes.x(r.hour)},${axes.y(r.q75)}`),...analytics.errorByHour.slice().reverse().map(r=>`${axes.x(r.hour)},${axes.y(r.q25)}`)].join(' '); appendOptimizationSvg(svg,'polygon',{points:polygon,class:'optimization-error-band'}); appendOptimizationSvg(svg,'polyline',{points:analytics.errorByHour.map(r=>`${axes.x(r.hour)},${axes.y(r.median)}`).join(' '),fill:'none',class:'optimization-error-line'}); for(const row of analytics.errorByHour){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(row.hour),cy:axes.y(row.median),r:3,fill:'#45d6c1'});appendOptimizationSvg(dot,'title',{},`${String(row.hour).padStart(2,'0')}:00 · median ${row.median.toLocaleString()} LP · middle 50% ${row.q25.toLocaleString()} to ${row.q75.toLocaleString()} · n=${row.count}`);}}
-  renderUpgradingProcessEvidence(latestUpgradingOptimizationResult?.processEvidence);
+  renderUpgradingBreakevenTable();
 }
 
-function formatProcessEvidenceDuration(seconds) {
-  return Number.isFinite(Number(seconds)) ? `${Math.round(Number(seconds)).toLocaleString()} sec` : '--';
-}
-
-function formatProcessEvidenceShare(count, percent) {
-  if (!Number.isFinite(Number(percent))) return Number(count || 0).toLocaleString();
-  return `${Number(count || 0).toLocaleString()} (${Number(percent).toFixed(1)}%)`;
-}
-
-function renderUpgradingProcessEvidence(evidence) {
-  if (!optimizationUpgradingProcessEvidenceBody) return;
-  optimizationUpgradingProcessEvidenceBody.replaceChildren();
-  if (!evidence?.snapshotRows) {
-    const row = document.createElement('tr'); row.className = 'empty-row';
-    const cell = document.createElement('td'); cell.colSpan = 2; cell.textContent = 'No process history for the selected faction';
-    row.append(cell); optimizationUpgradingProcessEvidenceBody.append(row); return;
+function renderUpgradingBreakevenTable() {
+  if (!optimizationUpgradingBreakevenBody) return;
+  optimizationUpgradingBreakevenBody.replaceChildren();
+  const result = latestUpgradingOptimizationResult || {};
+  const atlasPool = Number(result.atlasPool);
+  const prices = result.componentPricesAtl || {};
+  const rows = upgradingMarginComponents
+    .map(([name, lp]) => ({ name, lp, gmPrice: Number(prices[String(name).toLowerCase()]) }))
+    .filter((row) => Number.isFinite(row.gmPrice) && row.gmPrice > 0 && Number.isFinite(atlasPool) && atlasPool > 0)
+    .sort((a, b) => a.lp - b.lp);
+  if (!rows.length) {
+    const tr = document.createElement('tr'); tr.className = 'empty-row';
+    const td = document.createElement('td'); td.colSpan = 3; td.textContent = 'Component prices unavailable';
+    tr.append(td); optimizationUpgradingBreakevenBody.append(tr); return;
   }
-  const range = evidence.historyStart && evidence.historyEnd
-    ? `${new Date(evidence.historyStart).toLocaleString()} → ${new Date(evidence.historyEnd).toLocaleString()}` : '--';
-  const rows = [
-    ['History range', range], ['Process snapshots', Number(evidence.snapshotRows).toLocaleString()],
-    ['Unique processes', Number(evidence.uniqueProcesses).toLocaleString()], ['Player profiles', Number(evidence.profiles).toLocaleString()],
-    ['Exact repeat groups', Number(evidence.repeatGroups).toLocaleString()], ['Predecessor links', Number(evidence.predecessorLinks).toLocaleString()],
-    ['Longest observed chain', Number(evidence.longestChain).toLocaleString()],
-    ['Restart gap p25', formatProcessEvidenceDuration(evidence.restartGapP25Seconds)],
-    ['Restart gap median', formatProcessEvidenceDuration(evidence.restartGapMedianSeconds)],
-    ['Restart gap p75', formatProcessEvidenceDuration(evidence.restartGapP75Seconds)],
-    ['Restart gap p80', formatProcessEvidenceDuration(evidence.restartGapP80Seconds)],
-    ['Restart gap p90', formatProcessEvidenceDuration(evidence.restartGapP90Seconds)],
-    ['Detected restart gap', Number.isFinite(Number(evidence.automationGapLowerSeconds)) && Number.isFinite(Number(evidence.automationGapUpperSeconds)) ? `${formatProcessEvidenceDuration(evidence.automationGapLowerSeconds)} → ${formatProcessEvidenceDuration(evidence.automationGapUpperSeconds)}` : '--'],
-    ['Probable automation threshold', Number.isFinite(Number(evidence.automationThresholdSeconds)) ? `≤ ${formatProcessEvidenceDuration(evidence.automationThresholdSeconds)}` : '--'],
-    ['Probably automated', formatProcessEvidenceShare(evidence.probablyAutomatedCount, evidence.probablyAutomatedPercent)],
-    ['Restarts within 120 sec', formatProcessEvidenceShare(evidence.restartWithin120, evidence.restartWithin120Percent)],
-    ['Restarts within 300 sec', formatProcessEvidenceShare(evidence.restartWithin300, evidence.restartWithin300Percent)],
-  ];
-  for (const [label, value] of rows) { const tr=document.createElement('tr'); const name=document.createElement('td'); const amount=document.createElement('td'); name.textContent=label; amount.textContent=value; amount.className='numeric-cell'; tr.append(name,amount); optimizationUpgradingProcessEvidenceBody.append(tr); }
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    const name = document.createElement('td'); name.textContent = row.name;
+    const gmPrice = document.createElement('td'); gmPrice.className = 'numeric-cell'; gmPrice.textContent = row.gmPrice.toLocaleString(undefined, { maximumFractionDigits: 6 });
+    const breakeven = document.createElement('td'); breakeven.className = 'numeric-cell'; breakeven.textContent = Math.round(atlasPool * row.lp / row.gmPrice).toLocaleString();
+    tr.append(name, gmPrice, breakeven); optimizationUpgradingBreakevenBody.append(tr);
+  }
 }
 
 async function refreshScanningOptimizationAnalyticsData({ force = false } = {}) {
