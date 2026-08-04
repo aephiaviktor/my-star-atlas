@@ -217,6 +217,7 @@ function wrapMarketplaceConnection(connection, { instrumentation, operation } = 
       return (...args) => runWithTelemetryContext({
         feature: operation === 'LM' ? 'Marketplace LM' : operation === 'GM' ? 'Marketplace GM' : 'Other',
         suboperation: 'marketplace-scan',
+        ...(operation === 'GM' ? { faction: 'global' } : {}),
       }, () => instrumentation.runLogical(
         { operation, method },
         async () => {

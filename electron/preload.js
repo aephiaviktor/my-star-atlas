@@ -140,6 +140,7 @@ function consumptionTotalCacheKey(input) {
 contextBridge.exposeInMainWorld('myStarAtlas', {
   getProfileName: () => ipcRenderer.invoke('app:get-profile-name'),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+  getRpcUsageDay: (utcDate) => ipcRenderer.invoke('telemetry:rpc-usage-day', utcDate),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   downloadUpdateAndRestart: () => ipcRenderer.invoke('updates:download-and-restart'),
   getSettings: () => ipcRenderer.invoke('settings:get'),

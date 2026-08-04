@@ -25,6 +25,7 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher } = require('./rpc-resilience');
 const { createTelemetryLedger } = require('./telemetry-ledger');
+const { createRpcUsageReader } = require('./telemetry-day-summary');
 const {
   normalizeContext: normalizeTelemetryContext,
   setTelemetryRecorder,
@@ -101,6 +102,7 @@ const appIconPath = path.join(__dirname, 'assets', 'aephia-logo.png');
 
 app.setPath('userData', path.join(baseUserData, 'profiles', profileName));
 const telemetryLedger = createTelemetryLedger({ userDataPath: app.getPath('userData'), profile: profileName });
+const getRpcUsageDay = createRpcUsageReader({ ledger: telemetryLedger, userDataPath: app.getPath('userData') });
 setTelemetryRecorder(telemetryLedger);
 app.setName(`My Star Atlas - ${profileName}`);
 if (typeof app.setDesktopName === 'function') {
@@ -7395,6 +7397,7 @@ function handleTrustedIpc(channel, handler) {
 
 handleTrustedIpc('app:get-profile-name', () => profileName);
 handleTrustedIpc('app:get-version', () => packageJson.version);
+handleTrustedIpc('telemetry:rpc-usage-day', (_event, utcDate) => getRpcUsageDay(utcDate));
 handleTrustedIpc('updates:check', () => checkForUpdates());
 handleTrustedIpc('updates:download-and-restart', () => downloadUpdateAndRestart());
 handleTrustedIpc('settings:get', async () => redactSettings(await readSettings()));
@@ -7405,7 +7408,7 @@ handleTrustedIpc('rpc-limiter:send-settings', async (_event, payload) => sendSet
 function runTelemetryFeature(payload, feature, callback) {
   const safe = normalizeTelemetryContext({
     profile: profileName,
-    faction: normalizeFaction(payload?.faction),
+    faction: payload?.faction,
     feature,
     trigger: payload?.trigger,
   });

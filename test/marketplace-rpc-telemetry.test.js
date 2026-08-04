@@ -194,6 +194,20 @@ test('Marketplace compatibility telemetry bridges feature context without durabl
   setTelemetryRecorder(null);
 });
 
+test('GM marketplace transport is attributed to Shared/Global rather than the selected faction', async () => {
+  const durable = [];
+  setTelemetryRecorder({ record(event) { durable.push(event); }, flush() {} });
+  const telemetry = createMarketplaceRpcTelemetry({ runId: 'gm-global' });
+  const instrumentation = createMarketplaceRpcInstrumentation(telemetry);
+  const connection = wrapRpcConnection({ async getAccountInfo() { return { ok: true }; } });
+  const wrapped = wrapMarketplaceConnection(connection, { instrumentation, operation: 'GM' });
+  assert.deepEqual(await wrapped.getAccountInfo('synthetic'), { ok: true });
+  const logical = durable.find((event) => event.type === 'logical-start');
+  assert.equal(logical.context.feature, 'Marketplace GM');
+  assert.equal(logical.context.faction, 'global');
+  setTelemetryRecorder(null);
+});
+
 test('Marketplace attempt budget retains the exact first refused sentinel', () => {
   const attemptBudget = createMarketplaceRpcAttemptBudget({ limit: 0 });
   let first;

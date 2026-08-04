@@ -69,13 +69,13 @@
         <div class="nav-footer">
           <button id="open-settings-btn" class="settings-launch nav-cyan" type="button">
             <span class="nav-icon">ST</span>
-            <span>Settings</span>
+            <span class="settings-label">Settings</span>
+            <span id="settings-status-dot" class="sync-dot muted settings-status-dot" role="img" aria-label="Settings Incomplete" title="Settings Incomplete"></span>
           </button>
           <div class="nav-footer-status">
-            <div class="version-line">v<span id="version-label">0.5.0</span></div>
-            <div class="settings-ready-badge">
-              <span class="sync-dot muted"></span>
-              <span id="settings-status">Settings incomplete</span>
+            <div class="version-line">
+              <span>v<span id="version-label">0.5.0</span></span>
+              <button id="rpc-usage-btn" class="rpc-usage-launch" type="button">RPC Usage</button>
             </div>
           </div>
         </div>
@@ -1577,6 +1577,59 @@
         </aside>
       </div>
 
+      <div class="modal-backdrop" id="rpc-usage-modal" hidden>
+        <section class="rpc-usage-dialog" role="dialog" aria-modal="true" aria-labelledby="rpc-usage-dialog-title">
+          <div class="rpc-usage-dialog-header">
+            <div>
+              <h2 id="rpc-usage-dialog-title">RPC Usage</h2>
+              <p id="rpc-usage-period">UTC day in progress</p>
+            </div>
+            <button id="rpc-usage-close-btn" class="icon-button" type="button" aria-label="Close RPC Usage">×</button>
+          </div>
+          <div class="rpc-usage-controls">
+            <label>
+              UTC date
+              <select id="rpc-usage-date-select" aria-label="RPC Usage UTC date"></select>
+            </label>
+            <label>
+              Faction
+              <select id="rpc-usage-faction-select" aria-label="Filter RPC Usage by faction">
+                <option value="all">All</option>
+                <option value="MUD">MUD</option>
+                <option value="ONI">ONI</option>
+                <option value="USTUR">USTUR</option>
+                <option value="global">Shared/Global</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </label>
+            <label>
+              Method
+              <select id="rpc-usage-method-select" aria-label="Filter RPC Usage by method">
+                <option value="all">All methods</option>
+              </select>
+            </label>
+          </div>
+          <div id="rpc-usage-content">
+            <div class="rpc-usage-metrics">
+              <div><span>UTC-day total</span><strong id="rpc-usage-total">—</strong></div>
+              <div><span>Filtered subtotal</span><strong id="rpc-usage-filtered">—</strong></div>
+              <div><span>Day share</span><strong id="rpc-usage-share">—</strong></div>
+              <div><span>Retries</span><strong id="rpc-usage-retries">—</strong></div>
+              <div><span>Fallback attempts</span><strong id="rpc-usage-fallbacks">—</strong></div>
+            </div>
+            <p class="rpc-usage-provider-line" id="rpc-usage-providers">Providers: —</p>
+            <p class="rpc-usage-updated" id="rpc-usage-updated">Last telemetry update: —</p>
+            <div class="rpc-usage-table-wrap">
+              <table class="rpc-usage-table">
+                <thead><tr><th>Method</th><th>Requests</th><th>Day share</th><th>Retries</th><th>Fallbacks</th></tr></thead>
+                <tbody id="rpc-usage-method-body"></tbody>
+              </table>
+            </div>
+          </div>
+          <p class="rpc-usage-empty" id="rpc-usage-empty" hidden>No telemetry recorded</p>
+        </section>
+      </div>
+
       <div class="modal-backdrop" id="update-modal" hidden>
         <section class="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-dialog-title">
           <h2 id="update-dialog-title">My Star Atlas Update</h2>
@@ -1594,6 +1647,7 @@
     </div>
 
     <script src="./request-guard.js"></script>
+    <script src="./rpc-usage-model.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

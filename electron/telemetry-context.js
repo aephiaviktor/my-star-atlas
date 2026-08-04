@@ -6,7 +6,7 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const FEATURES = new Set(['Marketplace LM', 'Marketplace GM', 'Fleet discovery', 'Rental data', 'Earnings', 'Mining counts', 'Other']);
 const TRIGGERS = new Set(['startup', 'background', 'navigation', 'manual', 'settings', 'unknown']);
 const PROVIDERS = new Set(['main', 'fallback', 'direct', 'unknown']);
-const FACTIONS = new Set(['MUD', 'ONI', 'USTUR', 'unknown']);
+const FACTIONS = new Set(['MUD', 'ONI', 'USTUR', 'global', 'unknown']);
 const METHODS = new Set([
   'getAccountInfo', 'getMultipleAccountsInfo', 'getProgramAccounts', 'getProgramAccountsV2',
   'getSignaturesForAddress', 'getParsedTransaction', 'batch', 'unknown',
@@ -16,11 +16,21 @@ const storage = new AsyncLocalStorage();
 let recorder = null;
 
 function choose(value, allowed, fallback) { return allowed.has(value) ? value : fallback; }
-function normalizeMethod(value) { return choose(String(value || ''), METHODS, 'unknown'); }
+function normalizeFaction(value) {
+  const faction = String(value || '').trim();
+  const upper = faction.toUpperCase();
+  if (upper === 'MUD' || upper === 'ONI' || upper === 'USTUR') return upper;
+  if (upper === 'GLOBAL' || upper === 'SHARED' || upper === 'SHARED/GLOBAL') return 'global';
+  return 'unknown';
+}
+function normalizeMethod(value) {
+  const method = String(value || '').trim();
+  return METHODS.has(method) || /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(method) ? method : 'unknown';
+}
 function normalizeContext(value = {}) {
   return Object.freeze({
     profile: /^[A-Za-z0-9_-]{1,32}$/.test(String(value.profile || '')) ? String(value.profile) : 'unknown',
-    faction: choose(value.faction, FACTIONS, 'unknown'),
+    faction: normalizeFaction(value.faction),
     feature: choose(value.feature, FEATURES, 'Other'),
     suboperation: choose(value.suboperation, SUBOPERATIONS, 'none'),
     trigger: choose(value.trigger, TRIGGERS, 'unknown'),
@@ -81,7 +91,7 @@ function recordTelemetryCounter(counter, amount = 1, overrides = {}) {
 
 module.exports = {
   FEATURES, TRIGGERS, PROVIDERS, METHODS, SUBOPERATIONS,
-  normalizeContext, normalizeMethod, setTelemetryRecorder, getTelemetryRecorder,
+  normalizeContext, normalizeFaction, normalizeMethod, setTelemetryRecorder, getTelemetryRecorder,
   getTelemetryContext, runWithTelemetryContext, runFeature, runLogicalOperation,
   recordTelemetryCounter, safeFlush,
 };

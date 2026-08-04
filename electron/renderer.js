@@ -1,5 +1,6 @@
 const api = window.myStarAtlas;
 const requestGuard = window.RequestGuard.createRequestGuard();
+const rpcUsageModel = window.RpcUsageModel;
 
 function getRefreshContext(filters = {}) {
   const settings = latestSettings || getFormPayload();
@@ -13,7 +14,6 @@ function getRefreshContext(filters = {}) {
 const form = document.querySelector('#settings-form');
 const appShell = document.querySelector('.app-shell');
 const saveStatus = document.querySelector('#save-status');
-const settingsStatus = document.querySelector('#settings-status');
 const syncDot = document.querySelector('.sync-dot');
 const toggleSensitiveButton = document.querySelector('#toggle-sensitive-btn');
 const rpcLimiterMainUrl = document.querySelector('#rpc-limiter-main-url');
@@ -38,6 +38,23 @@ const updateLatestVersion = document.querySelector('#update-latest-version');
 const updateMessage = document.querySelector('#update-message');
 const updateConfirmButton = document.querySelector('#update-confirm-btn');
 const updateCancelButton = document.querySelector('#update-cancel-btn');
+const rpcUsageButton = document.querySelector('#rpc-usage-btn');
+const rpcUsageModal = document.querySelector('#rpc-usage-modal');
+const rpcUsageCloseButton = document.querySelector('#rpc-usage-close-btn');
+const rpcUsageDateSelect = document.querySelector('#rpc-usage-date-select');
+const rpcUsageFactionSelect = document.querySelector('#rpc-usage-faction-select');
+const rpcUsageMethodSelect = document.querySelector('#rpc-usage-method-select');
+const rpcUsagePeriod = document.querySelector('#rpc-usage-period');
+const rpcUsageContent = document.querySelector('#rpc-usage-content');
+const rpcUsageEmpty = document.querySelector('#rpc-usage-empty');
+const rpcUsageTotal = document.querySelector('#rpc-usage-total');
+const rpcUsageFiltered = document.querySelector('#rpc-usage-filtered');
+const rpcUsageShare = document.querySelector('#rpc-usage-share');
+const rpcUsageRetries = document.querySelector('#rpc-usage-retries');
+const rpcUsageFallbacks = document.querySelector('#rpc-usage-fallbacks');
+const rpcUsageProviders = document.querySelector('#rpc-usage-providers');
+const rpcUsageUpdated = document.querySelector('#rpc-usage-updated');
+const rpcUsageMethodBody = document.querySelector('#rpc-usage-method-body');
 const measurementList = document.querySelector('#measurement-list');
 const fleetSyncStatus = document.querySelector('#fleet-sync-status');
 const fleetTableBody = document.querySelector('#fleet-table-body');
@@ -88,6 +105,8 @@ const earningsColumnControlsContainer = document.querySelector('#earnings-column
 let earningsColumnControls = Array.from(document.querySelectorAll('[data-earnings-column]'));
 let availableUpdate = null;
 let updateCheckInFlight = false;
+let rpcUsageSummary = null;
+let rpcUsageLoadGeneration = 0;
 const earningsSduPriceValue = document.querySelector('#earnings-sdu-price-value');
 const earningsSduPriceNote = document.querySelector('#earnings-sdu-price-note');
 const earningsSduScanValue = document.querySelector('#earnings-sdu-scan-value');
@@ -1178,6 +1197,127 @@ function setUpdateModalOpen(open) {
   updateModal.hidden = !open;
 }
 
+function currentUtcDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function setRpcUsageModalOpen(open) {
+  rpcUsageModal.hidden = !open;
+  if (open) rpcUsageCloseButton.focus();
+  else rpcUsageButton.focus();
+}
+
+function populateRpcUsageDates(dates, selectedDate) {
+  const values = [...new Set([selectedDate, ...(Array.isArray(dates) ? dates : [])].filter(Boolean))]
+    .sort((left, right) => right.localeCompare(left));
+  rpcUsageDateSelect.replaceChildren();
+  for (const value of values) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    option.selected = value === selectedDate;
+    rpcUsageDateSelect.appendChild(option);
+  }
+}
+
+function populateRpcUsageMethods(methods) {
+  const selected = rpcUsageMethodSelect.value || 'all';
+  rpcUsageMethodSelect.replaceChildren();
+  const all = document.createElement('option');
+  all.value = 'all';
+  all.textContent = 'All methods';
+  rpcUsageMethodSelect.appendChild(all);
+  for (const method of Array.isArray(methods) ? methods : []) {
+    const option = document.createElement('option');
+    option.value = method;
+    option.textContent = method;
+    rpcUsageMethodSelect.appendChild(option);
+  }
+  rpcUsageMethodSelect.value = [...rpcUsageMethodSelect.options].some((option) => option.value === selected) ? selected : 'all';
+}
+
+function formatRpcUsagePercent(value) {
+  return `${(Math.max(0, Number(value) || 0) * 100).toFixed(1)}%`;
+}
+
+function renderRpcUsage() {
+  const summary = rpcUsageSummary;
+  if (!summary?.available) {
+    rpcUsageContent.hidden = true;
+    rpcUsageEmpty.hidden = false;
+    setText(rpcUsageEmpty, summary?.reason === 'missing' ? 'No telemetry recorded' : 'Telemetry unavailable for this UTC day.');
+    setText(rpcUsagePeriod, 'UTC telemetry unavailable');
+    return;
+  }
+  const view = rpcUsageModel.buildRpcUsageView(summary, {
+    faction: rpcUsageFactionSelect.value,
+    method: rpcUsageMethodSelect.value,
+  });
+  rpcUsageContent.hidden = false;
+  rpcUsageEmpty.hidden = true;
+  setText(rpcUsagePeriod, `${summary.periodLabel} · ${summary.utcDate}`);
+  setText(rpcUsageTotal, formatWholeNumber(view.dayTotal));
+  setText(rpcUsageFiltered, formatWholeNumber(view.filtered.requests));
+  setText(rpcUsageShare, formatRpcUsagePercent(view.filteredShare));
+  setText(rpcUsageRetries, formatWholeNumber(view.filtered.retries));
+  setText(rpcUsageFallbacks, formatWholeNumber(view.filtered.fallbackAttempts));
+
+  const providerRequests = new Map(view.providers.map((item) => [item.key, item.requests]));
+  const providerParts = (summary.providers || []).map((item) => `${item.label}: ${formatWholeNumber(providerRequests.get(item.key) || 0)}`);
+  setText(rpcUsageProviders, `Providers: ${providerParts.join(' · ')} · Batch elements: ${formatWholeNumber(view.filtered.batchElements)} (not additional requests)`);
+  const updatedAt = Date.parse(summary.lastUpdatedAt);
+  setText(rpcUsageUpdated, `Last telemetry update: ${Number.isFinite(updatedAt) ? new Date(updatedAt).toISOString() : 'Unavailable'}`);
+
+  rpcUsageMethodBody.replaceChildren();
+  if (!view.methods.length) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 5;
+    cell.textContent = 'No RPC requests recorded for this filter.';
+    row.appendChild(cell);
+    rpcUsageMethodBody.appendChild(row);
+    return;
+  }
+  for (const method of view.methods) {
+    const row = document.createElement('tr');
+    const values = [
+      method.method,
+      formatWholeNumber(method.requests),
+      formatRpcUsagePercent(view.dayTotal > 0 ? method.requests / view.dayTotal : 0),
+      formatWholeNumber(method.retries),
+      formatWholeNumber(method.fallbackAttempts),
+    ];
+    for (const value of values) {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      row.appendChild(cell);
+    }
+    rpcUsageMethodBody.appendChild(row);
+  }
+}
+
+async function loadRpcUsage(utcDate = currentUtcDate()) {
+  const generation = ++rpcUsageLoadGeneration;
+  setText(rpcUsagePeriod, `Loading ${utcDate} UTC...`);
+  rpcUsageContent.hidden = true;
+  rpcUsageEmpty.hidden = false;
+  setText(rpcUsageEmpty, 'Loading telemetry...');
+  try {
+    const result = await api.getRpcUsageDay(utcDate);
+    if (generation !== rpcUsageLoadGeneration) return;
+    rpcUsageSummary = result;
+    populateRpcUsageDates(rpcUsageSummary.availableDates, rpcUsageSummary.utcDate);
+    populateRpcUsageMethods(rpcUsageSummary.methods);
+  } catch (error) {
+    if (generation !== rpcUsageLoadGeneration) return;
+    console.error(error);
+    rpcUsageSummary = { available: false, reason: 'unavailable', utcDate, availableDates: [] };
+    populateRpcUsageDates([], utcDate);
+    populateRpcUsageMethods([]);
+  }
+  renderRpcUsage();
+}
+
 function renderUpdateState(result, error = null) {
   availableUpdate = result || null;
   const updateAvailable = Boolean(result?.updateAvailable);
@@ -1323,9 +1463,11 @@ function hasSecureSetting(settings, key) {
 
 function updateSettingsStatus(settings) {
   const ready = hasRequiredSettings(settings);
-  setText(settingsStatus, ready ? 'Settings ready' : 'Settings incomplete');
+  const status = ready ? 'Settings Ready' : 'Settings Incomplete';
   syncDot.classList.toggle('ready', ready);
   syncDot.classList.toggle('muted', !ready);
+  syncDot.setAttribute('title', status);
+  syncDot.setAttribute('aria-label', status);
   setText(profileLabel, normalizeFaction(settings?.faction));
 }
 
@@ -8556,6 +8698,18 @@ updateButton.addEventListener('click', () => {
   void checkForUpdates({ openModal: true });
 });
 
+rpcUsageButton.addEventListener('click', () => {
+  setRpcUsageModalOpen(true);
+  void loadRpcUsage(currentUtcDate());
+});
+rpcUsageCloseButton.addEventListener('click', () => setRpcUsageModalOpen(false));
+rpcUsageModal.addEventListener('click', (event) => {
+  if (event.target === rpcUsageModal) setRpcUsageModalOpen(false);
+});
+rpcUsageDateSelect.addEventListener('change', () => void loadRpcUsage(rpcUsageDateSelect.value));
+rpcUsageFactionSelect.addEventListener('change', renderRpcUsage);
+rpcUsageMethodSelect.addEventListener('change', renderRpcUsage);
+
 updateCancelButton.addEventListener('click', () => setUpdateModalOpen(false));
 updateModal.addEventListener('click', (event) => {
   if (event.target === updateModal) setUpdateModalOpen(false);
@@ -8584,7 +8738,8 @@ settingsOverlay.addEventListener('click', (event) => {
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
-    if (!updateModal.hidden) setUpdateModalOpen(false);
+    if (!rpcUsageModal.hidden) setRpcUsageModalOpen(false);
+    else if (!updateModal.hidden) setUpdateModalOpen(false);
     else if (!settingsOverlay.classList.contains('hidden')) closeSettings();
   }
 });
