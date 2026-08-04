@@ -124,7 +124,7 @@ test('Optimization exposes Upgrading after Scanning with date filters, table, an
   assert.doesNotMatch(html, /Process automation evidence/);
   assert.match(html, />LP Analysis yesterday</);
   assert.match(html, /optimization-upgrading-primary-chart-card[\s\S]*?Faction LP redemption vs player LP per upgrading crew[\s\S]*?id="optimization-upgrading-redemption-chart"/);
-  assert.match(html, /id="optimization-upgrading-error-chart"[\s\S]*?Component profit margin vs faction LP redemption[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?Component Efficiency Frontier[\s\S]*?id="optimization-upgrading-efficiency-chart"[\s\S]*?optimization-upgrading-breakeven-card optimization-analytics-summary-card[\s\S]*?>LP Analysis yesterday</);
+  assert.match(html, /id="optimization-upgrading-error-chart"[\s\S]*?optimization-upgrading-primary-chart-card[\s\S]*?Component profit margin vs faction LP redemption[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?optimization-upgrading-breakeven-card optimization-analytics-summary-card[\s\S]*?>LP Analysis yesterday[\s\S]*?optimization-upgrading-primary-chart-card[\s\S]*?Component Efficiency Frontier[\s\S]*?id="optimization-upgrading-efficiency-chart"/);
   assert.match(html, /id="optimization-upgrading-forecast-chart"[\s\S]*?id="optimization-upgrading-error-chart"/);
   assert.match(html, /<section class="optimization-analytics-card">\s*<h3>Forecast error by snapshot hour<\/h3>/);
   assert.match(html, /optimization-upgrading-primary-chart-card/);

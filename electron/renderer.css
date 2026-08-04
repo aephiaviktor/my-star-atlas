@@ -2785,7 +2785,7 @@ label {
 .optimization-upgrading-breakeven-table { width: 100%; }
 .optimization-upgrading-breakeven-table { min-width: 0; font-size: 11px; }
 .optimization-upgrading-breakeven-table th,
-.optimization-upgrading-breakeven-table td { padding: 8px 10px; }
+.optimization-upgrading-breakeven-table td { padding: 5px 8px; }
 
 .optimization-dominated-cross { stroke: #f8fafc; stroke-width: 2; pointer-events: none; }
 .optimization-efficiency-label { font-size: 9px; pointer-events: none; }
@@ -2794,8 +2794,8 @@ label {
 .optimization-efficiency-legend-button::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: var(--component-color); }
 .optimization-efficiency-legend-button.selected { color: var(--text); border-color: var(--component-color); opacity: 1; }
 .optimization-analysis-group-head .optimization-limit-group { color: #67b7ff; background: rgba(36, 119, 184, 0.16); text-align: center; }
-.optimization-framework-limit-input { box-sizing: border-box; width: 92px; border: 1px solid rgba(103, 183, 255, 0.55); border-radius: 4px; padding: 4px 6px; background: rgba(4, 20, 30, 0.9); color: var(--text); font: inherit; text-align: right; }
-.optimization-limit-cell { min-width: 105px; }
+.optimization-framework-limit-input { box-sizing: border-box; width: 78px; border: 1px solid rgba(103, 183, 255, 0.55); border-radius: 4px; padding: 3px 5px; background: rgba(4, 20, 30, 0.9); color: var(--text); font: inherit; text-align: right; }
+.optimization-limit-cell { min-width: 90px; }
 .optimization-upgrading-breakeven-wrap { max-height: none; overflow: visible; }
 .optimization-efficiency-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .optimization-efficiency-card-header h3 { margin-bottom: 8px; }
