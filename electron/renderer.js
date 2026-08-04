@@ -7814,9 +7814,9 @@ function getUpgradingComparisonScales(results, now = new Date()) {
   };
 }
 
-function renderUpgradingChartAxes(svg, { minY = 0, maxY = 1, xMax = 24, xTicks = [0,6,12,18,24], xLabel = '', yLabel = '', height = 280 } = {}) {
+function renderUpgradingChartAxes(svg, { minY = 0, maxY = 1, xMin = 0, xMax = 24, xTicks = [0,6,12,18,24], xLabel = '', yLabel = '', height = 280 } = {}) {
   const width=760,left=74,right=16,top=12,bottom=48;
-  const x=(value)=>left+value/xMax*(width-left-right); const y=(value)=>top+(maxY-value)/Math.max(1,maxY-minY)*(height-top-bottom);
+  const x=(value)=>left+(value-xMin)/Math.max(1,xMax-xMin)*(width-left-right); const y=(value)=>top+(maxY-value)/Math.max(1,maxY-minY)*(height-top-bottom);
   for(let tick=0;tick<=4;tick++){ const value=minY+(maxY-minY)*(4-tick)/4; const yy=top+(height-top-bottom)*tick/4; appendOptimizationSvg(svg,'line',{x1:left,x2:width-right,y1:yy,y2:yy,class:'grid-line'}); appendOptimizationSvg(svg,'text',{x:left-6,y:yy+3,'text-anchor':'end',class:'axis-label'},formatCompactNumber(value)); }
   for(const value of xTicks) appendOptimizationSvg(svg,'text',{x:x(value),y:height-bottom+16,'text-anchor':'middle',class:'axis-label'},Math.abs(value) >= 1000 ? formatCompactNumber(value) : String(Math.round(value)));
   if(xLabel) appendOptimizationSvg(svg,'text',{x:(left+width-right)/2,y:height-5,'text-anchor':'middle',class:'axis-label optimization-axis-title'},xLabel);
@@ -7831,25 +7831,25 @@ const upgradingMarginComponents = Object.freeze([
   ['Survey Data Unit', 1325], ['Ink', 100000],
 ]);
 const upgradingFactionColors = Object.freeze({ MUD: '#ef4444', ONI: '#3b82f6', USTUR: '#f59e0b' });
-function buildUpgradingMarginSeries(result, xMax = 50_000_000_000) {
+function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000_000_000) {
   const atlasPool = Number(result?.atlasPool), prices = result?.componentPricesAtl || {};
   if (!Number.isFinite(atlasPool) || atlasPool <= 0) return [];
   return upgradingMarginComponents.map(([name, lp]) => {
     const price = Number(prices[String(name).toLowerCase()]);
     if (!Number.isFinite(price) || price <= 0) return null;
-    const points = Array.from({ length: 100 }, (_, index) => { const factionLp = xMax * (index + 1) / 100; return { factionLp, marginPercent: ((atlasPool / factionLp * lp) / price - 1) * 100 }; });
+    const points = Array.from({ length: 101 }, (_, index) => { const factionLp = xMin + (xMax - xMin) * index / 100; return { factionLp, marginPercent: ((atlasPool / factionLp * lp) / price - 1) * 100 }; });
     return { name, lp, price, points };
   }).filter(Boolean);
 }
 function renderUpgradingMarginChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingMarginChart, 760, 340); if (!svg) return;
   const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}); if (!series.length) return;
-  const xMax = 50_000_000_000, values = series.flatMap((entry) => entry.points.map((point) => point.marginPercent));
-  const axes = renderUpgradingChartAxes(svg, { minY: Math.min(-100, ...values), maxY: Math.max(100, ...values), xMax, xTicks: [0, 10e9, 20e9, 30e9, 40e9, 50e9], xLabel: 'Theoretical faction LP redemption', yLabel: 'Component profit margin (%)', height: 340 });
+  const xMin = 10_000_000_000, xMax = 50_000_000_000, values = series.flatMap((entry) => entry.points.map((point) => point.marginPercent));
+  const axes = renderUpgradingChartAxes(svg, { minY: Math.min(-100, ...values), maxY: Math.max(100, ...values), xMin, xMax, xTicks: [10e9, 20e9, 30e9, 40e9, 50e9], xLabel: 'Theoretical faction LP redemption', yLabel: 'Component profit margin (%)', height: 340 });
   appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
   series.forEach((entry, index) => { const line = appendOptimizationSvg(svg, 'polyline', { points: entry.points.map((point) => `${axes.x(point.factionLp)},${axes.y(point.marginPercent)}`).join(' '), fill: 'none', stroke: getAssetChartColor(entry.name, index), 'stroke-width': 2, class: 'optimization-margin-line' }); bindOptimizationAnalyticsTooltip(line, `${entry.name} · ${entry.lp.toLocaleString()} LP/component · current GM ${entry.price.toLocaleString(undefined, { maximumFractionDigits: 6 })} ATLAS`); });
   const yesterday = analytics.latestFactionRedemption;
-  if (Number.isFinite(yesterday?.factionLp) && yesterday.factionLp <= xMax) { const faction = normalizeFaction(latestSettings?.faction); const marker = appendOptimizationSvg(svg, 'line', { x1: axes.x(yesterday.factionLp), x2: axes.x(yesterday.factionLp), y1: axes.top, y2: axes.height - axes.bottom, stroke: upgradingFactionColors[faction] || '#45d6c1', 'stroke-width': 3, class: 'optimization-yesterday-line' }); bindOptimizationAnalyticsTooltip(marker, `${yesterday.date} · ${faction === 'USTUR' ? 'UST' : faction} faction redemption ${yesterday.factionLp.toLocaleString()} LP`); }
+  if (Number.isFinite(yesterday?.factionLp) && yesterday.factionLp >= xMin && yesterday.factionLp <= xMax) { const faction = normalizeFaction(latestSettings?.faction); const marker = appendOptimizationSvg(svg, 'line', { x1: axes.x(yesterday.factionLp), x2: axes.x(yesterday.factionLp), y1: axes.top, y2: axes.height - axes.bottom, stroke: upgradingFactionColors[faction] || '#45d6c1', 'stroke-width': 3, class: 'optimization-yesterday-line' }); bindOptimizationAnalyticsTooltip(marker, `${yesterday.date} · ${faction === 'USTUR' ? 'UST' : faction} faction redemption ${yesterday.factionLp.toLocaleString()} LP`); }
 }
 
 function renderUpgradingOptimizationAnalytics() {

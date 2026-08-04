@@ -122,7 +122,7 @@ test('Optimization exposes Upgrading after Scanning with date filters, table, an
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
   for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-margin-chart', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-process-evidence-body']) assert.match(html, new RegExp(`id="${id}"`));
   assert.match(html, /Process automation evidence/);
-  assert.match(html, /Component profit margin vs faction LP redemption[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?Faction LP redemption vs player LP per upgrading crew[\s\S]*?id="optimization-upgrading-redemption-chart"/);
+  assert.match(html, /Faction LP redemption vs player LP per upgrading crew[\s\S]*?id="optimization-upgrading-redemption-chart"[\s\S]*?Component profit margin vs faction LP redemption[\s\S]*?id="optimization-upgrading-margin-chart"/);
   assert.match(html, /id="optimization-upgrading-forecast-chart"[\s\S]*?id="optimization-upgrading-error-chart"/);
   assert.match(html, /<section class="optimization-analytics-card">\s*<h3>Forecast error by snapshot hour<\/h3>/);
   assert.doesNotMatch(html, /optimization-upgrading-primary-chart-card/);
@@ -184,9 +184,10 @@ test('component margin chart uses pool share value, current GM price, and latest
     extractFunction(renderer, 'buildUpgradingMarginSeries'),
     'this.build = buildUpgradingMarginSeries;',
   ].join('\n'), context);
-  const series = context.build({ atlasPool: 2_000_000, componentPricesAtl: { framework: 2 } }, 10_000_000_000);
+  const series = context.build({ atlasPool: 2_000_000, componentPricesAtl: { framework: 2 } }, 10_000_000_000, 50_000_000_000);
   assert.equal(series.length, 1);
-  assert.equal(series[0].points.at(-1).marginPercent, -99.32);
+  assert.equal(series[0].points[0].factionLp, 10_000_000_000);
+  assert.equal(series[0].points.at(-1).marginPercent, -99.864);
   assert.match(main, /fetchAephiaResourceData\(\)\.catch/);
   assert.match(main, /pricingATL\?\.priceATL/);
   assert.match(main, /atlasPool: UPGRADE_ATLAS_POOLS\[aephiaFaction\]/);
