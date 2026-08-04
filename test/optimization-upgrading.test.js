@@ -230,3 +230,30 @@ test('component efficiency calculates gross and net ATLAS per second and marks d
   assert.match(html, /Gross ATLAS\/s/);
   assert.match(html, /Net ATLAS\/s/);
 });
+
+
+test('upgrading chart axes preserve sub-unit ranges instead of collapsing ATLAS-per-second values', () => {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(`${extractFunction(renderer, 'mapUpgradingChartY')}\nthis.mapY = mapUpgradingChartY;`, context);
+  assert.equal(context.mapY(0.0002, 0.0001, 0.0002, 12, 292), 12);
+  assert.equal(context.mapY(0.0001, 0.0001, 0.0002, 12, 292), 292);
+  assert.doesNotMatch(renderer, /Math\.max\(1,maxY-minY\)/);
+});
+
+test('LIMIT mode gives every achievable component Framework-equivalent net ATLAS per second', () => {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(`${extractFunction(renderer, 'applyUpgradingLimitPrices')}\nthis.apply = applyUpgradingLimitPrices;`, context);
+  const rows = [
+    { name: 'Framework', durationSeconds: 12, grossAtlasPerSecond: 0.0003, impliedAtlasValue: 0.0036, cargoWeight: 1 },
+    { name: 'Electronics', durationSeconds: 14, grossAtlasPerSecond: 0.0004, impliedAtlasValue: 0.0056, cargoWeight: 2 },
+  ];
+  const result = context.apply(rows, 0.0012);
+  assert.equal(result.length, 2);
+  assert.ok(Math.abs(result[0].netAtlasPerSecond - 0.0002) < 1e-15);
+  assert.ok(Math.abs(result[1].netAtlasPerSecond - 0.0002) < 1e-15);
+  assert.ok(Math.abs(result[1].limitPrice - 0.0028) < 1e-15);
+  assert.match(html, /id="optimization-upgrading-efficiency-limit"/);
+  assert.match(css, /optimization-upgrading-breakeven-wrap \{ max-height: none; overflow: visible; \}/);
+});

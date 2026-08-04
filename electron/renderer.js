@@ -97,6 +97,7 @@ const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimizati
 const optimizationUpgradingMarginChart = document.querySelector('#optimization-upgrading-margin-chart');
 const optimizationUpgradingEfficiencyChart = document.querySelector('#optimization-upgrading-efficiency-chart');
 const optimizationUpgradingEfficiencyLegend = document.querySelector('#optimization-upgrading-efficiency-legend');
+const optimizationUpgradingEfficiencyLimitButton = document.querySelector('#optimization-upgrading-efficiency-limit');
 const optimizationUpgradingRedemptionChart = document.querySelector('#optimization-upgrading-redemption-chart');
 const optimizationUpgradingForecastChart = document.querySelector('#optimization-upgrading-forecast-chart');
 const optimizationUpgradingErrorChart = document.querySelector('#optimization-upgrading-error-chart');
@@ -7816,9 +7817,13 @@ function getUpgradingComparisonScales(results, now = new Date()) {
   };
 }
 
+function mapUpgradingChartY(value, minY, maxY, top, bottom) {
+  return top + (maxY - value) / Math.max(Number.EPSILON, maxY - minY) * (bottom - top);
+}
+
 function renderUpgradingChartAxes(svg, { minY = 0, maxY = 1, xMin = 0, xMax = 24, xTicks = [0,6,12,18,24], xLabel = '', yLabel = '', height = 280, xFormatter = null, yFormatter = null } = {}) {
   const width=760,left=74,right=16,top=12,bottom=48;
-  const x=(value)=>left+(value-xMin)/Math.max(1,xMax-xMin)*(width-left-right); const y=(value)=>top+(maxY-value)/Math.max(1,maxY-minY)*(height-top-bottom);
+  const x=(value)=>left+(value-xMin)/Math.max(Number.EPSILON,xMax-xMin)*(width-left-right); const y=(value)=>mapUpgradingChartY(value,minY,maxY,top,height-bottom);
   for(let tick=0;tick<=4;tick++){ const value=minY+(maxY-minY)*(4-tick)/4; const yy=top+(height-top-bottom)*tick/4; appendOptimizationSvg(svg,'line',{x1:left,x2:width-right,y1:yy,y2:yy,class:'grid-line'}); appendOptimizationSvg(svg,'text',{x:left-6,y:yy+3,'text-anchor':'end',class:'axis-label'},yFormatter ? yFormatter(value) : formatCompactNumber(value)); }
   for(const value of xTicks) appendOptimizationSvg(svg,'text',{x:x(value),y:height-bottom+16,'text-anchor':'middle',class:'axis-label'},xFormatter ? xFormatter(value) : (Math.abs(value) >= 1000 ? formatCompactNumber(value) : String(Math.round(value))));
   if(xLabel) appendOptimizationSvg(svg,'text',{x:(left+width-right)/2,y:height-5,'text-anchor':'middle',class:'axis-label optimization-axis-title'},xLabel);
@@ -7837,6 +7842,8 @@ const upgradingDurationSeconds = Object.freeze({ 'Power Source': 15, Framework: 
 const upgradingCargoWeight = Object.freeze({ 'Power Source': 2, Framework: 1, Electromagnet: 4, Electronics: 2, 'Field Stabilizer': 6, 'Particle Accelerator': 6, 'Radiation Absorber': 6, 'Survey Data Unit': 1, Ink: 1 });
 const selectedUpgradingEfficiencyComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
 const upgradingFrameworkLimitByFaction = new Map();
+let upgradingEfficiencyLimitMode = false;
+optimizationUpgradingEfficiencyLimitButton?.addEventListener('click', () => { if (optimizationUpgradingEfficiencyLimitButton.disabled) return; upgradingEfficiencyLimitMode = !upgradingEfficiencyLimitMode; renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {})); });
 function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000_000_000) {
   const atlasPool = Number(result?.atlasPool), prices = result?.componentPricesAtl || {};
   if (!Number.isFinite(atlasPool) || atlasPool <= 0) return [];
@@ -7884,11 +7891,28 @@ function renderUpgradingEfficiencyLegend(rows, analytics) {
   });
 }
 
+function applyUpgradingLimitPrices(rows, frameworkLimit) {
+  const framework = rows.find((row) => row.name === 'Framework');
+  if (!framework || !Number.isFinite(frameworkLimit) || frameworkLimit <= 0) return rows;
+  const targetNetAtlasPerSecond = framework.grossAtlasPerSecond - frameworkLimit / framework.durationSeconds;
+  return rows.map((row) => {
+    const limitPrice = row.durationSeconds * (row.grossAtlasPerSecond - targetNetAtlasPerSecond);
+    if (limitPrice < 0) return { ...row, limitPrice, limitAchievable: false };
+    return { ...row, gmPrice: limitPrice, limitPrice, limitAchievable: true, netAtlasPerSecond: targetNetAtlasPerSecond, marginPercent: (row.impliedAtlasValue / limitPrice - 1) * 100, netAtlasPerCargoUnit: (row.impliedAtlasValue - limitPrice) / row.cargoWeight };
+  }).filter((row) => row.limitAchievable !== false);
+}
+
 function renderUpgradingEfficiencyChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingEfficiencyChart, 760, 340);
   if (!svg) return;
-  const allRows = buildUpgradingEfficiencyRows(latestUpgradingOptimizationResult || {}, Number(analytics.latestFactionRedemption?.factionLp));
-  renderUpgradingEfficiencyLegend(allRows, analytics);
+  const baseRows = buildUpgradingEfficiencyRows(latestUpgradingOptimizationResult || {}, Number(analytics.latestFactionRedemption?.factionLp));
+  renderUpgradingEfficiencyLegend(baseRows, analytics);
+  const faction = normalizeFaction(latestSettings?.faction);
+  const frameworkLimit = Number(upgradingFrameworkLimitByFaction.get(faction));
+  const hasFrameworkLimit = Number.isFinite(frameworkLimit) && frameworkLimit > 0;
+  if (!hasFrameworkLimit) upgradingEfficiencyLimitMode = false;
+  if (optimizationUpgradingEfficiencyLimitButton) { optimizationUpgradingEfficiencyLimitButton.disabled = !hasFrameworkLimit; optimizationUpgradingEfficiencyLimitButton.classList.toggle('active', upgradingEfficiencyLimitMode); optimizationUpgradingEfficiencyLimitButton.setAttribute('aria-pressed', String(upgradingEfficiencyLimitMode)); optimizationUpgradingEfficiencyLimitButton.title = hasFrameworkLimit ? 'Plot all components at their equivalent limit prices' : 'Enter a Framework limit price first'; }
+  const allRows = upgradingEfficiencyLimitMode ? applyUpgradingLimitPrices(baseRows, frameworkLimit) : baseRows;
   const rows = markUpgradingDominatedRows(allRows.filter((row) => selectedUpgradingEfficiencyComponents.has(row.name)));
   if (!rows.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
   const margins = rows.map((row) => row.marginPercent), nets = rows.map((row) => row.netAtlasPerSecond);
@@ -7900,7 +7924,7 @@ function renderUpgradingEfficiencyChart(analytics) {
   rows.forEach((row, index) => {
     const cx = axes.x(row.marginPercent), cy = axes.y(row.netAtlasPerSecond), radius = 5 + Math.sqrt(row.cargoWeight) * 2;
     const dot = appendOptimizationSvg(svg, 'circle', { cx, cy, r: radius, fill: getAssetChartColor(row.name, index), opacity: row.dominated ? 0.38 : 0.9, stroke: row.dominated ? '#cbd5e1' : '#e8fffb', 'stroke-width': row.dominated ? 1 : 2 });
-    bindOptimizationAnalyticsTooltip(dot, `${row.name} · margin ${row.marginPercent.toFixed(1)}% · gross ${row.grossAtlasPerSecond.toFixed(6)} ATLAS/s · net ${row.netAtlasPerSecond.toFixed(6)} ATLAS/s · cargo ${row.cargoWeight}${row.dominated ? ' · Pareto-dominated' : ' · efficiency frontier'}`);
+    bindOptimizationAnalyticsTooltip(dot, `${row.name}${upgradingEfficiencyLimitMode ? ' · LIMIT price' : ''} · margin ${row.marginPercent.toFixed(1)}% · gross ${row.grossAtlasPerSecond.toFixed(6)} ATLAS/s · net ${row.netAtlasPerSecond.toFixed(6)} ATLAS/s · cargo ${row.cargoWeight}${row.dominated ? ' · Pareto-dominated' : ' · efficiency frontier'}`);
     appendOptimizationSvg(svg, 'text', { x: cx + radius + 3, y: cy + 3, class: 'axis-label optimization-efficiency-label' }, row.name);
     if (row.dominated) { const size = radius * 0.75; appendOptimizationSvg(svg, 'line', { x1: cx-size, y1: cy-size, x2: cx+size, y2: cy+size, class: 'optimization-dominated-cross' }); appendOptimizationSvg(svg, 'line', { x1: cx-size, y1: cy+size, x2: cx+size, y2: cy-size, class: 'optimization-dominated-cross' }); }
   });
@@ -7973,7 +7997,7 @@ function renderUpgradingBreakevenTable() {
     if (row.name === 'Framework') {
       const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = 'any'; input.className = 'optimization-framework-limit-input'; input.placeholder = 'Enter price'; input.setAttribute('aria-label', 'Framework limit buy price');
       const saved = upgradingFrameworkLimitByFaction.get(faction); if (saved !== undefined) input.value = String(saved);
-      input.addEventListener('input', () => { const value = input.value.trim(); if (!value) upgradingFrameworkLimitByFaction.delete(faction); else { const parsed = Number(value); if (Number.isFinite(parsed) && parsed >= 0) upgradingFrameworkLimitByFaction.set(faction, parsed); else upgradingFrameworkLimitByFaction.delete(faction); } updateLimits(); });
+      input.addEventListener('input', () => { const value = input.value.trim(); if (!value) upgradingFrameworkLimitByFaction.delete(faction); else { const parsed = Number(value); if (Number.isFinite(parsed) && parsed >= 0) upgradingFrameworkLimitByFaction.set(faction, parsed); else upgradingFrameworkLimitByFaction.delete(faction); } updateLimits(); renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(result)); });
       limitCell.append(input);
     }
     tr.append(limitCell); optimizationUpgradingBreakevenBody.append(tr);
