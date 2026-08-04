@@ -41,6 +41,8 @@ const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeB
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
+const { createAtlasPriceResolver } = require('./atlas-price-resolver');
+const { buildCargoCostPool } = require('./cargo-cost-pool');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
 const {
@@ -103,6 +105,9 @@ const appIconPath = path.join(__dirname, 'assets', 'aephia-logo.png');
 app.setPath('userData', path.join(baseUserData, 'profiles', profileName));
 const telemetryLedger = createTelemetryLedger({ userDataPath: app.getPath('userData'), profile: profileName });
 const getRpcUsageDay = createRpcUsageReader({ ledger: telemetryLedger, userDataPath: app.getPath('userData') });
+const atlasPriceResolver = createAtlasPriceResolver({
+  filePath: path.join(app.getPath('userData'), 'price-history', 'current-price-seeds-v1.json'),
+});
 setTelemetryRecorder(telemetryLedger);
 app.setName(`My Star Atlas - ${profileName}`);
 if (typeof app.setDesktopName === 'function') {
@@ -6441,6 +6446,12 @@ async function fetchEarningsSnapshot(payload) {
     fetchShipStatsSot(),
   ]);
   const { sduPriceAtl, ammunitionPriceAtl, foodPriceAtl, fuelPriceAtl, atlasPerSol } = prices;
+  // Freeze the already-loaded current priceATL values once. The resolver owns
+  // date precedence so cargo accounting never embeds temporary pricing rules.
+  await atlasPriceResolver.captureCurrentPriceSeeds({
+    ...(prices.resourcePricesAtlByName || {}),
+    Fuel: fuelPriceAtl,
+  });
 
   const fleetShipsKeys = fleets
     .map((fleet) => {
@@ -6753,12 +6764,13 @@ async function fetchEarningsSnapshot(payload) {
   }
   const activeCargoFleetKeys = new Set();
   const activeMappedCargoFleetKeys = new Set();
-  const cargo = cargoRows.map((cargoRow) => {
+  const cargo = await Promise.all(cargoRows.map(async (cargoRow) => {
     const fleet = fleetByLabel.get(normalizeFleetLabel(cargoRow.fleet));
     const activeKey = fleet?.key || normalizeFleetLabel(cargoRow.fleet);
     activeCargoFleetKeys.add(activeKey);
     if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
-    const fuelCostsAtlas = fuelPriceAtl != null ? cargoRow.burnedFuel * fuelPriceAtl : null;
+    const fuelPrice = await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate);
+    const fuelCostsAtlas = fuelPrice.status === 'complete' ? cargoRow.burnedFuel * fuelPrice.priceATL : null;
     const txsCostsAtlas = atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null;
     const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
     const costParts = [fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
@@ -6780,6 +6792,11 @@ async function fetchEarningsSnapshot(payload) {
       cargoLegs: Number(cargoRow.cargoLegs) || 0,
       starbaseLabel: Array.isArray(cargoRow.starbases) && cargoRow.starbases.length ? cargoRow.starbases.join(', ') : '--',
       fuelCostsAtlas,
+      fuelPriceEffectiveUtcDate: fuelPrice.effectiveUtcDate,
+      fuelPriceSource: fuelPrice.source,
+      fuelPriceProvenance: fuelPrice.provenance,
+      fuelPriceEstimated: fuelPrice.estimated,
+      fuelValuationStatus: fuelPrice.status,
       rentalRateAtlasPerDay,
       txsCostsAtlas,
       totalCostsAtlas,
@@ -6788,7 +6805,31 @@ async function fetchEarningsSnapshot(payload) {
         ? (txsCostsAtlas / totalCostsAtlas) * 100
         : null,
     };
-  });
+  }));
+  const cargoCostPool = buildCargoCostPool(cargo.map((row) => ({
+    fleetAccount: row.fleetAccount || row.fleetName,
+    isoDate: row.isoDate,
+    assignment: row.assignment,
+    rentalContract: row.rentalContract,
+    costSources: [
+      ...(Number.isFinite(row.rentalRateAtlasPerDay) ? [{
+        kind: 'rental', daily: true, contractId: row.rentalContract,
+        amount: row.rentalRateAtlasPerDay, currency: 'ATLAS', timestamp: `${row.isoDate}T00:00:00.000Z`,
+        valuation: { status: 'native' },
+      }] : []),
+      ...(Number(row.burnedFuel) > 0 ? [{
+        kind: 'fuel', amount: Number(row.burnedFuel), currency: 'FUEL', timestamp: `${row.isoDate}T00:00:00.000Z`,
+        valuation: row.fuelValuationStatus === 'complete' ? {
+          status: 'complete', amountATL: row.fuelCostsAtlas, effectiveUtcDate: row.fuelPriceEffectiveUtcDate,
+          source: row.fuelPriceSource, provenance: row.fuelPriceProvenance, estimated: row.fuelPriceEstimated,
+        } : { status: 'incomplete', amountATL: null, effectiveUtcDate: row.isoDate },
+      }] : []),
+      ...(Number(row.txCostSol) > 0 ? [{
+        kind: 'transaction_fee', amount: Number(row.txCostSol), currency: 'SOL', timestamp: `${row.isoDate}T00:00:00.000Z`,
+        valuation: Number.isFinite(row.txsCostsAtlas) ? { status: 'complete', amountATL: row.txsCostsAtlas, source: prices.atlasPerSolSource } : { status: 'incomplete', amountATL: null },
+      }] : []),
+    ],
+  })));
   // Scope allocation rows through the already faction-scoped movement fleets,
   // while preserving each fleet and route as separate cost dimensions.
   const scopedCargoFleetLabels = new Set(cargoRows.map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
@@ -6801,19 +6842,23 @@ async function fetchEarningsSnapshot(payload) {
     fleetByLabel,
     normalizeFleetLabel
   );
-  const ledgerCargoAllocations = enrichedCargoAllocationRows.map((row) => {
-    const fuelCostsAtlas = fuelPriceAtl != null ? row.allocatedFuel * fuelPriceAtl : null;
+  const valueCargoAllocation = async (row) => {
+    const fuelPrice = await atlasPriceResolver.resolveAtlasPrice('Fuel', row.isoDate);
+    const fuelCostsAtlas = fuelPrice.status === 'complete' ? row.allocatedFuel * fuelPrice.priceATL : null;
     const txsCostsAtlas = atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
+    return { fuelPrice, fuelCostsAtlas, txsCostsAtlas };
+  };
+  const ledgerCargoAllocations = await Promise.all(enrichedCargoAllocationRows.map(async (row) => {
+    const { fuelCostsAtlas, txsCostsAtlas } = await valueCargoAllocation(row);
     return {
       ...row,
       totalCostsAtlas: Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)
         ? fuelCostsAtlas + txsCostsAtlas
         : null,
     };
-  });
-  const cargoAllocations = groupCargoAllocationRows(enrichedCargoAllocationRows).map((row) => {
-    const fuelCostsAtlas = fuelPriceAtl != null ? row.allocatedFuel * fuelPriceAtl : null;
-    const txsCostsAtlas = atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
+  }));
+  const cargoAllocations = await Promise.all(groupCargoAllocationRows(enrichedCargoAllocationRows).map(async (row) => {
+    const { fuelPrice, fuelCostsAtlas, txsCostsAtlas } = await valueCargoAllocation(row);
     const totalCostsAtlas = Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)
       ? fuelCostsAtlas + txsCostsAtlas
       : null;
@@ -6822,9 +6867,14 @@ async function fetchEarningsSnapshot(payload) {
       fuelCostsAtlas,
       txsCostsAtlas,
       totalCostsAtlas,
+      fuelPriceEffectiveUtcDate: fuelPrice.effectiveUtcDate,
+      fuelPriceSource: fuelPrice.source,
+      fuelPriceProvenance: fuelPrice.provenance,
+      fuelPriceEstimated: fuelPrice.estimated,
+      fuelValuationStatus: fuelPrice.status,
       costsPerUnitAtlas: Number.isFinite(totalCostsAtlas) && row.amount > 0 ? totalCostsAtlas / row.amount : null,
     };
-  });
+  }));
   const cargoVolumeByFleetDayAssignment = buildCargoVolumeByFleetDayAssignment(cargoAllocations);
   const cargoAllocationAvailable = cargoAllocationResult.status === 'fulfilled';
   for (const row of cargo) {
@@ -7309,6 +7359,9 @@ async function fetchEarningsSnapshot(payload) {
     activeMappedCargoFleetCount: activeMappedCargoFleetKeys.size,
     cargoRowCount: cargo.length,
     cargoAllocationRowCount: cargoAllocations.length,
+    cargoCostPool,
+    cargoCostCount: cargoCostPool.costs.length,
+    cargoCostNeedsReviewCount: cargoCostPool.pending.length,
     totalMined,
     totalMiningRevenueAtlas: totalMiningRevenueCount > 0 ? totalMiningRevenueAtlas : null,
     todayMined: todayMiningTotals.mined,
