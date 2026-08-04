@@ -31,10 +31,59 @@ test('replay is idempotent, conflict fails closed, and distinct equal points rem
   assert.equal(distinct.records.length, 2);
 });
 
-test('assignment and fleet labels do not participate in canonical identity', () => {
-  const a = projectRawCostEvents([fuel()]).records[0];
-  const b = projectRawCostEvents([fuel({ assignment: 'Supply Chain', fleetLabel: 'Renamed' })]).records[0];
-  assert.equal(a.id, b.id);
+test('mutable assignment and fleet-label metadata merge deterministically without conflicts', () => {
+  const variants = [
+    fuel(),
+    fuel({ assignment: 'Supply Chain' }),
+    fuel({ fleetLabel: 'Renamed' }),
+    fuel({ assignment: 'Supply Chain', fleetLabel: 'Renamed' }),
+  ];
+  for (const variant of variants.slice(1)) {
+    const projected = projectRawCostEvents([variants[0], variant]);
+    assert.equal(projected.records.length, 1);
+    assert.equal(projected.rejected.length, 0);
+  }
+  const forward = projectRawCostEvents(variants);
+  const reverse = projectRawCostEvents([...variants].reverse());
+  assert.equal(forward.records.length, 1);
+  assert.equal(reverse.records.length, 1);
+  assert.deepEqual(forward.records, reverse.records);
+  assert.equal(forward.records[0].fuelQuantity, '12.500000000000001');
+});
+
+test('immutable Fuel source facts still conflict and fail closed', () => {
+  const changes = [
+    { fuelQuantity: '13' },
+    { _time: '2026-08-05T00:01:02.004Z' },
+    { movementEventId: 'cycle:other' },
+    { cycleId: 'other-cycle' },
+    { movementIndex: '1' },
+    { timestampProvenance: 'observed_at' },
+    { sourceProvenance: 'other_source' },
+  ];
+  for (const change of changes) {
+    const projected = projectRawCostEvents([fuel(), fuel(change)]);
+    assert.equal(projected.records.length, 0);
+    assert.equal(projected.rejected.length, 1);
+    assert.equal(projected.rejected[0].reason, 'source_identity_conflict');
+  }
+});
+
+test('immutable SOL amount, signature, event position, timestamp, and provenance still conflict', () => {
+  const baseline = sol({ eventPosition: '0' });
+  const changes = [
+    { txFeeLamports: '9007199254740994' },
+    { transactionSignature: 'different-signature' },
+    { eventPosition: '1' },
+    { _time: '2026-08-05T00:01:02.004Z' },
+    { timestampProvenance: 'observed_at' },
+    { sourceProvenance: 'other_source' },
+  ];
+  for (const change of changes) {
+    const projected = projectRawCostEvents([baseline, { ...baseline, ...change }]);
+    assert.equal(projected.records.length, 0);
+    assert.equal(projected.rejected[0].reason, 'source_identity_conflict');
+  }
 });
 
 test('CSV reconstruction ignores repeated table headers', () => {
@@ -44,11 +93,22 @@ test('CSV reconstruction ignores repeated table headers', () => {
   assert.deepEqual(projectRawCostEvents(rows).records.map((row) => row.eventType), ['fuel', 'sol_fee']);
 });
 
-test('incremental projection equals full rebuild', () => {
-  const rows = [fuel(), sol(), fuel({ eventIdentity: 'fuel:cycle:1', movementIndex: '1', movementEventId: 'cycle:1' })];
+test('incremental projection equals full rebuild, including mutable metadata revisions', () => {
+  const rows = [
+    fuel(),
+    fuel({ assignment: 'Supply Chain', fleetLabel: 'Renamed' }),
+    sol(),
+    fuel({ eventIdentity: 'fuel:cycle:1', movementIndex: '1', movementEventId: 'cycle:1' }),
+  ];
   const full = projectRawCostEvents(rows);
-  const incremental = projectRawCostEvents([...projectRawCostEvents(rows.slice(0, 1)).records.map((r) => ({ ...rows[0] })), ...rows.slice(1)]);
+  const accumulatedRows = [];
+  let incremental;
+  for (const chunk of [rows.slice(0, 1), rows.slice(1, 2), rows.slice(2)]) {
+    accumulatedRows.push(...chunk);
+    incremental = projectRawCostEvents(accumulatedRows);
+  }
   assert.equal(rawCostDigest(incremental.records), rawCostDigest(full.records));
+  assert.deepEqual(incremental.records, full.records);
 });
 
 test('versioned UTC cutover prevents legacy/raw overlap and excludes disabled USTUR1', () => {

@@ -15,17 +15,25 @@ const RAW_COST_CUTOVERS = Object.freeze({
 function clean(value) { return String(value ?? '').trim(); }
 function exactUnsigned(value) { const text = clean(value); return /^\d+$/.test(text) ? text.replace(/^0+(?=\d)/, '') : ''; }
 function exactPositiveDecimal(value) { const text = clean(value); return /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text) && Number(text) > 0 ? text : ''; }
-function canonicalPayload(record) {
+function immutableSourcePayload(record) {
   return JSON.stringify({
+    schemaVersion: record.schemaVersion,
     eventType: record.eventType, eventIdentity: record.eventIdentity,
     timestamp: record.timestamp, timestampProvenance: record.timestampProvenance,
     sourceProvenance: record.sourceProvenance, faction: record.faction,
     instance: record.instance, fleetAccount: record.fleetAccount,
-    fleetLabel: record.fleetLabel, assignment: record.assignment,
     fuelQuantity: record.fuelQuantity, movementEventId: record.movementEventId,
     cycleId: record.cycleId, movementIndex: record.movementIndex,
     txFeeLamports: record.txFeeLamports, transactionSignature: record.transactionSignature,
     eventPosition: record.eventPosition,
+  });
+}
+
+function canonicalPayload(record) {
+  return JSON.stringify({
+    immutableSourcePayload: immutableSourcePayload(record),
+    fleetLabel: record.fleetLabel,
+    assignment: record.assignment,
   });
 }
 
@@ -87,13 +95,15 @@ function projectRawCostEvents(rows = []) {
       continue;
     }
     const existing = records.get(record.id);
-    if (existing && canonicalPayload(existing) !== canonicalPayload(record)) {
+    if (existing && immutableSourcePayload(existing) !== immutableSourcePayload(record)) {
       records.delete(record.id);
       conflicted.add(record.id);
       rejected.push({ reason: 'source_identity_conflict', eventIdentity, id: record.id });
       continue;
     }
-    if (!existing && !conflicted.has(record.id)) records.set(record.id, record);
+    if (!conflicted.has(record.id) && (!existing || canonicalPayload(record) < canonicalPayload(existing))) {
+      records.set(record.id, record);
+    }
   }
   return { records: Array.from(records.values()), rejected };
 }
