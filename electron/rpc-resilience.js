@@ -53,7 +53,7 @@ function createRpcFetcher({
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       let response;
       let hookToken;
-      try { hookToken = onAttemptStart?.({ attempt }); } catch (_) { /* telemetry hooks are inert */ }
+      try { hookToken = onAttemptStart?.({ attempt, init }); } catch (_) { /* telemetry hooks are inert */ }
       try {
         response = await fetchImpl(url, init);
         try { onAttemptFinish?.({ attempt, token: hookToken, outcome: response?.ok ? 'success' : 'failure' }); } catch (_) { /* inert */ }

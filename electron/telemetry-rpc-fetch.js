@@ -74,10 +74,11 @@ function wrapRpcConnection(connection) {
 
 function rawAttemptHooks({ providerRole = 'unknown', fallback = false } = {}) {
   return {
-    onAttemptStart({ attempt } = {}) {
-      const context = { ...getTelemetryContext(), providerRole };
+    onAttemptStart({ attempt, init } = {}) {
+      const inspected = inspectRpcMethod(init);
+      const context = { ...getTelemetryContext(), providerRole, rpcMethod: inspected.method };
       const startedAt = Date.now();
-      safeRecord({ type: 'wire-start', at: startedAt, retry: Number(attempt) > 0, fallback, context });
+      safeRecord({ type: 'wire-start', at: startedAt, retry: Number(attempt) > 0, fallback, batchElements: inspected.batchElements, context });
       return startedAt;
     },
     onAttemptFinish({ token, outcome } = {}) {

@@ -49,12 +49,34 @@ test('admission refusal produces no wire attempt and preserves the exact excepti
   setTelemetryRecorder(null);
 });
 
-test('raw retry hooks count five actual attempts and preserve hook failures', () => {
+test('raw retry hooks classify the request body at the transport boundary without changing counters', () => {
   const ledger = collector(); setTelemetryRecorder(ledger);
   const hooks = rawAttemptHooks({ providerRole: 'direct' });
-  for (let attempt = 0; attempt < 5; attempt += 1) { const token = hooks.onAttemptStart({ attempt }); hooks.onAttemptFinish({ token, outcome: attempt === 4 ? 'success' : 'failure' }); }
-  assert.equal(ledger.events.filter((event) => event.type === 'wire-start').length, 5);
-  assert.equal(ledger.events.filter((event) => event.type === 'wire-start' && event.retry).length, 4);
+  const init = { body: JSON.stringify({ method: 'getProgramAccountsV2', params: ['secret-not-persisted'] }) };
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const token = hooks.onAttemptStart({ attempt, init });
+    hooks.onAttemptFinish({ token, outcome: attempt === 4 ? 'success' : 'failure' });
+  }
+  const starts = ledger.events.filter((event) => event.type === 'wire-start');
+  assert.equal(starts.length, 5);
+  assert.equal(starts.filter((event) => event.retry).length, 4);
+  assert.equal(starts.filter((event) => event.fallback).length, 0);
+  assert.equal(starts.filter((event) => event.context.rpcMethod === 'getProgramAccountsV2').length, 5);
+  assert.equal(starts.reduce((sum, event) => sum + Number(event.batchElements || 0), 0), 0);
+  assert.equal(JSON.stringify(ledger.events).includes('secret-not-persisted'), false);
+  setTelemetryRecorder(null);
+});
+
+test('raw retry hooks retain batch classification and fail closed for malformed bodies', () => {
+  const ledger = collector(); setTelemetryRecorder(ledger);
+  const hooks = rawAttemptHooks({ providerRole: 'fallback', fallback: true });
+  hooks.onAttemptStart({ attempt: 0, init: { body: JSON.stringify([{ method: 'getBalance' }, { method: 'getAccountInfo' }]) } });
+  hooks.onAttemptStart({ attempt: 1, init: { body: 'not-json' } });
+  const starts = ledger.events.filter((event) => event.type === 'wire-start');
+  assert.deepEqual(starts.map((event) => [event.context.rpcMethod, event.batchElements, event.retry, event.fallback]), [
+    ['batch', 2, false, true],
+    ['unknown', 0, true, true],
+  ]);
   setTelemetryRecorder(null);
 });
 
