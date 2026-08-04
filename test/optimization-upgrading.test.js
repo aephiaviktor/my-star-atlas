@@ -220,6 +220,9 @@ test('component efficiency calculates gross and net ATLAS per second and marks d
   assert.equal(framework.dominated, false);
   assert.equal(powerSource.dominated, true);
   assert.match(renderer, /optimization-dominated-cross/);
+  assert.match(renderer, /optimization-pareto-frontier/);
+  assert.doesNotMatch(extractFunction(renderer, 'markUpgradingDominatedRows'), /cargoWeight/);
+  assert.match(renderer, /duration: 3000/);
   assert.match(renderer, /optimization-efficiency-label/);
   assert.match(renderer, /const factionLp = Number\(buildUpgradingOptimizationAnalytics\(result\)\.latestFactionRedemption/);
   assert.match(renderer, /frameworkLimit \/ framework\.durationSeconds/);

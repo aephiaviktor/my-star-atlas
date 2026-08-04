@@ -2802,3 +2802,4 @@ label {
 .optimization-efficiency-limit-button { border: 1px solid rgba(103, 183, 255, 0.5); border-radius: 5px; padding: 4px 10px; background: transparent; color: #67b7ff; font-size: 10px; font-weight: 700; cursor: pointer; }
 .optimization-efficiency-limit-button.active { background: rgba(103, 183, 255, 0.22); box-shadow: 0 0 0 1px rgba(103, 183, 255, 0.25) inset; }
 .optimization-efficiency-limit-button:disabled { opacity: 0.35; cursor: not-allowed; }
+.optimization-pareto-frontier { stroke: #67b7ff; stroke-width: 2.5; stroke-dasharray: 6 4; opacity: 0.9; pointer-events: none; }

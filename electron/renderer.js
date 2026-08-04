@@ -7843,7 +7843,9 @@ const upgradingCargoWeight = Object.freeze({ 'Power Source': 2, Framework: 1, El
 const selectedUpgradingEfficiencyComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
 const upgradingFrameworkLimitByFaction = new Map();
 let upgradingEfficiencyLimitMode = false;
-optimizationUpgradingEfficiencyLimitButton?.addEventListener('click', () => { if (optimizationUpgradingEfficiencyLimitButton.disabled) return; upgradingEfficiencyLimitMode = !upgradingEfficiencyLimitMode; renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {})); });
+let animateUpgradingEfficiencyNextRender = false;
+const upgradingEfficiencyPointPositions = new Map();
+optimizationUpgradingEfficiencyLimitButton?.addEventListener('click', () => { if (optimizationUpgradingEfficiencyLimitButton.disabled) return; upgradingEfficiencyLimitMode = !upgradingEfficiencyLimitMode; animateUpgradingEfficiencyNextRender = true; renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {})); });
 function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000_000_000) {
   const atlasPool = Number(result?.atlasPool), prices = result?.componentPricesAtl || {};
   if (!Number.isFinite(atlasPool) || atlasPool <= 0) return [];
@@ -7875,7 +7877,7 @@ function buildUpgradingEfficiencyRows(result, factionLp) {
 }
 
 function markUpgradingDominatedRows(rows) {
-  return rows.map((row) => ({ ...row, dominated: rows.some((other) => other !== row && other.marginPercent >= row.marginPercent && other.netAtlasPerSecond >= row.netAtlasPerSecond && other.cargoWeight <= row.cargoWeight && (other.marginPercent > row.marginPercent || other.netAtlasPerSecond > row.netAtlasPerSecond || other.cargoWeight < row.cargoWeight)) }));
+  return rows.map((row) => ({ ...row, dominated: rows.some((other) => other !== row && other.marginPercent >= row.marginPercent && other.netAtlasPerSecond >= row.netAtlasPerSecond && (other.marginPercent > row.marginPercent || other.netAtlasPerSecond > row.netAtlasPerSecond)) }));
 }
 
 function renderUpgradingEfficiencyLegend(rows, analytics) {
@@ -7921,13 +7923,20 @@ function renderUpgradingEfficiencyChart(analytics) {
   const axes = renderUpgradingChartAxes(svg, { minY, maxY, xMin: minX, xMax: maxX, xTicks: [minX, minX + (maxX-minX)/4, minX + (maxX-minX)/2, minX + (maxX-minX)*3/4, maxX], xLabel: 'Profit margin at yesterday’s faction LP (%)', yLabel: 'Net ATLAS/s', height: 340, xFormatter: (value) => value.toFixed(1), yFormatter: (value) => value.toFixed(6) });
   if (minX <= 0 && maxX >= 0) appendOptimizationSvg(svg, 'line', { x1: axes.x(0), x2: axes.x(0), y1: axes.top, y2: axes.height - axes.bottom, class: 'optimization-zero-line' });
   if (minY <= 0 && maxY >= 0) appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
+  const frontier = rows.filter((row) => !row.dominated).sort((a, b) => a.marginPercent - b.marginPercent);
+  if (frontier.length > 1) appendOptimizationSvg(svg, 'polyline', { points: frontier.map((row) => `${axes.x(row.marginPercent)},${axes.y(row.netAtlasPerSecond)}`).join(' '), fill: 'none', class: 'optimization-pareto-frontier' });
   rows.forEach((row, index) => {
     const cx = axes.x(row.marginPercent), cy = axes.y(row.netAtlasPerSecond), radius = 5 + Math.sqrt(row.cargoWeight) * 2;
-    const dot = appendOptimizationSvg(svg, 'circle', { cx, cy, r: radius, fill: getAssetChartColor(row.name, index), opacity: row.dominated ? 0.38 : 0.9, stroke: row.dominated ? '#cbd5e1' : '#e8fffb', 'stroke-width': row.dominated ? 1 : 2 });
+    const group = appendOptimizationSvg(svg, 'g', { class: 'optimization-efficiency-point' });
+    const dot = appendOptimizationSvg(group, 'circle', { cx, cy, r: radius, fill: getAssetChartColor(row.name, index), opacity: row.dominated ? 0.38 : 0.9, stroke: row.dominated ? '#cbd5e1' : '#e8fffb', 'stroke-width': row.dominated ? 1 : 2 });
     bindOptimizationAnalyticsTooltip(dot, `${row.name}${upgradingEfficiencyLimitMode ? ' · LIMIT price' : ''} · margin ${row.marginPercent.toFixed(1)}% · gross ${row.grossAtlasPerSecond.toFixed(6)} ATLAS/s · net ${row.netAtlasPerSecond.toFixed(6)} ATLAS/s · cargo ${row.cargoWeight}${row.dominated ? ' · Pareto-dominated' : ' · efficiency frontier'}`);
-    appendOptimizationSvg(svg, 'text', { x: cx + radius + 3, y: cy + 3, class: 'axis-label optimization-efficiency-label' }, row.name);
-    if (row.dominated) { const size = radius * 0.75; appendOptimizationSvg(svg, 'line', { x1: cx-size, y1: cy-size, x2: cx+size, y2: cy+size, class: 'optimization-dominated-cross' }); appendOptimizationSvg(svg, 'line', { x1: cx-size, y1: cy+size, x2: cx+size, y2: cy-size, class: 'optimization-dominated-cross' }); }
+    appendOptimizationSvg(group, 'text', { x: cx + radius + 3, y: cy + 3, class: 'axis-label optimization-efficiency-label' }, row.name);
+    if (row.dominated) { const size = radius * 0.75; appendOptimizationSvg(group, 'line', { x1: cx-size, y1: cy-size, x2: cx+size, y2: cy+size, class: 'optimization-dominated-cross' }); appendOptimizationSvg(group, 'line', { x1: cx-size, y1: cy+size, x2: cx+size, y2: cy-size, class: 'optimization-dominated-cross' }); }
+    const previous = upgradingEfficiencyPointPositions.get(row.name);
+    if (animateUpgradingEfficiencyNextRender && previous && group.animate) group.animate([{ transform: `translate(${previous.cx-cx}px, ${previous.cy-cy}px)` }, { transform: 'translate(0px, 0px)' }], { duration: 3000, easing: 'ease-in-out' });
+    upgradingEfficiencyPointPositions.set(row.name, { cx, cy });
   });
+  animateUpgradingEfficiencyNextRender = false;
 }
 
 function renderUpgradingMarginChart(analytics) {
