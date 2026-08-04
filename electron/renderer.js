@@ -7841,7 +7841,7 @@ const upgradingFactionColors = Object.freeze({ MUD: '#ef4444', ONI: '#3b82f6', U
 const upgradingDurationSeconds = Object.freeze({ 'Power Source': 15, Framework: 12, Electromagnet: 16, Electronics: 14, 'Field Stabilizer': 24, 'Particle Accelerator': 96, 'Radiation Absorber': 48, 'Survey Data Unit': 120, Ink: 60 });
 const upgradingCargoWeight = Object.freeze({ 'Power Source': 2, Framework: 1, Electromagnet: 4, Electronics: 2, 'Field Stabilizer': 6, 'Particle Accelerator': 6, 'Radiation Absorber': 6, 'Survey Data Unit': 1, Ink: 1 });
 const selectedUpgradingEfficiencyComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
-const upgradingFrameworkLimitByFaction = new Map();
+const upgradingLimitAnchorByFaction = new Map();
 let upgradingEfficiencyLimitMode = false;
 let animateUpgradingEfficiencyNextRender = false;
 const upgradingEfficiencyPointPositions = new Map();
@@ -7876,8 +7876,8 @@ function buildUpgradingEfficiencyRows(result, factionLp) {
   return rows;
 }
 
-function markUpgradingDominatedRows(rows) {
-  return rows.map((row) => ({ ...row, dominated: rows.some((other) => other !== row && other.marginPercent >= row.marginPercent && other.netAtlasPerSecond >= row.netAtlasPerSecond && (other.marginPercent > row.marginPercent || other.netAtlasPerSecond > row.netAtlasPerSecond)) }));
+function markUpgradingDominatedRows(rows, includeCargo = true) {
+  return rows.map((row) => ({ ...row, dominated: rows.some((other) => other !== row && other.marginPercent >= row.marginPercent && other.netAtlasPerSecond >= row.netAtlasPerSecond && (!includeCargo || other.cargoWeight <= row.cargoWeight) && (other.marginPercent > row.marginPercent || other.netAtlasPerSecond > row.netAtlasPerSecond || (includeCargo && other.cargoWeight < row.cargoWeight))) }));
 }
 
 function renderUpgradingEfficiencyLegend(rows, analytics) {
@@ -7893,10 +7893,10 @@ function renderUpgradingEfficiencyLegend(rows, analytics) {
   });
 }
 
-function applyUpgradingLimitPrices(rows, frameworkLimit) {
-  const framework = rows.find((row) => row.name === 'Framework');
-  if (!framework || !Number.isFinite(frameworkLimit) || frameworkLimit <= 0) return rows;
-  const targetNetAtlasPerSecond = framework.grossAtlasPerSecond - frameworkLimit / framework.durationSeconds;
+function applyUpgradingLimitPrices(rows, anchorName, anchorPrice) {
+  const anchor = rows.find((row) => row.name === anchorName);
+  if (!anchor || !Number.isFinite(anchorPrice) || anchorPrice <= 0) return rows;
+  const targetNetAtlasPerSecond = anchor.grossAtlasPerSecond - anchorPrice / anchor.durationSeconds;
   return rows.map((row) => {
     const limitPrice = row.durationSeconds * (row.grossAtlasPerSecond - targetNetAtlasPerSecond);
     if (limitPrice < 0) return { ...row, limitPrice, limitAchievable: false };
@@ -7910,12 +7910,12 @@ function renderUpgradingEfficiencyChart(analytics) {
   const baseRows = buildUpgradingEfficiencyRows(latestUpgradingOptimizationResult || {}, Number(analytics.latestFactionRedemption?.factionLp));
   renderUpgradingEfficiencyLegend(baseRows, analytics);
   const faction = normalizeFaction(latestSettings?.faction);
-  const frameworkLimit = Number(upgradingFrameworkLimitByFaction.get(faction));
-  const hasFrameworkLimit = Number.isFinite(frameworkLimit) && frameworkLimit > 0;
-  if (!hasFrameworkLimit) upgradingEfficiencyLimitMode = false;
-  if (optimizationUpgradingEfficiencyLimitButton) { optimizationUpgradingEfficiencyLimitButton.disabled = !hasFrameworkLimit; optimizationUpgradingEfficiencyLimitButton.classList.toggle('active', upgradingEfficiencyLimitMode); optimizationUpgradingEfficiencyLimitButton.setAttribute('aria-pressed', String(upgradingEfficiencyLimitMode)); optimizationUpgradingEfficiencyLimitButton.title = hasFrameworkLimit ? 'Plot all components at their equivalent limit prices' : 'Enter a Framework limit price first'; }
-  const allRows = upgradingEfficiencyLimitMode ? applyUpgradingLimitPrices(baseRows, frameworkLimit) : baseRows;
-  const rows = markUpgradingDominatedRows(allRows.filter((row) => selectedUpgradingEfficiencyComponents.has(row.name)));
+  const anchor = upgradingLimitAnchorByFaction.get(faction);
+  const hasLimitAnchor = Boolean(anchor?.name) && Number.isFinite(Number(anchor?.price)) && Number(anchor.price) > 0;
+  if (!hasLimitAnchor) upgradingEfficiencyLimitMode = false;
+  if (optimizationUpgradingEfficiencyLimitButton) { optimizationUpgradingEfficiencyLimitButton.disabled = !hasLimitAnchor; optimizationUpgradingEfficiencyLimitButton.classList.toggle('active', upgradingEfficiencyLimitMode); optimizationUpgradingEfficiencyLimitButton.setAttribute('aria-pressed', String(upgradingEfficiencyLimitMode)); optimizationUpgradingEfficiencyLimitButton.title = hasLimitAnchor ? `Plot all components from ${anchor.name}'s equivalent limit prices` : 'Enter a limit price in any component row first'; }
+  const allRows = upgradingEfficiencyLimitMode ? applyUpgradingLimitPrices(baseRows, anchor?.name, Number(anchor?.price)) : baseRows;
+  const rows = markUpgradingDominatedRows(allRows.filter((row) => selectedUpgradingEfficiencyComponents.has(row.name)), true);
   if (!rows.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
   const margins = rows.map((row) => row.marginPercent), nets = rows.map((row) => row.netAtlasPerSecond);
   const xPad = Math.max(1, (Math.max(...margins) - Math.min(...margins)) * 0.12), yPad = Math.max(0.000001, (Math.max(...nets) - Math.min(...nets)) * 0.12);
@@ -7923,7 +7923,7 @@ function renderUpgradingEfficiencyChart(analytics) {
   const axes = renderUpgradingChartAxes(svg, { minY, maxY, xMin: minX, xMax: maxX, xTicks: [minX, minX + (maxX-minX)/4, minX + (maxX-minX)/2, minX + (maxX-minX)*3/4, maxX], xLabel: 'Profit margin at yesterday’s faction LP (%)', yLabel: 'Net ATLAS/s', height: 340, xFormatter: (value) => value.toFixed(1), yFormatter: (value) => value.toFixed(6) });
   if (minX <= 0 && maxX >= 0) appendOptimizationSvg(svg, 'line', { x1: axes.x(0), x2: axes.x(0), y1: axes.top, y2: axes.height - axes.bottom, class: 'optimization-zero-line' });
   if (minY <= 0 && maxY >= 0) appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
-  const frontier = rows.filter((row) => !row.dominated).sort((a, b) => a.marginPercent - b.marginPercent);
+  const frontier = markUpgradingDominatedRows(rows, false).filter((row) => !row.dominated).sort((a, b) => a.marginPercent - b.marginPercent);
   if (frontier.length > 1) appendOptimizationSvg(svg, 'polyline', { points: frontier.map((row) => `${axes.x(row.marginPercent)},${axes.y(row.netAtlasPerSecond)}`).join(' '), fill: 'none', class: 'optimization-pareto-frontier' });
   rows.forEach((row, index) => {
     const cx = axes.x(row.marginPercent), cy = axes.y(row.netAtlasPerSecond), radius = 5 + Math.sqrt(row.cargoWeight) * 2;
@@ -7979,37 +7979,27 @@ function renderUpgradingBreakevenTable() {
   const result = latestUpgradingOptimizationResult || {};
   const factionLp = Number(buildUpgradingOptimizationAnalytics(result).latestFactionRedemption?.factionLp);
   const rows = buildUpgradingEfficiencyRows(result, factionLp).sort((a, b) => a.lp - b.lp);
-  if (!rows.length) {
-    const tr = document.createElement('tr'); tr.className = 'empty-row';
-    const td = document.createElement('td'); td.colSpan = 9; td.textContent = 'Component prices or yesterday’s faction LP unavailable';
-    tr.append(td); optimizationUpgradingBreakevenBody.append(tr); return;
-  }
+  if (!rows.length) { const tr=document.createElement('tr'),td=document.createElement('td'); tr.className='empty-row';td.colSpan=9;td.textContent='Component prices or yesterday’s faction LP unavailable';tr.append(td);optimizationUpgradingBreakevenBody.append(tr);return; }
   const faction = normalizeFaction(latestSettings?.faction);
-  const updateLimits = () => {
-    const frameworkLimit = Number(upgradingFrameworkLimitByFaction.get(faction));
-    const framework = rows.find((row) => row.name === 'Framework');
-    const hasLimit = Number.isFinite(frameworkLimit) && frameworkLimit >= 0 && framework;
-    const targetNet = hasLimit ? framework.grossAtlasPerSecond - frameworkLimit / framework.durationSeconds : null;
-    for (const cell of optimizationUpgradingBreakevenBody.querySelectorAll('[data-limit-component]')) {
-      if (cell.dataset.limitComponent === 'Framework') continue;
-      if (!Number.isFinite(targetNet)) { cell.textContent = ''; continue; }
-      const row = rows.find((entry) => entry.name === cell.dataset.limitComponent);
-      const limit = row.durationSeconds * (row.grossAtlasPerSecond - targetNet);
-      cell.textContent = limit < 0 ? 'Not achievable' : limit.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  const updateLimits = (editedName = '') => {
+    const anchor = upgradingLimitAnchorByFaction.get(faction);
+    const anchorRow = rows.find((row) => row.name === anchor?.name);
+    const valid = anchorRow && Number.isFinite(Number(anchor?.price)) && Number(anchor.price) > 0;
+    const targetNet = valid ? anchorRow.grossAtlasPerSecond - Number(anchor.price) / anchorRow.durationSeconds : null;
+    for (const input of optimizationUpgradingBreakevenBody.querySelectorAll('[data-limit-component]')) {
+      const row = rows.find((entry) => entry.name === input.dataset.limitComponent); input.classList.toggle('active-anchor', valid && row.name === anchor.name);
+      if (editedName === row.name) continue;
+      if (!valid) { input.value=''; input.placeholder='Enter price'; continue; }
+      if (row.name === anchor.name) { input.value=String(anchor.price); continue; }
+      const limit=row.durationSeconds*(row.grossAtlasPerSecond-targetNet); input.value=limit<0?'':limit.toLocaleString('en-US',{useGrouping:false,maximumFractionDigits:6}); input.placeholder=limit<0?'Not achievable':'Enter price';
     }
   };
   for (const row of rows) {
-    const tr = document.createElement('tr');
-    const values = [row.name === 'Ink' ? 'INK' : row.name, row.gmPrice.toLocaleString(undefined, { maximumFractionDigits: 6 }), row.lpPerSecond.toFixed(3), formatCompactNumber(Number(result.atlasPool) * row.lp / row.gmPrice), row.grossAtlasPerSecond.toFixed(6), `${row.marginPercent.toFixed(1)}%`, row.netAtlasPerSecond.toFixed(6), row.netAtlasPerCargoUnit.toFixed(6)];
-    values.forEach((value, index) => { const td = document.createElement('td'); td.textContent = value; if (index > 0) td.className = 'numeric-cell'; tr.append(td); });
-    const limitCell = document.createElement('td'); limitCell.className = 'numeric-cell optimization-limit-cell'; limitCell.dataset.limitComponent = row.name;
-    if (row.name === 'Framework') {
-      const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = 'any'; input.className = 'optimization-framework-limit-input'; input.placeholder = 'Enter price'; input.setAttribute('aria-label', 'Framework limit buy price');
-      const saved = upgradingFrameworkLimitByFaction.get(faction); if (saved !== undefined) input.value = String(saved);
-      input.addEventListener('input', () => { const value = input.value.trim(); if (!value) upgradingFrameworkLimitByFaction.delete(faction); else { const parsed = Number(value); if (Number.isFinite(parsed) && parsed >= 0) upgradingFrameworkLimitByFaction.set(faction, parsed); else upgradingFrameworkLimitByFaction.delete(faction); } updateLimits(); renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(result)); });
-      limitCell.append(input);
-    }
-    tr.append(limitCell); optimizationUpgradingBreakevenBody.append(tr);
+    const tr=document.createElement('tr'); const values=[row.name==='Ink'?'INK':row.name,row.gmPrice.toLocaleString(undefined,{maximumFractionDigits:6}),row.lpPerSecond.toFixed(3),formatCompactNumber(Number(result.atlasPool)*row.lp/row.gmPrice),row.grossAtlasPerSecond.toFixed(6),`${row.marginPercent.toFixed(1)}%`,row.netAtlasPerSecond.toFixed(6),row.netAtlasPerCargoUnit.toFixed(6)];
+    values.forEach((value,index)=>{const td=document.createElement('td');td.textContent=value;if(index>0)td.className='numeric-cell';tr.append(td);});
+    const cell=document.createElement('td');cell.className='numeric-cell optimization-limit-cell';const input=document.createElement('input');input.type='number';input.min='0';input.step='any';input.className='optimization-framework-limit-input';input.placeholder='Enter price';input.dataset.limitComponent=row.name;input.setAttribute('aria-label',`${row.name} limit buy price`);
+    input.addEventListener('input',()=>{const value=input.value.trim(),price=Number(value);if(value&&Number.isFinite(price)&&price>0)upgradingLimitAnchorByFaction.set(faction,{name:row.name,price});else upgradingLimitAnchorByFaction.delete(faction);updateLimits(row.name);renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(result));});
+    cell.append(input);tr.append(cell);optimizationUpgradingBreakevenBody.append(tr);
   }
   updateLimits();
 }

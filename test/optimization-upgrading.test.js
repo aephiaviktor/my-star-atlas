@@ -192,7 +192,7 @@ test('component margin chart uses pool share value, current GM price, and latest
   assert.match(main, /pricingATL\?\.priceATL/);
   assert.match(main, /atlasPool: UPGRADE_ATLAS_POOLS\[aephiaFaction\]/);
   assert.match(renderer, /latestFactionRedemption/);
-  assert.match(renderer, /formatCompactNumber\(Number\(result\.atlasPool\) \* row\.lp \/ row\.gmPrice\)/);
+  assert.match(renderer, /formatCompactNumber\(Number\(result\.atlasPool\)\*row\.lp\/row\.gmPrice\)/);
   assert.match(renderer, /sort\(\(a, b\) => a\.lp - b\.lp\)/);
   assert.match(css, /\.optimization-upgrading-breakeven-table \{ min-width: 0; font-size: 11px; \}/);
   for (const component of ['Power Source', 'Framework', 'Electromagnet', 'Electronics', 'Field Stabilizer', 'Particle Accelerator', 'Radiation Absorber', 'Survey Data Unit', 'Ink']) assert.match(renderer, new RegExp(component));
@@ -221,12 +221,14 @@ test('component efficiency calculates gross and net ATLAS per second and marks d
   assert.equal(powerSource.dominated, true);
   assert.match(renderer, /optimization-dominated-cross/);
   assert.match(renderer, /optimization-pareto-frontier/);
-  assert.doesNotMatch(extractFunction(renderer, 'markUpgradingDominatedRows'), /cargoWeight/);
+  assert.match(extractFunction(renderer, 'markUpgradingDominatedRows'), /includeCargo/);
+  assert.match(renderer, /markUpgradingDominatedRows\(rows, false\)/);
   assert.match(renderer, /duration: 3000/);
   assert.match(renderer, /optimization-efficiency-label/);
   assert.match(renderer, /const factionLp = Number\(buildUpgradingOptimizationAnalytics\(result\)\.latestFactionRedemption/);
-  assert.match(renderer, /frameworkLimit \/ framework\.durationSeconds/);
-  assert.match(renderer, /row\.durationSeconds \* \(row\.grossAtlasPerSecond - targetNet\)/);
+  assert.match(renderer, /anchorPrice \/ anchor\.durationSeconds/);
+  assert.match(renderer, /upgradingLimitAnchorByFaction/);
+  assert.match(renderer, /row\.durationSeconds\*\(row\.grossAtlasPerSecond-targetNet\)/);
   assert.match(html, /Capital-limited/);
   assert.match(html, /Crew-limited/);
   assert.match(html, /Cargo-limited/);
@@ -252,7 +254,7 @@ test('LIMIT mode gives every achievable component Framework-equivalent net ATLAS
     { name: 'Framework', durationSeconds: 12, grossAtlasPerSecond: 0.0003, impliedAtlasValue: 0.0036, cargoWeight: 1 },
     { name: 'Electronics', durationSeconds: 14, grossAtlasPerSecond: 0.0004, impliedAtlasValue: 0.0056, cargoWeight: 2 },
   ];
-  const result = context.apply(rows, 0.0012);
+  const result = context.apply(rows, 'Framework', 0.0012);
   assert.equal(result.length, 2);
   assert.ok(Math.abs(result[0].netAtlasPerSecond - 0.0002) < 1e-15);
   assert.ok(Math.abs(result[1].netAtlasPerSecond - 0.0002) < 1e-15);
