@@ -2783,3 +2783,6 @@ label {
 .optimization-upgrading-breakeven-card { min-height: 398px; }
 .optimization-upgrading-breakeven-wrap { max-height: 340px; overflow-y: auto; }
 .optimization-upgrading-breakeven-table { width: 100%; }
+.optimization-upgrading-breakeven-table { min-width: 0; font-size: 11px; }
+.optimization-upgrading-breakeven-table th,
+.optimization-upgrading-breakeven-table td { padding: 8px 10px; }

@@ -8,6 +8,7 @@ const main = fs.readFileSync('electron/main.js', 'utf8');
 const preload = fs.readFileSync('electron/preload.js', 'utf8');
 const renderer = fs.readFileSync('electron/renderer.js', 'utf8');
 const html = fs.readFileSync('electron/renderer.html', 'utf8');
+const css = fs.readFileSync('electron/renderer.css', 'utf8');
 
 const components = ['Framework', 'Electronics', 'Power Source', 'Electromagnet', 'Field Stabilizer', 'Particle Accelerator', 'Radiation Absorber', 'Survey Data Unit'];
 
@@ -169,7 +170,6 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(renderer, /#f59e0b.*?isToday\?/);
   assert.match(renderer, /actual final/);
   assert.match(renderer, /forecast error/);
-  const css = fs.readFileSync('electron/renderer.css', 'utf8');
   assert.match(css, /\.optimization-surface\.optimization-analytics-surface\s*\{[\s\S]*?overflow-y:\s*scroll/);
   assert.match(css, /\.optimization-line-hit/);
   assert.match(css, /pointer-events: stroke/);
@@ -194,5 +194,6 @@ test('component margin chart uses pool share value, current GM price, and latest
   assert.match(renderer, /latestFactionRedemption/);
   assert.match(renderer, /atlasPool \* row\.lp \/ row\.gmPrice/);
   assert.match(renderer, /sort\(\(a, b\) => a\.lp - b\.lp\)/);
+  assert.match(css, /\.optimization-upgrading-breakeven-table \{ min-width: 0; font-size: 11px; \}/);
   for (const component of ['Power Source', 'Framework', 'Electromagnet', 'Electronics', 'Field Stabilizer', 'Particle Accelerator', 'Radiation Absorber', 'Survey Data Unit', 'Ink']) assert.match(renderer, new RegExp(component));
 });
