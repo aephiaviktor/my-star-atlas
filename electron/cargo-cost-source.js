@@ -155,12 +155,15 @@ function aggregateRawCostsByFleetDay(records = []) {
   const groups = new Map();
   for (const record of records) {
     const isoDate = utcDay(record.timestamp);
-    const fleet = clean(record.fleetAccount || record.fleetLabel);
-    if (!isoDate || !fleet) continue;
-    const key = `${isoDate}\n${fleet}`;
-    if (!groups.has(key)) groups.set(key, { isoDate, fleet, fleetAccount: clean(record.fleetAccount), fleetLabel: clean(record.fleetLabel), assignments: new Set(), fuel: [], lamports: 0n, sourceIds: [] });
+    const fleetAccount = clean(record.fleetAccount);
+    if (!isoDate) continue;
+    const allocationStatus = fleetAccount ? 'scoped' : 'unallocated';
+    const allocationKey = fleetAccount
+      ? `fleet:${fleetAccount}`
+      : `unallocated:v1:${record.faction}:${record.instance}:${isoDate}:${record.eventType}`;
+    const key = `${isoDate}\n${allocationKey}`;
+    if (!groups.has(key)) groups.set(key, { isoDate, faction: record.faction, instance: record.instance, fleetAccount, allocationKey, allocationStatus, eventType: fleetAccount ? null : record.eventType, fuel: [], lamports: 0n, sourceIds: [] });
     const group = groups.get(key);
-    if (clean(record.assignment)) group.assignments.add(clean(record.assignment));
     if (record.eventType === 'fuel') group.fuel.push(record.fuelQuantity);
     if (record.eventType === 'sol_fee') group.lamports += BigInt(record.txFeeLamports);
     group.sourceIds.push(record.id);
@@ -169,10 +172,12 @@ function aggregateRawCostsByFleetDay(records = []) {
     const fuelQuantity = addExactDecimals(group.fuel);
     const txFeeLamports = String(group.lamports);
     const txCostSolExact = lamportsToSolDecimal(txFeeLamports);
+    const unallocated = group.allocationStatus === 'unallocated';
     return {
-      isoDate: group.isoDate, timestamp: `${group.isoDate}T00:00:00.000Z`,
-      fleet: group.fleetLabel || group.fleet, fleetAccount: group.fleetAccount,
-      assignment: group.assignments.size === 1 ? Array.from(group.assignments)[0] : 'Transport',
+      isoDate: group.isoDate, timestamp: `${group.isoDate}T00:00:00.000Z`, faction: group.faction, instance: group.instance,
+      fleet: unallocated ? null : group.fleetAccount, fleetAccount: group.fleetAccount,
+      assignment: null, allocationKey: group.allocationKey, allocationStatus: group.allocationStatus,
+      allocationReason: unallocated ? 'allocation_scope_missing' : null, eventType: group.eventType,
       burnedFuelExact: fuelQuantity, burnedFuel: Number(fuelQuantity),
       txFeeLamports, txCostSolExact, txCostSol: Number(txCostSolExact), txsDaily: 0,
       starbases: [], completedCycleIds: [], cargoCycles: 0, cargoLegs: 0,
@@ -181,9 +186,33 @@ function aggregateRawCostsByFleetDay(records = []) {
   });
 }
 
+function decimalUnits(value) {
+  const text = clean(value) || '0';
+  const [whole, fraction = ''] = text.split('.');
+  return { units: BigInt(`${whole || '0'}${fraction}`), scale: fraction.length };
+}
+
+function unitsToDecimal(units, scale) {
+  if (!scale) return String(units);
+  const padded = String(units).padStart(scale + 1, '0');
+  return `${padded.slice(0, -scale)}.${padded.slice(-scale)}`.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+}
+
+function exactShares(total, weights) {
+  const { units, scale } = decimalUnits(total);
+  const normalized = weights.map((weight) => decimalUnits(String(Math.max(0, Number(weight) || 0))));
+  const weightScale = normalized.reduce((max, row) => Math.max(max, row.scale), 0);
+  const weightUnits = normalized.map((row) => row.units * (10n ** BigInt(weightScale - row.scale)));
+  const weightTotal = weightUnits.reduce((sum, value) => sum + value, 0n);
+  const shares = weightUnits.map((weight) => weightTotal ? (units * weight) / weightTotal : 0n);
+  const receiver = weightTotal ? weightUnits.findLastIndex((weight) => weight > 0n) : 0;
+  shares[receiver < 0 ? 0 : receiver] += units - shares.reduce((sum, value) => sum + value, 0n);
+  return shares.map((share) => unitsToDecimal(share, scale));
+}
+
 function applyRawCostsToCargoAllocations(rows = [], rawDailyRows = [], cutoverUtc = RAW_COST_CUTOVER_UTC) {
   const cutoverDay = utcDay(cutoverUtc);
-  const rawByFleetDay = new Map(rawDailyRows.map((row) => [`${row.isoDate}\n${clean(row.fleetAccount || row.fleet)}`, row]));
+  const rawByFleetDay = new Map(rawDailyRows.filter((row) => row.allocationStatus !== 'unallocated' && clean(row.fleetAccount)).map((row) => [`${row.isoDate}\n${clean(row.fleetAccount)}`, row]));
   const groups = new Map();
   for (const row of rows) {
     if (clean(row.isoDate) < cutoverDay) continue;
@@ -194,11 +223,14 @@ function applyRawCostsToCargoAllocations(rows = [], rawDailyRows = [], cutoverUt
   const replacements = new Map();
   for (const [key, group] of groups) {
     const raw = rawByFleetDay.get(key);
-    const totalWeight = group.reduce((sum, row) => sum + Math.max(0, Number(row.cargoVolume) || Number(row.amount) || 0), 0);
+    const weights = group.map((row) => Math.max(0, Number(row.cargoVolume) || Number(row.amount) || 0));
+    const fuelShares = raw ? exactShares(raw.burnedFuelExact, weights) : group.map(() => '0');
+    const lamportShares = raw ? exactShares(raw.txFeeLamports, weights) : group.map(() => '0');
     group.forEach((row, index) => {
-      const weight = Math.max(0, Number(row.cargoVolume) || Number(row.amount) || 0);
-      const ratio = totalWeight > 0 ? weight / totalWeight : (index === 0 ? 1 : 0);
-      replacements.set(row, { ...row, allocatedFuel: raw ? raw.burnedFuel * ratio : 0, allocatedTxCostSol: raw ? raw.txCostSol * ratio : 0, sourceMode: raw ? 'canonical_raw' : 'raw_missing' });
+      const allocatedFuelExact = fuelShares[index];
+      const allocatedTxFeeLamports = lamportShares[index];
+      const allocatedTxCostSolExact = lamportsToSolDecimal(allocatedTxFeeLamports);
+      replacements.set(row, { ...row, allocatedFuelExact, allocatedFuel: Number(allocatedFuelExact), allocatedTxFeeLamports, allocatedTxCostSolExact, allocatedTxCostSol: Number(allocatedTxCostSolExact), sourceMode: raw ? 'canonical_raw' : 'raw_missing' });
     });
   }
   return rows.map((row) => replacements.get(row) || row);
@@ -217,7 +249,10 @@ async function valueCanonicalRawCosts(records, { resolveFuelPrice } = {}) {
 function buildCanonicalRawCostPool(records = [], rejected = []) {
   return {
     costs: records.map((record) => ({
-      id: record.id, fleet: record.fleetAccount || record.fleetLabel,
+      id: record.id, fleet: clean(record.fleetAccount) || null,
+      allocationKey: clean(record.fleetAccount) ? `fleet:${clean(record.fleetAccount)}` : `unallocated:v1:${record.faction}:${record.instance}:${utcDay(record.timestamp)}:${record.eventType}`,
+      allocationStatus: clean(record.fleetAccount) ? 'scoped' : 'unallocated',
+      allocationReason: clean(record.fleetAccount) ? null : 'allocation_scope_missing',
       utcDate: utcDay(record.timestamp), kind: record.eventType === 'fuel' ? 'fuel' : 'transaction_fee',
       sourceIdentity: record.eventIdentity, amount: record.eventType === 'fuel' ? record.fuelQuantity : record.txFeeLamports,
       currency: record.eventType === 'fuel' ? 'FUEL' : 'LAMPORTS', timestamp: record.timestamp,
@@ -225,7 +260,7 @@ function buildCanonicalRawCostPool(records = [], rejected = []) {
       instructionIndex: record.eventPosition, valuation: record.valuation,
       native: record,
     })),
-    references: records.map((record) => ({ costId: record.id, assignment: record.assignment || null, resourceMint: null, destination: null })),
+    references: records.map((record) => ({ costId: record.id, allocationKey: clean(record.fleetAccount) ? `fleet:${clean(record.fleetAccount)}` : `unallocated:v1:${record.faction}:${record.instance}:${utcDay(record.timestamp)}:${record.eventType}`, resourceMint: null, destination: null })),
     pending: rejected.map((entry) => ({ status: 'data_quality_failure', ...entry })),
   };
 }

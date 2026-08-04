@@ -23,6 +23,15 @@ test('cutover is applied before authoritative cargo totals and allocation valuat
   assert.match(main, /cargoRows = \[\.\.\.cutoverSelection\.legacyRows, \.\.\.canonicalRawDailyRows\]/);
 });
 
+test('canonical allocation scope uses immutable fleet accounts and compatibility route evidence only', () => {
+  assert.doesNotMatch(source, /fleetAccount\s*\|\|\s*(?:record\.)?fleetLabel/);
+  assert.doesNotMatch(source, /allocationKey[^\n]*(?:fleetLabel|assignment)/);
+  assert.match(source, /allocationReason: unallocated \? 'allocation_scope_missing' : null/);
+  assert.match(source, /rawDailyRows\.filter\(\(row\) => row\.allocationStatus !== 'unallocated' && clean\(row\.fleetAccount\)\)/);
+  assert.match(main, /fleetByAccount\.get\(String\(cargoRow\.fleetAccount/);
+  assert.match(main, /new Set\(compatibilityCargoRows\.map\(\(row\) => normalizeFleetLabel\(row\.fleet\)\)/);
+});
+
 test('frozen price seed remains exactly July 6 through August 4', () => {
   assert.match(price, /INITIAL_SEED_START_UTC = '2026-07-06'/);
   assert.match(price, /INITIAL_SEED_END_UTC = '2026-08-04'/);

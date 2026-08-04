@@ -6575,6 +6575,7 @@ async function fetchEarningsSnapshot(payload) {
   fleetRows.sort((a, b) => (Number(b.expectedSduPerScan) || 0) - (Number(a.expectedSduPerScan) || 0));
 
   const fleetByLabel = new Map();
+  const fleetByAccount = new Map();
   // Cross-faction leak fix: the wallet's `fetchProfileFleets` is
   // filtered by `ownerProfile` / `subProfile` but NOT by faction, so a
   // single profile can own fleets in multiple factions (MUD/USTUR/ONI)
@@ -6595,6 +6596,8 @@ async function fetchEarningsSnapshot(payload) {
     if (!walletFactionMatches(fleet)) continue;
     const key = normalizeFleetLabel(fleet.label);
     if (key && !fleetByLabel.has(key)) fleetByLabel.set(key, fleet);
+    const account = String(fleet.key || '').trim();
+    if (account && !fleetByAccount.has(account)) fleetByAccount.set(account, fleet);
   }
 
   let scanningRows = [];
@@ -6794,13 +6797,15 @@ async function fetchEarningsSnapshot(payload) {
   const activeCargoFleetKeys = new Set();
   const activeMappedCargoFleetKeys = new Set();
   const cargo = await Promise.all(cargoRows.map(async (cargoRow) => {
-    const fleet = fleetByLabel.get(normalizeFleetLabel(cargoRow.fleet));
-    const activeKey = fleet?.key || normalizeFleetLabel(cargoRow.fleet);
+    const canonicalRaw = cargoRow.sourceMode === 'canonical_raw';
+    const fleet = canonicalRaw
+      ? fleetByAccount.get(String(cargoRow.fleetAccount || '').trim())
+      : fleetByLabel.get(normalizeFleetLabel(cargoRow.fleet));
+    const activeKey = fleet?.key || (canonicalRaw ? String(cargoRow.allocationKey || '') : normalizeFleetLabel(cargoRow.fleet));
     activeCargoFleetKeys.add(activeKey);
     if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
     const fuelPrice = await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate);
     const fuelCostsAtlas = fuelPrice.status === 'complete' ? cargoRow.burnedFuel * fuelPrice.priceATL : null;
-    const canonicalRaw = cargoRow.sourceMode === 'canonical_raw';
     const txsCostsAtlas = !canonicalRaw && atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null;
     const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
     const incompleteRawValuation = canonicalRaw && ((Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas)));
@@ -6809,8 +6814,8 @@ async function fetchEarningsSnapshot(payload) {
     const netProfitAtlas = Number.isFinite(totalCostsAtlas) ? -totalCostsAtlas : null;
     return {
       ...cargoRow,
-      fleetName: cargoRow.fleet,
-      fleetAccount: fleet?.key || '',
+      fleetName: fleet?.label || (cargoRow.allocationStatus === 'unallocated' ? 'Unallocated' : cargoRow.fleet),
+      fleetAccount: fleet?.key || cargoRow.fleetAccount || '',
       rented: fleet?.relationship === 'managed' || fleet?.relationship === 'owned-managed',
       ownership: fleet?.ownership || '',
       relationship: fleet?.relationship || '',
@@ -6865,7 +6870,7 @@ async function fetchEarningsSnapshot(payload) {
   const cargoCostPool = mergeCargoCostPools(legacyCargoCostPool, canonicalRawCostPool);
   // Scope allocation rows through the already faction-scoped movement fleets,
   // while preserving each fleet and route as separate cost dimensions.
-  const scopedCargoFleetLabels = new Set(cargoRows.map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
+  const scopedCargoFleetLabels = new Set(compatibilityCargoRows.map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
   const fleetScopedCargoAllocationRows = cargoAllocationRows.filter((row) =>
     scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet))
   );

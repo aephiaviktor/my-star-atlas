@@ -6,6 +6,7 @@ const {
   RAW_COST_CUTOVER_UTC, RAW_COST_CUTOVERS, buildRawCostFluxQuery,
   projectRawCostEvents, selectLegacyRawCutover, lamportsToSolDecimal, rawCostDigest,
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
+  buildCanonicalRawCostPool,
 } = require('../electron/cargo-cost-source');
 
 const fuel = (overrides = {}) => ({ _time: '2026-08-05T00:01:02.003Z', schemaVersion: '1', eventType: 'fuel', eventIdentity: 'fuel:cycle:0', fuelQuantity: '12.500000000000001', movementEventId: 'cycle:0', cycleId: 'cycle', movementIndex: '0', timestampProvenance: 'solana_block_time', sourceProvenance: 'confirmed_movement', faction: 'MUD', instance: 'MUD', fleetAccount: 'fleet', fleetLabel: 'Fleet', assignment: 'Transport', ...overrides });
@@ -122,19 +123,76 @@ test('versioned UTC cutover prevents legacy/raw overlap and excludes disabled US
   assert.equal(disabled.cutover, null); assert.equal(disabled.trackingDisabled, true); assert.equal(disabled.legacyRows.length, 1); assert.equal(disabled.rawRecords.length, 0);
 });
 
-test('raw daily projection drives existing cargo-weight allocation without double counting compatibility costs', () => {
-  const records = projectRawCostEvents([fuel(), sol({ txFeeLamports: '5000' })]).records;
+test('raw daily projection drives existing cargo-weight allocation with exact native conservation', () => {
+  const records = projectRawCostEvents([fuel(), sol({ txFeeLamports: '5001' })]).records;
   const daily = aggregateRawCostsByFleetDay(records);
   assert.equal(daily[0].burnedFuelExact, '12.500000000000001');
-  assert.equal(daily[0].txFeeLamports, '5000');
+  assert.equal(daily[0].txFeeLamports, '5001');
+  assert.equal(daily[0].allocationKey, 'fleet:fleet');
   const allocated = applyRawCostsToCargoAllocations([
     { isoDate: '2026-08-05', fleetAccount: 'fleet', cargoVolume: 1, allocatedFuel: 999, allocatedTxCostSol: 999 },
     { isoDate: '2026-08-05', fleetAccount: 'fleet', cargoVolume: 3, allocatedFuel: 999, allocatedTxCostSol: 999 },
     { isoDate: '2026-08-04', fleetAccount: 'fleet', cargoVolume: 1, allocatedFuel: 7, allocatedTxCostSol: 0.1 },
   ], daily);
-  assert.equal(allocated[0].allocatedFuel, daily[0].burnedFuel * 0.25);
-  assert.equal(allocated[1].allocatedFuel, daily[0].burnedFuel * 0.75);
+  assert.deepEqual(allocated.slice(0, 2).map((row) => row.allocatedFuelExact), ['3.125', '9.375000000000001']);
+  assert.deepEqual(allocated.slice(0, 2).map((row) => row.allocatedTxFeeLamports), ['1250', '3751']);
+  assert.equal(allocated[0].allocatedFuel + allocated[1].allocatedFuel, daily[0].burnedFuel);
+  assert.equal(BigInt(allocated[0].allocatedTxFeeLamports) + BigInt(allocated[1].allocatedTxFeeLamports), 5001n);
   assert.equal(allocated[2].allocatedFuel, 7);
+});
+
+test('missing fleet scope is explicit unallocated accounting and never falls back to metadata', () => {
+  const unscoped = projectRawCostEvents([
+    fuel({ fleetAccount: '', fleetLabel: 'Mutable Fleet', assignment: 'Transport' }),
+    sol({ fleetAccount: '', fleetLabel: 'Mutable Fleet', assignment: 'Transport', eventIdentity: 'sol_fee:unscoped', transactionSignature: 'unscoped' }),
+  ]).records;
+  const daily = aggregateRawCostsByFleetDay(unscoped);
+  assert.equal(daily.length, 2);
+  for (const row of daily) {
+    assert.equal(row.fleetAccount, '');
+    assert.equal(row.fleet, null);
+    assert.equal(row.assignment, null);
+    assert.equal(row.allocationStatus, 'unallocated');
+    assert.equal(row.allocationReason, 'allocation_scope_missing');
+    assert.match(row.allocationKey, /^unallocated:v1:MUD:MUD:2026-08-05:(fuel|sol_fee)$/);
+  }
+  const attemptedLabelMatch = applyRawCostsToCargoAllocations([
+    { isoDate: '2026-08-05', fleetAccount: 'Mutable Fleet', fleet: 'Mutable Fleet', cargoVolume: 1, allocatedFuel: 99, allocatedTxCostSol: 99 },
+  ], daily);
+  assert.equal(attemptedLabelMatch[0].sourceMode, 'raw_missing');
+  assert.equal(attemptedLabelMatch[0].allocatedFuel, 0);
+  assert.equal(attemptedLabelMatch[0].allocatedTxCostSol, 0);
+});
+
+test('mutable metadata cannot change scoped allocation or unallocated results in either order', () => {
+  for (const fleetAccount of ['fleet', '']) {
+    const base = fuel({ fleetAccount });
+    const changed = fuel({ fleetAccount, fleetLabel: 'Renamed', assignment: 'Supply Chain' });
+    const forward = aggregateRawCostsByFleetDay(projectRawCostEvents([base, changed]).records);
+    const reverse = aggregateRawCostsByFleetDay(projectRawCostEvents([changed, base]).records);
+    assert.deepEqual(forward, reverse);
+    assert.equal(forward[0].burnedFuelExact, '12.500000000000001');
+    assert.equal(forward[0].allocationKey, fleetAccount ? 'fleet:fleet' : 'unallocated:v1:MUD:MUD:2026-08-05:fuel');
+  }
+});
+
+test('distinct unscoped identities remain canonical, distinct, and conserved without double counting', () => {
+  const records = projectRawCostEvents([
+    sol({ fleetAccount: '', fleetLabel: 'Same', eventIdentity: 'sol_fee:a', transactionSignature: 'a', txFeeLamports: '7' }),
+    sol({ fleetAccount: '', fleetLabel: 'Same', eventIdentity: 'sol_fee:b', transactionSignature: 'b', txFeeLamports: '7' }),
+  ]).records;
+  const daily = aggregateRawCostsByFleetDay(records);
+  assert.equal(records.length, 2);
+  assert.equal(daily.length, 1);
+  assert.equal(daily[0].sourceIds.length, 2);
+  assert.equal(daily[0].txFeeLamports, '14');
+  assert.equal(daily[0].allocationStatus, 'unallocated');
+  const pool = buildCanonicalRawCostPool(records);
+  assert.equal(pool.costs.length, 2);
+  assert.equal(pool.references.length, 2);
+  assert.equal(pool.pending.length, 0);
+  assert.ok(pool.costs.every((cost) => cost.fleet === null && cost.allocationStatus === 'unallocated' && cost.allocationReason === 'allocation_scope_missing'));
+  assert.ok(pool.references.every((reference) => !Object.hasOwn(reference, 'assignment')));
 });
 
 test('post-seed missing price remains incomplete and null, never zero', async () => {
