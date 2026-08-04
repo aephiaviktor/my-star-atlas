@@ -157,6 +157,16 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(fs.readFileSync('electron/renderer.css', 'utf8'), /\.optimization-upgrading-tall-chart svg \{ height: auto; aspect-ratio: 760 \/ 340; \}/);
   assert.match(fs.readFileSync('electron/renderer.css', 'utf8'), /\.optimization-upgrading-primary-chart-card \.optimization-upgrading-tall-chart \{ width: 66\.6667%; margin-inline: auto; \}/);
   assert.match(renderer, /row\.lpPerSecond\.toFixed\(1\)/);
+  assert.match(renderer, /const upgradingBreakevenColumns = Object\.freeze\(\[[\s\S]*?key: 'name'[\s\S]*?key: 'upgradingTime'[\s\S]*?key: 'lpValue'[\s\S]*?key: 'lpPerSecond'[\s\S]*?key: 'factionLp'[\s\S]*?key: 'breakevenLp'[\s\S]*?key: 'gmPrice'[\s\S]*?key: 'grossAtlasPerSecond'/);
+  assert.match(renderer, /key: 'grossAtlasPerSecond', label: 'Gross ATLAS\/s', selected: false/);
+  for (const key of ['name', 'lpPerSecond', 'breakevenLp', 'gmPrice', 'marginPercent', 'netAtlasPerSecond', 'netAtlasPerCargoUnit', 'limit']) assert.match(renderer, new RegExp(`key: '${key}', label: [^\\n]+ selected: true`));
+  for (const key of ['upgradingTime', 'lpValue', 'factionLp']) assert.match(renderer, new RegExp(`key: '${key}', label: [^\\n]+ selected: false`));
+  assert.match(renderer, /currentOptimizationSubtab === 'upgrading' && currentOptimizationView === 'analytics'/);
+  assert.match(renderer, /persistUpgradingBreakevenColumnState\(\)/);
+  assert.match(html, /id="optimization-upgrading-breakeven-head"/);
+  assert.match(renderer, /upgradingTime:`\$\{row\.durationSeconds\}s`/);
+  assert.match(renderer, /lpValue:row\.lp\.toLocaleString\(\)/);
+  assert.match(renderer, /factionLp:factionLp\.toLocaleString\(\)/);
   assert.match(renderer, /expected_total_lp_eod/);
   assert.match(renderer, /points\.sort\(\(a,b\) => a\.hour-b\.hour\)\.slice\(1\)/);
   assert.match(renderer, /bindOptimizationAnalyticsTooltip\(snapshot/);

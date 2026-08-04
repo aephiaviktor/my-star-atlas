@@ -102,6 +102,7 @@ const optimizationUpgradingRedemptionChart = document.querySelector('#optimizati
 const optimizationUpgradingForecastChart = document.querySelector('#optimization-upgrading-forecast-chart');
 const optimizationUpgradingErrorChart = document.querySelector('#optimization-upgrading-error-chart');
 const optimizationUpgradingBreakevenBody = document.querySelector('#optimization-upgrading-breakeven-body');
+const optimizationUpgradingBreakevenHead = document.querySelector('#optimization-upgrading-breakeven-head');
 const earningsSyncStatus = document.querySelector('#earnings-sync-status');
 const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
@@ -366,6 +367,34 @@ let optimizationColumns = [];
 let optimizationSelectedColumns = new Set();
 let optimizationKnownColumns = new Set();
 const OPTIMIZATION_COLUMN_STORAGE_KEY = 'my-star-atlas:optimization-scanning-columns:v1';
+const upgradingBreakevenColumns = Object.freeze([
+  { key: 'name', label: 'Name', selected: true },
+  { key: 'upgradingTime', label: 'Upgrading time', selected: false },
+  { key: 'lpValue', label: 'LP value', selected: false },
+  { key: 'lpPerSecond', label: 'LP/s', selected: true },
+  { key: 'factionLp', label: 'Faction LP redemption', selected: false },
+  { key: 'breakevenLp', label: 'Breakeven LP', selected: true },
+  { key: 'gmPrice', label: 'GM price', selected: true },
+  { key: 'grossAtlasPerSecond', label: 'Gross ATLAS/s', selected: false },
+  { key: 'marginPercent', label: 'Profit Margin', selected: true, group: 'Capital-limited' },
+  { key: 'netAtlasPerSecond', label: 'Net ATLAS/s', selected: true, group: 'Crew-limited' },
+  { key: 'netAtlasPerCargoUnit', label: 'Net ATLAS/cargo unit', selected: true, group: 'Cargo-limited' },
+  { key: 'limit', label: 'Limit', selected: true },
+]);
+const UPGRADING_BREAKEVEN_COLUMN_STORAGE_KEY = 'my-star-atlas:optimization-upgrading-analysis-columns:v1';
+let upgradingBreakevenSelectedColumns = new Set(upgradingBreakevenColumns.filter((column) => column.selected).map((column) => column.key));
+
+try {
+  const saved = JSON.parse(localStorage.getItem(UPGRADING_BREAKEVEN_COLUMN_STORAGE_KEY) || 'null');
+  if (Array.isArray(saved)) upgradingBreakevenSelectedColumns = new Set(saved.filter((key) => upgradingBreakevenColumns.some((column) => column.key === key)));
+} catch (_error) {
+  // Invalid or unavailable storage leaves the documented defaults selected.
+}
+
+function persistUpgradingBreakevenColumnState() {
+  try { localStorage.setItem(UPGRADING_BREAKEVEN_COLUMN_STORAGE_KEY, JSON.stringify([...upgradingBreakevenSelectedColumns])); }
+  catch (_error) { /* Column controls remain functional without storage. */ }
+}
 
 function restoreOptimizationColumnState() {
   try {
@@ -7058,6 +7087,23 @@ function getOrderedOptimizationColumns(columns) {
 function renderOptimizationColumnControls() {
   if (!optimizationColumnList) return;
   optimizationColumnList.replaceChildren();
+  if (currentOptimizationSubtab === 'upgrading' && currentOptimizationView === 'analytics') {
+    for (const column of upgradingBreakevenColumns) {
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = upgradingBreakevenSelectedColumns.has(column.key);
+      input.addEventListener('change', () => {
+        if (input.checked) upgradingBreakevenSelectedColumns.add(column.key);
+        else upgradingBreakevenSelectedColumns.delete(column.key);
+        persistUpgradingBreakevenColumnState();
+        renderUpgradingBreakevenTable();
+      });
+      label.append(input, document.createTextNode(` ${column.label}`));
+      optimizationColumnList.append(label);
+    }
+    return;
+  }
   if (currentOptimizationSubtab === 'upgrading') {
     for (const column of optimizationUpgradingColumns) {
       const label = document.createElement('label');
@@ -7974,12 +8020,23 @@ function renderUpgradingOptimizationAnalytics() {
 }
 
 function renderUpgradingBreakevenTable() {
-  if (!optimizationUpgradingBreakevenBody) return;
+  if (!optimizationUpgradingBreakevenBody || !optimizationUpgradingBreakevenHead) return;
+  const visibleColumns = upgradingBreakevenColumns.filter((column) => upgradingBreakevenSelectedColumns.has(column.key));
+  optimizationUpgradingBreakevenHead.replaceChildren();
+  const groupRow = document.createElement('tr'); groupRow.className = 'optimization-analysis-group-head';
+  const metricRow = document.createElement('tr');
+  for (const column of visibleColumns) {
+    const th = document.createElement('th');
+    if (column.group) { th.textContent = column.group; th.className = 'optimization-limit-group'; groupRow.append(th); const metricTh = document.createElement('th'); metricTh.textContent = column.label; metricRow.append(metricTh); }
+    else { th.textContent = column.label; th.rowSpan = 2; groupRow.append(th); }
+  }
+  optimizationUpgradingBreakevenHead.append(groupRow);
+  if (visibleColumns.some((column) => column.group)) optimizationUpgradingBreakevenHead.append(metricRow);
   optimizationUpgradingBreakevenBody.replaceChildren();
   const result = latestUpgradingOptimizationResult || {};
   const factionLp = Number(buildUpgradingOptimizationAnalytics(result).latestFactionRedemption?.factionLp);
   const rows = buildUpgradingEfficiencyRows(result, factionLp).sort((a, b) => a.lp - b.lp);
-  if (!rows.length) { const tr=document.createElement('tr'),td=document.createElement('td'); tr.className='empty-row';td.colSpan=9;td.textContent='Component prices or yesterday’s faction LP unavailable';tr.append(td);optimizationUpgradingBreakevenBody.append(tr);return; }
+  if (!rows.length) { const tr=document.createElement('tr'),td=document.createElement('td'); tr.className='empty-row';td.colSpan=Math.max(1,visibleColumns.length);td.textContent='Component prices or yesterday’s faction LP unavailable';tr.append(td);optimizationUpgradingBreakevenBody.append(tr);return; }
   const faction = normalizeFaction(latestSettings?.faction);
   const updateLimits = (editedName = '') => {
     const anchor = upgradingLimitAnchorByFaction.get(faction);
@@ -7995,11 +8052,15 @@ function renderUpgradingBreakevenTable() {
     }
   };
   for (const row of rows) {
-    const tr=document.createElement('tr'); const values=[row.name==='Ink'?'INK':row.name,row.gmPrice.toLocaleString(undefined,{maximumFractionDigits:6}),row.lpPerSecond.toFixed(1),formatCompactNumber(Number(result.atlasPool)*row.lp/row.gmPrice),row.grossAtlasPerSecond.toFixed(6),`${row.marginPercent.toFixed(1)}%`,row.netAtlasPerSecond.toFixed(6),row.netAtlasPerCargoUnit.toFixed(6)];
-    values.forEach((value,index)=>{const td=document.createElement('td');td.textContent=value;if(index>0)td.className='numeric-cell';tr.append(td);});
-    const cell=document.createElement('td');cell.className='numeric-cell optimization-limit-cell';const input=document.createElement('input');input.type='number';input.min='0';input.step='any';input.className='optimization-framework-limit-input';input.placeholder='Enter price';input.dataset.limitComponent=row.name;input.setAttribute('aria-label',`${row.name} limit buy price`);
-    input.addEventListener('input',()=>{const value=input.value.trim(),price=Number(value);if(value&&Number.isFinite(price)&&price>0)upgradingLimitAnchorByFaction.set(faction,{name:row.name,price});else upgradingLimitAnchorByFaction.delete(faction);updateLimits(row.name);renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(result));});
-    cell.append(input);tr.append(cell);optimizationUpgradingBreakevenBody.append(tr);
+    const tr=document.createElement('tr');
+    const values={name:row.name==='Ink'?'INK':row.name,upgradingTime:`${row.durationSeconds}s`,lpValue:row.lp.toLocaleString(),lpPerSecond:row.lpPerSecond.toFixed(1),factionLp:factionLp.toLocaleString(),breakevenLp:formatCompactNumber(Number(result.atlasPool)*row.lp/row.gmPrice),gmPrice:row.gmPrice.toLocaleString(undefined,{maximumFractionDigits:6}),grossAtlasPerSecond:row.grossAtlasPerSecond.toFixed(6),marginPercent:`${row.marginPercent.toFixed(1)}%`,netAtlasPerSecond:row.netAtlasPerSecond.toFixed(6),netAtlasPerCargoUnit:row.netAtlasPerCargoUnit.toFixed(6)};
+    for (const column of visibleColumns) {
+      const cell=document.createElement('td');
+      if(column.key==='limit'){cell.className='numeric-cell optimization-limit-cell';const input=document.createElement('input');input.type='number';input.min='0';input.step='any';input.className='optimization-framework-limit-input';input.placeholder='Enter price';input.dataset.limitComponent=row.name;input.setAttribute('aria-label',`${row.name} limit buy price`);input.addEventListener('input',()=>{const value=input.value.trim(),price=Number(value);if(value&&Number.isFinite(price)&&price>0)upgradingLimitAnchorByFaction.set(faction,{name:row.name,price});else upgradingLimitAnchorByFaction.delete(faction);updateLimits(row.name);renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(result));});cell.append(input);}
+      else { cell.textContent=values[column.key]; if(column.key!=='name')cell.className='numeric-cell'; }
+      tr.append(cell);
+    }
+    optimizationUpgradingBreakevenBody.append(tr);
   }
   updateLimits();
 }
@@ -8197,6 +8258,7 @@ async function refreshUpgradingOptimization({ force = false } = {}) {
 
 function setActiveOptimizationSubtab(subtab) {
   currentOptimizationSubtab = subtab;
+  appShell?.classList.toggle('optimization-upgrading-active', subtab === 'upgrading');
   document.querySelectorAll('.optimization-subtab-button').forEach((button) => {
     const active = button.dataset.optimizationSubtab === subtab;
     button.classList.toggle('active', active); button.setAttribute('aria-selected', String(active));

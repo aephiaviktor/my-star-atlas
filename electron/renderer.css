@@ -184,7 +184,8 @@ select:focus {
 }
 
 .app-shell.earnings-active #earnings-column-controls,
-.app-shell.optimization-active:not(.optimization-analytics-active) #optimization-column-controls {
+.app-shell.optimization-active:not(.optimization-analytics-active) #optimization-column-controls,
+.app-shell.optimization-active.optimization-analytics-active.optimization-upgrading-active #optimization-column-controls {
   display: grid;
 }
 
