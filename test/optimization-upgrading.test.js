@@ -192,7 +192,7 @@ test('component margin chart uses pool share value, current GM price, and latest
   assert.match(main, /pricingATL\?\.priceATL/);
   assert.match(main, /atlasPool: UPGRADE_ATLAS_POOLS\[aephiaFaction\]/);
   assert.match(renderer, /latestFactionRedemption/);
-  assert.match(renderer, /atlasPool \* row\.lp \/ row\.gmPrice/);
+  assert.match(renderer, /formatCompactNumber\(atlasPool \* row\.lp \/ row\.gmPrice\)/);
   assert.match(renderer, /sort\(\(a, b\) => a\.lp - b\.lp\)/);
   assert.match(css, /\.optimization-upgrading-breakeven-table \{ min-width: 0; font-size: 11px; \}/);
   for (const component of ['Power Source', 'Framework', 'Electromagnet', 'Electronics', 'Field Stabilizer', 'Particle Accelerator', 'Radiation Absorber', 'Survey Data Unit', 'Ink']) assert.match(renderer, new RegExp(component));

@@ -7893,7 +7893,7 @@ function renderUpgradingBreakevenTable() {
     const tr = document.createElement('tr');
     const name = document.createElement('td'); name.textContent = row.name;
     const gmPrice = document.createElement('td'); gmPrice.className = 'numeric-cell'; gmPrice.textContent = row.gmPrice.toLocaleString(undefined, { maximumFractionDigits: 6 });
-    const breakeven = document.createElement('td'); breakeven.className = 'numeric-cell'; breakeven.textContent = Math.round(atlasPool * row.lp / row.gmPrice).toLocaleString();
+    const breakeven = document.createElement('td'); breakeven.className = 'numeric-cell'; breakeven.textContent = formatCompactNumber(atlasPool * row.lp / row.gmPrice);
     tr.append(name, gmPrice, breakeven); optimizationUpgradingBreakevenBody.append(tr);
   }
 }
