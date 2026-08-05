@@ -6136,30 +6136,15 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'ships') return createShipsCell(entry);
   if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
   if (columnId === 'txsDaily') return createTextCell(entry.txsDaily == null ? '--' : formatWholeNumber(entry.txsDaily));
-  if (columnId === 'cargoCycles') return createTextCell(entry.cargoCycles == null ? '--' : formatWholeNumber(entry.cargoCycles));
+  if (columnId === 'cargoCycles') {
+    const cycles = entry.cargoCycles == null ? 0 : Number(entry.cargoCycles);
+    const legs = entry.cargoLegs == null ? 0 : Number(entry.cargoLegs);
+    return createTextCell(`${formatWholeNumber(cycles)} cycles / ${formatWholeNumber(legs)} legs`);
+  }
   if (columnId === 'assignment') return createTextCell(entry.assignment || '--');
-  if (columnId === 'travelModeTime') return createTextCell(entry.travelModeTime?.label || '--');
+  if (columnId === 'travelModeTime') return createTextCell(entry.travelModeTime?.label || '0% Warp | 0% Subwarp');
   if (columnId === 'starbases') return createTextCell(entry.starbaseLabel || '--');
-  const valuationCell = (value, formatter = formatAtlasWhole) => {
-    const cell = createTextCell(value == null ? '--' : formatter(value));
-    const valuations = [entry.fuelValuation, entry.solValuation];
-    const provisional = valuations.find((valuation) => valuation?.status === 'provisional');
-    const incomplete = valuations.find((valuation) => valuation?.status === 'incomplete');
-    if (value != null && provisional) {
-      const indicator = document.createElement('span');
-      indicator.className = 'provisional-valuation-indicator';
-      indicator.textContent = ' ~';
-      indicator.title = `Provisional · event day ${provisional.eventDay} · fallback price day ${provisional.priceDay}`;
-      cell.appendChild(indicator);
-    } else if (value == null && incomplete) {
-      const indicator = document.createElement('span');
-      indicator.className = 'incomplete-valuation-indicator';
-      indicator.textContent = ' ⓘ';
-      indicator.title = `Incomplete valuation · event day ${incomplete.eventDay || entry.isoDate} · ${incomplete.reason || 'price unavailable'}`;
-      cell.appendChild(indicator);
-    }
-    return cell;
-  };
+  const valuationCell = (value, formatter = formatAtlasWhole) => createTextCell(value == null ? '--' : formatter(value));
   if (columnId === 'fuelCosts') return valuationCell(entry.fuelCostsAtlas);
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
   if (columnId === 'txsCosts') return valuationCell(entry.txsCostsAtlas);

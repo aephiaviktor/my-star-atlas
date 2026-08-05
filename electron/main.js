@@ -6471,6 +6471,7 @@ async function fetchEarningsSnapshot(payload) {
   await atlasPriceResolver.captureCurrentPriceSeeds({
     ...(prices.resourcePricesAtlByName || {}),
     Fuel: fuelPriceAtl,
+    SOL: atlasPerSol,
   });
 
   const fleetShipsKeys = fleets

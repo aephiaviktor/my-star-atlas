@@ -17,6 +17,13 @@ function provisionalValuationTooltip(row) {
 }
 
 function clean(value) { return String(value ?? '').trim(); }
+function canonicalOperationalSection(assignment) {
+  const value = clean(assignment).toLowerCase();
+  if (value === 'scan' || value === 'scanning') return 'scanning';
+  if (value === 'mine' || value === 'mining') return 'mining';
+  if (value === 'cargo' || value === 'transport' || value === 'supply chain') return 'cargo';
+  return null;
+}
 function operationalIdentity(row) {
   const isoDate = clean(row?.isoDate);
   const faction = clean(row?.faction);
@@ -77,55 +84,67 @@ function aggregateOperationalCargoRows(rows = []) {
   }));
 }
 
-function incompleteOperationalProjection(cost) {
+function emptyCanonicalCost(operation) {
+  const eventDay = clean(operation.isoDate);
   return {
-    ...cost,
-    fleet: cost.allocationStatus === 'unallocated' ? null : cost.fleet,
-    assignment: null,
-    txsDaily: finiteOrNull(cost.txsDaily),
-    completedCycleIds: [],
-    cargoCycles: null,
-    cargoLegs: null,
-    starbases: [],
-    travelTimeByMode: null,
-    travelModeTime: null,
-    travelModeWarpPercent: null,
-    cargoVolume: null,
-    fleetCargoCapacity: null,
-    operationalStatus: 'incomplete',
-    operationalReason: cost.allocationStatus === 'unallocated' ? 'allocation_scope_missing' : 'operational_row_missing',
+    isoDate: eventDay,
+    faction: clean(operation.faction),
+    instance: clean(operation.instance),
+    fleetAccount: clean(operation.fleetAccount),
+    fleet: clean(operation.fleet),
+    allocationKey: `fleet:${clean(operation.fleetAccount)}`,
+    allocationStatus: 'scoped',
+    sourceMode: 'canonical_raw',
+    burnedFuelExact: '0',
+    burnedFuel: 0,
+    txFeeLamports: '0',
+    txCostSolExact: '0',
+    txCostSol: 0,
+    txsDaily: finiteOrNull(operation.txsDaily) ?? 0,
+    fuelValuation: { status: 'complete', amountATLExact: '0', amountATL: 0, eventDay, priceDay: eventDay, source: 'no_cost', provenance: 'No attributable Cargo fuel cost', estimated: false },
+    solValuation: { status: 'complete', amountATLExact: '0', amountATL: 0, eventDay, priceDay: eventDay, source: 'no_cost', provenance: 'No attributable Cargo transaction fee', estimated: false },
+    sourceIds: [],
   };
 }
 
 function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [], operationalRows = [] } = {}) {
   const operations = aggregateOperationalCargoRows(operationalRows);
-  const canonical = costRows.map((cost) => {
-    if (cost?.allocationStatus === 'unallocated') return incompleteOperationalProjection(cost);
-    const operation = operations.get(operationalIdentity(cost));
-    if (!operation) return incompleteOperationalProjection(cost);
-    return {
-      ...cost,
-      fleet: operation.fleet,
-      assignment: operation.assignment,
-      txsDaily: finiteOrNull(cost.txsDaily),
-      completedCycleIds: operation.completedCycleIds,
-      cargoCycles: operation.cargoCycles,
-      cargoLegs: operation.cargoLegs,
-      starbases: operation.starbases,
-      travelTimeByMode: operation.travelTimeByMode,
-      travelModeTime: operation.travelModeTime,
-      travelModeWarpPercent: operation.travelModeWarpPercent,
-      cargoVolume: operation.cargoVolume,
-      fleetCargoCapacity: operation.fleetCargoCapacity,
-      operationalStatus: 'joined',
-      operationalReason: null,
-    };
-  }).sort((a, b) => clean(b.isoDate).localeCompare(clean(a.isoDate)) || clean(a.allocationKey).localeCompare(clean(b.allocationKey)));
-  return [...legacyRows, ...canonical];
+  const costs = new Map(costRows
+    .filter((cost) => cost?.allocationStatus !== 'unallocated')
+    .map((cost) => [operationalIdentity(cost), cost])
+    .filter(([identity]) => identity));
+  const canonical = Array.from(operations.entries())
+    .filter(([, operation]) => canonicalOperationalSection(operation.assignment) === 'cargo')
+    .map(([identity, operation]) => {
+      const cost = costs.get(identity) || emptyCanonicalCost(operation);
+      return {
+        ...cost,
+        fleet: operation.fleet,
+        fleetAccount: operation.fleetAccount,
+        faction: operation.faction,
+        instance: operation.instance,
+        isoDate: operation.isoDate,
+        assignment: operation.assignment,
+        txsDaily: finiteOrNull(cost.txsDaily) ?? finiteOrNull(operation.txsDaily) ?? 0,
+        completedCycleIds: operation.completedCycleIds,
+        cargoCycles: operation.cargoCycles ?? 0,
+        cargoLegs: operation.cargoLegs ?? 0,
+        starbases: operation.starbases,
+        travelTimeByMode: operation.travelTimeByMode,
+        travelModeTime: operation.travelModeTime,
+        travelModeWarpPercent: operation.travelModeWarpPercent,
+        cargoVolume: operation.cargoVolume ?? 0,
+        fleetCargoCapacity: operation.fleetCargoCapacity,
+        operationalStatus: 'joined',
+        operationalReason: null,
+      };
+    })
+    .sort((a, b) => clean(b.isoDate).localeCompare(clean(a.isoDate)) || clean(a.fleetAccount).localeCompare(clean(b.fleetAccount)));
+  return [...legacyRows.filter((row) => canonicalOperationalSection(row?.assignment) === 'cargo'), ...canonical];
 }
 
 function operationalCargoDigest(rows = []) {
   return crypto.createHash('sha256').update(rows.map((row) => JSON.stringify(row)).join('\n')).digest('hex');
 }
 
-module.exports = { projectCargoTableRow, provisionalValuationTooltip, joinCanonicalCostsWithOperationalRows, operationalCargoDigest, aggregateOperationalCargoRows };
+module.exports = { projectCargoTableRow, provisionalValuationTooltip, joinCanonicalCostsWithOperationalRows, operationalCargoDigest, aggregateOperationalCargoRows, canonicalOperationalSection };

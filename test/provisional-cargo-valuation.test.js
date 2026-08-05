@@ -61,11 +61,10 @@ test('Cargo projection unifies dates, retains UTC day, and never renders null as
   assert.equal(canonical.isoDate,'2026-08-05'); assert.equal(canonical.fuelCostsAtlas,null);
 });
 
-test('presentation marks provisional values without adding RPC, polling, or cadence', async () => {
+test('presentation hides internal price provenance without adding RPC, polling, or cadence', async () => {
   const renderer=await fs.readFile(path.join(__dirname,'..','electron','renderer.js'),'utf8');
   const source=await fs.readFile(path.join(__dirname,'..','electron','cargo-cost-source.js'),'utf8');
   const projection=await fs.readFile(path.join(__dirname,'..','electron','cargo-table-projection.js'),'utf8');
-  assert.match(renderer,/provisional-valuation-indicator/);
-  assert.match(renderer,/event day \$\{provisional\.eventDay\} · fallback price day \$\{provisional\.priceDay\}/);
+  assert.doesNotMatch(renderer,/provisional-valuation-indicator|incomplete-valuation-indicator|Incomplete valuation|fallback price day/);
   assert.doesNotMatch(source+projection,/Connection\(|getAccountInfo|setInterval|setTimeout|polling/i);
 });

@@ -37,7 +37,7 @@ test('Cargo query errors expose the actionable failure instead of a generic unav
 
 test('Cargo table shows completed cycles immediately after Txs Daily', () => {
   assert.match(js, /id: 'txsDaily', label: 'Txs Daily' \}\),\s*Object\.freeze\(\{ id: 'cargoCycles', label: 'Cycles Daily'/);
-  assert.match(js, /columnId === 'cargoCycles'[^\n]*entry\.cargoCycles/);
+  assert.match(js, /columnId === 'cargoCycles'[\s\S]*entry\.cargoCycles[\s\S]*entry\.cargoLegs/);
   assert.match(html, /<th scope="col">Txs Daily<\/th>\s*<th scope="col">Cycles Daily<\/th>\s*<th scope="col">Assignment<\/th>/);
 });
 
