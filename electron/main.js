@@ -47,7 +47,9 @@ const {
   RAW_COST_CUTOVER_MANIFEST_VERSION, buildRawCostFluxQuery, projectRawCostEvents,
   selectLegacyRawCutover, exporterForFaction, aggregateRawCostsByFleetDay,
   applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
+  valueNativeCost,
 } = require('./cargo-cost-source');
+const { projectCargoTableRow } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
 const {
@@ -6660,10 +6662,14 @@ async function fetchEarningsSnapshot(payload) {
     ? selectLegacyRawCutover({ legacyRows: compatibilityCargoRows, rawRecords: rawCargoCosts.records, ...rawExporter })
     : { cutover: null, legacyRows: cargoRows, rawRecords: [], trackingDisabled: false };
   const valuedCanonicalRawCosts = await valueCanonicalRawCosts(cutoverSelection.rawRecords, {
-    resolveFuelPrice: (asset, date) => atlasPriceResolver.resolveAtlasPrice(asset, date),
+    resolvePrice: (asset, date) => atlasPriceResolver.resolveAtlasPrice(asset, date),
   });
-  const canonicalRawDailyRows = aggregateRawCostsByFleetDay(valuedCanonicalRawCosts);
-  cargoRows = [...cutoverSelection.legacyRows, ...canonicalRawDailyRows];
+  const canonicalRawDailyRows = aggregateRawCostsByFleetDay(valuedCanonicalRawCosts)
+    .map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) }));
+  cargoRows = [
+    ...cutoverSelection.legacyRows.map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) })),
+    ...canonicalRawDailyRows,
+  ];
 
   const activeFleetKeys = new Set();
   const activeMappedFleetKeys = new Set();
@@ -6804,9 +6810,14 @@ async function fetchEarningsSnapshot(payload) {
     const activeKey = fleet?.key || (canonicalRaw ? String(cargoRow.allocationKey || '') : normalizeFleetLabel(cargoRow.fleet));
     activeCargoFleetKeys.add(activeKey);
     if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
-    const fuelPrice = await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate);
-    const fuelCostsAtlas = fuelPrice.status === 'complete' ? cargoRow.burnedFuel * fuelPrice.priceATL : null;
-    const txsCostsAtlas = !canonicalRaw && atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null;
+    const fuelPrice = canonicalRaw ? cargoRow.fuelValuation : await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate);
+    const fuelCostsAtlas = canonicalRaw
+      ? (cargoRow.fuelValuation?.amountATL ?? (Number(cargoRow.burnedFuel) > 0 ? null : 0))
+      : (['complete', 'provisional'].includes(fuelPrice.status) ? cargoRow.burnedFuel * fuelPrice.priceATL : null);
+    const solValuation = canonicalRaw ? cargoRow.solValuation : null;
+    const txsCostsAtlas = canonicalRaw
+      ? (solValuation?.amountATL ?? (BigInt(cargoRow.txFeeLamports || '0') > 0n ? null : 0))
+      : (atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null);
     const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
     const incompleteRawValuation = canonicalRaw && ((Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas)));
     const costParts = [fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
@@ -6828,11 +6839,14 @@ async function fetchEarningsSnapshot(payload) {
       cargoLegs: Number(cargoRow.cargoLegs) || 0,
       starbaseLabel: Array.isArray(cargoRow.starbases) && cargoRow.starbases.length ? cargoRow.starbases.join(', ') : '--',
       fuelCostsAtlas,
-      fuelPriceEffectiveUtcDate: fuelPrice.effectiveUtcDate,
-      fuelPriceSource: fuelPrice.source,
-      fuelPriceProvenance: fuelPrice.provenance,
-      fuelPriceEstimated: fuelPrice.estimated,
-      fuelValuationStatus: fuelPrice.status,
+      fuelPriceEffectiveUtcDate: fuelPrice?.effectiveUtcDate,
+      fuelPriceDay: fuelPrice?.priceDay,
+      fuelPriceSource: fuelPrice?.source,
+      fuelPriceProvenance: fuelPrice?.provenance,
+      fuelPriceEstimated: fuelPrice?.estimated,
+      fuelValuationStatus: fuelPrice?.status,
+      fuelValuation: canonicalRaw ? cargoRow.fuelValuation : null,
+      solValuation,
       rentalRateAtlasPerDay,
       txsCostsAtlas,
       totalCostsAtlas,
@@ -6885,9 +6899,21 @@ async function fetchEarningsSnapshot(payload) {
   }
   const valueCargoAllocation = async (row) => {
     const fuelPrice = await atlasPriceResolver.resolveAtlasPrice('Fuel', row.isoDate);
-    const fuelCostsAtlas = fuelPrice.status === 'complete' ? row.allocatedFuel * fuelPrice.priceATL : null;
-    const txsCostsAtlas = row.sourceMode !== 'canonical_raw' && atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null;
-    return { fuelPrice, fuelCostsAtlas, txsCostsAtlas };
+    const canonicalRaw = row.sourceMode === 'canonical_raw';
+    const fuelValuation = canonicalRaw && Number(row.allocatedFuelExact || 0) > 0
+      ? valueNativeCost({ eventType: 'fuel', timestamp: row.timestamp, fuelQuantity: row.allocatedFuelExact }, fuelPrice)
+      : null;
+    const solPrice = canonicalRaw ? await atlasPriceResolver.resolveAtlasPrice('SOL', row.isoDate) : null;
+    const solValuation = canonicalRaw && BigInt(row.allocatedTxFeeLamports || '0') > 0n
+      ? valueNativeCost({ eventType: 'sol_fee', timestamp: row.timestamp, txFeeLamports: row.allocatedTxFeeLamports }, solPrice)
+      : null;
+    const fuelCostsAtlas = canonicalRaw
+      ? (Number(row.allocatedFuelExact || 0) > 0 ? fuelValuation?.amountATL ?? null : 0)
+      : (['complete', 'provisional'].includes(fuelPrice.status) ? row.allocatedFuel * fuelPrice.priceATL : null);
+    const txsCostsAtlas = canonicalRaw
+      ? (BigInt(row.allocatedTxFeeLamports || '0') > 0n ? solValuation?.amountATL ?? null : 0)
+      : (atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null);
+    return { fuelPrice, fuelValuation, solValuation, fuelCostsAtlas, txsCostsAtlas };
   };
   const ledgerCargoAllocations = await Promise.all(enrichedCargoAllocationRows.map(async (row) => {
     const { fuelCostsAtlas, txsCostsAtlas } = await valueCargoAllocation(row);
@@ -6899,7 +6925,7 @@ async function fetchEarningsSnapshot(payload) {
     };
   }));
   const cargoAllocations = await Promise.all(groupCargoAllocationRows(enrichedCargoAllocationRows).map(async (row) => {
-    const { fuelPrice, fuelCostsAtlas, txsCostsAtlas } = await valueCargoAllocation(row);
+    const { fuelPrice, fuelValuation, solValuation, fuelCostsAtlas, txsCostsAtlas } = await valueCargoAllocation(row);
     const totalCostsAtlas = Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)
       ? fuelCostsAtlas + txsCostsAtlas
       : null;
@@ -6913,6 +6939,8 @@ async function fetchEarningsSnapshot(payload) {
       fuelPriceProvenance: fuelPrice.provenance,
       fuelPriceEstimated: fuelPrice.estimated,
       fuelValuationStatus: fuelPrice.status,
+      fuelValuation,
+      solValuation,
       costsPerUnitAtlas: Number.isFinite(totalCostsAtlas) && row.amount > 0 ? totalCostsAtlas / row.amount : null,
     };
   }));

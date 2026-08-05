@@ -22,6 +22,15 @@ function normalizeAsset(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function exactPositiveDecimal(value) {
+  const text = typeof value === 'number' ? String(value) : String(value ?? '').trim();
+  return /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(text) && !/^0(?:\.0+)?$/.test(text) ? text : '';
+}
+
+function incompletePrice(effectiveUtcDate, reason) {
+  return { status: 'incomplete', priceATL: null, priceATLExact: null, effectiveUtcDate: effectiveUtcDate || null, priceDay: null, source: null, provenance: null, estimated: null, reason };
+}
+
 function emptyDocument() {
   return { schemaVersion: PRICE_SEED_SCHEMA_VERSION, seeds: {}, historical: {} };
 }
@@ -69,24 +78,38 @@ function createAtlasPriceResolver({ filePath, now = () => new Date().toISOString
   async function resolveAtlasPrice(asset, valuationUtcDate, { historicalByDate = null } = {}) {
     const key = normalizeAsset(asset);
     const effectiveUtcDate = normalizeUtcDate(valuationUtcDate);
-    if (!key || !effectiveUtcDate) return { status: 'incomplete', priceATL: null, effectiveUtcDate: effectiveUtcDate || null, source: null, provenance: null, estimated: null };
+    if (!key || !effectiveUtcDate) return incompletePrice(effectiveUtcDate, 'valuation_day_invalid');
     const document = await loadDocument(filePath);
     const externalHistorical = historicalByDate?.[effectiveUtcDate]?.[key] ?? historicalByDate?.[effectiveUtcDate]?.[asset];
     const persistedHistorical = document.historical?.[effectiveUtcDate]?.[key];
     const historical = externalHistorical ?? persistedHistorical;
-    const historicalPrice = Number(historical?.priceATL ?? historical);
-    if (Number.isFinite(historicalPrice) && historicalPrice > 0) {
+    if (historical != null) {
+      const historicalExact = exactPositiveDecimal(historical?.priceATL ?? historical);
+      if (!historicalExact) return incompletePrice(effectiveUtcDate, 'historical_price_invalid');
       return {
-        status: 'complete', priceATL: historicalPrice, effectiveUtcDate,
+        status: 'complete', priceATL: Number(historicalExact), priceATLExact: historicalExact,
+        effectiveUtcDate, priceDay: effectiveUtcDate,
         source: historical?.source || 'aephia_historical',
         provenance: historical?.provenance || 'Aephia exact UTC-date historical value', estimated: false,
       };
     }
     const seed = document.seeds[key];
+    const seedExact = exactPositiveDecimal(seed?.priceATL);
     if (seed && inInitialSeedWindow(effectiveUtcDate)) {
-      return { status: 'complete', priceATL: seed.priceATL, effectiveUtcDate, capturedAt: seed.capturedAt, source: seed.source, provenance: seed.provenance, estimated: true };
+      if (!seedExact) return incompletePrice(effectiveUtcDate, 'seed_price_invalid');
+      return { status: 'complete', priceATL: Number(seedExact), priceATLExact: seedExact, effectiveUtcDate, priceDay: effectiveUtcDate, capturedAt: seed.capturedAt, source: seed.source, provenance: seed.provenance, estimated: true };
     }
-    return { status: 'incomplete', priceATL: null, effectiveUtcDate, source: null, provenance: null, estimated: null };
+    if (effectiveUtcDate > INITIAL_SEED_END_UTC) {
+      if (!seed || !seedExact) return incompletePrice(effectiveUtcDate, seed ? 'provisional_seed_invalid' : 'provisional_seed_missing');
+      return {
+        status: 'provisional', priceATL: Number(seedExact), priceATLExact: seedExact,
+        effectiveUtcDate, priceDay: INITIAL_SEED_END_UTC, capturedAt: seed.capturedAt,
+        source: 'provisional_seed_carry_forward',
+        provenance: `Frozen ${INITIAL_SEED_END_UTC} current_price_seed carried forward provisionally`,
+        estimated: true,
+      };
+    }
+    return incompletePrice(effectiveUtcDate, 'price_missing');
   }
 
   return { captureCurrentPriceSeeds, resolveAtlasPrice, load: () => loadDocument(filePath) };

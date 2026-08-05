@@ -162,10 +162,12 @@ function aggregateRawCostsByFleetDay(records = []) {
       ? `fleet:${fleetAccount}`
       : `unallocated:v1:${record.faction}:${record.instance}:${isoDate}:${record.eventType}`;
     const key = `${isoDate}\n${allocationKey}`;
-    if (!groups.has(key)) groups.set(key, { isoDate, faction: record.faction, instance: record.instance, fleetAccount, allocationKey, allocationStatus, eventType: fleetAccount ? null : record.eventType, fuel: [], lamports: 0n, sourceIds: [] });
+    if (!groups.has(key)) groups.set(key, { isoDate, faction: record.faction, instance: record.instance, fleetAccount, allocationKey, allocationStatus, eventType: fleetAccount ? null : record.eventType, fuel: [], lamports: 0n, fuelValuations: [], solValuations: [], sourceIds: [] });
     const group = groups.get(key);
     if (record.eventType === 'fuel') group.fuel.push(record.fuelQuantity);
     if (record.eventType === 'sol_fee') group.lamports += BigInt(record.txFeeLamports);
+    if (record.eventType === 'fuel') group.fuelValuations.push(record.valuation);
+    if (record.eventType === 'sol_fee') group.solValuations.push(record.valuation);
     group.sourceIds.push(record.id);
   }
   return Array.from(groups.values()).map((group) => {
@@ -173,6 +175,15 @@ function aggregateRawCostsByFleetDay(records = []) {
     const txFeeLamports = String(group.lamports);
     const txCostSolExact = lamportsToSolDecimal(txFeeLamports);
     const unallocated = group.allocationStatus === 'unallocated';
+    const aggregateValuation = (valuations) => {
+      if (!valuations.length) return null;
+      if (valuations.some((value) => !value || value.status === 'incomplete')) {
+        return { status: 'incomplete', amountATL: null, amountATLExact: null, eventDay: group.isoDate, priceDay: null, reason: valuations.find((value) => value?.reason)?.reason || 'historical_price_missing' };
+      }
+      const amountATLExact = addExactDecimals(valuations.map((value) => value.amountATLExact));
+      const first = valuations[0];
+      return { ...first, status: valuations.some((value) => value.status === 'provisional') ? 'provisional' : 'complete', amountATLExact, amountATL: Number(amountATLExact) };
+    };
     return {
       isoDate: group.isoDate, timestamp: `${group.isoDate}T00:00:00.000Z`, faction: group.faction, instance: group.instance,
       fleet: unallocated ? null : group.fleetAccount, fleetAccount: group.fleetAccount,
@@ -182,6 +193,7 @@ function aggregateRawCostsByFleetDay(records = []) {
       txFeeLamports, txCostSolExact, txCostSol: Number(txCostSolExact), txsDaily: 0,
       starbases: [], completedCycleIds: [], cargoCycles: 0, cargoLegs: 0,
       travelModeTime: null, travelModeWarpPercent: null, sourceIds: group.sourceIds.sort(), sourceMode: 'canonical_raw',
+      fuelValuation: aggregateValuation(group.fuelValuations), solValuation: aggregateValuation(group.solValuations),
     };
   });
 }
@@ -196,6 +208,29 @@ function unitsToDecimal(units, scale) {
   if (!scale) return String(units);
   const padded = String(units).padStart(scale + 1, '0');
   return `${padded.slice(0, -scale)}.${padded.slice(-scale)}`.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+}
+
+function multiplyExactDecimals(left, right) {
+  const a = decimalUnits(left);
+  const b = decimalUnits(right);
+  return unitsToDecimal(a.units * b.units, a.scale + b.scale);
+}
+
+function valueNativeCost(record, price) {
+  const eventDay = utcDay(record.timestamp);
+  if (!price || !['complete', 'provisional'].includes(price.status) || !exactPositiveDecimal(price.priceATLExact ?? price.priceATL)) {
+    return { status: 'incomplete', amountATL: null, amountATLExact: null, eventDay, priceDay: null, effectiveUtcDate: eventDay, reason: price?.reason || 'historical_price_missing' };
+  }
+  const priceATLExact = exactPositiveDecimal(price.priceATLExact ?? price.priceATL);
+  const amountATLExact = record.eventType === 'fuel'
+    ? multiplyExactDecimals(record.fuelQuantity, priceATLExact)
+    : unitsToDecimal(BigInt(record.txFeeLamports) * decimalUnits(priceATLExact).units, decimalUnits(priceATLExact).scale + 9);
+  return {
+    status: price.status, amountATL: Number(amountATLExact), amountATLExact,
+    eventDay, priceDay: price.priceDay || price.effectiveUtcDate,
+    effectiveUtcDate: eventDay, priceATLExact,
+    source: price.source, provenance: price.provenance, estimated: price.estimated,
+  };
 }
 
 function exactShares(total, weights) {
@@ -236,13 +271,13 @@ function applyRawCostsToCargoAllocations(rows = [], rawDailyRows = [], cutoverUt
   return rows.map((row) => replacements.get(row) || row);
 }
 
-async function valueCanonicalRawCosts(records, { resolveFuelPrice } = {}) {
+async function valueCanonicalRawCosts(records, { resolvePrice, resolveFuelPrice } = {}) {
+  const resolver = resolvePrice || resolveFuelPrice;
   return Promise.all(records.map(async (record) => {
-    if (record.eventType !== 'fuel' || typeof resolveFuelPrice !== 'function') return record;
-    const result = await resolveFuelPrice('Fuel', utcDay(record.timestamp));
-    return { ...record, valuation: result?.status === 'complete'
-      ? { status: 'complete', amountATL: Number(record.fuelQuantity) * result.priceATL, effectiveUtcDate: result.effectiveUtcDate, source: result.source, provenance: result.provenance, estimated: result.estimated }
-      : { status: 'incomplete', amountATL: null, effectiveUtcDate: utcDay(record.timestamp) } };
+    if (typeof resolver !== 'function') return record;
+    const asset = record.eventType === 'fuel' ? 'Fuel' : 'SOL';
+    const result = await resolver(asset, utcDay(record.timestamp));
+    return { ...record, valuation: valueNativeCost(record, result) };
   }));
 }
 
@@ -274,5 +309,5 @@ module.exports = {
   RAW_COST_CUTOVER_UTC, RAW_COST_CUTOVERS, buildRawCostFluxQuery, canonicalRawCostIdentity,
   projectRawCostEvents, selectLegacyRawCutover, getRawCostCutover, lamportsToSolDecimal, rawCostDigest,
   exporterForFaction, aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
-  buildCanonicalRawCostPool,
+  buildCanonicalRawCostPool, valueNativeCost, multiplyExactDecimals,
 };

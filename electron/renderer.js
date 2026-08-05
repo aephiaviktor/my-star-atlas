@@ -6140,10 +6140,22 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'assignment') return createTextCell(entry.assignment || '--');
   if (columnId === 'travelModeTime') return createTextCell(entry.travelModeTime?.label || '--');
   if (columnId === 'starbases') return createTextCell(entry.starbaseLabel || '--');
-  if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas));
+  const valuationCell = (value) => {
+    const cell = createTextCell(value == null ? '--' : formatAtlasWhole(value));
+    const valuations = [entry.fuelValuation, entry.solValuation].filter((valuation) => valuation?.status === 'provisional');
+    if (value != null && valuations.length) {
+      const indicator = document.createElement('span');
+      indicator.className = 'provisional-valuation-indicator';
+      indicator.textContent = ' ~';
+      indicator.title = `Provisional · event day ${valuations[0].eventDay} · fallback price day ${valuations[0].priceDay}`;
+      cell.appendChild(indicator);
+    }
+    return cell;
+  };
+  if (columnId === 'fuelCosts') return valuationCell(entry.fuelCostsAtlas);
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
-  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
-  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
+  if (columnId === 'txsCosts') return valuationCell(entry.txsCostsAtlas);
+  if (columnId === 'totalCosts') return valuationCell(entry.totalCostsAtlas);
   if (columnId === 'txsCostsPct') return createTextCell(formatPercentNumber(entry.txsCostsPercent, 0));
   if (columnId === 'cargoVolume') return createTextCell(entry.cargoVolume == null ? '--' : formatWholeNumber(entry.cargoVolume));
   if (columnId === 'cargoCapacity') return createTextCell(entry.cargoCapacity == null ? '--' : formatWholeNumber(entry.cargoCapacity));
@@ -6783,9 +6795,9 @@ function renderEarningsCargoAllocations(result) {
     tr.appendChild(createTextCell(entry.destination || '--'));
     for (const column of remainingColumns) {
       if (column.id === 'assignment') tr.appendChild(createTextCell(entry.assignment || '--'));
-      else if (column.id === 'amount') tr.appendChild(createTextCell(formatWholeNumber(entry.amount || 0)));
-      else if (column.id === 'cargoVolume') tr.appendChild(createTextCell(formatWholeNumber(entry.cargoVolume || 0)));
-      else if (column.id === 'allocatedFuel') tr.appendChild(createTextCell(formatWholeNumber(entry.allocatedFuel || 0)));
+      else if (column.id === 'amount') tr.appendChild(createTextCell(entry.amount == null ? '--' : formatWholeNumber(entry.amount)));
+      else if (column.id === 'cargoVolume') tr.appendChild(createTextCell(entry.cargoVolume == null ? '--' : formatWholeNumber(entry.cargoVolume)));
+      else if (column.id === 'allocatedFuel') tr.appendChild(createTextCell(entry.allocatedFuel == null ? '--' : formatWholeNumber(entry.allocatedFuel)));
       else if (column.id === 'fuelCosts') tr.appendChild(createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas)));
       else if (column.id === 'txsCosts') tr.appendChild(createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas)));
       else if (column.id === 'totalCosts') tr.appendChild(createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas)));

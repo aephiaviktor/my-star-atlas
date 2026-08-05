@@ -197,7 +197,9 @@ test('distinct unscoped identities remain canonical, distinct, and conserved wit
 
 test('post-seed missing price remains incomplete and null, never zero', async () => {
   const [valued] = await valueCanonicalRawCosts(projectRawCostEvents([fuel()]).records, { resolveFuelPrice: async () => ({ status: 'incomplete', priceATL: null }) });
-  assert.deepEqual(valued.valuation, { status: 'incomplete', amountATL: null, effectiveUtcDate: '2026-08-05' });
+  assert.equal(valued.valuation.status, 'incomplete');
+  assert.equal(valued.valuation.amountATL, null);
+  assert.equal(valued.valuation.effectiveUtcDate, '2026-08-05');
 });
 
 test('malformed identity is quality failure and raw query has no aggregation or cadence', () => {

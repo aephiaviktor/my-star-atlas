@@ -20,7 +20,7 @@ test('cutover is applied before authoritative cargo totals and allocation valuat
   const allocation = main.indexOf('enrichedCargoAllocationRows = applyRawCostsToCargoAllocations');
   assert.ok(selection >= 0 && selection < cargoProjection);
   assert.ok(allocation > cargoProjection);
-  assert.match(main, /cargoRows = \[\.\.\.cutoverSelection\.legacyRows, \.\.\.canonicalRawDailyRows\]/);
+  assert.match(main, /cargoRows = \[[\s\S]*cutoverSelection\.legacyRows\.map[\s\S]*canonicalRawDailyRows[\s\S]*\]/);
 });
 
 test('canonical allocation scope uses immutable fleet accounts and compatibility route evidence only', () => {

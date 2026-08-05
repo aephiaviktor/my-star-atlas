@@ -17,7 +17,10 @@ test('frozen priceATL seed is captured once and initial UTC boundaries are inclu
   assert.equal((await resolver.resolveAtlasPrice('Fuel', INITIAL_SEED_START_UTC)).priceATL, 2.5);
   assert.equal((await resolver.resolveAtlasPrice('Fuel', INITIAL_SEED_END_UTC)).priceATL, 2.5);
   assert.equal((await resolver.resolveAtlasPrice('Fuel', '2026-07-05')).status, 'incomplete');
-  assert.equal((await resolver.resolveAtlasPrice('Fuel', '2026-08-05')).status, 'incomplete');
+  const provisional = await resolver.resolveAtlasPrice('Fuel', '2026-08-05');
+  assert.equal(provisional.status, 'provisional');
+  assert.equal(provisional.priceDay, '2026-08-04');
+  assert.equal(provisional.source, 'provisional_seed_carry_forward');
 }));
 
 test('exact historical price overrides seed for its date only and propagates provenance', async () => fixture(async (resolver) => {
@@ -25,7 +28,7 @@ test('exact historical price overrides seed for its date only and propagates pro
   const historicalByDate = { '2026-08-04': { fuel: { priceATL: 3.25, source: 'aephia_historical', provenance: 'server exact date' } } };
   const exact = await resolver.resolveAtlasPrice('Fuel', '2026-08-04T23:59:00Z', { historicalByDate });
   const prior = await resolver.resolveAtlasPrice('Fuel', '2026-08-03', { historicalByDate });
-  assert.deepEqual(exact, { status: 'complete', priceATL: 3.25, effectiveUtcDate: '2026-08-04', source: 'aephia_historical', provenance: 'server exact date', estimated: false });
+  assert.deepEqual(exact, { status: 'complete', priceATL: 3.25, priceATLExact: '3.25', effectiveUtcDate: '2026-08-04', priceDay: '2026-08-04', source: 'aephia_historical', provenance: 'server exact date', estimated: false });
   assert.equal(prior.priceATL, 2.5);
   assert.equal(prior.source, 'current_price_seed');
   assert.equal(prior.estimated, true);
