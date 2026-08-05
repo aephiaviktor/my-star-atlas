@@ -19,7 +19,8 @@ function calculateFleetCargoCapacity(ships = []) {
 function calculateCargoEfficiency({ cargoVolume, fleetCargoCapacity, cargoLegs } = {}) {
   const capacityPerLeg = Number(fleetCargoCapacity);
   const legs = Number(cargoLegs);
-  const volume = Number(cargoVolume);
+  const volumeKnown = cargoVolume != null && cargoVolume !== '';
+  const volume = volumeKnown ? Number(cargoVolume) : NaN;
   if (!Number.isFinite(capacityPerLeg) || capacityPerLeg <= 0 || !Number.isFinite(legs) || legs <= 0) {
     return { cargoCapacity: null, cargoEfficiencyPercent: null };
   }

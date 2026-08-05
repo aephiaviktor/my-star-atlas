@@ -1900,10 +1900,15 @@ select:focus {
   background: rgba(31, 220, 176, 0.1);
 }
 
-.provisional-valuation-indicator {
+.provisional-valuation-indicator,
+.incomplete-valuation-indicator {
   color: #f59e0b;
   cursor: help;
   font-weight: 700;
+}
+
+.incomplete-valuation-indicator {
+  color: var(--muted);
 }
 
 .empty-row td {

@@ -66,6 +66,6 @@ test('presentation marks provisional values without adding RPC, polling, or cade
   const source=await fs.readFile(path.join(__dirname,'..','electron','cargo-cost-source.js'),'utf8');
   const projection=await fs.readFile(path.join(__dirname,'..','electron','cargo-table-projection.js'),'utf8');
   assert.match(renderer,/provisional-valuation-indicator/);
-  assert.match(renderer,/event day \$\{valuations\[0\]\.eventDay\} · fallback price day \$\{valuations\[0\]\.priceDay\}/);
+  assert.match(renderer,/event day \$\{provisional\.eventDay\} · fallback price day \$\{provisional\.priceDay\}/);
   assert.doesNotMatch(source+projection,/Connection\(|getAccountInfo|setInterval|setTimeout|polling/i);
 });

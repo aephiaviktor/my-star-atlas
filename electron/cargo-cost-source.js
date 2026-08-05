@@ -162,10 +162,13 @@ function aggregateRawCostsByFleetDay(records = []) {
       ? `fleet:${fleetAccount}`
       : `unallocated:v1:${record.faction}:${record.instance}:${isoDate}:${record.eventType}`;
     const key = `${isoDate}\n${allocationKey}`;
-    if (!groups.has(key)) groups.set(key, { isoDate, faction: record.faction, instance: record.instance, fleetAccount, allocationKey, allocationStatus, eventType: fleetAccount ? null : record.eventType, fuel: [], lamports: 0n, fuelValuations: [], solValuations: [], sourceIds: [] });
+    if (!groups.has(key)) groups.set(key, { isoDate, faction: record.faction, instance: record.instance, fleetAccount, allocationKey, allocationStatus, eventType: fleetAccount ? null : record.eventType, fuel: [], lamports: 0n, transactions: 0, fuelValuations: [], solValuations: [], sourceIds: [] });
     const group = groups.get(key);
     if (record.eventType === 'fuel') group.fuel.push(record.fuelQuantity);
-    if (record.eventType === 'sol_fee') group.lamports += BigInt(record.txFeeLamports);
+    if (record.eventType === 'sol_fee') {
+      group.lamports += BigInt(record.txFeeLamports);
+      group.transactions += 1;
+    }
     if (record.eventType === 'fuel') group.fuelValuations.push(record.valuation);
     if (record.eventType === 'sol_fee') group.solValuations.push(record.valuation);
     group.sourceIds.push(record.id);
@@ -190,7 +193,7 @@ function aggregateRawCostsByFleetDay(records = []) {
       assignment: null, allocationKey: group.allocationKey, allocationStatus: group.allocationStatus,
       allocationReason: unallocated ? 'allocation_scope_missing' : null, eventType: group.eventType,
       burnedFuelExact: fuelQuantity, burnedFuel: Number(fuelQuantity),
-      txFeeLamports, txCostSolExact, txCostSol: Number(txCostSolExact), txsDaily: 0,
+      txFeeLamports, txCostSolExact, txCostSol: Number(txCostSolExact), txsDaily: group.transactions,
       starbases: [], completedCycleIds: [], cargoCycles: 0, cargoLegs: 0,
       travelModeTime: null, travelModeWarpPercent: null, sourceIds: group.sourceIds.sort(), sourceMode: 'canonical_raw',
       fuelValuation: aggregateValuation(group.fuelValuations), solValuation: aggregateValuation(group.solValuations),

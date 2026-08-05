@@ -6135,19 +6135,27 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'ships') return createShipsCell(entry);
   if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
-  if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
-  if (columnId === 'cargoCycles') return createTextCell(formatWholeNumber(entry.cargoCycles || 0));
+  if (columnId === 'txsDaily') return createTextCell(entry.txsDaily == null ? '--' : formatWholeNumber(entry.txsDaily));
+  if (columnId === 'cargoCycles') return createTextCell(entry.cargoCycles == null ? '--' : formatWholeNumber(entry.cargoCycles));
   if (columnId === 'assignment') return createTextCell(entry.assignment || '--');
   if (columnId === 'travelModeTime') return createTextCell(entry.travelModeTime?.label || '--');
   if (columnId === 'starbases') return createTextCell(entry.starbaseLabel || '--');
-  const valuationCell = (value) => {
-    const cell = createTextCell(value == null ? '--' : formatAtlasWhole(value));
-    const valuations = [entry.fuelValuation, entry.solValuation].filter((valuation) => valuation?.status === 'provisional');
-    if (value != null && valuations.length) {
+  const valuationCell = (value, formatter = formatAtlasWhole) => {
+    const cell = createTextCell(value == null ? '--' : formatter(value));
+    const valuations = [entry.fuelValuation, entry.solValuation];
+    const provisional = valuations.find((valuation) => valuation?.status === 'provisional');
+    const incomplete = valuations.find((valuation) => valuation?.status === 'incomplete');
+    if (value != null && provisional) {
       const indicator = document.createElement('span');
       indicator.className = 'provisional-valuation-indicator';
       indicator.textContent = ' ~';
-      indicator.title = `Provisional · event day ${valuations[0].eventDay} · fallback price day ${valuations[0].priceDay}`;
+      indicator.title = `Provisional · event day ${provisional.eventDay} · fallback price day ${provisional.priceDay}`;
+      cell.appendChild(indicator);
+    } else if (value == null && incomplete) {
+      const indicator = document.createElement('span');
+      indicator.className = 'incomplete-valuation-indicator';
+      indicator.textContent = ' ⓘ';
+      indicator.title = `Incomplete valuation · event day ${incomplete.eventDay || entry.isoDate} · ${incomplete.reason || 'price unavailable'}`;
       cell.appendChild(indicator);
     }
     return cell;
@@ -6156,10 +6164,10 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
   if (columnId === 'txsCosts') return valuationCell(entry.txsCostsAtlas);
   if (columnId === 'totalCosts') return valuationCell(entry.totalCostsAtlas);
-  if (columnId === 'txsCostsPct') return createTextCell(formatPercentNumber(entry.txsCostsPercent, 0));
+  if (columnId === 'txsCostsPct') return valuationCell(entry.txsCostsPercent, (value) => formatPercentNumber(value, 0));
   if (columnId === 'cargoVolume') return createTextCell(entry.cargoVolume == null ? '--' : formatWholeNumber(entry.cargoVolume));
   if (columnId === 'cargoCapacity') return createTextCell(entry.cargoCapacity == null ? '--' : formatWholeNumber(entry.cargoCapacity));
-  if (columnId === 'cargoEfficiency') return createTextCell(formatPercentNumber(entry.cargoEfficiencyPercent, 1));
+  if (columnId === 'cargoEfficiency') return createTextCell(entry.cargoEfficiencyPercent == null ? '--' : formatPercentNumber(entry.cargoEfficiencyPercent, 1));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
 }

@@ -54,6 +54,11 @@ function isCargoCycleId(value) {
   return /^[^;]+;-?\d+,-?\d+;\d+$/.test(String(value || '').trim());
 }
 
+function cargoFleetAccountFromCycleId(value) {
+  const account = String(value || '').trim().split(':', 1)[0];
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(account) ? account : null;
+}
+
 function enrichCargoAllocationRows(rows, fleetByLabel, normalizeFleetLabel) {
   return rows.map((row) => {
     const fleet = fleetByLabel.get(normalizeFleetLabel(row.fleet));
@@ -100,4 +105,4 @@ function dedupeCargoAllocationFieldRows(rows = []) {
   });
 }
 
-module.exports = { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows };
+module.exports = { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows };

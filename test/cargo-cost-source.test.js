@@ -128,6 +128,7 @@ test('raw daily projection drives existing cargo-weight allocation with exact na
   const daily = aggregateRawCostsByFleetDay(records);
   assert.equal(daily[0].burnedFuelExact, '12.500000000000001');
   assert.equal(daily[0].txFeeLamports, '5001');
+  assert.equal(daily[0].txsDaily, 1);
   assert.equal(daily[0].allocationKey, 'fleet:fleet');
   const allocated = applyRawCostsToCargoAllocations([
     { isoDate: '2026-08-05', fleetAccount: 'fleet', cargoVolume: 1, allocatedFuel: 999, allocatedTxCostSol: 999 },

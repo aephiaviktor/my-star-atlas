@@ -36,7 +36,7 @@ const {
 } = require('./telemetry-context');
 const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./telemetry-rpc-fetch');
 const { dependencyInstallRequired } = require('./update-dependencies');
-const { parseInfluxCsv, isCargoCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows } = require('./influx-data');
+const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
@@ -49,7 +49,7 @@ const {
   applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
   valueNativeCost,
 } = require('./cargo-cost-source');
-const { projectCargoTableRow } = require('./cargo-table-projection');
+const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
 const {
@@ -6232,10 +6232,10 @@ ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
   |> filter(fn: (r) => exists r.starbase)
   |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["fleet", "assignment", "starbase", "_time"])
+  |> group(columns: ["fleet", "assignment", "starbase", "cycleId", "_time"])
   |> sum(column: "_value")
   |> group()
-  |> keep(columns: ["fleet", "assignment", "starbase", "_time", "_value"])
+  |> keep(columns: ["fleet", "assignment", "starbase", "cycleId", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "assignment", "starbase"])`;
   const typeFlux = `from(bucket: "${bucket}")
   |> range(start: -31d)
@@ -6253,7 +6253,7 @@ ${scopeFilterFlux}
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
   |> filter(fn: (r) => exists r.fleet)
-  |> keep(columns: ["fleet", "assignment", "_time", "_value"])
+  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "assignment"])`;
   const txDailyFlux = `from(bucket: "${bucket}")
   |> range(start: -31d)
@@ -6278,11 +6278,13 @@ ${scopeFilterFlux}
   const rowsByKey = new Map();
   const txDailyByDayFleet = new Map();
   const travelModeByMovement = new Map();
-  const ensureRow = (isoDate, fleet, assignment, date) => {
-    const key = `${isoDate}\n${fleet}\n${assignment}`;
+  const ensureRow = (isoDate, fleet, assignment, date, fleetAccount = '') => {
+    const authoritativeFleet = String(fleetAccount || '').trim();
+    const key = `${isoDate}\n${authoritativeFleet || `label:${fleet}`}\n${assignment}`;
     if (!rowsByKey.has(key)) {
       rowsByKey.set(key, {
         fleet,
+        fleetAccount: authoritativeFleet,
         assignment,
         isoDate,
         label: formatShortUtcDate(date),
@@ -6312,6 +6314,7 @@ ${scopeFilterFlux}
   const moveTimeCsv = optionalCsv(moveTimeResult);
   const txDailyCsv = optionalCsv(txDailyResult);
   const completedCycleCsv = optionalCsv(completedCycleResult);
+  const completedCycleEvidenceAvailable = completedCycleResult.status === 'fulfilled';
 
   for (const row of parseInfluxCsv(completedCycleCsv)) {
     const fleet = String(row.fleet || '').trim();
@@ -6322,7 +6325,7 @@ ${scopeFilterFlux}
     if (!fleet || !assignment || !cycleId || !Number.isFinite(legCount) || legCount <= 0 || Number.isNaN(date.getTime())) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
-    ensureRow(isoDate, fleet, assignment, date).completedCycleLegs.set(cycleId, legCount);
+    ensureRow(isoDate, fleet, assignment, date, cargoFleetAccountFromCycleId(cycleId)).completedCycleLegs.set(cycleId, legCount);
   }
 
   for (const row of parseInfluxCsv(txDailyCsv)) {
@@ -6347,7 +6350,7 @@ ${scopeFilterFlux}
     if (!fleet || isCargoCycleId(fleet) || !assignment || !starbase || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
-    const entry = ensureRow(isoDate, fleet, assignment, date);
+    const entry = ensureRow(isoDate, fleet, assignment, date, cargoFleetAccountFromCycleId(row.cycleId));
     entry.burnedFuel += value;
     entry.starbases.add(starbase);
   }
@@ -6360,8 +6363,8 @@ ${scopeFilterFlux}
     if (!fleet || isCargoCycleId(fleet) || !assignment || !travelMode || Number.isNaN(date.getTime())) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
-    const entry = ensureRow(isoDate, fleet, assignment, date);
-    travelModeByMovement.set(`${row._time}\n${fleet}\n${assignment}`, travelMode);
+    const entry = ensureRow(isoDate, fleet, assignment, date, cargoFleetAccountFromCycleId(row.cycleId));
+    travelModeByMovement.set(`${row._time}\n${row.cycleId}`, travelMode);
     entry.txsDaily += 1;
   }
 
@@ -6370,11 +6373,11 @@ ${scopeFilterFlux}
     const assignment = String(row.assignment || '').trim();
     const moveTime = Number(row._value);
     const date = new Date(row._time);
-    const travelMode = travelModeByMovement.get(`${row._time}\n${fleet}\n${assignment}`);
+    const travelMode = travelModeByMovement.get(`${row._time}\n${row.cycleId}`);
     if (!fleet || isCargoCycleId(fleet) || !assignment || (travelMode !== 'warp' && travelMode !== 'subwarp') || !Number.isFinite(moveTime) || moveTime < 0 || Number.isNaN(date.getTime())) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
-    ensureRow(isoDate, fleet, assignment, date).travelTimeByMode[travelMode] += moveTime;
+    ensureRow(isoDate, fleet, assignment, date, cargoFleetAccountFromCycleId(row.cycleId)).travelTimeByMode[travelMode] += moveTime;
   }
 
   for (const row of rowsByKey.values()) {
@@ -6390,8 +6393,10 @@ ${scopeFilterFlux}
         ...row,
         starbases: Array.from(row.starbases).sort((a, b) => a.localeCompare(b)),
         completedCycleIds,
-        cargoCycles: completedCycleIds.length,
-        cargoLegs: Array.from(row.completedCycleLegs.values()).reduce((sum, value) => sum + value, 0),
+        cargoCycles: completedCycleEvidenceAvailable ? completedCycleIds.length : null,
+        cargoLegs: completedCycleEvidenceAvailable
+          ? Array.from(row.completedCycleLegs.values()).reduce((sum, value) => sum + value, 0)
+          : null,
         travelModeTime,
         travelModeWarpPercent: travelModeTime?.warpPercent ?? null,
       };
@@ -6666,10 +6671,17 @@ async function fetchEarningsSnapshot(payload) {
   });
   const canonicalRawDailyRows = aggregateRawCostsByFleetDay(valuedCanonicalRawCosts)
     .map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) }));
-  cargoRows = [
-    ...cutoverSelection.legacyRows.map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) })),
-    ...canonicalRawDailyRows,
-  ];
+  const operationalCargoRows = rawExporter ? compatibilityCargoRows.map((row) => ({
+    ...row,
+    faction: rawExporter.faction,
+    instance: rawExporter.instance,
+    fleetAccount: String(row.fleetAccount || '').trim(),
+  })) : [];
+  cargoRows = joinCanonicalCostsWithOperationalRows({
+    legacyRows: cutoverSelection.legacyRows.map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) })),
+    costRows: canonicalRawDailyRows,
+    operationalRows: operationalCargoRows,
+  });
 
   const activeFleetKeys = new Set();
   const activeMappedFleetKeys = new Set();
@@ -6835,8 +6847,8 @@ async function fetchEarningsSnapshot(payload) {
       shipTypes: fleet?.shipTypes || 0,
       totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
       fleetCargoCapacity: fleet?.totalCargoCapacity ?? null,
-      cargoCycles: Number(cargoRow.cargoCycles) || 0,
-      cargoLegs: Number(cargoRow.cargoLegs) || 0,
+      cargoCycles: cargoRow.cargoCycles == null ? null : Number(cargoRow.cargoCycles),
+      cargoLegs: cargoRow.cargoLegs == null ? null : Number(cargoRow.cargoLegs),
       starbaseLabel: Array.isArray(cargoRow.starbases) && cargoRow.starbases.length ? cargoRow.starbases.join(', ') : '--',
       fuelCostsAtlas,
       fuelPriceEffectiveUtcDate: fuelPrice?.effectiveUtcDate,
@@ -6948,8 +6960,8 @@ async function fetchEarningsSnapshot(payload) {
   const cargoAllocationAvailable = cargoAllocationResult.status === 'fulfilled';
   for (const row of cargo) {
     const volumeKey = `${row.isoDate}\n${normalizeFleetLabel(row.fleetName)}\n${row.assignment}`;
-    const cargoVolume = cargoAllocationAvailable
-      ? (cargoVolumeByFleetDayAssignment.get(volumeKey) || 0)
+    const cargoVolume = cargoAllocationAvailable && cargoVolumeByFleetDayAssignment.has(volumeKey)
+      ? cargoVolumeByFleetDayAssignment.get(volumeKey)
       : null;
     const efficiency = calculateCargoEfficiency({
       cargoVolume,

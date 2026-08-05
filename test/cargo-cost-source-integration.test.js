@@ -20,7 +20,7 @@ test('cutover is applied before authoritative cargo totals and allocation valuat
   const allocation = main.indexOf('enrichedCargoAllocationRows = applyRawCostsToCargoAllocations');
   assert.ok(selection >= 0 && selection < cargoProjection);
   assert.ok(allocation > cargoProjection);
-  assert.match(main, /cargoRows = \[[\s\S]*cutoverSelection\.legacyRows\.map[\s\S]*canonicalRawDailyRows[\s\S]*\]/);
+  assert.match(main, /cargoRows = joinCanonicalCostsWithOperationalRows\(\{[\s\S]*legacyRows: cutoverSelection\.legacyRows\.map[\s\S]*costRows: canonicalRawDailyRows[\s\S]*operationalRows: operationalCargoRows/);
 });
 
 test('canonical allocation scope uses immutable fleet accounts and compatibility route evidence only', () => {
@@ -29,6 +29,8 @@ test('canonical allocation scope uses immutable fleet accounts and compatibility
   assert.match(source, /allocationReason: unallocated \? 'allocation_scope_missing' : null/);
   assert.match(source, /rawDailyRows\.filter\(\(row\) => row\.allocationStatus !== 'unallocated' && clean\(row\.fleetAccount\)\)/);
   assert.match(main, /fleetByAccount\.get\(String\(cargoRow\.fleetAccount/);
+  assert.match(main, /cargoFleetAccountFromCycleId\(row\.cycleId\)/);
+  assert.match(main, /group\(columns: \["fleet", "assignment", "starbase", "cycleId", "_time"\]\)/);
   assert.match(main, /new Set\(compatibilityCargoRows\.map\(\(row\) => normalizeFleetLabel\(row\.fleet\)\)/);
 });
 
