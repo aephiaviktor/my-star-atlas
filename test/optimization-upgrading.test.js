@@ -120,11 +120,11 @@ test('Optimization exposes Upgrading after Scanning with date filters, table, an
   assert.match(html, /data-optimization-subtab="scanning"[^>]*>Scanning</);
   assert.match(html, /data-optimization-subtab="upgrading"[^>]*>Upgrading</);
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
-  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-margin-chart', 'optimization-upgrading-efficiency-chart', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-breakeven-body']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-net-atlas-chart', 'optimization-upgrading-margin-chart', 'optimization-upgrading-efficiency-chart', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-breakeven-body']) assert.match(html, new RegExp(`id="${id}"`));
   assert.doesNotMatch(html, /Process automation evidence/);
   assert.match(html, />LP Analysis yesterday</);
   assert.match(html, /optimization-upgrading-primary-chart-card[\s\S]*?Faction LP redemption vs player LP per upgrading crew[\s\S]*?id="optimization-upgrading-redemption-chart"/);
-  assert.match(html, /id="optimization-upgrading-error-chart"[\s\S]*?optimization-upgrading-primary-chart-card[\s\S]*?Component profit margin vs faction LP redemption[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?optimization-upgrading-breakeven-card optimization-analytics-summary-card[\s\S]*?>LP Analysis yesterday[\s\S]*?optimization-upgrading-primary-chart-card[\s\S]*?Component Efficiency Frontier[\s\S]*?id="optimization-upgrading-efficiency-chart"/);
+  assert.match(html, /id="optimization-upgrading-error-chart"[\s\S]*?<h3>NET ATLAS\/s vs faction LP redemption<\/h3>[\s\S]*?id="optimization-upgrading-net-atlas-chart"[\s\S]*?<h3>Component profit margin vs faction LP redemption<\/h3>[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?optimization-upgrading-breakeven-card optimization-analytics-summary-card[\s\S]*?>LP Analysis yesterday[\s\S]*?optimization-upgrading-primary-chart-card[\s\S]*?Component Efficiency Frontier[\s\S]*?id="optimization-upgrading-efficiency-chart"/);
   assert.match(html, /id="optimization-upgrading-forecast-chart"[\s\S]*?id="optimization-upgrading-error-chart"/);
   assert.match(html, /<section class="optimization-analytics-card">\s*<h3>Forecast error by snapshot hour<\/h3>/);
   assert.match(html, /optimization-upgrading-primary-chart-card/);
@@ -193,6 +193,7 @@ test('component margin chart uses pool share value, current GM price, and latest
   vm.createContext(context);
   vm.runInContext([
     `const upgradingMarginComponents = Object.freeze([['Framework', 68]]);`,
+    `const upgradingDurationSeconds = Object.freeze({ Framework: 12 });`,
     extractFunction(renderer, 'buildUpgradingMarginSeries'),
     'this.build = buildUpgradingMarginSeries;',
   ].join('\n'), context);
@@ -200,6 +201,7 @@ test('component margin chart uses pool share value, current GM price, and latest
   assert.equal(series.length, 1);
   assert.equal(series[0].points[0].factionLp, 10_000_000_000);
   assert.equal(series[0].points.at(-1).marginPercent, -99.864);
+  assert.ok(Math.abs(series[0].points.at(-1).netAtlasPerSecond - (-0.16644)) < 1e-12);
   assert.match(main, /fetchAephiaResourceData\(\)\.catch/);
   assert.match(main, /pricingATL\?\.priceATL/);
   assert.match(main, /atlasPool: UPGRADE_ATLAS_POOLS\[aephiaFaction\]/);

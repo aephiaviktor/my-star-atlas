@@ -94,6 +94,7 @@ const optimizationAnalyticsRankingHead = document.querySelector('#optimization-a
 const optimizationAnalyticsRanking = document.querySelector('#optimization-analytics-ranking');
 const optimizationAnalyticsTooltip = document.querySelector('#optimization-analytics-tooltip');
 const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
+const optimizationUpgradingNetAtlasChart = document.querySelector('#optimization-upgrading-net-atlas-chart');
 const optimizationUpgradingMarginChart = document.querySelector('#optimization-upgrading-margin-chart');
 const optimizationUpgradingEfficiencyChart = document.querySelector('#optimization-upgrading-efficiency-chart');
 const optimizationUpgradingEfficiencyLegend = document.querySelector('#optimization-upgrading-efficiency-legend');
@@ -7903,8 +7904,10 @@ function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000
   return upgradingMarginComponents.map(([name, lp]) => {
     const price = Number(prices[String(name).toLowerCase()]);
     if (!Number.isFinite(price) || price <= 0) return null;
-    const points = Array.from({ length: 101 }, (_, index) => { const factionLp = xMin + (xMax - xMin) * index / 100; return { factionLp, marginPercent: ((atlasPool / factionLp * lp) / price - 1) * 100 }; });
-    return { name, lp, price, points };
+    const durationSeconds = Number(upgradingDurationSeconds[name]);
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+    const points = Array.from({ length: 101 }, (_, index) => { const factionLp = xMin + (xMax - xMin) * index / 100; const impliedAtlasValue = atlasPool / factionLp * lp; return { factionLp, marginPercent: (impliedAtlasValue / price - 1) * 100, netAtlasPerSecond: (impliedAtlasValue - price) / durationSeconds }; });
+    return { name, lp, price, durationSeconds, points };
   }).filter(Boolean);
 }
 function buildUpgradingEfficiencyRows(result, factionLp) {
@@ -7990,6 +7993,18 @@ function renderUpgradingEfficiencyChart(analytics) {
   animateUpgradingEfficiencyNextRender = false;
 }
 
+function renderUpgradingNetAtlasChart(analytics) {
+  const svg = createOptimizationAnalyticsSvg(optimizationUpgradingNetAtlasChart, 760, 340); if (!svg) return;
+  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}); if (!series.length) return;
+  const xMin = 10_000_000_000, xMax = 50_000_000_000, values = series.flatMap((entry) => entry.points.map((point) => point.netAtlasPerSecond));
+  const minY = Math.min(0, ...values), maxY = Math.max(0, ...values), padding = Math.max(0.000001, (maxY - minY) * 0.08);
+  const axes = renderUpgradingChartAxes(svg, { minY: minY - padding, maxY: maxY + padding, xMin, xMax, xTicks: [10e9, 20e9, 30e9, 40e9, 50e9], xLabel: 'Theoretical faction LP redemption', yLabel: 'Net ATLAS/s', height: 340, yFormatter: (value) => value.toFixed(6) });
+  appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
+  series.forEach((entry, index) => { const line = appendOptimizationSvg(svg, 'polyline', { points: entry.points.map((point) => `${axes.x(point.factionLp)},${axes.y(point.netAtlasPerSecond)}`).join(' '), fill: 'none', stroke: getAssetChartColor(entry.name, index), 'stroke-width': 2, class: 'optimization-margin-line' }); bindOptimizationAnalyticsTooltip(line, `${entry.name} · ${entry.lp.toLocaleString()} LP/component · ${entry.durationSeconds}s · current GM ${entry.price.toLocaleString(undefined, { maximumFractionDigits: 6 })} ATLAS`); });
+  const yesterday = analytics.latestFactionRedemption;
+  if (Number.isFinite(yesterday?.factionLp) && yesterday.factionLp >= xMin && yesterday.factionLp <= xMax) { const faction = normalizeFaction(latestSettings?.faction); const marker = appendOptimizationSvg(svg, 'line', { x1: axes.x(yesterday.factionLp), x2: axes.x(yesterday.factionLp), y1: axes.top, y2: axes.height - axes.bottom, stroke: upgradingFactionColors[faction] || '#45d6c1', 'stroke-width': 3, class: 'optimization-yesterday-line' }); bindOptimizationAnalyticsTooltip(marker, `${yesterday.date} · ${faction === 'USTUR' ? 'UST' : faction} faction redemption ${yesterday.factionLp.toLocaleString()} LP`); }
+}
+
 function renderUpgradingMarginChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingMarginChart, 760, 340); if (!svg) return;
   const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}); if (!series.length) return;
@@ -8007,6 +8022,7 @@ function renderUpgradingOptimizationAnalytics() {
   const normalizedFaction = normalizeFaction(latestSettings?.faction);
   const factionLabel = normalizedFaction === 'USTUR' ? 'UST' : normalizedFaction;
   if(optimizationUpgradingAnalyticsStatus) optimizationUpgradingAnalyticsStatus.textContent = `${analytics.scatter.length} completed comparison days · ${analytics.forecasts.length} forecast days · rolling 30 days · UTC`;
+  renderUpgradingNetAtlasChart(analytics);
   renderUpgradingMarginChart(analytics);
   renderUpgradingEfficiencyChart(analytics);
   let svg=createOptimizationAnalyticsSvg(optimizationUpgradingRedemptionChart,760,340);
