@@ -399,8 +399,9 @@ test('Internal cost basis also recalculates the Profit Margin chart series', () 
   context.latestBreakevenResult = { breakevenRows: [{ starbase: 'OTHER-PHANTOM', asset: 'Framework', scanningCostPerUnit: 1 }] };
   assert.deepEqual(context.apply(series, 'internal', 'MUD'), []);
   assert.equal(context.apply(series, 'external', 'MUD')[0].price, 0.003);
+  assert.match(renderer, /renderUpgradingNetAtlasChart\(analytics\);/);
   assert.match(renderer, /renderUpgradingMarginChart\(analytics\);/);
-  assert.match(renderer, /applyUpgradingMarginCostBasis\(buildUpgradingMarginSeries/);
+  assert.match(renderer, /function renderUpgradingNetAtlasChart\(analytics\)[\s\S]*?applyUpgradingMarginCostBasis\(buildUpgradingMarginSeries/);
 });
 
 test('Internal cost basis replaces GM price for net metrics and stays unavailable without a phantom starbase row', () => {

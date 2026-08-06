@@ -7968,6 +7968,7 @@ function setUpgradingBreakevenCostBasis(basis) {
   if (next === UPGRADING_BREAKEVEN_BASISES.internal) upgradingEfficiencyLimitMode = false;
   const analytics = buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {});
   renderUpgradingBreakevenTable();
+  renderUpgradingNetAtlasChart(analytics);
   renderUpgradingMarginChart(analytics);
   renderUpgradingEfficiencyChart(analytics);
 }
@@ -8201,13 +8202,14 @@ function renderUpgradingRedemptionLegend(analytics) {
 function renderUpgradingNetAtlasChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingNetAtlasChart, 760, 340); if (!svg) return;
   const xMin = upgradingRedemptionChartView.xMin, xMax = upgradingRedemptionChartView.xMax;
-  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}, xMin, xMax).filter((entry) => selectedUpgradingRedemptionComponents.has(entry.name)); if (!series.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
+  const faction = normalizeFaction(latestSettings?.faction);
+  const series = applyUpgradingMarginCostBasis(buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}, xMin, xMax), upgradingBreakevenCostBasis, faction).filter((entry) => selectedUpgradingRedemptionComponents.has(entry.name)); if (!series.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, upgradingBreakevenCostBasis === UPGRADING_BREAKEVEN_BASISES.internal ? 'No internal component costs available' : 'Select at least one component'); return; }
   const values = series.flatMap((entry) => entry.points.map((point) => point.netAtlasPerSecond)), autoMinY = Math.min(0, ...values), autoMaxY = Math.max(0, ...values), padding = Math.max(0.000001, (autoMaxY - autoMinY) * 0.08);
   const minY = Number.isFinite(upgradingRedemptionChartView.netYMin) ? upgradingRedemptionChartView.netYMin : autoMinY - padding, maxY = Number.isFinite(upgradingRedemptionChartView.netYMax) ? upgradingRedemptionChartView.netYMax : autoMaxY + padding;
   const xTicks = Array.from({ length: 5 }, (_, index) => xMin + (xMax - xMin) * index / 4);
   const axes = renderUpgradingChartAxes(svg, { minY, maxY, xMin, xMax, xTicks, xLabel: 'Theoretical faction LP redemption', yLabel: 'Net ATLAS/s', height: 340, yFormatter: (value) => value.toFixed(6) });
   appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
-  series.forEach((entry, index) => { const line = appendOptimizationSvg(svg, 'polyline', { points: entry.points.map((point) => `${axes.x(point.factionLp)},${axes.y(point.netAtlasPerSecond)}`).join(' '), fill: 'none', stroke: getAssetChartColor(entry.name, index), 'stroke-width': 2, class: 'optimization-margin-line' }); bindOptimizationAnalyticsTooltip(line, `${entry.name} · ${entry.lp.toLocaleString()} LP/component · ${entry.durationSeconds}s · current GM ${entry.price.toLocaleString(undefined, { maximumFractionDigits: 6 })} ATLAS`); });
+  series.forEach((entry, index) => { const line = appendOptimizationSvg(svg, 'polyline', { points: entry.points.map((point) => `${axes.x(point.factionLp)},${axes.y(point.netAtlasPerSecond)}`).join(' '), fill: 'none', stroke: getAssetChartColor(entry.name, index), 'stroke-width': 2, class: 'optimization-margin-line' }); const costLabel = entry.costBasis === 'internal' ? 'internal cost' : 'current GM'; bindOptimizationAnalyticsTooltip(line, `${entry.name} · ${entry.lp.toLocaleString()} LP/component · ${entry.durationSeconds}s · ${costLabel} ${entry.price.toLocaleString(undefined, { maximumFractionDigits: 6 })} ATLAS`); });
   const yesterday = analytics.latestFactionRedemption;
   if (Number.isFinite(yesterday?.factionLp) && yesterday.factionLp >= xMin && yesterday.factionLp <= xMax) { const faction = normalizeFaction(latestSettings?.faction); const marker = appendOptimizationSvg(svg, 'line', { x1: axes.x(yesterday.factionLp), x2: axes.x(yesterday.factionLp), y1: axes.top, y2: axes.height - axes.bottom, stroke: upgradingFactionColors[faction] || '#45d6c1', 'stroke-width': 3, class: 'optimization-yesterday-line' }); bindOptimizationAnalyticsTooltip(marker, `${yesterday.date} · ${faction === 'USTUR' ? 'UST' : faction} faction redemption ${yesterday.factionLp.toLocaleString()} LP`); }
   bindUpgradingRedemptionChartNavigation(svg, axes, analytics, 'net', minY, maxY);
