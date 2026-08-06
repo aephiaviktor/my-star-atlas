@@ -182,6 +182,13 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(css, /\.optimization-upgrading-redemption-chart-row[\s\S]*?grid-column:\s*1\s*\/\s*-1/);
   assert.match(css, /\.optimization-upgrading-redemption-charts[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(css, /\.optimization-upgrading-redemption-chart[\s\S]*?min-height:\s*340px/);
+  assert.match(renderer, /bindUpgradingRedemptionChartNavigation/);
+  assert.match(renderer, /startDrag\('x-zoom'/);
+  assert.match(renderer, /startDrag\('y-zoom'/);
+  assert.match(renderer, /startDrag\('pan'/);
+  assert.match(renderer, /addEventListener\('dblclick'/);
+  assert.match(css, /\.optimization-chart-axis-drag/);
+  assert.match(css, /\.optimization-chart-pan-area/);
   assert.match(renderer, /rgba\(69, 214, 193/);
   assert.match(renderer, /analytics\.scatter\.forEach.*?fill:'#45d6c1'/);
   assert.doesNotMatch(renderer, /analytics\.scatter\.forEach.*?optimizationAnalyticsColor/);
@@ -256,6 +263,27 @@ test('component efficiency calculates gross and net ATLAS per second and marks d
   assert.match(html, /Net ATLAS\/s/);
 });
 
+
+test('upgrading redemption chart drag math zooms axes and pans a shared viewport', () => {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext([
+    extractFunction(renderer, 'calculateUpgradingRedemptionDragView'),
+    'this.drag = calculateUpgradingRedemptionDragView;',
+  ].join('\n'), context);
+  const view = { xMin: 10e9, xMax: 50e9, yMin: -0.2, yMax: 0.2 };
+  const xZoom = context.drag(view, 'x-zoom', 100, 0, 500, 300);
+  assert.ok(xZoom.xMax - xZoom.xMin > 40e9);
+  assert.equal(xZoom.yMin, view.yMin);
+  const pan = context.drag(view, 'pan', 100, -75, 500, 300);
+  assert.equal(pan.xMin, 2e9);
+  assert.equal(pan.xMax, 42e9);
+  assert.ok(Math.abs(pan.yMin - (-0.3)) < 1e-12);
+  assert.ok(Math.abs(pan.yMax - 0.1) < 1e-12);
+  const yZoom = context.drag(view, 'y-zoom', 0, 75, 500, 300);
+  assert.ok(yZoom.yMax - yZoom.yMin < 0.4);
+  assert.equal(yZoom.xMin, view.xMin);
+});
 
 test('upgrading chart axes preserve sub-unit ranges instead of collapsing ATLAS-per-second values', () => {
   const context = {};

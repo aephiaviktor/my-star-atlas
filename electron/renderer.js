@@ -7894,6 +7894,7 @@ const upgradingFactionColors = Object.freeze({ MUD: '#ef4444', ONI: '#3b82f6', U
 const upgradingDurationSeconds = Object.freeze({ 'Power Source': 15, Framework: 12, Electromagnet: 16, Electronics: 14, 'Field Stabilizer': 24, 'Particle Accelerator': 96, 'Radiation Absorber': 48, 'Survey Data Unit': 120, Ink: 60 });
 const upgradingCargoWeight = Object.freeze({ 'Power Source': 2, Framework: 1, Electromagnet: 4, Electronics: 2, 'Field Stabilizer': 6, 'Particle Accelerator': 6, 'Radiation Absorber': 6, 'Survey Data Unit': 1, Ink: 1 });
 const selectedUpgradingRedemptionComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
+const upgradingRedemptionChartView = { xMin: 10_000_000_000, xMax: 50_000_000_000, netYMin: null, netYMax: null, marginYMin: null, marginYMax: null };
 const selectedUpgradingEfficiencyComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
 const upgradingLimitAnchorByFaction = new Map();
 let upgradingEfficiencyLimitMode = false;
@@ -7912,6 +7913,35 @@ function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000
     return { name, lp, price, durationSeconds, points };
   }).filter(Boolean);
 }
+function calculateUpgradingRedemptionDragView(view, mode, dx, dy, width, height) {
+  const next = { ...view }, xSpan = view.xMax - view.xMin, ySpan = view.yMax - view.yMin;
+  if (mode === 'x-zoom') { const span = Math.max(100_000_000, Math.min(100_000_000_000, xSpan * Math.exp(dx / Math.max(1, width) * 2))); const center = (view.xMin + view.xMax) / 2; next.xMin = center - span / 2; next.xMax = center + span / 2; }
+  if (mode === 'y-zoom') { const span = Math.max(Number.EPSILON, ySpan * Math.exp(-dy / Math.max(1, height) * 2)); const center = (view.yMin + view.yMax) / 2; next.yMin = center - span / 2; next.yMax = center + span / 2; }
+  if (mode === 'pan') { const xShift = -dx / Math.max(1, width) * xSpan, yShift = dy / Math.max(1, height) * ySpan; next.xMin = view.xMin + xShift; next.xMax = view.xMax + xShift; next.yMin = view.yMin + yShift; next.yMax = view.yMax + yShift; }
+  return next;
+}
+
+function bindUpgradingRedemptionChartNavigation(svg, axes, analytics, chartKey, yMin, yMax) {
+  const plotWidth = axes.width - axes.left - axes.right, plotHeight = axes.height - axes.top - axes.bottom;
+  const plotArea = appendOptimizationSvg(svg, 'rect', { x: axes.left, y: axes.top, width: plotWidth, height: plotHeight, fill: 'transparent', class: 'optimization-chart-pan-area' });
+  svg.insertBefore(plotArea, svg.firstChild);
+  const xAxisArea = appendOptimizationSvg(svg, 'rect', { x: axes.left, y: axes.height - axes.bottom, width: plotWidth, height: axes.bottom, fill: 'transparent', class: 'optimization-chart-axis-drag optimization-chart-axis-drag-x' });
+  const yAxisArea = appendOptimizationSvg(svg, 'rect', { x: 0, y: axes.top, width: axes.left, height: plotHeight, fill: 'transparent', class: 'optimization-chart-axis-drag optimization-chart-axis-drag-y' });
+  const renderBoth = () => { renderUpgradingNetAtlasChart(analytics); renderUpgradingMarginChart(analytics); };
+  const startDrag = (mode, event) => {
+    event.preventDefault();
+    hideOptimizationAnalyticsTooltip();
+    const start = { xMin: upgradingRedemptionChartView.xMin, xMax: upgradingRedemptionChartView.xMax, yMin, yMax }, startX = event.clientX, startY = event.clientY;
+    const move = (moveEvent) => { const next = calculateUpgradingRedemptionDragView(start, mode, moveEvent.clientX - startX, moveEvent.clientY - startY, plotWidth, plotHeight); upgradingRedemptionChartView.xMin = next.xMin; upgradingRedemptionChartView.xMax = next.xMax; upgradingRedemptionChartView[`${chartKey}YMin`] = next.yMin; upgradingRedemptionChartView[`${chartKey}YMax`] = next.yMax; renderBoth(); };
+    const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop, { once: true });
+  };
+  xAxisArea.addEventListener('pointerdown', (event) => startDrag('x-zoom', event));
+  yAxisArea.addEventListener('pointerdown', (event) => startDrag('y-zoom', event));
+  plotArea.addEventListener('pointerdown', (event) => startDrag('pan', event));
+  svg.addEventListener('dblclick', (event) => { event.preventDefault(); upgradingRedemptionChartView.xMin = 10_000_000_000; upgradingRedemptionChartView.xMax = 50_000_000_000; upgradingRedemptionChartView[`${chartKey}YMin`] = null; upgradingRedemptionChartView[`${chartKey}YMax`] = null; renderBoth(); });
+}
+
 function buildUpgradingEfficiencyRows(result, factionLp) {
   const atlasPool = Number(result?.atlasPool);
   const prices = result?.componentPricesAtl || {};
@@ -8010,25 +8040,32 @@ function renderUpgradingRedemptionLegend(analytics) {
 
 function renderUpgradingNetAtlasChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingNetAtlasChart, 760, 340); if (!svg) return;
-  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}).filter((entry) => selectedUpgradingRedemptionComponents.has(entry.name)); if (!series.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
-  const xMin = 10_000_000_000, xMax = 50_000_000_000, values = series.flatMap((entry) => entry.points.map((point) => point.netAtlasPerSecond));
-  const minY = Math.min(0, ...values), maxY = Math.max(0, ...values), padding = Math.max(0.000001, (maxY - minY) * 0.08);
-  const axes = renderUpgradingChartAxes(svg, { minY: minY - padding, maxY: maxY + padding, xMin, xMax, xTicks: [10e9, 20e9, 30e9, 40e9, 50e9], xLabel: 'Theoretical faction LP redemption', yLabel: 'Net ATLAS/s', height: 340, yFormatter: (value) => value.toFixed(6) });
+  const xMin = upgradingRedemptionChartView.xMin, xMax = upgradingRedemptionChartView.xMax;
+  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}, xMin, xMax).filter((entry) => selectedUpgradingRedemptionComponents.has(entry.name)); if (!series.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
+  const values = series.flatMap((entry) => entry.points.map((point) => point.netAtlasPerSecond)), autoMinY = Math.min(0, ...values), autoMaxY = Math.max(0, ...values), padding = Math.max(0.000001, (autoMaxY - autoMinY) * 0.08);
+  const minY = Number.isFinite(upgradingRedemptionChartView.netYMin) ? upgradingRedemptionChartView.netYMin : autoMinY - padding, maxY = Number.isFinite(upgradingRedemptionChartView.netYMax) ? upgradingRedemptionChartView.netYMax : autoMaxY + padding;
+  const xTicks = Array.from({ length: 5 }, (_, index) => xMin + (xMax - xMin) * index / 4);
+  const axes = renderUpgradingChartAxes(svg, { minY, maxY, xMin, xMax, xTicks, xLabel: 'Theoretical faction LP redemption', yLabel: 'Net ATLAS/s', height: 340, yFormatter: (value) => value.toFixed(6) });
   appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
   series.forEach((entry, index) => { const line = appendOptimizationSvg(svg, 'polyline', { points: entry.points.map((point) => `${axes.x(point.factionLp)},${axes.y(point.netAtlasPerSecond)}`).join(' '), fill: 'none', stroke: getAssetChartColor(entry.name, index), 'stroke-width': 2, class: 'optimization-margin-line' }); bindOptimizationAnalyticsTooltip(line, `${entry.name} · ${entry.lp.toLocaleString()} LP/component · ${entry.durationSeconds}s · current GM ${entry.price.toLocaleString(undefined, { maximumFractionDigits: 6 })} ATLAS`); });
   const yesterday = analytics.latestFactionRedemption;
   if (Number.isFinite(yesterday?.factionLp) && yesterday.factionLp >= xMin && yesterday.factionLp <= xMax) { const faction = normalizeFaction(latestSettings?.faction); const marker = appendOptimizationSvg(svg, 'line', { x1: axes.x(yesterday.factionLp), x2: axes.x(yesterday.factionLp), y1: axes.top, y2: axes.height - axes.bottom, stroke: upgradingFactionColors[faction] || '#45d6c1', 'stroke-width': 3, class: 'optimization-yesterday-line' }); bindOptimizationAnalyticsTooltip(marker, `${yesterday.date} · ${faction === 'USTUR' ? 'UST' : faction} faction redemption ${yesterday.factionLp.toLocaleString()} LP`); }
+  bindUpgradingRedemptionChartNavigation(svg, axes, analytics, 'net', minY, maxY);
 }
 
 function renderUpgradingMarginChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingMarginChart, 760, 340); if (!svg) return;
-  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}).filter((entry) => selectedUpgradingRedemptionComponents.has(entry.name)); if (!series.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
-  const xMin = 10_000_000_000, xMax = 50_000_000_000, values = series.flatMap((entry) => entry.points.map((point) => point.marginPercent));
-  const axes = renderUpgradingChartAxes(svg, { minY: Math.min(-100, ...values), maxY: Math.max(100, ...values), xMin, xMax, xTicks: [10e9, 20e9, 30e9, 40e9, 50e9], xLabel: 'Theoretical faction LP redemption', yLabel: 'Component profit margin (%)', height: 340 });
+  const xMin = upgradingRedemptionChartView.xMin, xMax = upgradingRedemptionChartView.xMax;
+  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}, xMin, xMax).filter((entry) => selectedUpgradingRedemptionComponents.has(entry.name)); if (!series.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
+  const values = series.flatMap((entry) => entry.points.map((point) => point.marginPercent)), autoMinY = Math.min(-100, ...values), autoMaxY = Math.max(100, ...values);
+  const minY = Number.isFinite(upgradingRedemptionChartView.marginYMin) ? upgradingRedemptionChartView.marginYMin : autoMinY, maxY = Number.isFinite(upgradingRedemptionChartView.marginYMax) ? upgradingRedemptionChartView.marginYMax : autoMaxY;
+  const xTicks = Array.from({ length: 5 }, (_, index) => xMin + (xMax - xMin) * index / 4);
+  const axes = renderUpgradingChartAxes(svg, { minY, maxY, xMin, xMax, xTicks, xLabel: 'Theoretical faction LP redemption', yLabel: 'Component profit margin (%)', height: 340 });
   appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
   series.forEach((entry, index) => { const line = appendOptimizationSvg(svg, 'polyline', { points: entry.points.map((point) => `${axes.x(point.factionLp)},${axes.y(point.marginPercent)}`).join(' '), fill: 'none', stroke: getAssetChartColor(entry.name, index), 'stroke-width': 2, class: 'optimization-margin-line' }); bindOptimizationAnalyticsTooltip(line, `${entry.name} · ${entry.lp.toLocaleString()} LP/component · current GM ${entry.price.toLocaleString(undefined, { maximumFractionDigits: 6 })} ATLAS`); });
   const yesterday = analytics.latestFactionRedemption;
   if (Number.isFinite(yesterday?.factionLp) && yesterday.factionLp >= xMin && yesterday.factionLp <= xMax) { const faction = normalizeFaction(latestSettings?.faction); const marker = appendOptimizationSvg(svg, 'line', { x1: axes.x(yesterday.factionLp), x2: axes.x(yesterday.factionLp), y1: axes.top, y2: axes.height - axes.bottom, stroke: upgradingFactionColors[faction] || '#45d6c1', 'stroke-width': 3, class: 'optimization-yesterday-line' }); bindOptimizationAnalyticsTooltip(marker, `${yesterday.date} · ${faction === 'USTUR' ? 'UST' : faction} faction redemption ${yesterday.factionLp.toLocaleString()} LP`); }
+  bindUpgradingRedemptionChartNavigation(svg, axes, analytics, 'margin', minY, maxY);
 }
 
 function renderUpgradingOptimizationAnalytics() {
