@@ -94,6 +94,7 @@ const optimizationAnalyticsRankingHead = document.querySelector('#optimization-a
 const optimizationAnalyticsRanking = document.querySelector('#optimization-analytics-ranking');
 const optimizationAnalyticsTooltip = document.querySelector('#optimization-analytics-tooltip');
 const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
+const optimizationUpgradingRedemptionLegend = document.querySelector('#optimization-upgrading-redemption-legend');
 const optimizationUpgradingNetAtlasChart = document.querySelector('#optimization-upgrading-net-atlas-chart');
 const optimizationUpgradingMarginChart = document.querySelector('#optimization-upgrading-margin-chart');
 const optimizationUpgradingEfficiencyChart = document.querySelector('#optimization-upgrading-efficiency-chart');
@@ -7892,6 +7893,7 @@ const upgradingMarginComponents = Object.freeze([
 const upgradingFactionColors = Object.freeze({ MUD: '#ef4444', ONI: '#3b82f6', USTUR: '#f59e0b' });
 const upgradingDurationSeconds = Object.freeze({ 'Power Source': 15, Framework: 12, Electromagnet: 16, Electronics: 14, 'Field Stabilizer': 24, 'Particle Accelerator': 96, 'Radiation Absorber': 48, 'Survey Data Unit': 120, Ink: 60 });
 const upgradingCargoWeight = Object.freeze({ 'Power Source': 2, Framework: 1, Electromagnet: 4, Electronics: 2, 'Field Stabilizer': 6, 'Particle Accelerator': 6, 'Radiation Absorber': 6, 'Survey Data Unit': 1, Ink: 1 });
+const selectedUpgradingRedemptionComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
 const selectedUpgradingEfficiencyComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
 const upgradingLimitAnchorByFaction = new Map();
 let upgradingEfficiencyLimitMode = false;
@@ -7993,9 +7995,22 @@ function renderUpgradingEfficiencyChart(analytics) {
   animateUpgradingEfficiencyNextRender = false;
 }
 
+function renderUpgradingRedemptionLegend(analytics) {
+  if (!optimizationUpgradingRedemptionLegend) return;
+  optimizationUpgradingRedemptionLegend.replaceChildren();
+  upgradingMarginComponents.forEach(([name], index) => {
+    const button = document.createElement('button');
+    const selected = selectedUpgradingRedemptionComponents.has(name);
+    button.type = 'button'; button.className = `optimization-efficiency-legend-button${selected ? ' selected' : ''}`;
+    button.textContent = name === 'Ink' ? 'INK' : name; button.style.setProperty('--component-color', getAssetChartColor(name, index)); button.setAttribute('aria-pressed', String(selected));
+    button.addEventListener('click', () => { if (selected) selectedUpgradingRedemptionComponents.delete(name); else selectedUpgradingRedemptionComponents.add(name); renderUpgradingRedemptionLegend(analytics); renderUpgradingNetAtlasChart(analytics); renderUpgradingMarginChart(analytics); });
+    optimizationUpgradingRedemptionLegend.append(button);
+  });
+}
+
 function renderUpgradingNetAtlasChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingNetAtlasChart, 760, 340); if (!svg) return;
-  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}); if (!series.length) return;
+  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}).filter((entry) => selectedUpgradingRedemptionComponents.has(entry.name)); if (!series.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
   const xMin = 10_000_000_000, xMax = 50_000_000_000, values = series.flatMap((entry) => entry.points.map((point) => point.netAtlasPerSecond));
   const minY = Math.min(0, ...values), maxY = Math.max(0, ...values), padding = Math.max(0.000001, (maxY - minY) * 0.08);
   const axes = renderUpgradingChartAxes(svg, { minY: minY - padding, maxY: maxY + padding, xMin, xMax, xTicks: [10e9, 20e9, 30e9, 40e9, 50e9], xLabel: 'Theoretical faction LP redemption', yLabel: 'Net ATLAS/s', height: 340, yFormatter: (value) => value.toFixed(6) });
@@ -8007,7 +8022,7 @@ function renderUpgradingNetAtlasChart(analytics) {
 
 function renderUpgradingMarginChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingMarginChart, 760, 340); if (!svg) return;
-  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}); if (!series.length) return;
+  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}).filter((entry) => selectedUpgradingRedemptionComponents.has(entry.name)); if (!series.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
   const xMin = 10_000_000_000, xMax = 50_000_000_000, values = series.flatMap((entry) => entry.points.map((point) => point.marginPercent));
   const axes = renderUpgradingChartAxes(svg, { minY: Math.min(-100, ...values), maxY: Math.max(100, ...values), xMin, xMax, xTicks: [10e9, 20e9, 30e9, 40e9, 50e9], xLabel: 'Theoretical faction LP redemption', yLabel: 'Component profit margin (%)', height: 340 });
   appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
@@ -8022,6 +8037,7 @@ function renderUpgradingOptimizationAnalytics() {
   const normalizedFaction = normalizeFaction(latestSettings?.faction);
   const factionLabel = normalizedFaction === 'USTUR' ? 'UST' : normalizedFaction;
   if(optimizationUpgradingAnalyticsStatus) optimizationUpgradingAnalyticsStatus.textContent = `${analytics.scatter.length} completed comparison days · ${analytics.forecasts.length} forecast days · rolling 30 days · UTC`;
+  renderUpgradingRedemptionLegend(analytics);
   renderUpgradingNetAtlasChart(analytics);
   renderUpgradingMarginChart(analytics);
   renderUpgradingEfficiencyChart(analytics);

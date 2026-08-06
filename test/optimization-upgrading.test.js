@@ -120,11 +120,11 @@ test('Optimization exposes Upgrading after Scanning with date filters, table, an
   assert.match(html, /data-optimization-subtab="scanning"[^>]*>Scanning</);
   assert.match(html, /data-optimization-subtab="upgrading"[^>]*>Upgrading</);
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
-  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-net-atlas-chart', 'optimization-upgrading-margin-chart', 'optimization-upgrading-efficiency-chart', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-breakeven-body']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-redemption-legend', 'optimization-upgrading-net-atlas-chart', 'optimization-upgrading-margin-chart', 'optimization-upgrading-efficiency-chart', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-breakeven-body']) assert.match(html, new RegExp(`id="${id}"`));
   assert.doesNotMatch(html, /Process automation evidence/);
   assert.match(html, />LP Analysis yesterday</);
   assert.match(html, /optimization-upgrading-primary-chart-card[\s\S]*?Faction LP redemption vs player LP per upgrading crew[\s\S]*?id="optimization-upgrading-redemption-chart"/);
-  assert.match(html, /id="optimization-upgrading-error-chart"[\s\S]*?<h3>NET ATLAS\/s vs faction LP redemption<\/h3>[\s\S]*?id="optimization-upgrading-net-atlas-chart"[\s\S]*?<h3>Component profit margin vs faction LP redemption<\/h3>[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?optimization-upgrading-breakeven-card optimization-analytics-summary-card[\s\S]*?>LP Analysis yesterday[\s\S]*?optimization-upgrading-primary-chart-card[\s\S]*?Component Efficiency Frontier[\s\S]*?id="optimization-upgrading-efficiency-chart"/);
+  assert.match(html, /id="optimization-upgrading-error-chart"[\s\S]*?optimization-upgrading-redemption-chart-row[\s\S]*?id="optimization-upgrading-redemption-legend"[\s\S]*?<h3>Component NET ATLAS\/s vs Faction LP Redemption<\/h3>[\s\S]*?id="optimization-upgrading-net-atlas-chart"[\s\S]*?<h3>Component Profit Margin vs Faction LP Redemption<\/h3>[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?optimization-upgrading-breakeven-card optimization-analytics-summary-card[\s\S]*?>LP Analysis yesterday[\s\S]*?optimization-upgrading-primary-chart-card[\s\S]*?Component Efficiency Frontier[\s\S]*?id="optimization-upgrading-efficiency-chart"/);
   assert.match(html, /id="optimization-upgrading-forecast-chart"[\s\S]*?id="optimization-upgrading-error-chart"/);
   assert.match(html, /<section class="optimization-analytics-card">\s*<h3>Forecast error by snapshot hour<\/h3>/);
   assert.match(html, /optimization-upgrading-primary-chart-card/);
@@ -176,6 +176,12 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(renderer, /window\.innerHeight - bounds\.height - margin/);
   assert.match(renderer, /final \$\{factionLabel\} faction LP redemption/);
   assert.match(renderer, /optimization-line-hit/);
+  assert.match(renderer, /selectedUpgradingRedemptionComponents = new Set[\s\S]*?name !== 'Ink'/);
+  assert.match(renderer, /renderUpgradingRedemptionLegend[\s\S]*?renderUpgradingNetAtlasChart\(analytics\)[\s\S]*?renderUpgradingMarginChart\(analytics\)/);
+  assert.match(renderer, /buildUpgradingMarginSeries[^(]*\([^;]+?\.filter\(\(entry\) => selectedUpgradingRedemptionComponents\.has\(entry\.name\)\)/);
+  assert.match(css, /\.optimization-upgrading-redemption-chart-row[\s\S]*?grid-column:\s*1\s*\/\s*-1/);
+  assert.match(css, /\.optimization-upgrading-redemption-charts[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(css, /\.optimization-upgrading-redemption-chart[\s\S]*?min-height:\s*340px/);
   assert.match(renderer, /rgba\(69, 214, 193/);
   assert.match(renderer, /analytics\.scatter\.forEach.*?fill:'#45d6c1'/);
   assert.doesNotMatch(renderer, /analytics\.scatter\.forEach.*?optimizationAnalyticsColor/);
