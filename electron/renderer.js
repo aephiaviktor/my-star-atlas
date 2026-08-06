@@ -7907,7 +7907,7 @@ optimizationUpgradingEfficiencyLimitButton?.addEventListener('click', () => { if
 function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000_000_000) {
   const atlasPool = Number(result?.atlasPool), prices = result?.componentPricesAtl || {};
   if (!Number.isFinite(atlasPool) || atlasPool <= 0) return [];
-  const firstPositiveFactionLp = Math.max(1, xMin);
+  const firstPositiveFactionLp = xMin > 0 ? xMin : Math.max(1, xMax / 100);
   return upgradingMarginComponents.map(([name, lp]) => {
     const price = Number(prices[String(name).toLowerCase()]);
     if (!Number.isFinite(price) || price <= 0) return null;
@@ -7919,12 +7919,19 @@ function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000
 }
 function calculateUpgradingRedemptionDragView(view, mode, dx, dy, width, height, options = null) {
   const xFloor = options?.xFloor ?? null;
+  const xMinSpan = Number.isFinite(options?.xMinSpan) ? options.xMinSpan : Number.EPSILON;
+  const xMaxSpan = Number.isFinite(options?.xMaxSpan) ? options.xMaxSpan : Number.MAX_VALUE;
   const next = { ...view }, xSpan = view.xMax - view.xMin, ySpan = view.yMax - view.yMin;
-  if (mode === 'x-zoom') { const span = Math.max(100_000_000, Math.min(100_000_000_000, xSpan * Math.exp(dx / Math.max(1, width) * 2))); const center = (view.xMin + view.xMax) / 2; next.xMin = center - span / 2; next.xMax = center + span / 2; }
+  if (mode === 'x-zoom') { const span = Math.max(xMinSpan, Math.min(xMaxSpan, xSpan * Math.exp(dx / Math.max(1, width) * 2))); const center = (view.xMin + view.xMax) / 2; next.xMin = center - span / 2; next.xMax = center + span / 2; }
   if (mode === 'y-zoom') { const span = Math.max(Number.EPSILON, ySpan * Math.exp(-dy / Math.max(1, height) * 2)); const center = (view.yMin + view.yMax) / 2; next.yMin = center - span / 2; next.yMax = center + span / 2; }
   if (mode === 'pan') { const xShift = -dx / Math.max(1, width) * xSpan, yShift = dy / Math.max(1, height) * ySpan; next.xMin = view.xMin + xShift; next.xMax = view.xMax + xShift; next.yMin = view.yMin + yShift; next.yMax = view.yMax + yShift; }
   if (Number.isFinite(xFloor) && next.xMin < xFloor) { const span = next.xMax - next.xMin; next.xMin = xFloor; next.xMax = xFloor + span; }
   return next;
+}
+
+function normalizeUpgradingWheelDelta(event) {
+  const unit = event?.deltaMode === 1 ? 16 : (event?.deltaMode === 2 ? 240 : 1);
+  return Math.max(-80, Math.min(80, Number(event?.deltaY || 0) * unit));
 }
 
 function bindUpgradingRedemptionChartNavigation(svg, axes, analytics, chartKey, yMin, yMax) {
@@ -7938,15 +7945,15 @@ function bindUpgradingRedemptionChartNavigation(svg, axes, analytics, chartKey, 
     event.preventDefault();
     hideOptimizationAnalyticsTooltip();
     const start = { xMin: upgradingRedemptionChartView.xMin, xMax: upgradingRedemptionChartView.xMax, yMin, yMax }, startX = event.clientX, startY = event.clientY;
-    const move = (moveEvent) => { const next = calculateUpgradingRedemptionDragView(start, mode, moveEvent.clientX - startX, moveEvent.clientY - startY, plotWidth, plotHeight, { xFloor: 0 }); upgradingRedemptionChartView.xMin = next.xMin; upgradingRedemptionChartView.xMax = next.xMax; upgradingRedemptionChartView[`${chartKey}YMin`] = next.yMin; upgradingRedemptionChartView[`${chartKey}YMax`] = next.yMax; renderBoth(); };
+    const move = (moveEvent) => { const next = calculateUpgradingRedemptionDragView(start, mode, moveEvent.clientX - startX, moveEvent.clientY - startY, plotWidth, plotHeight, { xFloor: 0, xMinSpan: 100_000_000, xMaxSpan: 100_000_000_000 }); upgradingRedemptionChartView.xMin = next.xMin; upgradingRedemptionChartView.xMax = next.xMax; upgradingRedemptionChartView[`${chartKey}YMin`] = next.yMin; upgradingRedemptionChartView[`${chartKey}YMax`] = next.yMax; renderBoth(); };
     const stop = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop, { once: true });
   };
   xAxisArea.addEventListener('pointerdown', (event) => startDrag('x-zoom', event));
   yAxisArea.addEventListener('pointerdown', (event) => startDrag('y-zoom', event));
   plotArea.addEventListener('pointerdown', (event) => startDrag('pan', event));
-  xAxisArea.addEventListener('wheel', (event) => { event.preventDefault(); const next = calculateUpgradingRedemptionDragView({ xMin: upgradingRedemptionChartView.xMin, xMax: upgradingRedemptionChartView.xMax, yMin, yMax }, 'x-zoom', event.deltaY, 0, plotWidth, plotHeight, { xFloor: 0 }); upgradingRedemptionChartView.xMin = next.xMin; upgradingRedemptionChartView.xMax = next.xMax; renderBoth(); }, { passive: false });
-  yAxisArea.addEventListener('wheel', (event) => { event.preventDefault(); const next = calculateUpgradingRedemptionDragView({ xMin: upgradingRedemptionChartView.xMin, xMax: upgradingRedemptionChartView.xMax, yMin, yMax }, 'y-zoom', 0, -event.deltaY, plotWidth, plotHeight, { xFloor: 0 }); upgradingRedemptionChartView[`${chartKey}YMin`] = next.yMin; upgradingRedemptionChartView[`${chartKey}YMax`] = next.yMax; renderBoth(); }, { passive: false });
+  xAxisArea.addEventListener('wheel', (event) => { event.preventDefault(); const next = calculateUpgradingRedemptionDragView({ xMin: upgradingRedemptionChartView.xMin, xMax: upgradingRedemptionChartView.xMax, yMin, yMax }, 'x-zoom', normalizeUpgradingWheelDelta(event), 0, plotWidth, plotHeight, { xFloor: 0, xMinSpan: 100_000_000, xMaxSpan: 100_000_000_000 }); upgradingRedemptionChartView.xMin = next.xMin; upgradingRedemptionChartView.xMax = next.xMax; renderBoth(); }, { passive: false });
+  yAxisArea.addEventListener('wheel', (event) => { event.preventDefault(); const next = calculateUpgradingRedemptionDragView({ xMin: upgradingRedemptionChartView.xMin, xMax: upgradingRedemptionChartView.xMax, yMin, yMax }, 'y-zoom', 0, -normalizeUpgradingWheelDelta(event), plotWidth, plotHeight, { xFloor: 0 }); upgradingRedemptionChartView[`${chartKey}YMin`] = next.yMin; upgradingRedemptionChartView[`${chartKey}YMax`] = next.yMax; renderBoth(); }, { passive: false });
   svg.addEventListener('dblclick', (event) => { event.preventDefault(); upgradingRedemptionChartView.xMin = 10_000_000_000; upgradingRedemptionChartView.xMax = 50_000_000_000; upgradingRedemptionChartView[`${chartKey}YMin`] = null; upgradingRedemptionChartView[`${chartKey}YMax`] = null; renderBoth(); });
 }
 
@@ -7964,7 +7971,7 @@ function bindUpgradingAnalyticsChartNavigation(svg, axes, analytics, chartKey, v
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', stop, { once: true });
   };
   xAxisArea.addEventListener('pointerdown', (event) => startDrag('x-zoom', event)); yAxisArea.addEventListener('pointerdown', (event) => startDrag('y-zoom', event)); plotArea.addEventListener('pointerdown', (event) => startDrag('pan', event));
-  const wheelZoom = (mode, event) => { event.preventDefault(); const start = { xMin: Number.isFinite(view.xMin) ? view.xMin : defaultView.xMin, xMax: Number.isFinite(view.xMax) ? view.xMax : defaultView.xMax, yMin: Number.isFinite(view[`${chartKey}YMin`]) ? view[`${chartKey}YMin`] : defaultView.yMin, yMax: Number.isFinite(view[`${chartKey}YMax`]) ? view[`${chartKey}YMax`] : defaultView.yMax }; const next = calculateUpgradingRedemptionDragView(start, mode, mode === 'x-zoom' ? event.deltaY : 0, mode === 'y-zoom' ? -event.deltaY : 0, plotWidth, plotHeight, { xFloor: defaultView.xFloor }); view.xMin = next.xMin; view.xMax = next.xMax; view[`${chartKey}YMin`] = next.yMin; view[`${chartKey}YMax`] = next.yMax; renderUpgradingOptimizationAnalytics(); };
+  const wheelZoom = (mode, event) => { event.preventDefault(); const start = { xMin: Number.isFinite(view.xMin) ? view.xMin : defaultView.xMin, xMax: Number.isFinite(view.xMax) ? view.xMax : defaultView.xMax, yMin: Number.isFinite(view[`${chartKey}YMin`]) ? view[`${chartKey}YMin`] : defaultView.yMin, yMax: Number.isFinite(view[`${chartKey}YMax`]) ? view[`${chartKey}YMax`] : defaultView.yMax }; const next = calculateUpgradingRedemptionDragView(start, mode, mode === 'x-zoom' ? normalizeUpgradingWheelDelta(event) : 0, mode === 'y-zoom' ? -normalizeUpgradingWheelDelta(event) : 0, plotWidth, plotHeight, { xFloor: defaultView.xFloor }); view.xMin = next.xMin; view.xMax = next.xMax; view[`${chartKey}YMin`] = next.yMin; view[`${chartKey}YMax`] = next.yMax; renderUpgradingOptimizationAnalytics(); };
   xAxisArea.addEventListener('wheel', (event) => wheelZoom('x-zoom', event), { passive: false }); yAxisArea.addEventListener('wheel', (event) => wheelZoom('y-zoom', event), { passive: false });
   svg.addEventListener('dblclick', (event) => { event.preventDefault(); view.xMin = null; view.xMax = null; view[`${chartKey}YMin`] = null; view[`${chartKey}YMax`] = null; renderUpgradingOptimizationAnalytics(); });
 }
@@ -8110,8 +8117,9 @@ function renderUpgradingOptimizationAnalytics() {
   let svg=createOptimizationAnalyticsSvg(optimizationUpgradingRedemptionChart,760,340);
   if(svg && analytics.scatter.length){ const autoMinX=0,autoMaxX=Math.max(1,...analytics.scatter.map(r=>r.factionLp))*1.08,autoMinY=0,autoMaxY=comparisonScales.playerLpPerCrewMax*1.08; const minX=Number.isFinite(upgradingScatterChartView.xMin)?upgradingScatterChartView.xMin:autoMinX,maxX=Number.isFinite(upgradingScatterChartView.xMax)?upgradingScatterChartView.xMax:autoMaxX,minY=Number.isFinite(upgradingScatterChartView.scatterYMin)?upgradingScatterChartView.scatterYMin:autoMinY,maxY=Number.isFinite(upgradingScatterChartView.scatterYMax)?upgradingScatterChartView.scatterYMax:autoMaxY; const axes=renderUpgradingChartAxes(svg,{minY,maxY,xMin:minX,xMax:maxX,xTicks:[minX,minX+(maxX-minX)/4,minX+(maxX-minX)/2,minX+(maxX-minX)*3/4,maxX],xLabel:'Faction LP redeemed',yLabel:'Player LP / avg phantom crew',height:340});
     const meanX=analytics.scatter.reduce((s,r)=>s+r.factionLp,0)/analytics.scatter.length,meanY=analytics.scatter.reduce((s,r)=>s+r.playerLpPerCrew,0)/analytics.scatter.length; const cov=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)*(r.playerLpPerCrew-meanY),0),vx=analytics.scatter.reduce((s,r)=>s+(r.factionLp-meanX)**2,0),vy=analytics.scatter.reduce((s,r)=>s+(r.playerLpPerCrew-meanY)**2,0); const correlation=vx&&vy?cov/Math.sqrt(vx*vy):null;
-    if(vx){ const slope=cov/vx,intercept=meanY-slope*meanX; const startY=Math.max(0,Math.min(maxY,intercept)),endY=Math.max(0,Math.min(maxY,intercept+slope*maxX)); appendOptimizationSvg(svg,'line',{x1:axes.x(0),y1:axes.y(startY),x2:axes.x(maxX),y2:axes.y(endY),class:'optimization-trend-line'}); }
-    analytics.scatter.forEach((row,index)=>{const isLatest=index===analytics.scatter.length-1; const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(row.factionLp),cy:axes.y(row.playerLpPerCrew),r:isLatest?6:5,fill:'#45d6c1',stroke:isLatest?'#e8fffb':'none','stroke-width':isLatest?2:0,class:'mean-marker'}); bindOptimizationAnalyticsTooltip(dot,`${row.date} · faction ${row.factionLp.toLocaleString()} LP · player ${row.playerLp.toLocaleString()} LP · avg phantom crew ${row.averageCrew.toLocaleString(undefined,{maximumFractionDigits:1})} · ${row.playerLpPerCrew.toLocaleString(undefined,{maximumFractionDigits:1})} LP / crew`);});
+    const defs=appendOptimizationSvg(svg,'defs'); const clipPath=appendOptimizationSvg(defs,'clipPath',{id:'optimization-upgrading-scatter-clip'}); appendOptimizationSvg(clipPath,'rect',{x:axes.left,y:axes.top,width:axes.width-axes.left-axes.right,height:axes.height-axes.top-axes.bottom});
+    if(vx){ const slope=cov/vx,intercept=meanY-slope*meanX; const startY=intercept+slope*minX,endY=intercept+slope*maxX; appendOptimizationSvg(svg,'line',{x1:axes.x(minX),y1:axes.y(startY),x2:axes.x(maxX),y2:axes.y(endY),class:'optimization-trend-line','clip-path':`url(#optimization-upgrading-scatter-clip)`}); }
+    analytics.scatter.forEach((row,index)=>{const isLatest=index===analytics.scatter.length-1; const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(row.factionLp),cy:axes.y(row.playerLpPerCrew),r:isLatest?6:5,fill:'#45d6c1',stroke:isLatest?'#e8fffb':'none','stroke-width':isLatest?2:0,class:'mean-marker','clip-path':`url(#optimization-upgrading-scatter-clip)`}); bindOptimizationAnalyticsTooltip(dot,`${row.date} · faction ${row.factionLp.toLocaleString()} LP · player ${row.playerLp.toLocaleString()} LP · avg phantom crew ${row.averageCrew.toLocaleString(undefined,{maximumFractionDigits:1})} · ${row.playerLpPerCrew.toLocaleString(undefined,{maximumFractionDigits:1})} LP / crew`);});
     appendOptimizationSvg(svg,'text',{x:axes.width-axes.right,y:axes.top-2,'text-anchor':'end',class:'axis-label'},`correlation ${correlation==null?'--':correlation.toFixed(2)}`);
     bindUpgradingAnalyticsChartNavigation(svg, axes, analytics, 'scatter', upgradingScatterChartView, { xMin: autoMinX, xMax: autoMaxX, yMin: autoMinY, yMax: autoMaxY, xFloor: 0 });
   }

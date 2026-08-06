@@ -151,6 +151,9 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(renderer, /function buildUpgradingOptimizationAnalytics\(/);
   assert.match(renderer, /function renderUpgradingOptimizationAnalytics\(/);
   assert.match(renderer, /correlation/);
+  assert.match(renderer, /const startY=intercept\+slope\*minX,endY=intercept\+slope\*maxX/);
+  assert.doesNotMatch(renderer, /const startY=Math\.max\(0,Math\.min\(maxY,intercept\)\)/);
+  assert.match(renderer, /clip-path':`url\(#optimization-upgrading-scatter-clip\)`/);
   assert.match(renderer, /x:axes\.width-axes\.right,y:axes\.top-2,'text-anchor':'end'/);
   for (const label of ['Faction LP redeemed', 'Player LP / avg phantom crew', 'Snapshot hour (UTC)', 'Expected total LP by EOD', 'Forecast error (LP)']) assert.match(renderer, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   for (const subtitle of ['One dot per completed UTC day', 'Hourly optimization snapshots', 'Median signed error with the middle 50% band']) assert.doesNotMatch(html, new RegExp(subtitle));
@@ -293,9 +296,12 @@ test('upgrading redemption chart drag math zooms axes and pans a shared viewport
   const clampedPan = context.drag(view, 'pan', 1000, 0, 500, 300, { xFloor: 0 });
   assert.equal(clampedPan.xMin, 0);
   assert.equal(clampedPan.xMax, 40e9);
-  const clampedZoom = context.drag({ ...view, xMin: 0, xMax: 40e9 }, 'x-zoom', 100, 0, 500, 300, { xFloor: 0 });
+  const clampedZoom = context.drag({ ...view, xMin: 0, xMax: 40e9 }, 'x-zoom', 100, 0, 500, 300, { xFloor: 0, xMinSpan: 100e6, xMaxSpan: 100e9 });
   assert.equal(clampedZoom.xMin, 0);
   assert.ok(clampedZoom.xMax > 40e9);
+  const hourlyZoom = context.drag({ xMin: 0, xMax: 24, yMin: 0, yMax: 1 }, 'x-zoom', -100, 0, 500, 300);
+  assert.ok(hourlyZoom.xMax - hourlyZoom.xMin < 24);
+  assert.ok(hourlyZoom.xMax - hourlyZoom.xMin > 1);
 });
 
 test('upgrading chart axes preserve sub-unit ranges instead of collapsing ATLAS-per-second values', () => {
