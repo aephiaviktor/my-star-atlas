@@ -365,8 +365,8 @@ test('phantom starbase lookup and breakeven cost summation', () => {
   ].join('\n'), context);
   assert.equal(context.phantom('MUD'), 'MUD-PHANTOM');
   assert.equal(context.phantom('ONI'), 'ONI-PHANTOM');
-  assert.equal(context.phantom('USTUR'), 'USTUR-PHANTOM');
-  assert.equal(context.phantom('UST'), 'USTUR-PHANTOM');
+  assert.equal(context.phantom('USTUR'), 'UST-PHANTOM');
+  assert.equal(context.phantom('UST'), 'UST-PHANTOM');
   assert.equal(context.sum({ scanningCostPerUnit: 1, miningCostPerUnit: 2, craftingCostPerUnit: 3, cargoCostPerUnit: 4 }), 10);
   assert.equal(context.sum({ scanningCostPerUnit: 1, miningCostPerUnit: null, craftingCostPerUnit: 3, cargoCostPerUnit: null }), 4);
   assert.equal(context.sum({}), null);
@@ -429,6 +429,11 @@ test('Internal cost basis replaces GM price for net metrics and stays unavailabl
   assert.ok(Math.abs(internal[0].internalCost - 0.0025) < 1e-12);
   assert.equal(internal[0].marginPercent > 0, true);
   assert.notEqual(internal[0].netAtlasPerSecond, baseRows[0].netAtlasPerSecond);
+
+  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'UST-PHANTOM', asset: 'Framework', scanningCostPerUnit: 0.002, miningCostPerUnit: 0.001, craftingCostPerUnit: 0.0005, cargoCostPerUnit: 0.0005 }] };
+  const ustInternal = context.apply(baseRows, 'internal', 'USTUR');
+  assert.equal(ustInternal[0].basis, 'internal');
+  assert.ok(Math.abs(ustInternal[0].internalCost - 0.004) < 1e-12);
 
   context.latestBreakevenResult = { breakevenRows: [{ starbase: 'OTHER-1', asset: 'Framework', scanningCostPerUnit: 0.001, miningCostPerUnit: 0.0005, craftingCostPerUnit: 0.0008, cargoCostPerUnit: 0.0002 }] };
   const missing = context.apply(baseRows, 'internal', 'MUD');

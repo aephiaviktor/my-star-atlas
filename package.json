@@ -1,6 +1,6 @@
 {
   "name": "my-star-atlas",
-  "version": "0.6.140",
+  "version": "0.6.141",
   "private": true,
   "main": "electron/main.js",
   "type": "commonjs",

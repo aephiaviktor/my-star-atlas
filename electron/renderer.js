@@ -421,7 +421,7 @@ function phantomStarbaseForFaction(faction) {
   const normalized = String(faction || '').toUpperCase();
   if (normalized === 'MUD') return 'MUD-PHANTOM';
   if (normalized === 'ONI') return 'ONI-PHANTOM';
-  if (normalized === 'USTUR' || normalized === 'UST') return 'USTUR-PHANTOM';
+  if (normalized === 'USTUR' || normalized === 'UST') return 'UST-PHANTOM';
   return `${normalized || 'MUD'}-PHANTOM`;
 }
 
