@@ -2795,6 +2795,12 @@ label {
 }
 
 .optimization-upgrading-breakeven-card { min-height: 398px; }
+.optimization-upgrading-breakeven-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.optimization-upgrading-breakeven-header h3 { margin-bottom: 8px; }
+.optimization-upgrading-breakeven-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.optimization-upgrading-breakeven-toggle-label { text-transform: uppercase; letter-spacing: 0.04em; }
+.optimization-upgrading-breakeven-toggle-option { border: 1px solid rgba(103, 183, 255, 0.5); border-radius: 5px; padding: 3px 9px; background: transparent; color: #67b7ff; font-size: 10px; font-weight: 700; cursor: pointer; }
+.optimization-upgrading-breakeven-toggle-option.active { background: rgba(103, 183, 255, 0.22); box-shadow: 0 0 0 1px rgba(103, 183, 255, 0.25) inset; color: #e8fffb; }
 .optimization-upgrading-breakeven-wrap { max-height: 340px; overflow-y: auto; }
 .optimization-upgrading-breakeven-table { width: 100%; }
 .optimization-upgrading-breakeven-table { min-width: 0; font-size: 11px; }

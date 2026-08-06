@@ -329,3 +329,116 @@ test('LIMIT mode gives every achievable component Framework-equivalent net ATLAS
   assert.match(html, /id="optimization-upgrading-efficiency-limit"/);
   assert.match(css, /optimization-upgrading-breakeven-wrap \{ max-height: none; overflow: visible; \}/);
 });
+
+test('LP Analysis yesterday exposes a cost basis toggle beside the title and an Internal Cost column', () => {
+  assert.match(html, /optimization-upgrading-breakeven-header/);
+  assert.match(html, /id="optimization-upgrading-breakeven-basis-external"/);
+  assert.match(html, /id="optimization-upgrading-breakeven-basis-internal"/);
+  assert.match(html, /data-basis="external"/);
+  assert.match(html, /data-basis="internal"/);
+  const headerIdx = html.indexOf('optimization-upgrading-breakeven-header');
+  const externalIdx = html.indexOf('id="optimization-upgrading-breakeven-basis-external"');
+  const internalIdx = html.indexOf('id="optimization-upgrading-breakeven-basis-internal"');
+  const h3Idx = html.indexOf('<h3>LP Analysis yesterday</h3>');
+  assert.ok(headerIdx < externalIdx && headerIdx < internalIdx);
+  assert.ok(h3Idx < externalIdx && h3Idx < internalIdx);
+  assert.ok(externalIdx < internalIdx);
+  assert.match(renderer, /const UPGRADING_BREAKEVEN_BASIS_STORAGE_KEY = 'my-star-atlas:optimization-upgrading-analysis-cost-basis:v1';/);
+  assert.match(renderer, /const UPGRADING_BREAKEVEN_BASISES = Object\.freeze\(\{ external: 'external', internal: 'internal' \}\);/);
+  assert.match(renderer, /let upgradingBreakevenCostBasis = UPGRADING_BREAKEVEN_BASISES\.external;/);
+  assert.match(renderer, /restoreUpgradingBreakevenCostBasis\(\);/);
+  assert.match(renderer, /setUpgradingBreakevenCostBasis\(UPGRADING_BREAKEVEN_BASISES\.internal\)/);
+  assert.match(renderer, /syncUpgradingBreakevenBasisToggle\(\);/);
+  assert.match(renderer, /key: 'internalCost', label: 'Internal Cost', selected: true/);
+  assert.match(css, /\.optimization-upgrading-breakeven-toggle-option\.active/);
+});
+
+test('phantom starbase lookup and breakeven cost summation', () => {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext([
+    `const UPGRADING_BREAKEVEN_BASISES = Object.freeze({ external: 'external', internal: 'internal' });`,
+    extractFunction(renderer, 'phantomStarbaseForFaction'),
+    extractFunction(renderer, 'sumBreakevenCostPerUnit'),
+    'this.phantom = phantomStarbaseForFaction;',
+    'this.sum = sumBreakevenCostPerUnit;',
+  ].join('\n'), context);
+  assert.equal(context.phantom('MUD'), 'MUD-PHANTOM');
+  assert.equal(context.phantom('ONI'), 'ONI-PHANTOM');
+  assert.equal(context.phantom('USTUR'), 'USTUR-PHANTOM');
+  assert.equal(context.phantom('UST'), 'USTUR-PHANTOM');
+  assert.equal(context.sum({ scanningCostPerUnit: 1, miningCostPerUnit: 2, craftingCostPerUnit: 3, cargoCostPerUnit: 4 }), 10);
+  assert.equal(context.sum({ scanningCostPerUnit: 1, miningCostPerUnit: null, craftingCostPerUnit: 3, cargoCostPerUnit: null }), 4);
+  assert.equal(context.sum({}), null);
+  assert.equal(context.sum(null), null);
+});
+
+test('Internal cost basis also recalculates the Profit Margin chart series', () => {
+  const context = { latestBreakevenResult: null };
+  vm.createContext(context);
+  vm.runInContext([
+    `const UPGRADING_BREAKEVEN_BASISES = Object.freeze({ external: 'external', internal: 'internal' });`,
+    extractFunction(renderer, 'phantomStarbaseForFaction'),
+    extractFunction(renderer, 'sumBreakevenCostPerUnit'),
+    extractFunction(renderer, 'getUpgradingBreakevenInternalCosts'),
+    extractFunction(renderer, 'applyUpgradingMarginCostBasis'),
+    'this.apply = applyUpgradingMarginCostBasis;',
+  ].join('\n'), context);
+  const series = [{
+    name: 'Framework', lp: 68, price: 0.003, durationSeconds: 12,
+    points: [{ factionLp: 10_000_000_000, impliedAtlasValue: 0.0034, marginPercent: 13.333, netAtlasPerSecond: 0.0000333 }],
+  }];
+  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'MUD-PHANTOM', asset: 'Framework', scanningCostPerUnit: 0.001, miningCostPerUnit: 0.0005, craftingCostPerUnit: 0.0008, cargoCostPerUnit: 0.0002 }] };
+  const internal = context.apply(series, 'internal', 'MUD');
+  assert.equal(internal.length, 1);
+  assert.equal(internal[0].costBasis, 'internal');
+  assert.ok(Math.abs(internal[0].price - 0.0025) < 1e-12);
+  assert.ok(Math.abs(internal[0].points[0].marginPercent - 36) < 1e-12);
+  assert.ok(Math.abs(internal[0].points[0].netAtlasPerSecond - 0.000075) < 1e-12);
+
+  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'OTHER-PHANTOM', asset: 'Framework', scanningCostPerUnit: 1 }] };
+  assert.deepEqual(context.apply(series, 'internal', 'MUD'), []);
+  assert.equal(context.apply(series, 'external', 'MUD')[0].price, 0.003);
+  assert.match(renderer, /renderUpgradingMarginChart\(analytics\);/);
+  assert.match(renderer, /applyUpgradingMarginCostBasis\(buildUpgradingMarginSeries/);
+});
+
+test('Internal cost basis replaces GM price for net metrics and stays unavailable without a phantom starbase row', () => {
+  const context = { latestBreakevenResult: null };
+  vm.createContext(context);
+  vm.runInContext([
+    `const UPGRADING_BREAKEVEN_BASISES = Object.freeze({ external: 'external', internal: 'internal' });`,
+    extractFunction(renderer, 'phantomStarbaseForFaction'),
+    extractFunction(renderer, 'sumBreakevenCostPerUnit'),
+    extractFunction(renderer, 'getUpgradingBreakevenInternalCosts'),
+    extractFunction(renderer, 'applyUpgradingCostBasis'),
+    'this.latestBreakevenResult = null;',
+    'this.apply = applyUpgradingCostBasis;',
+  ].join('\n'), context);
+  const baseRows = [
+    { name: 'Framework', lp: 68, gmPrice: 0.003, durationSeconds: 12, cargoWeight: 1, lpPerSecond: 5.667, impliedAtlasValue: 0.0034, grossAtlasPerSecond: 0.000283, netAtlasPerSecond: 0.000033, marginPercent: 13.33, netAtlasPerCargoUnit: 0.0004 },
+  ];
+  const external = context.apply(baseRows, 'external', 'MUD');
+  assert.equal(external[0].basis, 'external');
+  assert.equal(external[0].internalCost, null);
+  assert.equal(external[0].netAtlasPerSecond, baseRows[0].netAtlasPerSecond);
+
+  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'MUD-PHANTOM', asset: 'Framework', scanningCostPerUnit: 0.001, miningCostPerUnit: 0.0005, craftingCostPerUnit: 0.0008, cargoCostPerUnit: 0.0002 }] };
+  const internal = context.apply(baseRows, 'internal', 'MUD');
+  assert.equal(internal[0].basis, 'internal');
+  assert.ok(Math.abs(internal[0].internalCost - 0.0025) < 1e-12);
+  assert.equal(internal[0].marginPercent > 0, true);
+  assert.notEqual(internal[0].netAtlasPerSecond, baseRows[0].netAtlasPerSecond);
+
+  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'OTHER-1', asset: 'Framework', scanningCostPerUnit: 0.001, miningCostPerUnit: 0.0005, craftingCostPerUnit: 0.0008, cargoCostPerUnit: 0.0002 }] };
+  const missing = context.apply(baseRows, 'internal', 'MUD');
+  assert.equal(missing[0].internalCost, null);
+  assert.equal(missing[0].marginPercent, null);
+  assert.equal(missing[0].netAtlasPerSecond, null);
+  assert.equal(missing[0].netAtlasPerCargoUnit, null);
+
+  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'MUD-PHANTOM', asset: 'Other', scanningCostPerUnit: 1, miningCostPerUnit: 1, craftingCostPerUnit: 1, cargoCostPerUnit: 1 }] };
+  const mismatched = context.apply(baseRows, 'internal', 'MUD');
+  assert.equal(mismatched[0].internalCost, null);
+  assert.equal(mismatched[0].netAtlasPerSecond, null);
+});

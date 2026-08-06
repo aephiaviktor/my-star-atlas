@@ -105,6 +105,8 @@ const optimizationUpgradingForecastChart = document.querySelector('#optimization
 const optimizationUpgradingErrorChart = document.querySelector('#optimization-upgrading-error-chart');
 const optimizationUpgradingBreakevenBody = document.querySelector('#optimization-upgrading-breakeven-body');
 const optimizationUpgradingBreakevenHead = document.querySelector('#optimization-upgrading-breakeven-head');
+const optimizationUpgradingBreakevenBasisExternalButton = document.querySelector('#optimization-upgrading-breakeven-basis-external');
+const optimizationUpgradingBreakevenBasisInternalButton = document.querySelector('#optimization-upgrading-breakeven-basis-internal');
 const earningsSyncStatus = document.querySelector('#earnings-sync-status');
 const earningsTableHead = document.querySelector('#earnings-table-head');
 const earningsTableBody = document.querySelector('#earnings-table-body');
@@ -377,6 +379,7 @@ const upgradingBreakevenColumns = Object.freeze([
   { key: 'factionLp', label: 'Faction LP redemption', selected: false },
   { key: 'breakevenLp', label: 'Breakeven LP', selected: true },
   { key: 'gmPrice', label: 'GM price', selected: true },
+  { key: 'internalCost', label: 'Internal Cost', selected: true },
   { key: 'grossAtlasPerSecond', label: 'Gross ATLAS/s', selected: false },
   { key: 'marginPercent', label: 'Profit Margin', selected: true, group: 'Capital-limited' },
   { key: 'netAtlasPerSecond', label: 'Net ATLAS/s', selected: true, group: 'Crew-limited' },
@@ -396,6 +399,56 @@ try {
 function persistUpgradingBreakevenColumnState() {
   try { localStorage.setItem(UPGRADING_BREAKEVEN_COLUMN_STORAGE_KEY, JSON.stringify([...upgradingBreakevenSelectedColumns])); }
   catch (_error) { /* Column controls remain functional without storage. */ }
+}
+
+const UPGRADING_BREAKEVEN_BASIS_STORAGE_KEY = 'my-star-atlas:optimization-upgrading-analysis-cost-basis:v1';
+const UPGRADING_BREAKEVEN_BASISES = Object.freeze({ external: 'external', internal: 'internal' });
+let upgradingBreakevenCostBasis = UPGRADING_BREAKEVEN_BASISES.external;
+
+function restoreUpgradingBreakevenCostBasis() {
+  try {
+    const saved = String(localStorage.getItem(UPGRADING_BREAKEVEN_BASIS_STORAGE_KEY) || '');
+    if (saved === UPGRADING_BREAKEVEN_BASISES.internal) upgradingBreakevenCostBasis = UPGRADING_BREAKEVEN_BASISES.internal;
+  } catch (_error) { /* Missing or restricted storage keeps the documented default. */ }
+}
+
+function persistUpgradingBreakevenCostBasis() {
+  try { localStorage.setItem(UPGRADING_BREAKEVEN_BASIS_STORAGE_KEY, upgradingBreakevenCostBasis); }
+  catch (_error) { /* Toggle remains functional without storage. */ }
+}
+
+function phantomStarbaseForFaction(faction) {
+  const normalized = String(faction || '').toUpperCase();
+  if (normalized === 'MUD') return 'MUD-PHANTOM';
+  if (normalized === 'ONI') return 'ONI-PHANTOM';
+  if (normalized === 'USTUR' || normalized === 'UST') return 'USTUR-PHANTOM';
+  return `${normalized || 'MUD'}-PHANTOM`;
+}
+
+function sumBreakevenCostPerUnit(entry) {
+  if (!entry) return null;
+  const fields = [entry.scanningCostPerUnit, entry.miningCostPerUnit, entry.craftingCostPerUnit, entry.cargoCostPerUnit];
+  if (fields.every((value) => value == null)) return null;
+  const total = fields.reduce((sum, value) => sum + (Number.isFinite(Number(value)) ? Number(value) : 0), 0);
+  return Number.isFinite(total) ? total : null;
+}
+
+function getUpgradingBreakevenInternalCosts(faction) {
+  const result = latestBreakevenResult;
+  const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
+  if (!rows.length) return { starbase: phantomStarbaseForFaction(faction), byAsset: {}, available: false, reason: 'no-breakeven-data' };
+  const phantomStarbase = phantomStarbaseForFaction(faction);
+  const matched = rows.filter((row) => String(row.starbase || '').toUpperCase() === phantomStarbase.toUpperCase());
+  if (!matched.length) return { starbase: phantomStarbase, byAsset: {}, available: false, reason: 'no-phantom-starbase' };
+  const byAsset = {};
+  let anyComponentCost = false;
+  for (const row of matched) {
+    const assetKey = String(row.asset || '').trim();
+    if (!assetKey) continue;
+    const internalCost = sumBreakevenCostPerUnit(row);
+    if (internalCost != null) { byAsset[assetKey] = internalCost; anyComponentCost = true; }
+  }
+  return { starbase: phantomStarbase, byAsset, available: anyComponentCost, reason: anyComponentCost ? null : 'no-internal-cost' };
 }
 
 function restoreOptimizationColumnState() {
@@ -420,6 +473,7 @@ function persistOptimizationColumnState() {
 }
 
 restoreOptimizationColumnState();
+restoreUpgradingBreakevenCostBasis();
 
 let optimizationSort = { key: 'time', direction: 'desc' };
 let currentOptimizationView = 'data';
@@ -7904,6 +7958,32 @@ let upgradingEfficiencyLimitMode = false;
 let animateUpgradingEfficiencyNextRender = false;
 const upgradingEfficiencyPointPositions = new Map();
 optimizationUpgradingEfficiencyLimitButton?.addEventListener('click', () => { if (optimizationUpgradingEfficiencyLimitButton.disabled) return; upgradingEfficiencyLimitMode = !upgradingEfficiencyLimitMode; animateUpgradingEfficiencyNextRender = true; renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {})); });
+
+function setUpgradingBreakevenCostBasis(basis) {
+  const next = basis === UPGRADING_BREAKEVEN_BASISES.internal ? UPGRADING_BREAKEVEN_BASISES.internal : UPGRADING_BREAKEVEN_BASISES.external;
+  if (upgradingBreakevenCostBasis === next) return;
+  upgradingBreakevenCostBasis = next;
+  persistUpgradingBreakevenCostBasis();
+  syncUpgradingBreakevenBasisToggle();
+  if (next === UPGRADING_BREAKEVEN_BASISES.internal) upgradingEfficiencyLimitMode = false;
+  const analytics = buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {});
+  renderUpgradingBreakevenTable();
+  renderUpgradingMarginChart(analytics);
+  renderUpgradingEfficiencyChart(analytics);
+}
+
+function syncUpgradingBreakevenBasisToggle() {
+  for (const button of [optimizationUpgradingBreakevenBasisExternalButton, optimizationUpgradingBreakevenBasisInternalButton]) {
+    if (!button) continue;
+    const pressed = button.dataset?.basis === upgradingBreakevenCostBasis;
+    button.classList.toggle('active', pressed);
+    button.setAttribute('aria-pressed', String(pressed));
+  }
+}
+
+optimizationUpgradingBreakevenBasisExternalButton?.addEventListener('click', () => setUpgradingBreakevenCostBasis(UPGRADING_BREAKEVEN_BASISES.external));
+optimizationUpgradingBreakevenBasisInternalButton?.addEventListener('click', () => setUpgradingBreakevenCostBasis(UPGRADING_BREAKEVEN_BASISES.internal));
+syncUpgradingBreakevenBasisToggle();
 function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000_000_000) {
   const atlasPool = Number(result?.atlasPool), prices = result?.componentPricesAtl || {};
   if (!Number.isFinite(atlasPool) || atlasPool <= 0) return [];
@@ -7913,8 +7993,27 @@ function buildUpgradingMarginSeries(result, xMin = 10_000_000_000, xMax = 50_000
     if (!Number.isFinite(price) || price <= 0) return null;
     const durationSeconds = Number(upgradingDurationSeconds[name]);
     if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
-    const points = Array.from({ length: 101 }, (_, index) => { const factionLp = firstPositiveFactionLp + (xMax - firstPositiveFactionLp) * index / 100; const impliedAtlasValue = atlasPool / factionLp * lp; return { factionLp, marginPercent: (impliedAtlasValue / price - 1) * 100, netAtlasPerSecond: (impliedAtlasValue - price) / durationSeconds }; });
+    const points = Array.from({ length: 101 }, (_, index) => { const factionLp = firstPositiveFactionLp + (xMax - firstPositiveFactionLp) * index / 100; const impliedAtlasValue = atlasPool / factionLp * lp; return { factionLp, impliedAtlasValue, marginPercent: (impliedAtlasValue / price - 1) * 100, netAtlasPerSecond: (impliedAtlasValue - price) / durationSeconds }; });
     return { name, lp, price, durationSeconds, points };
+  }).filter(Boolean);
+}
+
+function applyUpgradingMarginCostBasis(series, basis, faction) {
+  if (basis !== UPGRADING_BREAKEVEN_BASISES.internal) return series.map((entry) => ({ ...entry, costBasis: 'external' }));
+  const internalCosts = getUpgradingBreakevenInternalCosts(faction);
+  return series.map((entry) => {
+    const internalCost = internalCosts.byAsset[entry.name];
+    if (!Number.isFinite(internalCost) || internalCost <= 0) return null;
+    return {
+      ...entry,
+      price: internalCost,
+      externalPrice: entry.price,
+      costBasis: 'internal',
+      points: entry.points.map((point) => {
+        const impliedAtlasValue = Number.isFinite(point.impliedAtlasValue) ? point.impliedAtlasValue : entry.price * (point.marginPercent + 100) / 100;
+        return { ...point, impliedAtlasValue, marginPercent: (impliedAtlasValue / internalCost - 1) * 100, netAtlasPerSecond: (impliedAtlasValue - internalCost) / entry.durationSeconds };
+      }),
+    };
   }).filter(Boolean);
 }
 function calculateUpgradingRedemptionDragView(view, mode, dx, dy, width, height, options = null) {
@@ -7996,6 +8095,24 @@ function buildUpgradingEfficiencyRows(result, factionLp) {
   return rows;
 }
 
+function applyUpgradingCostBasis(rows, basis, faction) {
+  const useInternal = basis === UPGRADING_BREAKEVEN_BASISES.internal;
+  if (!useInternal) {
+    return rows.map((row) => ({ ...row, internalCost: null, basis: 'external' }));
+  }
+  const internalCosts = getUpgradingBreakevenInternalCosts(faction);
+  return rows.map((row) => {
+    const internalCost = internalCosts.byAsset[row.name];
+    if (!Number.isFinite(internalCost) || internalCost <= 0) {
+      return { ...row, internalCost: null, basis: 'internal', marginPercent: null, netAtlasPerSecond: null, netAtlasPerCargoUnit: null };
+    }
+    const marginPercent = (row.impliedAtlasValue / internalCost - 1) * 100;
+    const netAtlasPerSecond = row.grossAtlasPerSecond - internalCost / row.durationSeconds;
+    const netAtlasPerCargoUnit = (row.impliedAtlasValue - internalCost) / row.cargoWeight;
+    return { ...row, internalCost, basis: 'internal', marginPercent, netAtlasPerSecond, netAtlasPerCargoUnit };
+  });
+}
+
 function markUpgradingDominatedRows(rows, includeCargo = true) {
   return rows.map((row) => ({ ...row, dominated: rows.some((other) => other !== row && other.marginPercent >= row.marginPercent && other.netAtlasPerSecond >= row.netAtlasPerSecond && (!includeCargo || other.cargoWeight <= row.cargoWeight) && (other.marginPercent > row.marginPercent || other.netAtlasPerSecond > row.netAtlasPerSecond || (includeCargo && other.cargoWeight < row.cargoWeight))) }));
 }
@@ -8028,14 +8145,21 @@ function renderUpgradingEfficiencyChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingEfficiencyChart, 760, 340);
   if (!svg) return;
   const baseRows = buildUpgradingEfficiencyRows(latestUpgradingOptimizationResult || {}, Number(analytics.latestFactionRedemption?.factionLp));
-  renderUpgradingEfficiencyLegend(baseRows, analytics);
   const faction = normalizeFaction(latestSettings?.faction);
+  const basisRows = applyUpgradingCostBasis(baseRows, upgradingBreakevenCostBasis, faction);
+  renderUpgradingEfficiencyLegend(basisRows, analytics);
   const anchor = upgradingLimitAnchorByFaction.get(faction);
   const hasLimitAnchor = Boolean(anchor?.name) && Number.isFinite(Number(anchor?.price)) && Number(anchor.price) > 0;
-  if (!hasLimitAnchor) upgradingEfficiencyLimitMode = false;
-  if (optimizationUpgradingEfficiencyLimitButton) { optimizationUpgradingEfficiencyLimitButton.disabled = !hasLimitAnchor; optimizationUpgradingEfficiencyLimitButton.classList.toggle('active', upgradingEfficiencyLimitMode); optimizationUpgradingEfficiencyLimitButton.setAttribute('aria-pressed', String(upgradingEfficiencyLimitMode)); optimizationUpgradingEfficiencyLimitButton.title = hasLimitAnchor ? `Plot all components from ${anchor.name}'s equivalent limit prices` : 'Enter a limit price in any component row first'; }
-  const allRows = upgradingEfficiencyLimitMode ? applyUpgradingLimitPrices(baseRows, anchor?.name, Number(anchor?.price)) : baseRows;
-  const rows = markUpgradingDominatedRows(allRows.filter((row) => selectedUpgradingEfficiencyComponents.has(row.name)), true);
+  const isInternalBasis = upgradingBreakevenCostBasis === UPGRADING_BREAKEVEN_BASISES.internal;
+  if (!hasLimitAnchor || isInternalBasis) upgradingEfficiencyLimitMode = false;
+  if (optimizationUpgradingEfficiencyLimitButton) {
+    optimizationUpgradingEfficiencyLimitButton.disabled = !hasLimitAnchor || isInternalBasis;
+    optimizationUpgradingEfficiencyLimitButton.classList.toggle('active', upgradingEfficiencyLimitMode);
+    optimizationUpgradingEfficiencyLimitButton.setAttribute('aria-pressed', String(upgradingEfficiencyLimitMode));
+    optimizationUpgradingEfficiencyLimitButton.title = isInternalBasis ? 'LIMIT mode is available only with the external cost basis' : (hasLimitAnchor ? `Plot all components from ${anchor.name}'s equivalent limit prices` : 'Enter a limit price in any component row first');
+  }
+  const allRows = upgradingEfficiencyLimitMode ? applyUpgradingLimitPrices(basisRows, anchor?.name, Number(anchor?.price)) : basisRows;
+  const rows = markUpgradingDominatedRows(allRows.filter((row) => selectedUpgradingEfficiencyComponents.has(row.name) && Number.isFinite(row.marginPercent) && Number.isFinite(row.netAtlasPerSecond)), true);
   if (!rows.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
   const margins = rows.map((row) => row.marginPercent), nets = rows.map((row) => row.netAtlasPerSecond);
   const xPad = Math.max(1, (Math.max(...margins) - Math.min(...margins)) * 0.12), yPad = Math.max(0.000001, (Math.max(...nets) - Math.min(...nets)) * 0.12);
@@ -8092,13 +8216,15 @@ function renderUpgradingNetAtlasChart(analytics) {
 function renderUpgradingMarginChart(analytics) {
   const svg = createOptimizationAnalyticsSvg(optimizationUpgradingMarginChart, 760, 340); if (!svg) return;
   const xMin = upgradingRedemptionChartView.xMin, xMax = upgradingRedemptionChartView.xMax;
-  const series = buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}, xMin, xMax).filter((entry) => selectedUpgradingRedemptionComponents.has(entry.name)); if (!series.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'Select at least one component'); return; }
+  const faction = normalizeFaction(latestSettings?.faction);
+  const series = applyUpgradingMarginCostBasis(buildUpgradingMarginSeries(latestUpgradingOptimizationResult || {}, xMin, xMax), upgradingBreakevenCostBasis, faction).filter((entry) => selectedUpgradingRedemptionComponents.has(entry.name));
+  if (!series.length) { appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, upgradingBreakevenCostBasis === UPGRADING_BREAKEVEN_BASISES.internal ? 'No internal component costs available' : 'Select at least one component'); return; }
   const values = series.flatMap((entry) => entry.points.map((point) => point.marginPercent)), autoMinY = Math.min(-100, ...values), autoMaxY = Math.max(100, ...values);
   const minY = Number.isFinite(upgradingRedemptionChartView.marginYMin) ? upgradingRedemptionChartView.marginYMin : autoMinY, maxY = Number.isFinite(upgradingRedemptionChartView.marginYMax) ? upgradingRedemptionChartView.marginYMax : autoMaxY;
   const xTicks = Array.from({ length: 5 }, (_, index) => xMin + (xMax - xMin) * index / 4);
   const axes = renderUpgradingChartAxes(svg, { minY, maxY, xMin, xMax, xTicks, xLabel: 'Theoretical faction LP redemption', yLabel: 'Component profit margin (%)', height: 340 });
   appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
-  series.forEach((entry, index) => { const line = appendOptimizationSvg(svg, 'polyline', { points: entry.points.map((point) => `${axes.x(point.factionLp)},${axes.y(point.marginPercent)}`).join(' '), fill: 'none', stroke: getAssetChartColor(entry.name, index), 'stroke-width': 2, class: 'optimization-margin-line' }); bindOptimizationAnalyticsTooltip(line, `${entry.name} · ${entry.lp.toLocaleString()} LP/component · current GM ${entry.price.toLocaleString(undefined, { maximumFractionDigits: 6 })} ATLAS`); });
+  series.forEach((entry, index) => { const line = appendOptimizationSvg(svg, 'polyline', { points: entry.points.map((point) => `${axes.x(point.factionLp)},${axes.y(point.marginPercent)}`).join(' '), fill: 'none', stroke: getAssetChartColor(entry.name, index), 'stroke-width': 2, class: 'optimization-margin-line' }); const costLabel = entry.costBasis === 'internal' ? 'internal cost' : 'current GM'; bindOptimizationAnalyticsTooltip(line, `${entry.name} · ${entry.lp.toLocaleString()} LP/component · ${costLabel} ${entry.price.toLocaleString(undefined, { maximumFractionDigits: 6 })} ATLAS`); });
   const yesterday = analytics.latestFactionRedemption;
   if (Number.isFinite(yesterday?.factionLp) && yesterday.factionLp >= xMin && yesterday.factionLp <= xMax) { const faction = normalizeFaction(latestSettings?.faction); const marker = appendOptimizationSvg(svg, 'line', { x1: axes.x(yesterday.factionLp), x2: axes.x(yesterday.factionLp), y1: axes.top, y2: axes.height - axes.bottom, stroke: upgradingFactionColors[faction] || '#45d6c1', 'stroke-width': 3, class: 'optimization-yesterday-line' }); bindOptimizationAnalyticsTooltip(marker, `${yesterday.date} · ${faction === 'USTUR' ? 'UST' : faction} faction redemption ${yesterday.factionLp.toLocaleString()} LP`); }
   bindUpgradingRedemptionChartNavigation(svg, axes, analytics, 'margin', minY, maxY);
@@ -8147,9 +8273,10 @@ function renderUpgradingBreakevenTable() {
   optimizationUpgradingBreakevenBody.replaceChildren();
   const result = latestUpgradingOptimizationResult || {};
   const factionLp = Number(buildUpgradingOptimizationAnalytics(result).latestFactionRedemption?.factionLp);
-  const rows = buildUpgradingEfficiencyRows(result, factionLp).sort((a, b) => a.lp - b.lp);
-  if (!rows.length) { const tr=document.createElement('tr'),td=document.createElement('td'); tr.className='empty-row';td.colSpan=Math.max(1,visibleColumns.length);td.textContent='Component prices or yesterday’s faction LP unavailable';tr.append(td);optimizationUpgradingBreakevenBody.append(tr);return; }
+  const baseRows = buildUpgradingEfficiencyRows(result, factionLp).sort((a, b) => a.lp - b.lp);
   const faction = normalizeFaction(latestSettings?.faction);
+  const rows = applyUpgradingCostBasis(baseRows, upgradingBreakevenCostBasis, faction);
+  if (!rows.length) { const tr=document.createElement('tr'),td=document.createElement('td'); tr.className='empty-row';td.colSpan=Math.max(1,visibleColumns.length);td.textContent='Component prices or yesterday’s faction LP unavailable';tr.append(td);optimizationUpgradingBreakevenBody.append(tr);return; }
   const updateLimits = (editedName = '') => {
     const anchor = upgradingLimitAnchorByFaction.get(faction);
     const anchorRow = rows.find((row) => row.name === anchor?.name);
@@ -8165,7 +8292,11 @@ function renderUpgradingBreakevenTable() {
   };
   for (const row of rows) {
     const tr=document.createElement('tr');
-    const values={name:row.name==='Ink'?'INK':row.name,upgradingTime:`${row.durationSeconds}s`,lpValue:row.lp.toLocaleString(),lpPerSecond:row.lpPerSecond.toFixed(1),factionLp:formatCompactNumber(factionLp),breakevenLp:formatCompactNumber(Number(result.atlasPool)*row.lp/row.gmPrice),gmPrice:row.gmPrice.toLocaleString(undefined,{maximumFractionDigits:6}),grossAtlasPerSecond:row.grossAtlasPerSecond.toFixed(6),marginPercent:`${row.marginPercent.toFixed(1)}%`,netAtlasPerSecond:row.netAtlasPerSecond.toFixed(6),netAtlasPerCargoUnit:row.netAtlasPerCargoUnit.toFixed(6)};
+    const internalCostText = row.internalCost == null ? '--' : Number(row.internalCost).toLocaleString(undefined, { maximumFractionDigits: 6 });
+    const marginText = row.marginPercent == null || !Number.isFinite(row.marginPercent) ? '--' : `${row.marginPercent.toFixed(1)}%`;
+    const netAtlasPerSecondText = row.netAtlasPerSecond == null || !Number.isFinite(row.netAtlasPerSecond) ? '--' : row.netAtlasPerSecond.toFixed(6);
+    const netAtlasPerCargoUnitText = row.netAtlasPerCargoUnit == null || !Number.isFinite(row.netAtlasPerCargoUnit) ? '--' : row.netAtlasPerCargoUnit.toFixed(6);
+    const values={name:row.name==='Ink'?'INK':row.name,upgradingTime:`${row.durationSeconds}s`,lpValue:row.lp.toLocaleString(),lpPerSecond:row.lpPerSecond.toFixed(1),factionLp:formatCompactNumber(factionLp),breakevenLp:formatCompactNumber(Number(result.atlasPool)*row.lp/row.gmPrice),gmPrice:row.gmPrice.toLocaleString(undefined,{maximumFractionDigits:6}),internalCost:internalCostText,grossAtlasPerSecond:row.grossAtlasPerSecond.toFixed(6),marginPercent:marginText,netAtlasPerSecond:netAtlasPerSecondText,netAtlasPerCargoUnit:netAtlasPerCargoUnitText};
     for (const column of visibleColumns) {
       const cell=document.createElement('td');
       if(column.key==='limit'){cell.className='numeric-cell optimization-limit-cell';const input=document.createElement('input');input.type='number';input.min='0';input.step='any';input.className='optimization-framework-limit-input';input.placeholder='Enter price';input.dataset.limitComponent=row.name;input.setAttribute('aria-label',`${row.name} limit buy price`);input.addEventListener('input',()=>{const value=input.value.trim(),price=Number(value);if(value&&Number.isFinite(price)&&price>0)upgradingLimitAnchorByFaction.set(faction,{name:row.name,price});else upgradingLimitAnchorByFaction.delete(faction);updateLimits(row.name);renderUpgradingEfficiencyChart(buildUpgradingOptimizationAnalytics(result));});cell.append(input);}
