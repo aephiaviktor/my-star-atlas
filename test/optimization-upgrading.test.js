@@ -183,10 +183,17 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(css, /\.optimization-upgrading-redemption-charts[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(css, /\.optimization-upgrading-redemption-chart[\s\S]*?min-height:\s*340px/);
   assert.match(renderer, /bindUpgradingRedemptionChartNavigation/);
+  assert.match(renderer, /bindUpgradingAnalyticsChartNavigation/);
+  for (const chartKey of ['scatter', 'forecast', 'error', 'efficiency']) assert.match(renderer, new RegExp(`bindUpgradingAnalyticsChartNavigation\\(svg, axes, analytics, '${chartKey}'`));
+  assert.match(renderer, /upgradingTimeChartView/);
+  assert.match(renderer, /upgradingScatterChartView/);
+  assert.match(renderer, /upgradingEfficiencyChartView/);
   assert.match(renderer, /startDrag\('x-zoom'/);
   assert.match(renderer, /startDrag\('y-zoom'/);
   assert.match(renderer, /startDrag\('pan'/);
   assert.match(renderer, /addEventListener\('dblclick'/);
+  assert.match(renderer, /addEventListener\('wheel'/);
+  assert.match(renderer, /xFloor: 0/);
   assert.match(css, /\.optimization-chart-axis-drag/);
   assert.match(css, /\.optimization-chart-pan-area/);
   assert.match(renderer, /rgba\(69, 214, 193/);
@@ -283,6 +290,12 @@ test('upgrading redemption chart drag math zooms axes and pans a shared viewport
   const yZoom = context.drag(view, 'y-zoom', 0, 75, 500, 300);
   assert.ok(yZoom.yMax - yZoom.yMin < 0.4);
   assert.equal(yZoom.xMin, view.xMin);
+  const clampedPan = context.drag(view, 'pan', 1000, 0, 500, 300, { xFloor: 0 });
+  assert.equal(clampedPan.xMin, 0);
+  assert.equal(clampedPan.xMax, 40e9);
+  const clampedZoom = context.drag({ ...view, xMin: 0, xMax: 40e9 }, 'x-zoom', 100, 0, 500, 300, { xFloor: 0 });
+  assert.equal(clampedZoom.xMin, 0);
+  assert.ok(clampedZoom.xMax > 40e9);
 });
 
 test('upgrading chart axes preserve sub-unit ranges instead of collapsing ATLAS-per-second values', () => {
