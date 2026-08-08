@@ -36,7 +36,7 @@ const {
 } = require('./telemetry-context');
 const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./telemetry-rpc-fetch');
 const { dependencyInstallRequired } = require('./update-dependencies');
-const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows } = require('./influx-data');
+const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, buildCargoRowsFromCompletedAllocations } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
@@ -6407,33 +6407,31 @@ ${scopeFilterFlux}
 async function fetchCargoAllocationEarningsRows(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
   const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
   |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
   |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
+${scopeFilterFlux}
   |> keep(columns: ["_time", "_field", "_value", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex"])
   |> sort(columns: ["_time"])`;
   const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
-  const grouped = new Map();
-  const fieldRows = dedupeCargoAllocationFieldRows(parseInfluxCsv(await queryInfluxFlux(settings, flux)));
-  for (const row of fieldRows) {
-    const date = new Date(row._time);
-    const isoDate = getUtcDateKey(date);
-    const asset = String(row.rss || 'Unknown asset').trim() || 'Unknown asset';
-    const assignment = String(row.assignment || 'Unknown').trim() || 'Unknown';
-    const fleet = String(row.fleet || '').trim();
-    const origin = String(row.originStarbase || '').trim() || '--';
-    const destination = String(row.deliveryStarbase || '').trim() || '--';
-    if (!includedDays.has(isoDate) || !fleet) continue;
-    const cycleId = String(row.cycleId || '').trim();
-    const key = `${isoDate}\n${fleet}\n${asset}\n${origin}\n${destination}\n${assignment}\n${cycleId}`;
-    if (!grouped.has(key)) grouped.set(key, { isoDate, timestamp: date.toISOString(), label: formatShortUtcDate(date), fleet, asset, origin, destination, assignment, cycleId, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
-    const target = grouped.get(key);
-    if (date.toISOString() < target.timestamp) target.timestamp = date.toISOString();
-    const value = Number(row._value);
-    if (Number.isFinite(value) && Object.hasOwn(target, row._field)) target[row._field] += value;
-  }
-  return Array.from(grouped.values()).sort((a, b) => b.isoDate.localeCompare(a.isoDate) || a.fleet.localeCompare(b.fleet) || a.asset.localeCompare(b.asset) || a.origin.localeCompare(b.origin) || a.destination.localeCompare(b.destination) || a.assignment.localeCompare(b.assignment));
+  return buildCargoAllocationRecords(parseInfluxCsv(await queryInfluxFlux(settings, flux)), includedDays)
+    .map((row) => ({ ...row, label: formatShortUtcDate(new Date(row.timestamp)) }));
+}
+
+async function fetchCargoCompletionEvidenceRows(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
+  const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -31d)
+  |> filter(fn: (r) => r._measurement == "cargo_cycle_completed" and r._field == "legCount")
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.fleet and exists r.assignment and exists r.cycleId)
+  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet", "assignment"])`;
+  return parseInfluxCsv(await queryInfluxFlux(settings, flux));
 }
 
 async function fetchCanonicalRawCargoCosts(settings) {
@@ -6655,6 +6653,19 @@ async function fetchEarningsSnapshot(payload) {
   else cargoError = String(cargoResult.reason?.message || cargoResult.reason || 'cargo_rows_unavailable');
   if (cargoAllocationResult.status === 'fulfilled') cargoAllocationRows = cargoAllocationResult.value;
   else cargoAllocationError = String(cargoAllocationResult.reason?.message || cargoAllocationResult.reason || 'cargo_allocation_rows_unavailable');
+  // A timeout in the expensive movement aggregate must not erase already
+  // completed Cargo telemetry. Reconstruct only cycles that retain exact
+  // completion evidence and faction-scoped allocation rows.
+  if (cargoResult.status === 'rejected' && cargoAllocationRows.length) {
+    try {
+      const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
+      const completionRows = await fetchCargoCompletionEvidenceRows(settings);
+      cargoRows = buildCargoRowsFromCompletedAllocations({ completionRows, allocationRows: cargoAllocationRows, includedDays })
+        .map((row) => ({ ...row, label: formatShortUtcDate(new Date(`${row.isoDate}T00:00:00.000Z`)) }));
+    } catch (error) {
+      cargoError = `${cargoError}; completion_fallback:${String(error?.message || error)}`;
+    }
+  }
   if (craftingResult.status === 'fulfilled') craftingRows = craftingResult.value;
   else craftingError = String(craftingResult.reason?.message || craftingResult.reason || 'crafting_rows_unavailable');
   if (upgradingResult.status === 'fulfilled') upgradingRows = upgradingResult.value;

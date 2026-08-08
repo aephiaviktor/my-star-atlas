@@ -1,0 +1,21 @@
+{
+  "profileFaction": "USTUR",
+  "completionRows": [
+    {
+      "_time": "2026-07-25T07:33:48.498982227Z",
+      "_measurement": "cargo_cycle_completed",
+      "_field": "legCount",
+      "_value": "3",
+      "faction": "UST",
+      "fleet": "CF-22|01b",
+      "assignment": "Supply Chain",
+      "cycleId": "11111111111111111111111111111111:35,16:1784963236893"
+    }
+  ],
+  "allocationRows": [
+    {"_time":"2026-07-25T07:33:48.498982227Z","_measurement":"cargo_cost_allocation","_field":"amount","_value":"15648","faction":"UST","fleet":"CF-22|01b","rss":"Field Stabilizer","assignment":"Supply Chain","originStarbase":"MRZ-21","deliveryStarbase":"MRZ-22","cycleId":"11111111111111111111111111111111:35,16:1784963236893","allocationIndex":"0"},
+    {"_time":"2026-07-25T07:33:48.498982227Z","_measurement":"cargo_cost_allocation","_field":"cargoVolume","_value":"93888","faction":"UST","fleet":"CF-22|01b","rss":"Field Stabilizer","assignment":"Supply Chain","originStarbase":"MRZ-21","deliveryStarbase":"MRZ-22","cycleId":"11111111111111111111111111111111:35,16:1784963236893","allocationIndex":"0"},
+    {"_time":"2026-07-25T07:33:48.498982227Z","_measurement":"cargo_cost_allocation","_field":"allocatedFuel","_value":"17835.494841372823","faction":"UST","fleet":"CF-22|01b","rss":"Field Stabilizer","assignment":"Supply Chain","originStarbase":"MRZ-21","deliveryStarbase":"MRZ-22","cycleId":"11111111111111111111111111111111:35,16:1784963236893","allocationIndex":"0"},
+    {"_time":"2026-07-25T07:33:48.498982227Z","_measurement":"cargo_cost_allocation","_field":"allocatedTxCostSol","_value":"0.000003750409485994295","faction":"UST","fleet":"CF-22|01b","rss":"Field Stabilizer","assignment":"Supply Chain","originStarbase":"MRZ-21","deliveryStarbase":"MRZ-22","cycleId":"11111111111111111111111111111111:35,16:1784963236893","allocationIndex":"0"}
+  ]
+}
