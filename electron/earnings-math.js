@@ -48,6 +48,8 @@ function buildCargoVolumeByFleetDayAssignment(rows = []) {
 }
 
 function filterCargoAllocationsToCompletedCycles(allocations = [], cargoRows = []) {
+  const completionEvidenceAvailable = cargoRows.some((row) => row?.cargoCycles != null || (Array.isArray(row?.completedCycleIds) && row.completedCycleIds.length));
+  if (!completionEvidenceAvailable) return allocations;
   const completedCycleIds = new Set(
     cargoRows.flatMap((row) => Array.isArray(row?.completedCycleIds) ? row.completedCycleIds : [])
       .map((cycleId) => String(cycleId || '').trim())

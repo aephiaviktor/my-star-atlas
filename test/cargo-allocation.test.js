@@ -89,12 +89,12 @@ test('enrichCargoAllocationRows adds fleet metadata without changing allocation 
 
 test('groupCargoAllocationRows sums duplicate field rows for the same fleet route and asset', () => {
   const rows = [
-    { isoDate: '2026-07-22', label: '22 Jul', fleet: 'Fleet Alpha', asset: 'Food', origin: 'MRZ-1', destination: 'MRZ-2', assignment: 'Transport', amount: 4, cargoVolume: 8, allocatedFuel: 2, allocatedTxCostSol: 0.01 },
-    { isoDate: '2026-07-22', label: '22 Jul', fleet: 'Fleet Alpha', asset: 'Food', origin: 'MRZ-1', destination: 'MRZ-2', assignment: 'Transport', amount: 6, cargoVolume: 12, allocatedFuel: 3, allocatedTxCostSol: 0.02 },
+    { isoDate: '2026-07-22', label: '22 Jul', fleet: 'Fleet Alpha', asset: 'Food', origin: 'MRZ-1', destination: 'MRZ-2', assignment: 'Transport', amount: 4, cargoVolume: 8, allocatedFuel: 2, allocatedFuelExact: '2.125', allocatedTxCostSol: 0.01, allocatedTxFeeLamports: '1001' },
+    { isoDate: '2026-07-22', label: '22 Jul', fleet: 'Fleet Alpha', asset: 'Food', origin: 'MRZ-1', destination: 'MRZ-2', assignment: 'Transport', amount: 6, cargoVolume: 12, allocatedFuel: 3, allocatedFuelExact: '3.375', allocatedTxCostSol: 0.02, allocatedTxFeeLamports: '2002' },
   ];
 
   assert.deepEqual(groupCargoAllocationRows(rows), [{
     isoDate: '2026-07-22', label: '22 Jul', fleet: 'Fleet Alpha', asset: 'Food', origin: 'MRZ-1', destination: 'MRZ-2', assignment: 'Transport',
-    amount: 10, cargoVolume: 20, allocatedFuel: 5, allocatedTxCostSol: 0.03,
+    amount: 10, cargoVolume: 20, allocatedFuel: 5, allocatedFuelExact: '5.5', allocatedTxCostSol: 0.03, allocatedTxFeeLamports: '3003',
   }]);
 });

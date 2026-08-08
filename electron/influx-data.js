@@ -75,18 +75,41 @@ function enrichCargoAllocationRows(rows, fleetByLabel, normalizeFleetLabel) {
   });
 }
 
+function sumExactDecimals(values) {
+  const parsed = values.map((value) => {
+    const normalized = String(value ?? '0').trim();
+    const match = normalized.match(/^(-?)(\d+)(?:\.(\d+))?$/);
+    if (!match) return { units: 0n, scale: 0 };
+    const fraction = match[3] || '';
+    const units = BigInt(`${match[1]}${match[2]}${fraction}`);
+    return { units, scale: fraction.length };
+  });
+  const scale = parsed.reduce((max, value) => Math.max(max, value.scale), 0);
+  const units = parsed.reduce((sum, value) => sum + value.units * (10n ** BigInt(scale - value.scale)), 0n);
+  if (scale === 0) return units.toString();
+  const negative = units < 0n;
+  const digits = (negative ? -units : units).toString().padStart(scale + 1, '0');
+  const result = `${negative ? '-' : ''}${digits.slice(0, -scale)}.${digits.slice(-scale)}`.replace(/\.?0+$/, '');
+  return result === '-0' ? '0' : result;
+}
+
 function groupCargoAllocationRows(rows) {
   const groups = new Map();
   for (const row of rows) {
     const key = `${row.isoDate}\n${row.fleet}\n${row.asset}\n${row.origin}\n${row.destination}\n${row.assignment}`;
     if (!groups.has(key)) {
-      groups.set(key, { ...row, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 });
+      const group = { ...row, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 };
+      if (row.allocatedFuelExact != null) group.allocatedFuelExact = '0';
+      if (row.allocatedTxFeeLamports != null) group.allocatedTxFeeLamports = '0';
+      groups.set(key, group);
     }
     const group = groups.get(key);
     group.amount += Number(row.amount) || 0;
     group.cargoVolume += Number(row.cargoVolume) || 0;
     group.allocatedFuel += Number(row.allocatedFuel) || 0;
+    if (row.allocatedFuelExact != null) group.allocatedFuelExact = sumExactDecimals([group.allocatedFuelExact || '0', row.allocatedFuelExact]);
     group.allocatedTxCostSol += Number(row.allocatedTxCostSol) || 0;
+    if (row.allocatedTxFeeLamports != null) group.allocatedTxFeeLamports = (BigInt(group.allocatedTxFeeLamports || '0') + BigInt(row.allocatedTxFeeLamports)).toString();
   }
   return Array.from(groups.values());
 }

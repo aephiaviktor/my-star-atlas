@@ -28,6 +28,13 @@ test('cargo volume only includes allocations from explicitly completed cycles', 
   ]);
 });
 
+test('completed allocation telemetry survives when the optional completion query is unavailable', () => {
+  const allocations = [{ cycleId: 'completed-at-emission', cargoVolume: 100 }];
+  const cargoRows = [{ cargoCycles: null, completedCycleIds: [] }];
+
+  assert.deepEqual(filterCargoAllocationsToCompletedCycles(allocations, cargoRows), allocations);
+});
+
 test('fleet cargo capacity sums ship capacity across quantities and rejects partial mappings', () => {
   assert.equal(calculateFleetCargoCapacity([
     { amount: 2, cargoCapacity: 1000 },
