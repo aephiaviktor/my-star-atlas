@@ -4,15 +4,16 @@ const { readFileSync } = require('node:fs');
 const path = require('node:path');
 
 const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+const craftingBasis = readFileSync(path.join(__dirname, '..', 'electron', 'crafting-cost-basis.js'), 'utf8');
 const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
 const html = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
 
 test('Crafting calculates Costs per Unit as Total Costs divided by Crafted output', () => {
   assert.match(
-    main,
-    /const costsPerUnitAtlas = Number\.isFinite\(totalCostsAtlas\) && craftingRow\.crafted > 0\s*\? totalCostsAtlas \/ craftingRow\.crafted\s*:\s*null;/,
+    craftingBasis,
+    /const costsPerUnitAtlas = totalCostsAtlas != null && crafted > 0 \? totalCostsAtlas \/ crafted : null;/,
   );
-  assert.match(main, /totalCostsAtlas,\s+costsPerUnitAtlas,\s+netProfitAtlas,/);
+  assert.match(craftingBasis, /feeCostsAtlas, txsCostsAtlas, totalCostsAtlas, costsPerUnitAtlas, netProfitAtlas/);
 });
 
 test('Crafting shows Costs per Unit after Profit Margin and enables it by default', () => {

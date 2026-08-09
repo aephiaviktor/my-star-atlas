@@ -133,6 +133,20 @@ function utcDateKey(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
 }
 
+function canonicalCargoUtcDay(row) {
+  const timestamp = row?.timestamp ?? row?._time;
+  if (timestamp != null && String(timestamp).trim()) return utcDateKey(timestamp);
+  const isoDate = String(row?.isoDate || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(isoDate) ? utcDateKey(`${isoDate}T00:00:00.000Z`) : '';
+}
+
+function cargoFleetDayIdentity(row) {
+  const day = canonicalCargoUtcDay(row);
+  const fleet = String(row?.fleetAccount || row?.fleet || '').trim().toLowerCase();
+  const assignment = String(row?.assignment || '').trim().toLowerCase();
+  return day && fleet && assignment ? `${day}\n${fleet}\n${assignment}` : '';
+}
+
 function buildCargoAllocationRecords(fieldRows = [], includedDays = null) {
   const grouped = new Map();
   for (const row of dedupeCargoAllocationFieldRows(fieldRows)) {
@@ -150,7 +164,10 @@ function buildCargoAllocationRecords(fieldRows = [], includedDays = null) {
       isoDate,
       timestamp: date.toISOString(),
       label: isoDate,
+      faction: String(row?.faction || '').trim(),
+      instance: String(row?.instance || '').trim(),
       fleet,
+      fleetAccount: cargoFleetAccountFromCycleId(cycleId) || '',
       asset,
       origin,
       destination,
@@ -178,6 +195,7 @@ function buildCargoRowsFromCompletedAllocations({ completionRows = [], allocatio
     allocationsByCycle.get(cycleId).push(row);
   }
   const rows = new Map();
+  const seenCycles = new Set();
   for (const completion of completionRows) {
     const cycleId = String(completion?.cycleId || '').trim();
     const fleet = String(completion?.fleet || '').trim();
@@ -185,11 +203,15 @@ function buildCargoRowsFromCompletedAllocations({ completionRows = [], allocatio
     const isoDate = utcDateKey(completion?._time);
     const cargoLegs = Number(completion?._value);
     const allocations = allocationsByCycle.get(cycleId) || [];
-    if (!cycleId || !fleet || !assignment || !isoDate || (includedDays && !includedDays.has(isoDate)) || !Number.isFinite(cargoLegs) || cargoLegs <= 0 || !allocations.length) continue;
-    const key = `${isoDate}\n${fleet}\n${assignment}`;
+    const fleetAccount = cargoFleetAccountFromCycleId(cycleId) || '';
+    if (!cycleId || seenCycles.has(cycleId) || !fleetAccount || !fleet || !assignment || !isoDate || (includedDays && !includedDays.has(isoDate)) || !Number.isFinite(cargoLegs) || cargoLegs <= 0 || !allocations.length) continue;
+    seenCycles.add(cycleId);
+    const key = `${isoDate}\n${fleetAccount.toLowerCase()}\n${assignment.toLowerCase()}`;
     if (!rows.has(key)) rows.set(key, {
+      faction: String(completion?.faction || allocations[0]?.faction || '').trim(),
+      instance: String(completion?.instance || allocations[0]?.instance || '').trim(),
       fleet,
-      fleetAccount: cargoFleetAccountFromCycleId(cycleId) || '',
+      fleetAccount,
       assignment,
       isoDate,
       label: isoDate,
@@ -216,4 +238,35 @@ function buildCargoRowsFromCompletedAllocations({ completionRows = [], allocatio
   return Array.from(rows.values());
 }
 
-module.exports = { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows, buildCargoAllocationRecords, buildCargoRowsFromCompletedAllocations };
+function mergeCargoRowsWithCompletedAllocations({ movementRows = [], completionRows = [], allocationRows = [], includedDays = null } = {}) {
+  const normalizedMovement = movementRows.map((row) => {
+    const isoDate = canonicalCargoUtcDay(row);
+    return { ...row, isoDate, label: row.label || isoDate };
+  }).filter((row) => row.isoDate && (!includedDays || includedDays.has(row.isoDate)));
+  const movementCycles = new Set(normalizedMovement.flatMap((row) => [
+    ...(Array.isArray(row.movementCycleIds) ? row.movementCycleIds : []),
+    ...(Array.isArray(row.completedCycleIds) ? row.completedCycleIds : []),
+  ]).map((value) => String(value || '').trim()).filter(Boolean));
+  const missingCompletions = completionRows.filter((row) => !movementCycles.has(String(row?.cycleId || '').trim()));
+  const reconstructed = buildCargoRowsFromCompletedAllocations({ completionRows: missingCompletions, allocationRows, includedDays });
+  const byIdentity = new Map(normalizedMovement.map((row) => [cargoFleetDayIdentity(row), { ...row }]));
+  for (const row of reconstructed) {
+    const key = cargoFleetDayIdentity(row);
+    if (!key) continue;
+    if (!byIdentity.has(key)) {
+      byIdentity.set(key, { ...row, movementCycleIds: [] });
+      continue;
+    }
+    const target = byIdentity.get(key);
+    target.burnedFuel = (Number(target.burnedFuel) || 0) + (Number(row.burnedFuel) || 0);
+    target.txCostSol = (Number(target.txCostSol) || 0) + (Number(row.txCostSol) || 0);
+    target.cargoVolume = (Number(target.cargoVolume) || 0) + (Number(row.cargoVolume) || 0);
+    target.cargoLegs = (Number(target.cargoLegs) || 0) + (Number(row.cargoLegs) || 0);
+    target.completedCycleIds = Array.from(new Set([...(target.completedCycleIds || []), ...(row.completedCycleIds || [])]));
+    target.cargoCycles = target.completedCycleIds.length;
+    target.starbases = Array.from(new Set([...(target.starbases || []), ...(row.starbases || [])])).sort();
+  }
+  return Array.from(byIdentity.values()).sort((a, b) => a.isoDate.localeCompare(b.isoDate));
+}
+
+module.exports = { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows, buildCargoAllocationRecords, buildCargoRowsFromCompletedAllocations, canonicalCargoUtcDay, cargoFleetDayIdentity, mergeCargoRowsWithCompletedAllocations };

@@ -339,8 +339,10 @@ test('production Breakeven derives source columns and extrapolated totals from k
 
 test('Crafting and Upgrading use consumed ledger basis instead of current GM prices', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /const craftingBasis = craftingBasisByDay\.get/);
-  assert.match(main, /const ingCostsAtlas = craftingBasis && !craftingBasis\.uncosted \? craftingBasis\.basis : null;/);
+  const craftingBasis = readFileSync(path.join(__dirname, '..', 'electron', 'crafting-cost-basis.js'), 'utf8');
+  assert.match(main, /buildCraftingBasisByDay\(inventoryCostLedgerAppliedEventResults\)/);
+  assert.match(craftingBasis, /const craftingBasis = craftingBasisByDay\.get/);
+  assert.match(craftingBasis, /craftingBasis && !craftingBasis\.uncosted/);
   assert.match(main, /const componentBasis = upgradingBasisByDay\.get/);
   assert.match(main, /const upgradingCostsAtlas = componentBasis && !componentBasis\.uncosted \? componentBasis\.basis : null;/);
   assert.doesNotMatch(main, /const upgradingCostsAtlas = componentPriceAtl/);

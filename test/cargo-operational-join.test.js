@@ -7,6 +7,7 @@ const {
   joinCanonicalCostsWithOperationalRows,
   operationalCargoDigest,
   canonicalOperationalSection,
+  selectCutoverOwnedCargoRows,
 } = require('../electron/cargo-table-projection');
 const { cargoFleetAccountFromCycleId } = require('../electron/influx-data');
 
@@ -79,10 +80,46 @@ test('Cargo/Transport authoritative row is included once and fully populated', (
   assert.equal(row.operationalStatus, 'joined');
 });
 
-test('operational Cargo row without cost still renders deterministic numeric zero costs', () => {
+test('actual ONI cutover overlap becomes one canonical fleet-day with conserved metrics', () => {
+  const legacy = {
+    isoDate: '2026-07-20', label: '07/20', faction: 'ONI', instance: 'ONI-1', fleetAccount: 'big-bois-account',
+    fleet: 'Big Bois', assignment: 'Transport', txsDaily: 17, burnedFuel: 2.604, txCostSol: 0.000017,
+    cargoCycles: 0, cargoLegs: 0, cargoVolume: 0,
+  };
+  const operational = op({
+    isoDate: '2026-07-20', faction: 'ONI', instance: 'ONI-1', fleetAccount: 'big-bois-account', fleet: 'Big Bois',
+    txsDaily: 17, completedCycleIds: [], cargoCycles: 0, cargoLegs: 0, cargoVolume: 2024,
+  });
+  const canonicalCost = cost({
+    isoDate: '2026-07-20', faction: 'ONI', instance: 'ONI-1', fleetAccount: 'big-bois-account', fleet: 'Big Bois',
+    txsDaily: 17, burnedFuelExact: '2.604', burnedFuel: 2.604, txFeeLamports: '17000', txCostSolExact: '0.000017', txCostSol: 0.000017,
+  });
+
+  // Production previously concatenated both same-day owners, yielding the reported two-row shape.
+  assert.equal(joinCanonicalCostsWithOperationalRows({ legacyRows: [legacy], costRows: [canonicalCost], operationalRows: [operational] }).length, 2);
+
+  const owned = selectCutoverOwnedCargoRows({ legacyRows: [legacy], operationalRows: [operational], cutover: '2026-07-20T00:00:00.000Z' });
+  const rows = joinCanonicalCostsWithOperationalRows({ legacyRows: owned.legacyRows, costRows: [canonicalCost], operationalRows: owned.operationalRows });
+  assert.equal(rows.length, 1);
+  assert.deepEqual({ isoDate: rows[0].isoDate, fleet: rows[0].fleet, txsDaily: rows[0].txsDaily, burnedFuel: rows[0].burnedFuel, txCostSol: rows[0].txCostSol, cargoVolume: rows[0].cargoVolume }, {
+    isoDate: '2026-07-20', fleet: 'Big Bois', txsDaily: 17, burnedFuel: 2.604, txCostSol: 0.000017, cargoVolume: 2024,
+  });
+});
+
+test('operational Cargo row without cost fails closed as unavailable', () => {
   const [row] = joinCanonicalCostsWithOperationalRows({ operationalRows: [op()] });
   assert.equal(row.sourceMode, 'canonical_raw');
   assert.equal(row.txsDaily, 318);
+  assert.equal(row.costEvidenceStatus, 'unavailable');
+  assert.equal(row.burnedFuel, null);
+  assert.equal(row.txFeeLamports, null);
+  assert.equal(row.fuelValuation.amountATL, null);
+  assert.equal(row.solValuation.amountATL, null);
+});
+
+test('observed canonical zero remains a genuine numeric zero', () => {
+  const [row] = joinCanonicalCostsWithOperationalRows({ costRows: [cost({ burnedFuelExact:'0', burnedFuel:0, txFeeLamports:'0', txCostSolExact:'0', txCostSol:0, fuelValuation:{status:'complete',amountATL:0}, solValuation:{status:'complete',amountATL:0} })], operationalRows:[op()] });
+  assert.equal(row.costEvidenceStatus, 'available');
   assert.equal(row.burnedFuel, 0);
   assert.equal(row.txFeeLamports, '0');
   assert.equal(row.fuelValuation.amountATL, 0);

@@ -7,6 +7,7 @@ const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'ut
 const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
 const html = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
 const breakeven = readFileSync(path.join(__dirname, '..', 'electron', 'ledger-breakeven.js'), 'utf8');
+const craftingBasis = readFileSync(path.join(__dirname, '..', 'electron', 'crafting-cost-basis.js'), 'utf8');
 
  test('Cargo includes rental costs between fuel and transaction costs and in total costs', () => {
   const columns = renderer.slice(renderer.indexOf('const cargoEarningsOptionalColumns'), renderer.indexOf('const cargoAllocationEarningsOptionalColumns'));
@@ -26,7 +27,7 @@ test('Crafting and Upgrading expose internal/external cost-basis toggles', () =>
 });
 
 test('External basis values consumed crafting ingredients and upgrading components at GM prices', () => {
-  assert.match(main, /ingredientExternalValueAtlas/);
+  assert.match(craftingBasis, /ingredientExternalValueAtlas/);
   assert.match(main, /componentExternalValueAtlas/);
   assert.match(renderer, /applyEarningsCostBasis/);
   assert.match(renderer, /externalTotalCostsAtlas/);

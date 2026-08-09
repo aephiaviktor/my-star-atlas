@@ -95,15 +95,24 @@ function emptyCanonicalCost(operation) {
     allocationKey: `fleet:${clean(operation.fleetAccount)}`,
     allocationStatus: 'scoped',
     sourceMode: 'canonical_raw',
-    burnedFuelExact: '0',
-    burnedFuel: 0,
-    txFeeLamports: '0',
-    txCostSolExact: '0',
-    txCostSol: 0,
+    burnedFuelExact: null,
+    burnedFuel: null,
+    txFeeLamports: null,
+    txCostSolExact: null,
+    txCostSol: null,
     txsDaily: finiteOrNull(operation.txsDaily) ?? 0,
-    fuelValuation: { status: 'complete', amountATLExact: '0', amountATL: 0, eventDay, priceDay: eventDay, source: 'no_cost', provenance: 'No attributable Cargo fuel cost', estimated: false },
-    solValuation: { status: 'complete', amountATLExact: '0', amountATL: 0, eventDay, priceDay: eventDay, source: 'no_cost', provenance: 'No attributable Cargo transaction fee', estimated: false },
+    fuelValuation: { status: 'unavailable', amountATLExact: null, amountATL: null, eventDay, priceDay: null, source: 'missing_raw_cost_evidence', provenance: 'No matching canonical Cargo fuel evidence', estimated: false },
+    solValuation: { status: 'unavailable', amountATLExact: null, amountATL: null, eventDay, priceDay: null, source: 'missing_raw_cost_evidence', provenance: 'No matching canonical Cargo transaction-fee evidence', estimated: false },
     sourceIds: [],
+  };
+}
+
+function selectCutoverOwnedCargoRows({ legacyRows = [], operationalRows = [], cutover = null } = {}) {
+  const cutoverDay = clean(cutover).slice(0, 10);
+  if (!cutoverDay) return { legacyRows: [...legacyRows], operationalRows: [] };
+  return {
+    legacyRows: legacyRows.filter((row) => clean(row?.isoDate) < cutoverDay),
+    operationalRows: operationalRows.filter((row) => clean(row?.isoDate) >= cutoverDay),
   };
 }
 
@@ -116,7 +125,8 @@ function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [],
   const canonical = Array.from(operations.entries())
     .filter(([, operation]) => canonicalOperationalSection(operation.assignment) === 'cargo')
     .map(([identity, operation]) => {
-      const cost = costs.get(identity) || emptyCanonicalCost(operation);
+      const matchedCost = costs.get(identity);
+      const cost = matchedCost || emptyCanonicalCost(operation);
       return {
         ...cost,
         fleet: operation.fleet,
@@ -135,6 +145,7 @@ function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [],
         travelModeWarpPercent: operation.travelModeWarpPercent,
         cargoVolume: operation.cargoVolume ?? 0,
         fleetCargoCapacity: operation.fleetCargoCapacity,
+        costEvidenceStatus: matchedCost ? 'available' : 'unavailable',
         operationalStatus: 'joined',
         operationalReason: null,
       };
@@ -147,4 +158,4 @@ function operationalCargoDigest(rows = []) {
   return crypto.createHash('sha256').update(rows.map((row) => JSON.stringify(row)).join('\n')).digest('hex');
 }
 
-module.exports = { projectCargoTableRow, provisionalValuationTooltip, joinCanonicalCostsWithOperationalRows, operationalCargoDigest, aggregateOperationalCargoRows, canonicalOperationalSection };
+module.exports = { projectCargoTableRow, provisionalValuationTooltip, joinCanonicalCostsWithOperationalRows, operationalCargoDigest, aggregateOperationalCargoRows, canonicalOperationalSection, selectCutoverOwnedCargoRows };

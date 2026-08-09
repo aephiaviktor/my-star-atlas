@@ -36,9 +36,10 @@ const {
 } = require('./telemetry-context');
 const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./telemetry-rpc-fetch');
 const { dependencyInstallRequired } = require('./update-dependencies');
-const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, buildCargoRowsFromCompletedAllocations } = require('./influx-data');
+const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
+const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { createAtlasPriceResolver } = require('./atlas-price-resolver');
@@ -49,7 +50,7 @@ const {
   applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
   valueNativeCost,
 } = require('./cargo-cost-source');
-const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows } = require('./cargo-table-projection');
+const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
 const {
@@ -6445,9 +6446,11 @@ ${scopeFilterFlux}
         fleetAccount: authoritativeFleet,
         assignment,
         isoDate,
+        timestamp: date.toISOString(),
         label: formatShortUtcDate(date),
         starbases: new Set(),
         completedCycleLegs: new Map(),
+        movementCycleIds: new Set(),
         travelTimeByMode: { warp: 0, subwarp: 0 },
         burnedFuel: 0,
         txCostSol: 0,
@@ -6509,6 +6512,7 @@ ${scopeFilterFlux}
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, fleet, assignment, date, cargoFleetAccountFromCycleId(row.cycleId));
+    if (row.cycleId) entry.movementCycleIds.add(String(row.cycleId).trim());
     entry.burnedFuel += value;
     entry.starbases.add(starbase);
   }
@@ -6522,6 +6526,7 @@ ${scopeFilterFlux}
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
     const entry = ensureRow(isoDate, fleet, assignment, date, cargoFleetAccountFromCycleId(row.cycleId));
+    if (row.cycleId) entry.movementCycleIds.add(String(row.cycleId).trim());
     travelModeByMovement.set(`${row._time}\n${row.cycleId}`, travelMode);
     entry.txsDaily += 1;
   }
@@ -6551,6 +6556,7 @@ ${scopeFilterFlux}
         ...row,
         starbases: Array.from(row.starbases).sort((a, b) => a.localeCompare(b)),
         completedCycleIds,
+        movementCycleIds: Array.from(row.movementCycleIds),
         cargoCycles: completedCycleEvidenceAvailable ? completedCycleIds.length : null,
         cargoLegs: completedCycleEvidenceAvailable
           ? Array.from(row.completedCycleLegs.values()).reduce((sum, value) => sum + value, 0)
@@ -6811,14 +6817,13 @@ async function fetchEarningsSnapshot(payload) {
   else cargoError = String(cargoResult.reason?.message || cargoResult.reason || 'cargo_rows_unavailable');
   if (cargoAllocationResult.status === 'fulfilled') cargoAllocationRows = cargoAllocationResult.value;
   else cargoAllocationError = String(cargoAllocationResult.reason?.message || cargoAllocationResult.reason || 'cargo_allocation_rows_unavailable');
-  // A timeout in the expensive movement aggregate must not erase already
-  // completed Cargo telemetry. Reconstruct only cycles that retain exact
-  // completion evidence and faction-scoped allocation rows.
-  if (cargoResult.status === 'rejected' && cargoAllocationRows.length) {
+  // Exact completion evidence repairs rejected, empty, and partially populated
+  // movement results. The merge excludes cycles already represented by movement.
+  if (cargoAllocationRows.length) {
     try {
       const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
       const completionRows = await fetchCargoCompletionEvidenceRows(settings);
-      cargoRows = buildCargoRowsFromCompletedAllocations({ completionRows, allocationRows: cargoAllocationRows, includedDays })
+      cargoRows = mergeCargoRowsWithCompletedAllocations({ movementRows: cargoRows, completionRows, allocationRows: cargoAllocationRows, includedDays })
         .map((row) => ({ ...row, label: formatShortUtcDate(new Date(`${row.isoDate}T00:00:00.000Z`)) }));
     } catch (error) {
       cargoError = `${cargoError}; completion_fallback:${String(error?.message || error)}`;
@@ -6841,16 +6846,20 @@ async function fetchEarningsSnapshot(payload) {
   });
   const canonicalRawDailyRows = aggregateRawCostsByFleetDay(valuedCanonicalRawCosts)
     .map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) }));
-  const operationalCargoRows = rawExporter ? compatibilityCargoRows.map((row) => ({
-    ...row,
-    faction: rawExporter.faction,
-    instance: rawExporter.instance,
-    fleetAccount: String(row.fleetAccount || '').trim(),
-  })) : [];
+  const cutoverOwnedCargoRows = selectCutoverOwnedCargoRows({
+    legacyRows: cutoverSelection.legacyRows,
+    operationalRows: rawExporter ? compatibilityCargoRows.map((row) => ({
+      ...row,
+      faction: rawExporter.faction,
+      instance: rawExporter.instance,
+      fleetAccount: String(row.fleetAccount || '').trim(),
+    })) : [],
+    cutover: cutoverSelection.cutover,
+  });
   cargoRows = joinCanonicalCostsWithOperationalRows({
-    legacyRows: cutoverSelection.legacyRows.map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) })),
+    legacyRows: cutoverOwnedCargoRows.legacyRows.map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) })),
     costRows: canonicalRawDailyRows,
-    operationalRows: operationalCargoRows,
+    operationalRows: cutoverOwnedCargoRows.operationalRows,
   });
 
   const activeFleetKeys = new Set();
@@ -6993,15 +7002,16 @@ async function fetchEarningsSnapshot(payload) {
     activeCargoFleetKeys.add(activeKey);
     if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
     const fuelPrice = canonicalRaw ? cargoRow.fuelValuation : await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate);
+    const canonicalCostAvailable = !canonicalRaw || cargoRow.costEvidenceStatus === 'available';
     const fuelCostsAtlas = canonicalRaw
-      ? (cargoRow.fuelValuation?.amountATL ?? (Number(cargoRow.burnedFuel) > 0 ? null : 0))
+      ? (canonicalCostAvailable ? cargoRow.fuelValuation?.amountATL ?? null : null)
       : (['complete', 'provisional'].includes(fuelPrice.status) ? cargoRow.burnedFuel * fuelPrice.priceATL : null);
     const solValuation = canonicalRaw ? cargoRow.solValuation : null;
     const txsCostsAtlas = canonicalRaw
-      ? (solValuation?.amountATL ?? (BigInt(cargoRow.txFeeLamports || '0') > 0n ? null : 0))
+      ? (canonicalCostAvailable ? solValuation?.amountATL ?? null : null)
       : (atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null);
     const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
-    const incompleteRawValuation = canonicalRaw && ((Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas)));
+    const incompleteRawValuation = canonicalRaw && (!canonicalCostAvailable || (Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas)));
     const costParts = [fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = !incompleteRawValuation && costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const netProfitAtlas = Number.isFinite(totalCostsAtlas) ? -totalCostsAtlas : null;
@@ -7128,6 +7138,9 @@ async function fetchEarningsSnapshot(payload) {
   }));
   const cargoVolumeByFleetDayAssignment = buildCargoVolumeByFleetDayAssignment(cargoAllocations);
   const cargoAllocationAvailable = cargoAllocationResult.status === 'fulfilled';
+  const cargoAllocationAvailability = cargoAllocationAvailable
+    ? (cargoAllocationRows.length ? 'available' : 'empty')
+    : 'unavailable';
   for (const row of cargo) {
     const volumeKey = `${row.isoDate}\n${normalizeFleetLabel(row.fleetName)}\n${row.assignment}`;
     const cargoVolume = cargoAllocationAvailable && cargoVolumeByFleetDayAssignment.has(volumeKey)
@@ -7234,20 +7247,14 @@ async function fetchEarningsSnapshot(payload) {
     }
   }
 
-  const craftingBasisByDay = new Map();
+  const craftingBasisByDay = buildCraftingBasisByDay(inventoryCostLedgerAppliedEventResults);
   const upgradingBasisByDay = new Map();
   const totalLotBasis = (lot) => Object.values(lot?.costs || {}).reduce((sum, value) => sum + Number(value || 0), 0) + Number(lot?.cargoCost || 0);
   for (const applied of inventoryCostLedgerAppliedEventResults) {
     const event = applied.event;
     const lot = applied.result;
     const isoDate = getUtcDateKey(new Date(event.timestamp));
-    if (event.type === 'craft') {
-      const key = `${isoDate}\n${event.location}\n${event.outputAsset}`;
-      const entry = craftingBasisByDay.get(key) || { basis: 0, uncosted: false };
-      entry.basis += Math.max(0, totalLotBasis(lot) - Number(event.craftingCost || 0));
-      entry.uncosted ||= Number(lot?.uncostedQuantity || 0) > 0;
-      craftingBasisByDay.set(key, entry);
-    } else if (event.type === 'consume' && event.purpose === 'upgrading') {
+    if (event.type === 'consume' && event.purpose === 'upgrading') {
       const key = `${isoDate}\n${event.location}\n${event.asset}`;
       const entry = upgradingBasisByDay.get(key) || { basis: 0, uncosted: false };
       entry.basis += totalLotBasis(lot);
@@ -7281,59 +7288,11 @@ async function fetchEarningsSnapshot(payload) {
   // NetProfit is Revenue - TotalCosts; ProfitMargin is NetProfit/Revenue
   // * 100. txsDaily is the count of crafting events for this
   // (starbase, output, date), already aggregated by the fetch.
-  const crafting = craftingRows.map((craftingRow) => {
-    const outputPriceAtl = getCurrentResourcePriceAtl(prices, craftingRow.output);
-    const revenueAtlasPerDay = outputPriceAtl != null ? craftingRow.crafted * outputPriceAtl : null;
-    const craftingBasis = craftingBasisByDay.get(`${craftingRow.isoDate}\n${craftingRow.starbase}\n${craftingRow.output}`);
-    const ingCostsAtlas = craftingBasis && !craftingBasis.uncosted ? craftingBasis.basis : null;
-    const ingredientExternalValues = craftingRow.ingredients.map(({ input, amount }) => {
-      const price = getCurrentResourcePriceAtl(prices, input);
-      return price == null ? null : Number(amount) * price;
-    });
-    const ingredientExternalValueAtlas = ingredientExternalValues.length > 0 && ingredientExternalValues.every(Number.isFinite)
-      ? ingredientExternalValues.reduce((sum, value) => sum + value, 0)
-      : null;
-    const feeCostsAtlas = Number.isFinite(Number(craftingRow.feeAmount)) ? Number(craftingRow.feeAmount) : 0;
-    const txsCostsAtlas = atlasPerSol != null ? craftingRow.txCostSol * atlasPerSol : null;
-    const totalCostsAtlas = Number.isFinite(ingCostsAtlas) && Number.isFinite(feeCostsAtlas) && Number.isFinite(txsCostsAtlas)
-      ? ingCostsAtlas + feeCostsAtlas + txsCostsAtlas
-      : null;
-    const costsPerUnitAtlas = Number.isFinite(totalCostsAtlas) && craftingRow.crafted > 0
-      ? totalCostsAtlas / craftingRow.crafted
-      : null;
-    const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
-      ? revenueAtlasPerDay - totalCostsAtlas
-      : null;
-    const crew = Number.isFinite(Number(craftingRow.crew)) ? Number(craftingRow.crew) : 0;
-    const netProfitPerCrew = Number.isFinite(netProfitAtlas) && crew > 0
-      ? netProfitAtlas / crew
-      : null;
-    const externalTotalCostsAtlas = Number.isFinite(ingredientExternalValueAtlas) && Number.isFinite(feeCostsAtlas) && Number.isFinite(txsCostsAtlas)
-      ? ingredientExternalValueAtlas + feeCostsAtlas + txsCostsAtlas : null;
-    const externalNetProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(externalTotalCostsAtlas) ? revenueAtlasPerDay - externalTotalCostsAtlas : null;
-    return {
-      ...craftingRow,
-      assetName: craftingRow.output,
-      outputPriceAtl,
-      revenueAtlasPerDay,
-      ingCostsAtlas: Number.isFinite(ingCostsAtlas) ? ingCostsAtlas : null,
-      ingredientExternalValueAtlas,
-      externalTotalCostsAtlas,
-      externalNetProfitAtlas,
-      externalNetProfitPerCrew: Number.isFinite(externalNetProfitAtlas) && crew > 0 ? externalNetProfitAtlas / crew : null,
-      externalProfitMarginPercent: Number.isFinite(externalNetProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (externalNetProfitAtlas / revenueAtlasPerDay) * 100 : null,
-      externalCostsPerUnitAtlas: Number.isFinite(externalTotalCostsAtlas) && craftingRow.crafted > 0 ? externalTotalCostsAtlas / craftingRow.crafted : null,
-      feeCostsAtlas,
-      txsCostsAtlas,
-      totalCostsAtlas,
-      costsPerUnitAtlas,
-      netProfitAtlas,
-      crew,
-      netProfitPerCrew,
-      profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
-        ? (netProfitAtlas / revenueAtlasPerDay) * 100
-        : null,
-    };
+  const crafting = enrichCraftingEarningsRows({
+    craftingRows,
+    craftingBasisByDay,
+    resolvePrice: (asset) => getCurrentResourcePriceAtl(prices, asset),
+    atlasPerSol,
   });
 
   let redeemedLpByFactionAndDate = {};
@@ -7603,6 +7562,7 @@ async function fetchEarningsSnapshot(payload) {
     miningError,
     cargoError,
     cargoAllocationError,
+    cargoAllocationAvailability,
     rawCargoCostError,
     rawCargoCostQuery: rawCargoCosts.query,
     rawCargoCostCutoverManifestVersion: RAW_COST_CUTOVER_MANIFEST_VERSION,

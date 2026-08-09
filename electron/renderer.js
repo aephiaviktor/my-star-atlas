@@ -1150,7 +1150,7 @@ async function runFactionBackgroundPrefetch(generation, faction) {
     { key: 'consumption-total', cached: () => isConsumptionTotalCacheFresh(settings, '', ''), load: () => refreshConsTotal({ settings, starbaseFilter: '', assetFilter: '' }) },
     { key: 'pcr', cached: () => Boolean(getCachedFactionResult(faction, 'pcr')), load: async () => { const result = await api.getPcrCharts(settings); if (result?.ok) setCachedFactionResult(faction, 'pcr', result); } },
     { key: 'inventory', cached: () => Boolean(getCachedFactionResult(faction, 'inventory::__all__')), load: async () => { const result = await api.getInventory({ ...settings, starbaseFilter: '__all__' }); if (result?.ok) setCachedFactionResult(faction, 'inventory::__all__', result); } },
-    { key: 'earnings', cached: () => Boolean(getCachedFactionResult(faction, 'earnings')) || !getActivePlayerProfile(settings), load: async () => { const result = await api.getEarningsSnapshot(settings); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
+    { key: 'earnings', cached: () => Boolean(getCachedFactionResult(faction, 'earnings')) || !getActivePlayerProfile(settings), load: async () => { const result = await api.getEarningsSnapshot({ ...settings, earningsSubtab: 'crafting' }); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
     { key: 'optimization-scanning', cached: () => Boolean(getCachedFilterResult(faction, 'optimizationScanning', '', '', '__all__', '__all__', '__all__', '__all__')), load: async () => { const result = await api.getScanningOptimization({ faction, start: null, stop: null, fleet: '__all__', eventType: '__all__', operation: '__all__', status: '__all__', offset: 0, limit: 500 }); if (result?.ok) setCachedFilterResult(faction, 'optimizationScanning', result, '', '', '__all__', '__all__', '__all__', '__all__'); } },
     { key: 'optimization-upgrading', cached: () => Boolean(getCachedFilterResult(faction, 'optimizationUpgrading', '', '')), load: async () => { const result = await api.getUpgradingOptimization({ faction, start: null, stop: null }); if (result?.ok) setCachedFilterResult(faction, 'optimizationUpgrading', result, '', ''); } },
   ];
@@ -6128,7 +6128,7 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
   if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
   if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
-  if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
+  if (columnId === 'profitMargin') return createTextCell(entry.profitMarginPercent == null ? '--' : formatPercentNumber(entry.profitMarginPercent, 1));
   if (columnId === 'costsPerUnit') return createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
@@ -6153,7 +6153,7 @@ function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
   if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
   if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
-  if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
+  if (columnId === 'profitMargin') return createTextCell(entry.profitMarginPercent == null ? '--' : formatPercentNumber(entry.profitMarginPercent, 1));
   if (columnId === 'costsPerUnit') return createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
@@ -6170,7 +6170,7 @@ function createCraftingEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
   if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
   if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
-  if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
+  if (columnId === 'profitMargin') return createTextCell(entry.profitMarginPercent == null ? '--' : formatPercentNumber(entry.profitMarginPercent, 1));
   if (columnId === 'costsPerUnit') return createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6));
   return createTextCell('--');
 }
@@ -6185,7 +6185,7 @@ function createUpgradingEarningsOptionalCell(entry, columnId) {
   if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
   if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
   if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
-  if (columnId === 'profitMargin') return createTextCell(formatPercentNumber(entry.profitMarginPercent, 1));
+  if (columnId === 'profitMargin') return createTextCell(entry.profitMarginPercent == null ? '--' : formatPercentNumber(entry.profitMarginPercent, 1));
   return createTextCell('--');
 }
 
@@ -6799,6 +6799,8 @@ function renderEarningsCargo(result) {
 function renderEarningsCargoAllocations(result) {
   if (!earningsCargoAllocationTableBody) return;
   const rows = Array.isArray(result?.cargoAllocationRows) ? result.cargoAllocationRows : [];
+  const cargoAllocationAvailability = result?.cargoAllocationAvailability
+    || (result?.cargoAllocationError ? 'unavailable' : (rows.length ? 'available' : 'empty'));
   populateEarningsFilterOptions('cargoAllocation', rows);
   const filteredRows = getFilteredEarningsRows('cargoAllocation', rows);
   const totalFleet = earningsFilters.cargoAllocation.fleet === EARNINGS_TOTAL_FLEETS_FILTER;
@@ -6823,14 +6825,20 @@ function renderEarningsCargoAllocations(result) {
     }
     earningsCargoAllocationTableHead.appendChild(tr);
   }
-  setText(earningsCargoAllocationSyncStatus, `${formatWholeNumber(rows.length)} allocation rows at ${formatCheckedAt(result?.checkedAt)}${result?.cargoAllocationError ? ' · Influx allocation rows unavailable' : ''}`);
+  setText(earningsCargoAllocationSyncStatus, cargoAllocationAvailability === 'unavailable'
+    ? `Cargo allocation data unavailable at ${formatCheckedAt(result?.checkedAt)}`
+    : `${formatWholeNumber(rows.length)} allocation rows at ${formatCheckedAt(result?.checkedAt)}`);
   earningsCargoAllocationTableBody.textContent = '';
   if (!filteredRows.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     const td = document.createElement('td');
     td.colSpan = 5 + visibleColumns.length;
-    td.textContent = rows.length ? 'No rows match the current filters' : 'No cargo cost allocation data in the last 30 days';
+    td.textContent = cargoAllocationAvailability === 'unavailable'
+      ? `Cargo allocation data unavailable${result?.cargoAllocationError ? `: ${formatInfluxError(result.cargoAllocationError)}` : ''}`
+      : (cargoAllocationAvailability === 'empty'
+        ? 'No cargo cost allocation data in the last 30 days'
+        : 'No rows match the current filters');
     tr.appendChild(td);
     earningsCargoAllocationTableBody.appendChild(tr);
     return;
