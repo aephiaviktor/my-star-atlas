@@ -96,7 +96,9 @@ const optimizationAnalyticsTooltip = document.querySelector('#optimization-analy
 const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
 const optimizationUpgradingRedemptionLegend = document.querySelector('#optimization-upgrading-redemption-legend');
 const optimizationUpgradingNetAtlasChart = document.querySelector('#optimization-upgrading-net-atlas-chart');
-const optimizationUpgradingNetAtlasPerCrewChart = document.querySelector('#optimization-upgrading-net-atlas-per-crew-chart');
+const optimizationUpgradingLpPerCrewByRateChart = document.querySelector('#optimization-upgrading-lp-per-crew-by-rate-chart');
+const optimizationUpgradingComponentCostByRateChart = document.querySelector('#optimization-upgrading-component-cost-by-rate-chart');
+const optimizationUpgradingUpliftByRateChart = document.querySelector('#optimization-upgrading-uplift-by-rate-chart');
 const optimizationUpgradingMarginChart = document.querySelector('#optimization-upgrading-margin-chart');
 const optimizationUpgradingEfficiencyChart = document.querySelector('#optimization-upgrading-efficiency-chart');
 const optimizationUpgradingEfficiencyLegend = document.querySelector('#optimization-upgrading-efficiency-legend');
@@ -7883,7 +7885,13 @@ function buildUpgradingOptimizationAnalytics(result, now = new Date()) {
   const today = now.toISOString().slice(0, 10);
   const factionByDay = new Map((result?.factionDaily || []).map((row) => [String(row.date), Number(row.lp)]));
   const playerByDay = new Map((result?.playerDaily || []).map((row) => [String(row.date), Number(row.lp)]));
-  const netAtlasByDay = new Map((result?.netAtlasDaily || []).map((row) => [String(row.date), Number(row.netAtlas ?? row.netAtlasProfit)]));
+  const redemptionRateByDay = new Map((result?.redemptionRates || []).map((row) => [String(row.date), Number(row.atlasPerLp)]));
+  const actualByDay = new Map((result?.netAtlasDaily || []).map((row) => [String(row.date), {
+    lp: Number(row.lp), componentCost: Number(row.componentCost), netAtlas: Number(row.netAtlas ?? row.netAtlasProfit),
+  }]));
+  const neutralByDay = new Map((result?.neutralUpgradingDaily || []).map((row) => [String(row.date), {
+    lp: Number(row.lp), componentCost: Number(row.componentCost),
+  }]));
   const latestCrewByHour = new Map();
   for(const row of result?.rows || []) {
     const time = String(row.time || row._time || ''); const ms = Date.parse(time); const crew = Number(row.phantom_crew ?? row.phantomCrew);
@@ -7897,9 +7905,20 @@ function buildUpgradingOptimizationAnalytics(result, now = new Date()) {
   const scatter = [...factionByDay].filter(([date]) => date < today && playerByDay.has(date) && Number(averageCrewByDay.get(date)) > 0)
     .map(([date, factionLp]) => { const playerLp = playerByDay.get(date); const averageCrew = averageCrewByDay.get(date); return { date, factionLp, playerLp, averageCrew, playerLpPerCrew: playerLp / averageCrew }; })
     .sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
-  const netAtlasScatter = [...factionByDay].filter(([date]) => date < today && Number.isFinite(netAtlasByDay.get(date)) && Number(averageCrewByDay.get(date)) > 0)
-    .map(([date, factionLp]) => { const netAtlas = netAtlasByDay.get(date); const averageCrew = averageCrewByDay.get(date); return { date, factionLp, netAtlas, averageCrew, netAtlasPerCrew: netAtlas / averageCrew }; })
+  const responseScatter = [...playerByDay].filter(([date, playerLp]) => date < today && Number.isFinite(redemptionRateByDay.get(date)) && Number.isFinite(playerLp) && Number(averageCrewByDay.get(date)) > 0)
+    .map(([date, playerLp]) => { const atlasPerLp = redemptionRateByDay.get(date); const averageCrew = averageCrewByDay.get(date); return { date, atlasPerLp, playerLp, averageCrew, lpPerCrew: playerLp / averageCrew }; })
     .sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
+  const componentCostScatter = [...actualByDay].filter(([date, row]) => date < today && Number.isFinite(redemptionRateByDay.get(date)) && Number.isFinite(row.componentCost) && Number(averageCrewByDay.get(date)) > 0)
+    .map(([date, row]) => { const atlasPerLp = redemptionRateByDay.get(date); const averageCrew = averageCrewByDay.get(date); return { date, atlasPerLp, componentCost: row.componentCost, averageCrew, componentCostPerCrew: row.componentCost / averageCrew }; })
+    .sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
+  const upliftScatter = [...actualByDay].filter(([date, actual]) => {
+    const neutral = neutralByDay.get(date); const rate = redemptionRateByDay.get(date); const crew = averageCrewByDay.get(date);
+    return date < today && neutral && Number.isFinite(rate) && Number.isFinite(actual.lp) && Number.isFinite(actual.componentCost) && Number.isFinite(neutral.lp) && Number.isFinite(neutral.componentCost) && Number(crew) > 0;
+  }).map(([date, actual]) => {
+    const neutral = neutralByDay.get(date); const atlasPerLp = redemptionRateByDay.get(date); const averageCrew = averageCrewByDay.get(date);
+    const uplift = (actual.lp - neutral.lp) * atlasPerLp - (actual.componentCost - neutral.componentCost);
+    return { date, atlasPerLp, actualLp: actual.lp, neutralLp: neutral.lp, actualComponentCost: actual.componentCost, neutralComponentCost: neutral.componentCost, averageCrew, uplift, upliftPerCrew: uplift / averageCrew };
+  }).sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
   const latestByHour = new Map();
   for(const row of result?.rows || []) {
     const time = String(row.time || row._time || ''); const ms = Date.parse(time); const value = Number(row.expected_total_lp_eod);
@@ -7918,15 +7937,13 @@ function buildUpgradingOptimizationAnalytics(result, now = new Date()) {
   }
   const errorByHour = [...errors].sort((a,b) => a[0]-b[0]).map(([hour, values]) => ({ hour, median: optimizationQuantile(values,.5), q25: optimizationQuantile(values,.25), q75: optimizationQuantile(values,.75), count: values.length }));
   const latestFactionRedemption = [...factionByDay].filter(([date, lp]) => date < today && Number.isFinite(lp)).sort((a, b) => a[0].localeCompare(b[0])).at(-1);
-  return { scatter, netAtlasScatter, forecasts, errorByHour, latestFactionRedemption: latestFactionRedemption ? { date: latestFactionRedemption[0], factionLp: latestFactionRedemption[1] } : null };
+  return { scatter, responseScatter, componentCostScatter, upliftScatter, forecasts, errorByHour, latestFactionRedemption: latestFactionRedemption ? { date: latestFactionRedemption[0], factionLp: latestFactionRedemption[1] } : null };
 }
 
 function getUpgradingComparisonScales(results, now = new Date()) {
   const analytics = (results || []).map((result) => buildUpgradingOptimizationAnalytics(result, now));
   return {
     playerLpPerCrewMax: Math.max(1, ...analytics.flatMap((entry) => entry.scatter.map((row) => row.playerLpPerCrew)).filter(Number.isFinite)),
-    netAtlasPerCrewMin: Math.min(0, ...analytics.flatMap((entry) => entry.netAtlasScatter.map((row) => row.netAtlasPerCrew)).filter(Number.isFinite)),
-    netAtlasPerCrewMax: Math.max(1, ...analytics.flatMap((entry) => entry.netAtlasScatter.map((row) => row.netAtlasPerCrew)).filter(Number.isFinite)),
     forecastErrorBound: Math.max(1, ...analytics.flatMap((entry) => entry.errorByHour.flatMap((row) => [Math.abs(row.q25), Math.abs(row.q75)])).filter(Number.isFinite)),
   };
 }
@@ -7957,7 +7974,9 @@ const upgradingCargoWeight = Object.freeze({ 'Power Source': 2, Framework: 1, El
 const selectedUpgradingRedemptionComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
 const upgradingRedemptionChartView = { xMin: 10_000_000_000, xMax: 50_000_000_000, netYMin: null, netYMax: null, marginYMin: null, marginYMax: null };
 const upgradingScatterChartView = { xMin: null, xMax: null, scatterYMin: null, scatterYMax: null };
-const upgradingNetAtlasPerCrewChartView = { xMin: null, xMax: null, netAtlasPerCrewYMin: null, netAtlasPerCrewYMax: null };
+const upgradingLpPerCrewByRateChartView = { xMin: null, xMax: null, lpPerCrewByRateYMin: null, lpPerCrewByRateYMax: null };
+const upgradingComponentCostByRateChartView = { xMin: null, xMax: null, componentCostByRateYMin: null, componentCostByRateYMax: null };
+const upgradingUpliftByRateChartView = { xMin: null, xMax: null, upliftByRateYMin: null, upliftByRateYMax: null };
 const upgradingTimeChartView = { xMin: null, xMax: null, forecastYMin: null, forecastYMax: null, errorYMin: null, errorYMax: null };
 const upgradingEfficiencyChartView = { xMin: null, xMax: null, efficiencyYMin: null, efficiencyYMax: null };
 const selectedUpgradingEfficiencyComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
@@ -8248,7 +8267,18 @@ function renderUpgradingOptimizationAnalytics() {
   if(optimizationUpgradingAnalyticsStatus) optimizationUpgradingAnalyticsStatus.textContent = `${analytics.scatter.length} completed comparison days · ${analytics.forecasts.length} forecast days · rolling 30 days · UTC`;
   renderUpgradingRedemptionLegend(analytics);
   renderUpgradingNetAtlasChart(analytics);
-  renderUpgradingNetAtlasPerCrewChart(analytics, comparisonScales);
+  renderUpgradingRateResponseChart(analytics, 'responseScatter', optimizationUpgradingLpPerCrewByRateChart, upgradingLpPerCrewByRateChartView, {
+    chartKey: 'lpPerCrewByRate', yLabel: 'LP / average crew', title: 'LP / average crew', color: '#45d6c1',
+    value: (row) => row.lpPerCrew, tooltip: (row) => `${row.date} · ATLAS/LP ${row.atlasPerLp.toLocaleString(undefined, { maximumFractionDigits: 8 })} · player ${row.playerLp.toLocaleString()} LP · avg phantom crew ${row.averageCrew.toLocaleString(undefined, { maximumFractionDigits: 1 })} · ${row.lpPerCrew.toLocaleString(undefined, { maximumFractionDigits: 1 })} LP / crew`,
+  });
+  renderUpgradingRateResponseChart(analytics, 'componentCostScatter', optimizationUpgradingComponentCostByRateChart, upgradingComponentCostByRateChartView, {
+    chartKey: 'componentCostByRate', yLabel: 'Component cost / average crew', title: 'Component cost / average crew', color: '#f59e0b',
+    value: (row) => row.componentCostPerCrew, tooltip: (row) => `${row.date} · ATLAS/LP ${row.atlasPerLp.toLocaleString(undefined, { maximumFractionDigits: 8 })} · component cost ${row.componentCost.toLocaleString(undefined, { maximumFractionDigits: 2 })} ATLAS · avg phantom crew ${row.averageCrew.toLocaleString(undefined, { maximumFractionDigits: 1 })} · ${row.componentCostPerCrew.toLocaleString(undefined, { maximumFractionDigits: 2 })} ATLAS / crew`,
+  });
+  renderUpgradingRateResponseChart(analytics, 'upliftScatter', optimizationUpgradingUpliftByRateChart, upgradingUpliftByRateChartView, {
+    chartKey: 'upliftByRate', yLabel: 'Actual − neutral uplift / average crew', title: 'Actual − neutral baseline uplift / average crew', color: '#a78bfa', zeroLine: true,
+    value: (row) => row.upliftPerCrew, tooltip: (row) => `${row.date} · ATLAS/LP ${row.atlasPerLp.toLocaleString(undefined, { maximumFractionDigits: 8 })} · actual ${row.actualLp.toLocaleString()} LP · neutral ${row.neutralLp.toLocaleString()} LP · uplift ${row.uplift.toLocaleString(undefined, { maximumFractionDigits: 2 })} ATLAS · ${row.upliftPerCrew.toLocaleString(undefined, { maximumFractionDigits: 2 })} ATLAS / crew`,
+  });
   renderUpgradingMarginChart(analytics);
   renderUpgradingEfficiencyChart(analytics);
   let svg=createOptimizationAnalyticsSvg(optimizationUpgradingRedemptionChart,760,340);
@@ -8268,45 +8298,47 @@ function renderUpgradingOptimizationAnalytics() {
   renderUpgradingBreakevenTable();
 }
 
-function renderUpgradingNetAtlasPerCrewChart(analytics, comparisonScales = getUpgradingComparisonScales([latestUpgradingOptimizationResult || {}])) {
-  const svg = createOptimizationAnalyticsSvg(optimizationUpgradingNetAtlasPerCrewChart, 760, 340);
+function renderUpgradingRateResponseChart(analytics, seriesKey, container, view, options = {}) {
+  const svg = createOptimizationAnalyticsSvg(container, 760, 340);
   if (!svg) return;
-  const points = analytics.netAtlasScatter || [];
+  const points = analytics[seriesKey] || [];
   if (!points.length) {
-    appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'No complete daily net ATLAS data available');
+    appendOptimizationSvg(svg, 'text', { x: 380, y: 170, 'text-anchor': 'middle', class: 'axis-label' }, 'No complete daily data available');
     return;
   }
-  const autoMinX = 0;
-  const autoMaxX = Math.max(1, ...points.map((row) => row.factionLp)) * 1.08;
-  const autoMinY = Math.min(0, comparisonScales.netAtlasPerCrewMin);
-  const autoMaxY = Math.max(1, comparisonScales.netAtlasPerCrewMax) * 1.08;
-  const minX = Number.isFinite(upgradingNetAtlasPerCrewChartView.xMin) ? upgradingNetAtlasPerCrewChartView.xMin : autoMinX;
-  const maxX = Number.isFinite(upgradingNetAtlasPerCrewChartView.xMax) ? upgradingNetAtlasPerCrewChartView.xMax : autoMaxX;
-  const minY = Number.isFinite(upgradingNetAtlasPerCrewChartView.netAtlasPerCrewYMin) ? upgradingNetAtlasPerCrewChartView.netAtlasPerCrewYMin : autoMinY;
-  const maxY = Number.isFinite(upgradingNetAtlasPerCrewChartView.netAtlasPerCrewYMax) ? upgradingNetAtlasPerCrewChartView.netAtlasPerCrewYMax : autoMaxY;
+  const values = points.map(options.value).filter(Number.isFinite);
+  const autoMinX = Math.max(0, Math.min(...points.map((row) => row.atlasPerLp)) * 0.92);
+  const autoMaxX = Math.max(autoMinX + Number.EPSILON, Math.max(...points.map((row) => row.atlasPerLp)) * 1.08);
+  const valueMin = Math.min(...values); const valueMax = Math.max(...values); const valuePadding = Math.max(1e-9, (valueMax - valueMin) * 0.08);
+  const autoMinY = options.zeroLine ? Math.min(0, valueMin - valuePadding) : valueMin - valuePadding;
+  const autoMaxY = options.zeroLine ? Math.max(0, valueMax + valuePadding) : valueMax + valuePadding;
+  const minX = Number.isFinite(view.xMin) ? view.xMin : autoMinX;
+  const maxX = Number.isFinite(view.xMax) ? view.xMax : autoMaxX;
+  const minY = Number.isFinite(view[`${options.chartKey}YMin`]) ? view[`${options.chartKey}YMin`] : autoMinY;
+  const maxY = Number.isFinite(view[`${options.chartKey}YMax`]) ? view[`${options.chartKey}YMax`] : autoMaxY;
   const axes = renderUpgradingChartAxes(svg, {
     minY, maxY, xMin: minX, xMax: maxX,
     xTicks: [minX, minX + (maxX - minX) / 4, minX + (maxX - minX) / 2, minX + (maxX - minX) * 3 / 4, maxX],
-    xLabel: 'Faction LP redeemed', yLabel: 'NET ATLAS / avg phantom crew', height: 340,
+    xLabel: 'ATLAS / LP', yLabel: options.yLabel, height: 340,
+    xFormatter: (value) => value.toLocaleString(undefined, { maximumFractionDigits: 8 }),
     yFormatter: (value) => formatCompactNumber(value),
   });
-  if (minY <= 0 && maxY >= 0) appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
-  const meanX = points.reduce((sum, row) => sum + row.factionLp, 0) / points.length;
-  const meanY = points.reduce((sum, row) => sum + row.netAtlasPerCrew, 0) / points.length;
-  const covariance = points.reduce((sum, row) => sum + (row.factionLp - meanX) * (row.netAtlasPerCrew - meanY), 0);
-  const varianceX = points.reduce((sum, row) => sum + (row.factionLp - meanX) ** 2, 0);
+  if (options.zeroLine && minY <= 0 && maxY >= 0) appendOptimizationSvg(svg, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
+  const meanX = points.reduce((sum, row) => sum + row.atlasPerLp, 0) / points.length;
+  const meanY = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const covariance = points.reduce((sum, row) => sum + (row.atlasPerLp - meanX) * (options.value(row) - meanY), 0);
+  const varianceX = points.reduce((sum, row) => sum + (row.atlasPerLp - meanX) ** 2, 0);
   if (varianceX) {
-    const slope = covariance / varianceX;
-    const intercept = meanY - slope * meanX;
+    const slope = covariance / varianceX; const intercept = meanY - slope * meanX;
     appendOptimizationSvg(svg, 'line', { x1: axes.x(minX), y1: axes.y(intercept + slope * minX), x2: axes.x(maxX), y2: axes.y(intercept + slope * maxX), class: 'optimization-trend-line' });
   }
   points.forEach((row, index) => {
     const isLatest = index === points.length - 1;
-    const dot = appendOptimizationSvg(svg, 'circle', { cx: axes.x(row.factionLp), cy: axes.y(row.netAtlasPerCrew), r: isLatest ? 6 : 5, fill: '#f59e0b', stroke: isLatest ? '#fff7ed' : 'none', 'stroke-width': isLatest ? 2 : 0, class: 'mean-marker' });
-    bindOptimizationAnalyticsTooltip(dot, `${row.date} · faction ${row.factionLp.toLocaleString()} LP · net ${row.netAtlas.toLocaleString(undefined, { maximumFractionDigits: 2 })} ATLAS · avg phantom crew ${row.averageCrew.toLocaleString(undefined, { maximumFractionDigits: 1 })} · ${row.netAtlasPerCrew.toLocaleString(undefined, { maximumFractionDigits: 2 })} NET ATLAS / crew`);
+    const value = options.value(row); const dot = appendOptimizationSvg(svg, 'circle', { cx: axes.x(row.atlasPerLp), cy: axes.y(value), r: isLatest ? 6 : 5, fill: options.color || '#45d6c1', stroke: isLatest ? '#fff7ed' : 'none', 'stroke-width': isLatest ? 2 : 0, class: 'mean-marker' });
+    bindOptimizationAnalyticsTooltip(dot, options.tooltip(row));
   });
-  appendOptimizationSvg(svg, 'text', { x: axes.width - axes.right, y: axes.top - 2, 'text-anchor': 'end', class: 'axis-label' }, `n=${points.length}`);
-  bindUpgradingAnalyticsChartNavigation(svg, axes, analytics, 'netAtlasPerCrew', upgradingNetAtlasPerCrewChartView, { xMin: autoMinX, xMax: autoMaxX, yMin: autoMinY, yMax: autoMaxY, xFloor: 0 });
+  appendOptimizationSvg(svg, 'text', { x: axes.width - axes.right, y: axes.top - 2, 'text-anchor': 'end', class: 'axis-label' }, `${options.title} · n=${points.length}`);
+  bindUpgradingAnalyticsChartNavigation(svg, axes, analytics, options.chartKey, view, { xMin: autoMinX, xMax: autoMaxX, yMin: autoMinY, yMax: autoMaxY, xFloor: 0 });
 }
 
 function renderUpgradingBreakevenTable() {

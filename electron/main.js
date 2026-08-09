@@ -888,10 +888,12 @@ async function fetchDailyUpgradingNetAtlas(settings, redemptionRates) {
     const componentPrice = pricesByAsset.get(normalizeShipName(row.asset));
     const txCostSol = Number(row.txCostSol);
     if (!date || !Number.isFinite(lpPerUnit) || !Number.isFinite(atlasPerLp) || atlasPerLp <= 0 || !Number.isFinite(installed) || installed <= 0) continue;
-    const revenue = installed * lpPerUnit * atlasPerLp;
+    const lp = installed * lpPerUnit;
+    const revenue = lp * atlasPerLp;
     const componentCost = Number.isFinite(componentPrice) ? installed * componentPrice : null;
     const transactionCost = Number.isFinite(atlasPerSol) && Number.isFinite(txCostSol) ? txCostSol * atlasPerSol : null;
     const current = daily.get(date) || { date, revenue: 0, componentCost: 0, transactionCost: 0, complete: true };
+    current.lp = (current.lp || 0) + lp;
     current.revenue += revenue;
     if (componentCost == null) current.complete = false;
     else current.componentCost += componentCost;
@@ -901,11 +903,65 @@ async function fetchDailyUpgradingNetAtlas(settings, redemptionRates) {
   }
   return [...daily.values()].map((row) => ({
     date: row.date,
+    lp: row.lp || 0,
     netAtlas: row.complete ? row.revenue - row.componentCost - row.transactionCost : null,
     revenue: row.revenue,
     componentCost: row.complete ? row.componentCost : null,
     transactionCost: row.transactionCost,
-  })).filter((row) => Number.isFinite(row.netAtlas));
+  })).filter((row) => Number.isFinite(row.lp) && row.lp > 0);
+}
+
+async function fetchDailyNeutralUpgradingPlan(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
+  const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: -30d)
+  |> filter(fn: (r) => r._measurement == "lp_auto_comp")
+${scopeFilterFlux}
+  |> filter(fn: (r) => r._field == "neutral_upgrading_hour")
+  |> pivot(rowKey: ["_time", "component"], columnKey: ["_field"], valueColumn: "_value")
+  |> keep(columns: ["_time", "component", "neutral_upgrading_hour"])
+  |> sort(columns: ["_time", "component"])`;
+  const resources = await fetchAephiaResourceData().catch(() => []);
+  const pricesByAsset = new Map();
+  for (const resource of resources) {
+    const name = normalizeShipName(resource?.name);
+    const price = Number(resource?.pricingATL?.priceATL);
+    if (name && Number.isFinite(price) && price > 0) pricesByAsset.set(name, price);
+  }
+  const latestByComponentHour = new Map();
+  for (const row of parseInfluxCsv(await queryInfluxFlux({ ...settings, influxBucket: settings.influxBucket }, flux))) {
+    const time = String(row._time || '');
+    const component = normalizeShipName(row.component);
+    const rate = Number(row.neutral_upgrading_hour);
+    const ms = Date.parse(time);
+    if (!component || !Number.isFinite(ms) || !Number.isFinite(rate) || rate < 0) continue;
+    const key = `${time.slice(0, 13)}|${component}`;
+    if (!latestByComponentHour.has(key) || time > latestByComponentHour.get(key).time) latestByComponentHour.set(key, { time, component, rate });
+  }
+  const byDay = new Map();
+  for (const row of latestByComponentHour.values()) {
+    const date = row.time.slice(0, 10);
+    const hour = row.time.slice(0, 13);
+    if (!byDay.has(date)) byDay.set(date, new Map());
+    const day = byDay.get(date);
+    if (!day.has(hour)) day.set(hour, []);
+    day.get(hour).push(row);
+  }
+  return [...byDay.entries()].map(([date, hours]) => {
+    if (hours.size < 24) return null;
+    let lp = 0;
+    let componentCost = 0;
+    for (const rows of hours.values()) for (const row of rows) {
+      const lpPerUnit = UPGRADE_LP_BY_COMPONENT[row.component];
+      const price = pricesByAsset.get(row.component);
+      if (!Number.isFinite(lpPerUnit) || !Number.isFinite(price)) return null;
+      lp += row.rate * lpPerUnit;
+      componentCost += row.rate * price;
+    }
+    return { date, lp, componentCost, hours: hours.size, complete: true };
+  }).filter(Boolean);
 }
 
 function optimizationNumberQuantile(values, fraction) {
@@ -1029,8 +1085,12 @@ async function fetchUpgradingOptimization(payload = {}) {
     const price = Number(resource?.pricingATL?.priceATL);
     if (name && Number.isFinite(price) && price > 0) componentPricesAtl[name] = price;
   }
-  const netAtlasDaily = await fetchDailyUpgradingNetAtlas(settings, redemptionRates);
-  return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, playerProfile: String(settings.playerProfiles?.[aephiaFaction] || settings.playerProfile || ''), componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
+  const factionSettings = { ...settings, faction: aephiaFaction };
+  const [netAtlasDaily, neutralUpgradingDaily] = await Promise.all([
+    fetchDailyUpgradingNetAtlas(factionSettings, redemptionRates),
+    fetchDailyNeutralUpgradingPlan(factionSettings),
+  ]);
+  return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, neutralUpgradingDaily, playerProfile: String(settings.playerProfiles?.[aephiaFaction] || settings.playerProfile || ''), componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 
 function getInfluxScopeNote(settings) {
