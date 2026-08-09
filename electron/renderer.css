@@ -326,6 +326,8 @@ select:focus {
 .optimization-upgrading-tall-chart { min-height: 0; }
 .optimization-upgrading-tall-chart svg { height: auto; aspect-ratio: 760 / 340; }
 .optimization-upgrading-primary-chart-card .optimization-upgrading-tall-chart { width: 66.6667%; margin-inline: auto; }
+.optimization-upgrading-comparison-chart-card { grid-column: span 1; }
+.optimization-upgrading-comparison-chart-card .optimization-upgrading-tall-chart { width: 100%; }
 .optimization-upgrading-redemption-chart-row { grid-column: 1 / -1; min-width: 0; }
 .optimization-upgrading-redemption-legend { justify-content: center; margin: 0 0 6px; }
 .optimization-upgrading-redemption-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -378,6 +380,7 @@ select:focus {
   .optimization-analytics-grid { grid-template-columns: 1fr; }
   .optimization-analytics-card { grid-column: 1; }
   .optimization-upgrading-primary-chart-card .optimization-upgrading-tall-chart { width: 100%; }
+  .optimization-upgrading-comparison-chart-card { grid-column: 1; }
   .optimization-upgrading-redemption-charts { grid-template-columns: 1fr; }
   .optimization-analytics-metrics { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
 }

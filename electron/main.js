@@ -164,6 +164,10 @@ const GITHUB_ARCHIVE_URL = `https://github.com/${GITHUB_REPO}/archive/refs/heads
 const RESTART_TASK_NAME = 'My Star Atlas';
 const UPGRADE_ATLAS_POOLS = Object.freeze({ MUD: 1991250, ONI: 2000000, USTUR: 2000000 });
 const UPGRADE_LP_BY_COMPONENT = Object.freeze({ framework: 68, electronics: 92, 'power source': 98, electromagnet: 133, 'field stabilizer': 222, 'particle accelerator': 498, 'radiation absorber': 331, 'survey data unit': 1325, sdu: 1325, ink: 100000 });
+const POINTS_STORE_PROGRAM_ID = new PublicKey('PsToRxhEPScGt1Bxpm7zNDRzaMk31t8Aox7fyewoVse');
+const POINTS_STORE_REDEMPTION_CONFIG_DISCRIMINATOR = Buffer.from([173, 1, 86, 47, 27, 204, 146, 185]);
+const POINTS_STORE_REDEMPTION_CONFIG_FACTION_OFFSET = 73;
+const POINTS_STORE_FACTION_VALUES = Object.freeze({ MUD: 1, ONI: 2, USTUR: 3 });
 const JUPITER_PRICE_URL = 'https://lite-api.jup.ag/price/v3?ids=So11111111111111111111111111111111111111112,ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const ATLAS_MINT = 'ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
@@ -812,6 +816,98 @@ function mergeUpgradingOptimizationRows(aggregateRows, componentRows) {
   return [...byTime.values()];
 }
 
+// The Points Store RedemptionConfig keeps the exact daily redemption pool:
+// total_tokens / total_points is the on-chain ATLAS value of one LP.
+// The decoder repository documents this account layout and its remaining
+// RedemptionEpoch list; keep the small read-only parser local so the renderer
+// receives plain JSON rather than a second decoder dependency.
+async function fetchPointsStoreRedemptionRates(settings, faction) {
+  const factionValue = POINTS_STORE_FACTION_VALUES[normalizeFaction(faction)];
+  if (!factionValue) return [];
+  try {
+    const connection = createSolanaConnection(settings);
+    const accounts = await connection.getProgramAccounts(POINTS_STORE_PROGRAM_ID, {
+      commitment: 'confirmed',
+      filters: [
+        { memcmp: { offset: 0, bytes: bs58.encode(POINTS_STORE_REDEMPTION_CONFIG_DISCRIMINATOR) } },
+        { memcmp: { offset: POINTS_STORE_REDEMPTION_CONFIG_FACTION_OFFSET, bytes: bs58.encode(Buffer.from([factionValue])) } },
+      ],
+    });
+    const data = accounts[0]?.account?.data;
+    if (!data || data.length < 112) return [];
+    let offset = 108;
+    const epochCount = data.readUInt32LE(offset); offset += 4;
+    const rates = [];
+    for (let index = 0; index < epochCount && offset + 40 <= data.length; index += 1) {
+      const totalPoints = data.readBigUInt64LE(offset);
+      const redeemedPoints = data.readBigUInt64LE(offset + 8);
+      const totalTokens = data.readBigUInt64LE(offset + 16);
+      const redeemedTokens = data.readBigUInt64LE(offset + 24);
+      const dayIndex = Number(data.readBigInt64LE(offset + 32));
+      offset += 40;
+      // The epoch's advertised rate is the complete pool ratio. Using the
+      // redeemed subset would make a partially claimed epoch look different
+      // from the actual redemption price.
+      const points = Number(totalPoints);
+      const tokens = Number(totalTokens) / 1e8;
+      if (!Number.isFinite(dayIndex) || !Number.isFinite(points) || points <= 0 || !Number.isFinite(tokens) || tokens <= 0) continue;
+      rates.push({
+        date: new Date(dayIndex * 86400000).toISOString().slice(0, 10),
+        dayIndex,
+        totalPoints: Number(totalPoints),
+        redeemedPoints: Number(redeemedPoints),
+        redeemedTokens: tokens,
+        atlasPerLp: tokens / points,
+      });
+    }
+    return rates;
+  } catch (_error) {
+    return [];
+  }
+}
+
+async function fetchDailyUpgradingNetAtlas(settings, redemptionRates) {
+  const [rows, resources, atlasPerSol] = await Promise.all([
+    fetchUpgradingEarningsRows(settings).catch(() => []),
+    fetchAephiaResourceData().catch(() => []),
+    fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null),
+  ]);
+  const ratesByDate = new Map((redemptionRates || []).map((row) => [String(row.date), Number(row.atlasPerLp)]));
+  const pricesByAsset = new Map();
+  for (const resource of resources) {
+    const name = normalizeShipName(resource?.name);
+    const price = Number(resource?.pricingATL?.priceATL);
+    if (name && Number.isFinite(price) && price > 0) pricesByAsset.set(name, price);
+  }
+  const daily = new Map();
+  for (const row of rows) {
+    const date = String(row.isoDate || '');
+    const lpPerUnit = UPGRADE_LP_BY_COMPONENT[normalizeShipName(row.asset)];
+    const atlasPerLp = ratesByDate.get(date);
+    const installed = Number(row.installed);
+    const componentPrice = pricesByAsset.get(normalizeShipName(row.asset));
+    const txCostSol = Number(row.txCostSol);
+    if (!date || !Number.isFinite(lpPerUnit) || !Number.isFinite(atlasPerLp) || atlasPerLp <= 0 || !Number.isFinite(installed) || installed <= 0) continue;
+    const revenue = installed * lpPerUnit * atlasPerLp;
+    const componentCost = Number.isFinite(componentPrice) ? installed * componentPrice : null;
+    const transactionCost = Number.isFinite(atlasPerSol) && Number.isFinite(txCostSol) ? txCostSol * atlasPerSol : null;
+    const current = daily.get(date) || { date, revenue: 0, componentCost: 0, transactionCost: 0, complete: true };
+    current.revenue += revenue;
+    if (componentCost == null) current.complete = false;
+    else current.componentCost += componentCost;
+    if (transactionCost == null && txCostSol > 0) current.complete = false;
+    else if (transactionCost != null) current.transactionCost += transactionCost;
+    daily.set(date, current);
+  }
+  return [...daily.values()].map((row) => ({
+    date: row.date,
+    netAtlas: row.complete ? row.revenue - row.componentCost - row.transactionCost : null,
+    revenue: row.revenue,
+    componentCost: row.complete ? row.componentCost : null,
+    transactionCost: row.transactionCost,
+  })).filter((row) => Number.isFinite(row.netAtlas));
+}
+
 function optimizationNumberQuantile(values, fraction) {
   const sorted = (values || []).filter(Number.isFinite).sort((a, b) => a - b);
   if (!sorted.length) return null;
@@ -914,7 +1010,7 @@ async function fetchUpgradingOptimization(payload = {}) {
   |> filter(fn: (r) => r._measurement == "${measurement}" and r.faction == "${escapeFluxString(faction)}"${instanceFilter})
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
-  const [aggregateCsv, componentCsv, redeemedLpSummary, resources] = await Promise.all([
+  const [aggregateCsv, componentCsv, redeemedLpSummary, resources, redemptionRates] = await Promise.all([
     queryInfluxFlux(querySettings, base('optimization_upgrading')),
     queryInfluxFlux(querySettings, `from(bucket: "${escapeFluxString(bucket)}")
   |> ${range}
@@ -922,6 +1018,7 @@ async function fetchUpgradingOptimization(payload = {}) {
   |> pivot(rowKey: ["_time", "component"], columnKey: ["_field"], valueColumn: "_value")`),
     fetchRedeemedLpSummaryByDate(settings).catch(() => ({ factionDaily: {}, playerDaily: {} })),
     fetchAephiaResourceData().catch(() => []),
+    fetchPointsStoreRedemptionRates(settings, aephiaFaction),
   ]);
   const rows = mergeUpgradingOptimizationRows(parseInfluxCsv(aggregateCsv), parseInfluxCsv(componentCsv));
   const playerDaily = Object.entries(redeemedLpSummary.playerDaily?.[aephiaFaction] || {}).map(([date, lp]) => ({ date, lp: Number(lp) })).filter((row) => Number.isFinite(row.lp));
@@ -932,7 +1029,8 @@ async function fetchUpgradingOptimization(payload = {}) {
     const price = Number(resource?.pricingATL?.priceATL);
     if (name && Number.isFinite(price) && price > 0) componentPricesAtl[name] = price;
   }
-  return { ok: true, rows, playerDaily, factionDaily, componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
+  const netAtlasDaily = await fetchDailyUpgradingNetAtlas(settings, redemptionRates);
+  return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, playerProfile: String(settings.playerProfiles?.[aephiaFaction] || settings.playerProfile || ''), componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 
 function getInfluxScopeNote(settings) {

@@ -37,6 +37,9 @@ test('upgrading optimization backend joins snapshots, prices, and analytics hist
   assert.match(main, /playerRow\?\.contribution/);
   assert.match(main, /redeemedLpSummary\.playerDaily\?\.\[aephiaFaction\]/);
   assert.match(main, /redeemedLpSummary\.factionDaily\?\.\[aephiaFaction\]/);
+  assert.match(main, /POINTS_STORE_REDEMPTION_CONFIG_DISCRIMINATOR/);
+  assert.match(main, /atlasPerLp: tokens \/ points/);
+  assert.match(main, /const points = Number\(totalPoints\)/);
   assert.match(main, /mergeUpgradingOptimizationRows\(/);
   assert.match(main, /handleTrustedIpc\('optimization:upgrading'/);
   assert.match(preload, /getUpgradingOptimization:.*optimization:upgrading/);
@@ -116,14 +119,39 @@ test('upgrading redemption scatter normalizes player LP by average hourly phanto
   assert.equal(result.scatter[0].playerLpPerCrew, 10_000 / 300);
 });
 
+test('upgrading redemption analytics exposes daily net ATLAS normalized by average phantom crew', () => {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext([
+    extractFunction(renderer, 'optimizationQuantile'),
+    extractFunction(renderer, 'buildUpgradingOptimizationAnalytics'),
+    'this.build = buildUpgradingOptimizationAnalytics;',
+  ].join('\n'), context);
+  const result = context.build({
+    factionDaily: [{ date: '2026-07-27', lp: 1_000_000 }],
+    playerDaily: [{ date: '2026-07-27', lp: 10_000 }],
+    netAtlasDaily: [{ date: '2026-07-27', netAtlas: 12_345.5 }],
+    rows: [
+      { time: '2026-07-27T01:05:00Z', phantom_crew: 100, expected_total_lp_eod: 800_000 },
+      { time: '2026-07-27T01:55:00Z', phantom_crew: 200, expected_total_lp_eod: 850_000 },
+      { time: '2026-07-27T02:05:00Z', phantom_crew: 400, expected_total_lp_eod: 900_000 },
+    ],
+  }, new Date('2026-07-28T12:00:00Z'));
+  assert.equal(result.netAtlasScatter.length, 1);
+  assert.equal(result.netAtlasScatter[0].netAtlas, 12_345.5);
+  assert.equal(result.netAtlasScatter[0].averageCrew, 300);
+  assert.equal(result.netAtlasScatter[0].netAtlasPerCrew, 12_345.5 / 300);
+});
+
 test('Optimization exposes Upgrading after Scanning with date filters, table, and analytics charts', () => {
   assert.match(html, /data-optimization-subtab="scanning"[^>]*>Scanning</);
   assert.match(html, /data-optimization-subtab="upgrading"[^>]*>Upgrading</);
   assert.ok(html.indexOf('data-optimization-subtab="scanning"') < html.indexOf('data-optimization-subtab="upgrading"'));
-  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-redemption-legend', 'optimization-upgrading-net-atlas-chart', 'optimization-upgrading-margin-chart', 'optimization-upgrading-efficiency-chart', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-breakeven-body']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['optimization-upgrading-start-filter', 'optimization-upgrading-stop-filter', 'optimization-upgrading-sync-status', 'optimization-upgrading-table-head', 'optimization-upgrading-table-body', 'optimization-upgrading-analytics-status', 'optimization-upgrading-redemption-legend', 'optimization-upgrading-net-atlas-chart', 'optimization-upgrading-net-atlas-per-crew-chart', 'optimization-upgrading-margin-chart', 'optimization-upgrading-efficiency-chart', 'optimization-upgrading-redemption-chart', 'optimization-upgrading-forecast-chart', 'optimization-upgrading-error-chart', 'optimization-upgrading-breakeven-body']) assert.match(html, new RegExp(`id="${id}"`));
   assert.doesNotMatch(html, /Process automation evidence/);
   assert.match(html, />LP Analysis yesterday</);
   assert.match(html, /optimization-upgrading-primary-chart-card[\s\S]*?Faction LP redemption vs player LP per upgrading crew[\s\S]*?id="optimization-upgrading-redemption-chart"/);
+  assert.match(html, /Faction LP redemption vs player LP per upgrading crew[\s\S]*?Faction LP redemption vs NET ATLAS per upgrading crew[\s\S]*?id="optimization-upgrading-net-atlas-per-crew-chart"/);
   assert.match(html, /id="optimization-upgrading-error-chart"[\s\S]*?optimization-upgrading-redemption-chart-row[\s\S]*?id="optimization-upgrading-redemption-legend"[\s\S]*?<h3>Component NET ATLAS\/s vs Faction LP Redemption<\/h3>[\s\S]*?id="optimization-upgrading-net-atlas-chart"[\s\S]*?<h3>Component Profit Margin vs Faction LP Redemption<\/h3>[\s\S]*?id="optimization-upgrading-margin-chart"[\s\S]*?optimization-upgrading-breakeven-card optimization-analytics-summary-card[\s\S]*?>LP Analysis yesterday[\s\S]*?optimization-upgrading-primary-chart-card[\s\S]*?Component Efficiency Frontier[\s\S]*?id="optimization-upgrading-efficiency-chart"/);
   assert.match(html, /id="optimization-upgrading-forecast-chart"[\s\S]*?id="optimization-upgrading-error-chart"/);
   assert.match(html, /<section class="optimization-analytics-card">\s*<h3>Forecast error by snapshot hour<\/h3>/);
@@ -155,7 +183,7 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.doesNotMatch(renderer, /const startY=Math\.max\(0,Math\.min\(maxY,intercept\)\)/);
   assert.match(renderer, /clip-path':`url\(#optimization-upgrading-scatter-clip\)`/);
   assert.match(renderer, /x:axes\.width-axes\.right,y:axes\.top-2,'text-anchor':'end'/);
-  for (const label of ['Faction LP redeemed', 'Player LP / avg phantom crew', 'Snapshot hour (UTC)', 'Expected total LP by EOD', 'Forecast error (LP)']) assert.match(renderer, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  for (const label of ['Faction LP redeemed', 'Player LP / avg phantom crew', 'NET ATLAS / avg phantom crew', 'Snapshot hour (UTC)', 'Expected total LP by EOD', 'Forecast error (LP)']) assert.match(renderer, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   for (const subtitle of ['One dot per completed UTC day', 'Hourly optimization snapshots', 'Median signed error with the middle 50% band']) assert.doesNotMatch(html, new RegExp(subtitle));
   assert.match(fs.readFileSync('electron/renderer.css', 'utf8'), /\.optimization-upgrading-tall-chart svg \{ height: auto; aspect-ratio: 760 \/ 340; \}/);
   assert.match(fs.readFileSync('electron/renderer.css', 'utf8'), /\.optimization-upgrading-primary-chart-card \.optimization-upgrading-tall-chart \{ width: 66\.6667%; margin-inline: auto; \}/);
