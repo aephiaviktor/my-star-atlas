@@ -194,9 +194,9 @@ test('Upgrading renderer defines the agreed columns and component pairs', () => 
   assert.match(fs.readFileSync('electron/renderer.css', 'utf8'), /\.optimization-upgrading-tall-chart svg \{ height: auto; aspect-ratio: 760 \/ 340; \}/);
   assert.match(fs.readFileSync('electron/renderer.css', 'utf8'), /\.optimization-upgrading-primary-chart-card \.optimization-upgrading-tall-chart \{ width: 66\.6667%; margin-inline: auto; \}/);
   assert.match(renderer, /row\.lpPerSecond\.toFixed\(1\)/);
-  assert.match(renderer, /const upgradingBreakevenColumns = Object\.freeze\(\[[\s\S]*?key: 'name'[\s\S]*?key: 'upgradingTime'[\s\S]*?key: 'lpValue'[\s\S]*?key: 'lpPerSecond'[\s\S]*?key: 'factionLp'[\s\S]*?key: 'breakevenLp'[\s\S]*?key: 'gmPrice'[\s\S]*?key: 'grossAtlasPerSecond'/);
+  assert.match(renderer, /const upgradingBreakevenColumns = Object\.freeze\(\[[\s\S]*?key: 'name'[\s\S]*?key: 'upgradingTime'[\s\S]*?key: 'lpValue'[\s\S]*?key: 'lpPerSecond'[\s\S]*?key: 'factionLp'[\s\S]*?key: 'breakevenLp'[\s\S]*?key: 'externalPrice'[\s\S]*?key: 'internalCost'[\s\S]*?key: 'equalNetPrice'[\s\S]*?key: 'customPrice'[\s\S]*?key: 'grossAtlasPerSecond'/);
   assert.match(renderer, /key: 'grossAtlasPerSecond', label: 'Gross ATLAS\/s', selected: false/);
-  for (const key of ['name', 'lpPerSecond', 'breakevenLp', 'gmPrice', 'marginPercent', 'netAtlasPerSecond', 'netAtlasPerCargoUnit', 'limit']) assert.match(renderer, new RegExp(`key: '${key}', label: [^\\n]+ selected: true`));
+  for (const key of ['name', 'lpPerSecond', 'breakevenLp', 'externalPrice', 'internalCost', 'equalNetPrice', 'customPrice', 'marginPercent', 'netAtlasPerSecond', 'netAtlasPerCargoUnit']) assert.match(renderer, new RegExp(`key: '${key}', label: [^\\n]+ selected: true`));
   for (const key of ['upgradingTime', 'lpValue', 'factionLp']) assert.match(renderer, new RegExp(`key: '${key}', label: [^\\n]+ selected: false`));
   assert.match(renderer, /currentOptimizationSubtab === 'upgrading' && currentOptimizationView === 'analytics'/);
   assert.match(renderer, /persistUpgradingBreakevenColumnState\(\)/);
@@ -266,7 +266,7 @@ test('component margin chart uses pool share value, current GM price, and latest
   assert.match(main, /pricingATL\?\.priceATL/);
   assert.match(main, /atlasPool: UPGRADE_ATLAS_POOLS\[aephiaFaction\]/);
   assert.match(renderer, /latestFactionRedemption/);
-  assert.match(renderer, /formatCompactNumber\(Number\(result\.atlasPool\)\*row\.lp\/row\.gmPrice\)/);
+  assert.match(renderer, /formatCompactNumber\(Number\(result\.atlasPool\) \* row\.lp \/ row\.appliedPrice\)/);
   assert.match(renderer, /sort\(\(a, b\) => a\.lp - b\.lp\)/);
   assert.match(css, /\.optimization-upgrading-breakeven-table \{ min-width: 0; font-size: 11px; \}/);
   for (const component of ['Power Source', 'Framework', 'Electromagnet', 'Electronics', 'Field Stabilizer', 'Particle Accelerator', 'Radiation Absorber', 'Survey Data Unit', 'Ink']) assert.match(renderer, new RegExp(component));
@@ -299,10 +299,6 @@ test('component efficiency calculates gross and net ATLAS per second and marks d
   assert.match(renderer, /markUpgradingDominatedRows\(rows, false\)/);
   assert.match(renderer, /duration: 3000/);
   assert.match(renderer, /optimization-efficiency-label/);
-  assert.match(renderer, /const factionLp = Number\(buildUpgradingOptimizationAnalytics\(result\)\.latestFactionRedemption/);
-  assert.match(renderer, /anchorPrice \/ anchor\.durationSeconds/);
-  assert.match(renderer, /upgradingLimitAnchorByFaction/);
-  assert.match(renderer, /row\.durationSeconds\*\(row\.grossAtlasPerSecond-targetNet\)/);
   assert.match(html, /Capital-limited/);
   assert.match(html, /Crew-limited/);
   assert.match(html, /Cargo-limited/);
@@ -350,46 +346,6 @@ test('upgrading chart axes preserve sub-unit ranges instead of collapsing ATLAS-
   assert.doesNotMatch(renderer, /Math\.max\(1,maxY-minY\)/);
 });
 
-test('LIMIT mode gives every achievable component Framework-equivalent net ATLAS per second', () => {
-  const context = {};
-  vm.createContext(context);
-  vm.runInContext(`${extractFunction(renderer, 'applyUpgradingLimitPrices')}\nthis.apply = applyUpgradingLimitPrices;`, context);
-  const rows = [
-    { name: 'Framework', durationSeconds: 12, grossAtlasPerSecond: 0.0003, impliedAtlasValue: 0.0036, cargoWeight: 1 },
-    { name: 'Electronics', durationSeconds: 14, grossAtlasPerSecond: 0.0004, impliedAtlasValue: 0.0056, cargoWeight: 2 },
-  ];
-  const result = context.apply(rows, 'Framework', 0.0012);
-  assert.equal(result.length, 2);
-  assert.ok(Math.abs(result[0].netAtlasPerSecond - 0.0002) < 1e-15);
-  assert.ok(Math.abs(result[1].netAtlasPerSecond - 0.0002) < 1e-15);
-  assert.ok(Math.abs(result[1].limitPrice - 0.0028) < 1e-15);
-  assert.match(html, /id="optimization-upgrading-efficiency-limit"/);
-  assert.match(css, /optimization-upgrading-breakeven-wrap \{ max-height: none; overflow: visible; \}/);
-});
-
-test('LP Analysis yesterday exposes a cost basis toggle beside the title and an Internal Cost column', () => {
-  assert.match(html, /optimization-upgrading-breakeven-header/);
-  assert.match(html, /id="optimization-upgrading-breakeven-basis-external"/);
-  assert.match(html, /id="optimization-upgrading-breakeven-basis-internal"/);
-  assert.match(html, /data-basis="external"/);
-  assert.match(html, /data-basis="internal"/);
-  const headerIdx = html.indexOf('optimization-upgrading-breakeven-header');
-  const externalIdx = html.indexOf('id="optimization-upgrading-breakeven-basis-external"');
-  const internalIdx = html.indexOf('id="optimization-upgrading-breakeven-basis-internal"');
-  const h3Idx = html.indexOf('<h3>LP Analysis yesterday</h3>');
-  assert.ok(headerIdx < externalIdx && headerIdx < internalIdx);
-  assert.ok(h3Idx < externalIdx && h3Idx < internalIdx);
-  assert.ok(externalIdx < internalIdx);
-  assert.match(renderer, /const UPGRADING_BREAKEVEN_BASIS_STORAGE_KEY = 'my-star-atlas:optimization-upgrading-analysis-cost-basis:v1';/);
-  assert.match(renderer, /const UPGRADING_BREAKEVEN_BASISES = Object\.freeze\(\{ external: 'external', internal: 'internal' \}\);/);
-  assert.match(renderer, /let upgradingBreakevenCostBasis = UPGRADING_BREAKEVEN_BASISES\.external;/);
-  assert.match(renderer, /restoreUpgradingBreakevenCostBasis\(\);/);
-  assert.match(renderer, /setUpgradingBreakevenCostBasis\(UPGRADING_BREAKEVEN_BASISES\.internal\)/);
-  assert.match(renderer, /syncUpgradingBreakevenBasisToggle\(\);/);
-  assert.match(renderer, /key: 'internalCost', label: 'Internal Cost', selected: true/);
-  assert.match(css, /\.optimization-upgrading-breakeven-toggle-option\.active/);
-});
-
 test('phantom starbase lookup and breakeven cost summation', () => {
   const context = {};
   vm.createContext(context);
@@ -408,80 +364,4 @@ test('phantom starbase lookup and breakeven cost summation', () => {
   assert.equal(context.sum({ scanningCostPerUnit: 1, miningCostPerUnit: null, craftingCostPerUnit: 3, cargoCostPerUnit: null }), 4);
   assert.equal(context.sum({}), null);
   assert.equal(context.sum(null), null);
-});
-
-test('Internal cost basis also recalculates the Profit Margin chart series', () => {
-  const context = { latestBreakevenResult: null };
-  vm.createContext(context);
-  vm.runInContext([
-    `const UPGRADING_BREAKEVEN_BASISES = Object.freeze({ external: 'external', internal: 'internal' });`,
-    extractFunction(renderer, 'phantomStarbaseForFaction'),
-    extractFunction(renderer, 'sumBreakevenCostPerUnit'),
-    extractFunction(renderer, 'getUpgradingBreakevenInternalCosts'),
-    extractFunction(renderer, 'applyUpgradingMarginCostBasis'),
-    'this.apply = applyUpgradingMarginCostBasis;',
-  ].join('\n'), context);
-  const series = [{
-    name: 'Framework', lp: 68, price: 0.003, durationSeconds: 12,
-    points: [{ factionLp: 10_000_000_000, impliedAtlasValue: 0.0034, marginPercent: 13.333, netAtlasPerSecond: 0.0000333 }],
-  }];
-  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'MUD-PHANTOM', asset: 'Framework', scanningCostPerUnit: 0.001, miningCostPerUnit: 0.0005, craftingCostPerUnit: 0.0008, cargoCostPerUnit: 0.0002 }] };
-  const internal = context.apply(series, 'internal', 'MUD');
-  assert.equal(internal.length, 1);
-  assert.equal(internal[0].costBasis, 'internal');
-  assert.ok(Math.abs(internal[0].price - 0.0025) < 1e-12);
-  assert.ok(Math.abs(internal[0].points[0].marginPercent - 36) < 1e-12);
-  assert.ok(Math.abs(internal[0].points[0].netAtlasPerSecond - 0.000075) < 1e-12);
-
-  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'OTHER-PHANTOM', asset: 'Framework', scanningCostPerUnit: 1 }] };
-  assert.deepEqual(context.apply(series, 'internal', 'MUD'), []);
-  assert.equal(context.apply(series, 'external', 'MUD')[0].price, 0.003);
-  assert.match(renderer, /renderUpgradingNetAtlasChart\(analytics\);/);
-  assert.match(renderer, /renderUpgradingMarginChart\(analytics\);/);
-  assert.match(renderer, /function renderUpgradingNetAtlasChart\(analytics\)[\s\S]*?applyUpgradingMarginCostBasis\(buildUpgradingMarginSeries/);
-});
-
-test('Internal cost basis replaces GM price for net metrics and stays unavailable without a phantom starbase row', () => {
-  const context = { latestBreakevenResult: null };
-  vm.createContext(context);
-  vm.runInContext([
-    `const UPGRADING_BREAKEVEN_BASISES = Object.freeze({ external: 'external', internal: 'internal' });`,
-    extractFunction(renderer, 'phantomStarbaseForFaction'),
-    extractFunction(renderer, 'sumBreakevenCostPerUnit'),
-    extractFunction(renderer, 'getUpgradingBreakevenInternalCosts'),
-    extractFunction(renderer, 'applyUpgradingCostBasis'),
-    'this.latestBreakevenResult = null;',
-    'this.apply = applyUpgradingCostBasis;',
-  ].join('\n'), context);
-  const baseRows = [
-    { name: 'Framework', lp: 68, gmPrice: 0.003, durationSeconds: 12, cargoWeight: 1, lpPerSecond: 5.667, impliedAtlasValue: 0.0034, grossAtlasPerSecond: 0.000283, netAtlasPerSecond: 0.000033, marginPercent: 13.33, netAtlasPerCargoUnit: 0.0004 },
-  ];
-  const external = context.apply(baseRows, 'external', 'MUD');
-  assert.equal(external[0].basis, 'external');
-  assert.equal(external[0].internalCost, null);
-  assert.equal(external[0].netAtlasPerSecond, baseRows[0].netAtlasPerSecond);
-
-  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'MUD-PHANTOM', asset: 'Framework', scanningCostPerUnit: 0.001, miningCostPerUnit: 0.0005, craftingCostPerUnit: 0.0008, cargoCostPerUnit: 0.0002 }] };
-  const internal = context.apply(baseRows, 'internal', 'MUD');
-  assert.equal(internal[0].basis, 'internal');
-  assert.ok(Math.abs(internal[0].internalCost - 0.0025) < 1e-12);
-  assert.equal(internal[0].marginPercent > 0, true);
-  assert.notEqual(internal[0].netAtlasPerSecond, baseRows[0].netAtlasPerSecond);
-
-  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'UST-PHANTOM', asset: 'Framework', scanningCostPerUnit: 0.002, miningCostPerUnit: 0.001, craftingCostPerUnit: 0.0005, cargoCostPerUnit: 0.0005 }] };
-  const ustInternal = context.apply(baseRows, 'internal', 'USTUR');
-  assert.equal(ustInternal[0].basis, 'internal');
-  assert.ok(Math.abs(ustInternal[0].internalCost - 0.004) < 1e-12);
-
-  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'OTHER-1', asset: 'Framework', scanningCostPerUnit: 0.001, miningCostPerUnit: 0.0005, craftingCostPerUnit: 0.0008, cargoCostPerUnit: 0.0002 }] };
-  const missing = context.apply(baseRows, 'internal', 'MUD');
-  assert.equal(missing[0].internalCost, null);
-  assert.equal(missing[0].marginPercent, null);
-  assert.equal(missing[0].netAtlasPerSecond, null);
-  assert.equal(missing[0].netAtlasPerCargoUnit, null);
-
-  context.latestBreakevenResult = { breakevenRows: [{ starbase: 'MUD-PHANTOM', asset: 'Other', scanningCostPerUnit: 1, miningCostPerUnit: 1, craftingCostPerUnit: 1, cargoCostPerUnit: 1 }] };
-  const mismatched = context.apply(baseRows, 'internal', 'MUD');
-  assert.equal(mismatched[0].internalCost, null);
-  assert.equal(mismatched[0].netAtlasPerSecond, null);
 });

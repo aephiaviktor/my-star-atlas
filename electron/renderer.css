@@ -2827,3 +2827,8 @@ label {
 .optimization-efficiency-limit-button:disabled { opacity: 0.35; cursor: not-allowed; }
 .optimization-pareto-frontier { stroke: #67b7ff; stroke-width: 2.5; stroke-dasharray: 6 4; opacity: 0.9; pointer-events: none; }
 .optimization-framework-limit-input.active-anchor { border-color: #67b7ff; background: rgba(36, 119, 184, 0.2); box-shadow: 0 0 0 1px rgba(103, 183, 255, 0.35); }
+.optimization-custom-price-control { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.optimization-custom-price-input { width: 84px; padding: 3px 5px; text-align: right; color: inherit; background: rgba(8, 15, 28, .72); border: 1px solid rgba(148, 163, 184, .28); border-radius: 4px; }
+.optimization-custom-price-input[aria-invalid="true"] { border-color: #f87171; }
+.optimization-custom-price-reset { padding: 3px 5px; font-size: 10px; color: #cbd5e1; background: transparent; border: 1px solid rgba(148, 163, 184, .24); border-radius: 4px; cursor: pointer; }
+.optimization-basis-info { fill: #94a3b8; font-size: 10px; }
