@@ -236,6 +236,15 @@ function valueNativeCost(record, price) {
   };
 }
 
+function requireSameDateCargoPrice(price, isoDate) {
+  const eventDay = clean(isoDate);
+  const priceDay = clean(price?.priceDay || price?.effectiveUtcDate);
+  if (!price || !eventDay || priceDay !== eventDay) {
+    return { status: 'incomplete', priceATL: null, priceATLExact: null, priceDay: null, effectiveUtcDate: eventDay, reason: 'same_date_price_missing' };
+  }
+  return price;
+}
+
 function exactShares(total, weights) {
   const { units, scale } = decimalUnits(total);
   const normalized = weights.map((weight) => decimalUnits(String(Math.max(0, Number(weight) || 0))));
@@ -313,4 +322,5 @@ module.exports = {
   projectRawCostEvents, selectLegacyRawCutover, getRawCostCutover, lamportsToSolDecimal, rawCostDigest,
   exporterForFaction, aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
   buildCanonicalRawCostPool, valueNativeCost, multiplyExactDecimals,
+  requireSameDateCargoPrice,
 };

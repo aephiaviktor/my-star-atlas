@@ -29,10 +29,11 @@ test('canonical allocation scope uses immutable fleet accounts and compatibility
   assert.doesNotMatch(source, /allocationKey[^\n]*(?:fleetLabel|assignment)/);
   assert.match(source, /allocationReason: unallocated \? 'allocation_scope_missing' : null/);
   assert.match(source, /rawDailyRows\.filter\(\(row\) => row\.allocationStatus !== 'unallocated' && clean\(row\.fleetAccount\)\)/);
-  assert.match(main, /fleetByAccount\.get\(String\(cargoRow\.fleetAccount/);
+  assert.match(main, /fleetByAccount\.get\(authoritativeAccount\)/);
   assert.match(main, /cargoFleetAccountFromCycleId\(row\.cycleId\)/);
   assert.match(main, /group\(columns: \["fleet", "assignment", "starbase", "cycleId", "_time"\]\)/);
-  assert.match(main, /new Set\(compatibilityCargoRows\.map\(\(row\) => normalizeFleetLabel\(row\.fleet\)\)/);
+  assert.match(main, /new Set\(compatibilityCargoRows\.map\(\(row\) => String\(row\.fleetAccount/);
+  assert.match(main, /enrichCargoAllocationRows\([\s\S]*fleetByAccount/);
 });
 
 test('frozen price seed remains exactly July 6 through August 4', () => {

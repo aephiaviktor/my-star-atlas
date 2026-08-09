@@ -59,13 +59,15 @@ function cargoFleetAccountFromCycleId(value) {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(account) ? account : null;
 }
 
-function enrichCargoAllocationRows(rows, fleetByLabel, normalizeFleetLabel) {
+function enrichCargoAllocationRows(rows, fleetByLabel, normalizeFleetLabel, fleetByAccount = new Map()) {
   return rows.map((row) => {
-    const fleet = fleetByLabel.get(normalizeFleetLabel(row.fleet));
+    const authoritativeAccount = String(row?.fleetAccount || cargoFleetAccountFromCycleId(row?.cycleId) || '').trim();
+    const fleet = (authoritativeAccount ? fleetByAccount.get(authoritativeAccount) : null)
+      || (!authoritativeAccount ? fleetByLabel.get(normalizeFleetLabel(row.fleet)) : null);
     return {
       ...row,
       fleetName: row.fleet,
-      fleetAccount: fleet?.key || '',
+      fleetAccount: authoritativeAccount || fleet?.key || '',
       ownership: fleet?.ownership || '',
       relationship: fleet?.relationship || '',
       ships: fleet?.ships || [],

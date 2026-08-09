@@ -37,7 +37,7 @@ const {
 const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./telemetry-rpc-fetch');
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
-const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDayAssignment, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
+const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
@@ -48,9 +48,9 @@ const {
   RAW_COST_CUTOVER_MANIFEST_VERSION, buildRawCostFluxQuery, projectRawCostEvents,
   selectLegacyRawCutover, exporterForFaction, aggregateRawCostsByFleetDay,
   applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
-  valueNativeCost,
+  valueNativeCost, requireSameDateCargoPrice,
 } = require('./cargo-cost-source');
-const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows } = require('./cargo-table-projection');
+const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
 const {
@@ -6057,10 +6057,10 @@ ${scopeFilterFlux}
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
   |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["fleet", "_time"])
+  |> group(columns: ["fleet", "cycleId", "_time"])
   |> sum(column: "_value")
   |> group()
-  |> keep(columns: ["fleet", "_time", "_value"])
+  |> keep(columns: ["fleet", "cycleId", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
   const rowsByKey = new Map();
   const txDailyByDayFleet = new Map();
@@ -6096,7 +6096,8 @@ ${scopeFilterFlux}
     if (!fleet || isCargoCycleId(fleet) || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
     const isoDate = getUtcDateKey(date);
     if (!includedDays.has(isoDate)) continue;
-    const key = `${isoDate}\n${fleet}`;
+    const fleetAccount = cargoFleetAccountFromCycleId(row.cycleId);
+    const key = `${isoDate}\n${fleetAccount || `label:${fleet}`}`;
     const current = txDailyByDayFleet.get(key) || { txCostSol: 0 };
     current.txCostSol += value;
     txDailyByDayFleet.set(key, current);
@@ -6120,7 +6121,7 @@ ${scopeFilterFlux}
   }
 
   for (const row of rowsByKey.values()) {
-    const txDaily = txDailyByDayFleet.get(`${row.isoDate}\n${row.fleet}`) || { txCostSol: 0 };
+    const txDaily = txDailyByDayFleet.get(`${row.isoDate}\n${row.fleetAccount || `label:${row.fleet}`}`) || { txCostSol: 0 };
     row.txCostSol = txDaily.txCostSol;
   }
 
@@ -6842,7 +6843,7 @@ async function fetchEarningsSnapshot(payload) {
     ? selectLegacyRawCutover({ legacyRows: compatibilityCargoRows, rawRecords: rawCargoCosts.records, ...rawExporter })
     : { cutover: null, legacyRows: cargoRows, rawRecords: [], trackingDisabled: false };
   const valuedCanonicalRawCosts = await valueCanonicalRawCosts(cutoverSelection.rawRecords, {
-    resolvePrice: (asset, date) => atlasPriceResolver.resolveAtlasPrice(asset, date),
+    resolvePrice: async (asset, date) => requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice(asset, date), date),
   });
   const canonicalRawDailyRows = aggregateRawCostsByFleetDay(valuedCanonicalRawCosts)
     .map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) }));
@@ -6993,15 +6994,15 @@ async function fetchEarningsSnapshot(payload) {
   }
   const activeCargoFleetKeys = new Set();
   const activeMappedCargoFleetKeys = new Set();
-  const cargo = await Promise.all(cargoRows.map(async (cargoRow) => {
+  let cargo = await Promise.all(cargoRows.map(async (cargoRow) => {
     const canonicalRaw = cargoRow.sourceMode === 'canonical_raw';
-    const fleet = canonicalRaw
-      ? fleetByAccount.get(String(cargoRow.fleetAccount || '').trim())
-      : fleetByLabel.get(normalizeFleetLabel(cargoRow.fleet));
+    const authoritativeAccount = String(cargoRow.fleetAccount || '').trim();
+    const fleet = (authoritativeAccount ? fleetByAccount.get(authoritativeAccount) : null)
+      || (!authoritativeAccount ? fleetByLabel.get(normalizeFleetLabel(cargoRow.fleet)) : null);
     const activeKey = fleet?.key || (canonicalRaw ? String(cargoRow.allocationKey || '') : normalizeFleetLabel(cargoRow.fleet));
     activeCargoFleetKeys.add(activeKey);
     if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
-    const fuelPrice = canonicalRaw ? cargoRow.fuelValuation : await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate);
+    const fuelPrice = canonicalRaw ? cargoRow.fuelValuation : requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate), cargoRow.isoDate);
     const canonicalCostAvailable = !canonicalRaw || cargoRow.costEvidenceStatus === 'available';
     const fuelCostsAtlas = canonicalRaw
       ? (canonicalCostAvailable ? cargoRow.fuelValuation?.amountATL ?? null : null)
@@ -7017,6 +7018,8 @@ async function fetchEarningsSnapshot(payload) {
     const netProfitAtlas = Number.isFinite(totalCostsAtlas) ? -totalCostsAtlas : null;
     return {
       ...cargoRow,
+      profile: profileName,
+      faction: normalizeFaction(settings.faction),
       fleetName: fleet?.label || (cargoRow.allocationStatus === 'unallocated' ? 'Unallocated' : cargoRow.fleet),
       fleetAccount: fleet?.key || cargoRow.fleetAccount || '',
       rented: fleet?.relationship === 'managed' || fleet?.relationship === 'owned-managed',
@@ -7048,6 +7051,7 @@ async function fetchEarningsSnapshot(payload) {
         : null,
     };
   }));
+  cargo = projectCargoFleetDateRows(cargo, { profile: profileName, faction: normalizeFaction(settings.faction) });
   const legacyCargoCostPool = buildCargoCostPool(cargo.filter((row) => row.sourceMode !== 'canonical_raw').map((row) => ({
     fleetAccount: row.fleetAccount || row.fleetName,
     isoDate: row.isoDate,
@@ -7076,26 +7080,29 @@ async function fetchEarningsSnapshot(payload) {
   const cargoCostPool = mergeCargoCostPools(legacyCargoCostPool, canonicalRawCostPool);
   // Scope allocation rows through the already faction-scoped movement fleets,
   // while preserving each fleet and route as separate cost dimensions.
-  const scopedCargoFleetLabels = new Set(compatibilityCargoRows.map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
+  const scopedCargoFleetAccounts = new Set(compatibilityCargoRows.map((row) => String(row.fleetAccount || '').trim()).filter(Boolean));
+  const scopedCargoFleetLabels = new Set(compatibilityCargoRows.filter((row) => !String(row.fleetAccount || '').trim()).map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
   const fleetScopedCargoAllocationRows = cargoAllocationRows.filter((row) =>
-    scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet))
+    (String(row.fleetAccount || '').trim() && scopedCargoFleetAccounts.has(String(row.fleetAccount).trim()))
+      || (!String(row.fleetAccount || '').trim() && scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet)))
   );
   const scopedCargoAllocationRows = filterCargoAllocationsToCompletedCycles(fleetScopedCargoAllocationRows, compatibilityCargoRows);
   let enrichedCargoAllocationRows = enrichCargoAllocationRows(
     scopedCargoAllocationRows,
     fleetByLabel,
-    normalizeFleetLabel
+    normalizeFleetLabel,
+    fleetByAccount
   );
   if (cutoverSelection.cutover) {
     enrichedCargoAllocationRows = applyRawCostsToCargoAllocations(enrichedCargoAllocationRows, canonicalRawDailyRows, cutoverSelection.cutover);
   }
   const valueCargoAllocation = async (row) => {
-    const fuelPrice = await atlasPriceResolver.resolveAtlasPrice('Fuel', row.isoDate);
+    const fuelPrice = requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice('Fuel', row.isoDate), row.isoDate);
     const canonicalRaw = row.sourceMode === 'canonical_raw';
     const fuelValuation = canonicalRaw && Number(row.allocatedFuelExact || 0) > 0
       ? valueNativeCost({ eventType: 'fuel', timestamp: row.timestamp, fuelQuantity: row.allocatedFuelExact }, fuelPrice)
       : null;
-    const solPrice = canonicalRaw ? await atlasPriceResolver.resolveAtlasPrice('SOL', row.isoDate) : null;
+    const solPrice = canonicalRaw ? requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice('SOL', row.isoDate), row.isoDate) : null;
     const solValuation = canonicalRaw && BigInt(row.allocatedTxFeeLamports || '0') > 0n
       ? valueNativeCost({ eventType: 'sol_fee', timestamp: row.timestamp, txFeeLamports: row.allocatedTxFeeLamports }, solPrice)
       : null;
@@ -7136,15 +7143,15 @@ async function fetchEarningsSnapshot(payload) {
       costsPerUnitAtlas: Number.isFinite(totalCostsAtlas) && row.amount > 0 ? totalCostsAtlas / row.amount : null,
     };
   }));
-  const cargoVolumeByFleetDayAssignment = buildCargoVolumeByFleetDayAssignment(cargoAllocations);
+  const cargoVolumeByFleetDayMap = buildCargoVolumeByFleetDay(cargoAllocations);
   const cargoAllocationAvailable = cargoAllocationResult.status === 'fulfilled';
   const cargoAllocationAvailability = cargoAllocationAvailable
     ? (cargoAllocationRows.length ? 'available' : 'empty')
     : 'unavailable';
   for (const row of cargo) {
-    const volumeKey = `${row.isoDate}\n${normalizeFleetLabel(row.fleetName)}\n${row.assignment}`;
-    const cargoVolume = cargoAllocationAvailable && cargoVolumeByFleetDayAssignment.has(volumeKey)
-      ? cargoVolumeByFleetDayAssignment.get(volumeKey)
+    const volumeKey = `${row.isoDate}\n${normalizeFleetLabel(row.fleetAccount)}`;
+    const cargoVolume = cargoAllocationAvailable && cargoVolumeByFleetDayMap.has(volumeKey)
+      ? cargoVolumeByFleetDayMap.get(volumeKey)
       : null;
     const efficiency = calculateCargoEfficiency({
       cargoVolume,

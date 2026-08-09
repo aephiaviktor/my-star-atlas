@@ -116,6 +116,42 @@ function selectCutoverOwnedCargoRows({ legacyRows = [], operationalRows = [], cu
   };
 }
 
+function projectCargoFleetDateRows(rows = [], { profile = '', faction = '', selectedDate = '' } = {}) {
+  const expectedProfile = clean(profile);
+  const expectedFaction = clean(faction).toUpperCase();
+  const requestedDate = clean(selectedDate);
+  const groups = new Map();
+  for (const row of rows) {
+    const isoDate = /^\d{4}-\d{2}-\d{2}$/.test(clean(row?.isoDate)) ? clean(row.isoDate) : '';
+    const fleetAccount = clean(row?.fleetAccount);
+    const rowProfile = clean(row?.profile || expectedProfile);
+    const rowFaction = clean(row?.faction || expectedFaction).toUpperCase();
+    if (!isoDate || !fleetAccount || (requestedDate && isoDate !== requestedDate)
+      || (expectedProfile && rowProfile !== expectedProfile)
+      || (expectedFaction && rowFaction !== expectedFaction)) continue;
+    const key = `${rowProfile}\n${rowFaction}\n${fleetAccount}\n${isoDate}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ ...row, profile: rowProfile, faction: rowFaction, fleetAccount, isoDate });
+  }
+  const sumFields = ['burnedFuel', 'fuelCostsAtlas', 'txCostSol', 'txsCostsAtlas', 'totalCostsAtlas', 'txsDaily', 'cargoCycles', 'cargoLegs', 'cargoVolume'];
+  return Array.from(groups.values()).map((fragments) => {
+    const sorted = [...fragments].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    const first = sorted[0];
+    const result = { ...first };
+    for (const field of sumFields) result[field] = sumKnown(sorted, field);
+    const names = Array.from(new Set(sorted.map((row) => clean(row.fleetName || row.fleet)).filter(Boolean))).sort();
+    result.fleetName = names[0] || first.fleetAccount;
+    result.fleet = result.fleetName;
+    const assignments = Array.from(new Set(sorted.map((row) => clean(row.assignment)).filter(Boolean))).sort();
+    result.assignment = assignments.length === 1 ? assignments[0] : (assignments.length ? 'Mixed' : null);
+    result.completedCycleIds = Array.from(new Set(sorted.flatMap((row) => Array.isArray(row.completedCycleIds) ? row.completedCycleIds : []).map(clean).filter(Boolean))).sort();
+    result.starbases = Array.from(new Set(sorted.flatMap((row) => Array.isArray(row.starbases) ? row.starbases : []).map(clean).filter(Boolean))).sort();
+    result.starbaseLabel = result.starbases.length ? result.starbases.join(', ') : '--';
+    result.timestamp = sorted.map((row) => clean(row.timestamp)).filter(Boolean).sort()[0] || `${result.isoDate}T00:00:00.000Z`;
+    return result;
+  }).sort((a, b) => clean(b.isoDate).localeCompare(clean(a.isoDate)) || clean(a.fleetAccount).localeCompare(clean(b.fleetAccount)));
+}
+
 function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [], operationalRows = [] } = {}) {
   const operations = aggregateOperationalCargoRows(operationalRows);
   const costs = new Map(costRows
@@ -158,4 +194,4 @@ function operationalCargoDigest(rows = []) {
   return crypto.createHash('sha256').update(rows.map((row) => JSON.stringify(row)).join('\n')).digest('hex');
 }
 
-module.exports = { projectCargoTableRow, provisionalValuationTooltip, joinCanonicalCostsWithOperationalRows, operationalCargoDigest, aggregateOperationalCargoRows, canonicalOperationalSection, selectCutoverOwnedCargoRows };
+module.exports = { projectCargoTableRow, provisionalValuationTooltip, joinCanonicalCostsWithOperationalRows, operationalCargoDigest, aggregateOperationalCargoRows, canonicalOperationalSection, selectCutoverOwnedCargoRows, projectCargoFleetDateRows };

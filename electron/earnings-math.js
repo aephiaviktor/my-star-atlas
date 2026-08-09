@@ -37,11 +37,24 @@ function buildCargoVolumeByFleetDayAssignment(rows = []) {
   const totals = new Map();
   for (const row of rows) {
     const isoDate = String(row?.isoDate || '').trim();
-    const fleet = normalizeFleetKey(row?.fleetName || row?.fleet);
+    const fleet = normalizeFleetKey(row?.fleetAccount || row?.fleetName || row?.fleet);
     const assignment = String(row?.assignment || '').trim();
     const cargoVolume = Number(row?.cargoVolume);
     if (!isoDate || !fleet || !assignment || !Number.isFinite(cargoVolume) || cargoVolume < 0) continue;
     const key = `${isoDate}\n${fleet}\n${assignment}`;
+    totals.set(key, (totals.get(key) || 0) + cargoVolume);
+  }
+  return totals;
+}
+
+function buildCargoVolumeByFleetDay(rows = []) {
+  const totals = new Map();
+  for (const row of rows) {
+    const isoDate = String(row?.isoDate || '').trim();
+    const fleetAccount = normalizeFleetKey(row?.fleetAccount);
+    const cargoVolume = Number(row?.cargoVolume);
+    if (!isoDate || !fleetAccount || !Number.isFinite(cargoVolume) || cargoVolume < 0) continue;
+    const key = `${isoDate}\n${fleetAccount}`;
     totals.set(key, (totals.get(key) || 0) + cargoVolume);
   }
   return totals;
@@ -77,6 +90,7 @@ module.exports = {
   calculateFleetCargoCapacity,
   calculateCargoEfficiency,
   buildCargoVolumeByFleetDayAssignment,
+  buildCargoVolumeByFleetDay,
   filterCargoAllocationsToCompletedCycles,
   calculateTravelModeTime,
 };
