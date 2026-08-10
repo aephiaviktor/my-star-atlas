@@ -188,6 +188,44 @@ function buildCargoAllocationRecords(fieldRows = [], includedDays = null) {
   return Array.from(grouped.values()).sort((a, b) => b.isoDate.localeCompare(a.isoDate) || a.fleet.localeCompare(b.fleet) || a.asset.localeCompare(b.asset) || a.origin.localeCompare(b.origin) || a.destination.localeCompare(b.destination) || a.assignment.localeCompare(b.assignment));
 }
 
+function buildCargoAllocationRecordsFromPivotRows(pivotRows = [], includedDays = null) {
+  const records = new Map();
+  for (const row of pivotRows) {
+    const isoDate = utcDateKey(row?._time);
+    const cycleId = String(row?.cycleId || '').trim();
+    const allocationIndex = String(row?.allocationIndex ?? '').trim();
+    const fleet = String(row?.fleet || '').trim();
+    const fleetAccount = cargoFleetAccountFromCycleId(cycleId) || '';
+    const numericFields = [row?.amount, row?.cargoVolume, row?.allocatedFuel, row?.allocatedTxCostSol];
+    const [amount, cargoVolume, allocatedFuel, allocatedTxCostSol] = numericFields.map(Number);
+    if (!isoDate || (includedDays && !includedDays.has(isoDate)) || !cycleId || !allocationIndex || !fleet || !fleetAccount
+      || numericFields.some((value) => value == null || String(value).trim() === '')
+      || ![amount, cargoVolume, allocatedFuel, allocatedTxCostSol].every(Number.isFinite)) continue;
+    const key = `${cycleId}\n${allocationIndex}`;
+    if (records.has(key)) continue;
+    records.set(key, {
+      isoDate,
+      timestamp: new Date(row._time).toISOString(),
+      label: isoDate,
+      faction: String(row?.faction || '').trim(),
+      instance: String(row?.instance || '').trim(),
+      fleet,
+      fleetAccount,
+      asset: String(row?.rss || 'Unknown asset').trim() || 'Unknown asset',
+      origin: String(row?.originStarbase || '').trim() || '--',
+      destination: String(row?.deliveryStarbase || '').trim() || '--',
+      assignment: String(row?.assignment || 'Unknown').trim() || 'Unknown',
+      cycleId,
+      allocationIndex,
+      amount,
+      cargoVolume,
+      allocatedFuel,
+      allocatedTxCostSol,
+    });
+  }
+  return Array.from(records.values()).sort((a, b) => b.isoDate.localeCompare(a.isoDate) || a.fleet.localeCompare(b.fleet) || a.asset.localeCompare(b.asset) || a.origin.localeCompare(b.origin) || a.destination.localeCompare(b.destination) || a.assignment.localeCompare(b.assignment) || a.cycleId.localeCompare(b.cycleId) || a.allocationIndex.localeCompare(b.allocationIndex));
+}
+
 function buildCargoRowsFromCompletedAllocations({ completionRows = [], allocationRows = [], includedDays = null } = {}) {
   const allocationsByCycle = new Map();
   for (const row of allocationRows) {
@@ -271,4 +309,4 @@ function mergeCargoRowsWithCompletedAllocations({ movementRows = [], completionR
   return Array.from(byIdentity.values()).sort((a, b) => a.isoDate.localeCompare(b.isoDate));
 }
 
-module.exports = { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows, buildCargoAllocationRecords, buildCargoRowsFromCompletedAllocations, canonicalCargoUtcDay, cargoFleetDayIdentity, mergeCargoRowsWithCompletedAllocations };
+module.exports = { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, dedupeCargoAllocationFieldRows, buildCargoAllocationRecords, buildCargoAllocationRecordsFromPivotRows, buildCargoRowsFromCompletedAllocations, canonicalCargoUtcDay, cargoFleetDayIdentity, mergeCargoRowsWithCompletedAllocations };

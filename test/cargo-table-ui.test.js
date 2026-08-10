@@ -33,6 +33,20 @@ test('optional Cargo telemetry queries cannot discard core fleet rows', () => {
 
 test('Cargo query errors expose the actionable failure instead of a generic unavailable label', () => {
   assert.match(js, /Cargo query failed: \$\{formatInfluxError\(result\.cargoError\)\}/);
+  assert.match(js, /cargo_allocation_query_timeout_/);
+  assert.match(js, /cargo_allocation_response_rejected:/);
+  assert.match(js, /cargo_allocation_connectivity_failure/);
+});
+
+test('Cargo Allocation uses bounded complete pivot batches without changing filters or formulas', () => {
+  assert.match(main, /function cargoAllocationUtcBatches\(days = 30, batchDays = 5\)/);
+  assert.match(main, /pivot\(rowKey: \["_time", "cycleId", "allocationIndex"\]/);
+  assert.match(main, /exists r\.amount and exists r\.cargoVolume and exists r\.allocatedFuel and exists r\.allocatedTxCostSol/);
+  assert.match(main, /for \(const batch of batches\)/);
+  assert.doesNotMatch(main.slice(main.indexOf('function buildCargoAllocationPivotFlux'), main.indexOf('async function fetchCargoVolumeEarningsRows')), /sort\(columns:/);
+  assert.match(js, /earningsCargoAllocationDateFilter/);
+  assert.match(js, /earningsCargoAllocationFleetFilter/);
+  assert.match(js, /earningsCargoAllocationAssetFilter/);
 });
 
 test('Cargo table shows completed cycles immediately after Txs Daily', () => {
