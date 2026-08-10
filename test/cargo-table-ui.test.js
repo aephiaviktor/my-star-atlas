@@ -39,7 +39,8 @@ test('Cargo query errors expose the actionable failure instead of a generic unav
 });
 
 test('Cargo Allocation uses bounded complete pivot batches without changing filters or formulas', () => {
-  assert.match(main, /function cargoAllocationUtcBatches\(days = 30, batchDays = 5\)/);
+  assert.match(main, /cargoAllocationUtcBatches/);
+  assert.match(main, /if \(!batches\.length\) throw new Error\('cargo_allocation_invalid_utc_batches'\)/);
   assert.match(main, /pivot\(rowKey: \["_time", "cycleId", "allocationIndex"\]/);
   assert.match(main, /exists r\.amount and exists r\.cargoVolume and exists r\.allocatedFuel and exists r\.allocatedTxCostSol/);
   assert.match(main, /for \(const batch of batches\)/);
@@ -47,6 +48,12 @@ test('Cargo Allocation uses bounded complete pivot batches without changing filt
   assert.match(js, /earningsCargoAllocationDateFilter/);
   assert.match(js, /earningsCargoAllocationFleetFilter/);
   assert.match(js, /earningsCargoAllocationAssetFilter/);
+  assert.match(main, /cargo_allocation_processing_zero:/);
+  assert.match(js, /Cargo allocation processing rejected all upstream records/);
+  assert.match(main, /completedCycleIdentityCount/);
+  assert.match(main, /exactCycleMatchCount/);
+  assert.match(main, /completedCycleMatchedCount/);
+  assert.match(main, /ipcRowCount/);
 });
 
 test('Cargo table shows completed cycles immediately after Txs Daily', () => {

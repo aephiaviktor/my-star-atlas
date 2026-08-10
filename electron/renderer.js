@@ -1804,6 +1804,7 @@ function formatInfluxError(value) {
   if (/cargo_allocation_query_timeout_(\d+)ms/i.test(error)) return `Cargo allocation query timed out after ${error.match(/timeout_(\d+)ms/i)?.[1] || '15000'} ms.`;
   if (/cargo_allocation_response_rejected:/i.test(error)) return `Cargo allocation response was rejected: ${error.split(':').slice(1).join(':').slice(0, 180)}`;
   if (/cargo_allocation_connectivity_failure/i.test(error)) return 'Could not connect to the Influx server for Cargo allocation data.';
+  if (/cargo_allocation_processing_zero:/i.test(error)) return `Cargo allocation processing rejected all upstream records: ${error.split(':').slice(1).join(':').slice(0, 180)}`;
   if (/cargo_allocation_query_failed:/i.test(error)) return `Cargo allocation query failed: ${error.split(':').slice(1).join(':').slice(0, 180)}`;
   if (/influx_flux_\d+/i.test(error)) return `Influx query failed (${error.match(/\d+/)?.[0] || 'HTTP error'}).`;
   if (/fetch failed|network|timed?\s*out|abort/i.test(error)) return 'Could not reach the Influx server.';

@@ -8,6 +8,8 @@ const {
   enrichCargoAllocationRows,
   dedupeCargoAllocationFieldRows,
   buildCargoAllocationRecords,
+  cargoAllocationUtcBatches,
+  cargoAllocationProcessingFailure,
   buildCargoAllocationRecordsFromPivotRows,
 } = require('../electron/influx-data');
 
@@ -27,6 +29,23 @@ test('cargo allocation field rows deduplicate repeated cycle allocations', () =>
     { _field: 'cargoVolume', _value: '200' },
     { _field: 'cargoVolume', _value: '200' },
   ]);
+});
+
+test('Cargo Allocation UTC batches cover exactly 30 days oldest to newest', () => {
+  const batches = cargoAllocationUtcBatches({ now: new Date('2026-08-10T16:00:00.000Z') });
+  assert.equal(batches.length, 6);
+  assert.deepEqual(batches[0], { start: '2026-07-12T00:00:00.000Z', stop: '2026-07-17T00:00:00.000Z' });
+  assert.deepEqual(batches[5], { start: '2026-08-06T00:00:00.000Z', stop: '2026-08-11T00:00:00.000Z' });
+  for (let index = 1; index < batches.length; index += 1) assert.equal(batches[index - 1].stop, batches[index].start);
+});
+
+test('upstream-positive downstream-zero Allocation processing fails closed with bounded stages', () => {
+  const failure = cargoAllocationProcessingFailure(42, 0, { parsedRecordCount: 42, exactCycleMatchCount: 0 });
+  assert.match(failure, /^cargo_allocation_processing_zero:/);
+  assert.match(failure, /"parsedRecordCount":42/);
+  assert.ok(failure.length <= 240);
+  assert.equal(cargoAllocationProcessingFailure(0, 0, {}), '');
+  assert.equal(cargoAllocationProcessingFailure(42, 3, {}), '');
 });
 
 test('pivoted Cargo allocations preserve exact identity and reject incomplete records', () => {

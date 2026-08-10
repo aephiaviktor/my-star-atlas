@@ -36,7 +36,7 @@ const {
 } = require('./telemetry-context');
 const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./telemetry-rpc-fetch');
 const { dependencyInstallRequired } = require('./update-dependencies');
-const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, buildCargoAllocationRecordsFromPivotRows, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
+const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, cargoAllocationUtcBatches, cargoAllocationProcessingFailure, buildCargoAllocationRecordsFromPivotRows, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
@@ -6569,21 +6569,6 @@ ${scopeFilterFlux}
     .filter((row) => row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0);
 }
 
-function cargoAllocationUtcBatches(days = 30, batchDays = 5) {
-  const utcDays = getLastUtcDays(days);
-  if (!utcDays.length) return [];
-  const oldestMs = Date.parse(`${getUtcDateKey(utcDays[utcDays.length - 1])}T00:00:00.000Z`);
-  const stopMs = Date.parse(`${getUtcDateKey(utcDays[0])}T00:00:00.000Z`) + 86_400_000;
-  const batches = [];
-  for (let startMs = oldestMs; startMs < stopMs; startMs += batchDays * 86_400_000) {
-    batches.push({
-      start: new Date(startMs).toISOString(),
-      stop: new Date(Math.min(stopMs, startMs + batchDays * 86_400_000)).toISOString(),
-    });
-  }
-  return batches;
-}
-
 function buildCargoAllocationPivotFlux(bucket, scopeFilterFlux, { start, stop }) {
   return `from(bucket: "${bucket}")
   |> range(start: time(v: "${start}"), stop: time(v: "${stop}"))
@@ -6604,23 +6589,37 @@ async function fetchCargoAllocationEarningsRows(settings) {
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const batches = cargoAllocationUtcBatches();
+  if (!batches.length) throw new Error('cargo_allocation_invalid_utc_batches');
   const pivotRows = [];
+  const batchRecordCounts = [];
   for (const batch of batches) {
     const flux = buildCargoAllocationPivotFlux(bucket, scopeFilterFlux, batch);
-    pivotRows.push(...parseInfluxCsv(await queryInfluxFlux(settings, flux)));
+    const parsedRows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
+    batchRecordCounts.push(parsedRows.length);
+    pivotRows.push(...parsedRows);
   }
+  const completeValueCount = pivotRows.filter((row) =>
+    ['amount', 'cargoVolume', 'allocatedFuel', 'allocatedTxCostSol']
+      .every((field) => row?.[field] != null && String(row[field]).trim() !== '')
+  ).length;
   const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
   const rows = buildCargoAllocationRecordsFromPivotRows(pivotRows, includedDays)
     .map((row) => ({ ...row, label: formatShortUtcDate(new Date(row.timestamp)) }));
-  return {
-    rows,
-    diagnostics: {
-      durationMs: Date.now() - startedAt,
-      returnedRecordCount: pivotRows.length,
-      deduplicatedAllocationCount: rows.length,
-      batchCount: batches.length,
-    },
+  const diagnostics = {
+    durationMs: Date.now() - startedAt,
+    batchCount: batches.length,
+    batchRecordCounts,
+    returnedRecordCount: pivotRows.length,
+    parsedRecordCount: pivotRows.length,
+    completeValueCount,
+    deduplicatedAllocationCount: rows.length,
+    derivedFleetAccountCount: rows.filter((row) => row.fleetAccount).length,
+    factionUtcMatchedCount: rows.length,
   };
+  if (pivotRows.length && !rows.length) {
+    throw new Error(`cargo_allocation_processing_zero:${JSON.stringify(diagnostics)}`.slice(0, 240));
+  }
+  return { rows, diagnostics };
 }
 
 async function fetchCargoVolumeEarningsRows(settings) {
@@ -7171,6 +7170,16 @@ async function fetchEarningsSnapshot(payload) {
       || (!String(row.fleetAccount || '').trim() && scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet)))
   );
   const scopedCargoAllocationRows = filterCargoAllocationsToCompletedCycles(fleetScopedCargoAllocationRows, compatibilityCargoRows);
+  const completedCargoCycleIdsForAllocation = new Set(compatibilityCargoRows
+    .flatMap((row) => Array.isArray(row.completedCycleIds) ? row.completedCycleIds : [])
+    .map((cycleId) => String(cycleId || '').trim())
+    .filter(Boolean));
+  if (cargoAllocationQueryDiagnostics) {
+    cargoAllocationQueryDiagnostics.completedCycleIdentityCount = completedCargoCycleIdsForAllocation.size;
+    cargoAllocationQueryDiagnostics.exactCycleMatchCount = cargoAllocationRows.filter((row) => completedCargoCycleIdsForAllocation.has(String(row.cycleId || '').trim())).length;
+    cargoAllocationQueryDiagnostics.fleetScopedCount = fleetScopedCargoAllocationRows.length;
+    cargoAllocationQueryDiagnostics.completedCycleMatchedCount = scopedCargoAllocationRows.length;
+  }
   let enrichedCargoAllocationRows = enrichCargoAllocationRows(
     scopedCargoAllocationRows,
     fleetByLabel,
@@ -7237,7 +7246,11 @@ async function fetchEarningsSnapshot(payload) {
   );
   const cargoVolumeByFleetDayMap = buildCargoVolumeByFleetDay(scopedCargoVolumeRows);
   const cargoVolumeAvailable = cargoVolumeResult.status === 'fulfilled';
-  const cargoAllocationAvailable = cargoAllocationResult.status === 'fulfilled';
+  if (cargoAllocationQueryDiagnostics) cargoAllocationQueryDiagnostics.ipcRowCount = cargoAllocations.length;
+  const processingFailure = cargoAllocationProcessingFailure(cargoAllocationRows.length, cargoAllocations.length, cargoAllocationQueryDiagnostics || {});
+  const allocationProcessingLostAllRows = Boolean(processingFailure);
+  if (processingFailure) cargoAllocationError = processingFailure;
+  const cargoAllocationAvailable = cargoAllocationResult.status === 'fulfilled' && !allocationProcessingLostAllRows;
   const cargoAllocationAvailability = cargoAllocationAvailable
     ? (cargoAllocationRows.length ? 'available' : 'empty')
     : 'unavailable';
