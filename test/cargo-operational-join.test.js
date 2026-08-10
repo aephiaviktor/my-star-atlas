@@ -106,15 +106,36 @@ test('actual ONI cutover overlap becomes one canonical fleet-day with conserved 
   });
 });
 
-test('operational Cargo row without cost fails closed as unavailable', () => {
+test('operational Cargo row without canonical cost falls back to operational legacy costs', () => {
   const [row] = joinCanonicalCostsWithOperationalRows({ operationalRows: [op()] });
-  assert.equal(row.sourceMode, 'canonical_raw');
+  assert.equal(row.sourceMode, 'legacy');
   assert.equal(row.txsDaily, 318);
-  assert.equal(row.costEvidenceStatus, 'unavailable');
-  assert.equal(row.burnedFuel, null);
-  assert.equal(row.txFeeLamports, null);
-  assert.equal(row.fuelValuation.amountATL, null);
-  assert.equal(row.solValuation.amountATL, null);
+  assert.equal(row.costEvidenceStatus, 'legacy_fallback');
+  assert.deepEqual(row.costSourceSelection, { fuel: 'legacy', fee: 'legacy' });
+});
+
+test('partial canonical coverage suppresses only the matching component', () => {
+  const legacy = op({ burnedFuel: 99, txCostSol: 0.123, txsDaily: 12, label: '08/05' });
+  const [row] = joinCanonicalCostsWithOperationalRows({
+    costRows: [cost({ hasFuelCoverage: true, hasFeeCoverage: false, txFeeLamports: '0', txCostSol: 0, solValuation: null })],
+    operationalRows: [legacy],
+  });
+  assert.equal(row.sourceMode, 'mixed_cost_source');
+  assert.deepEqual(row.costSourceSelection, { fuel: 'canonical', fee: 'legacy' });
+  assert.equal(row.burnedFuel, 12.5);
+  assert.equal(row.txCostSol, 0.123);
+  assert.equal(row.txsDaily, 12);
+  assert.equal(row.label, '08/05');
+});
+
+test('canonical SOL fee without authoritative fleet account cannot suppress legacy fee', () => {
+  const [row] = joinCanonicalCostsWithOperationalRows({
+    costRows: [cost({ fleetAccount: '', allocationStatus: 'unallocated', hasFeeCoverage: true })],
+    operationalRows: [op({ txCostSol: 0.111, txsDaily: 9 })],
+  });
+  assert.equal(row.sourceMode, 'legacy');
+  assert.equal(row.txCostSol, 0.111);
+  assert.deepEqual(row.costSourceSelection, { fuel: 'legacy', fee: 'legacy' });
 });
 
 test('observed canonical zero remains a genuine numeric zero', () => {

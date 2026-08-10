@@ -162,12 +162,13 @@ function aggregateRawCostsByFleetDay(records = []) {
       ? `fleet:${fleetAccount}`
       : `unallocated:v1:${record.faction}:${record.instance}:${isoDate}:${record.eventType}`;
     const key = `${isoDate}\n${allocationKey}`;
-    if (!groups.has(key)) groups.set(key, { isoDate, faction: record.faction, instance: record.instance, fleetAccount, allocationKey, allocationStatus, eventType: fleetAccount ? null : record.eventType, fuel: [], lamports: 0n, transactions: 0, fuelValuations: [], solValuations: [], sourceIds: [] });
+    if (!groups.has(key)) groups.set(key, { isoDate, faction: record.faction, instance: record.instance, fleetAccount, allocationKey, allocationStatus, eventType: fleetAccount ? null : record.eventType, fuel: [], lamports: 0n, transactions: 0, fuelValuations: [], solValuations: [], sourceIds: [], hasFuelCoverage: false, hasFeeCoverage: false });
     const group = groups.get(key);
-    if (record.eventType === 'fuel') group.fuel.push(record.fuelQuantity);
+    if (record.eventType === 'fuel') { group.fuel.push(record.fuelQuantity); group.hasFuelCoverage = true; }
     if (record.eventType === 'sol_fee') {
       group.lamports += BigInt(record.txFeeLamports);
       group.transactions += 1;
+      group.hasFeeCoverage = true;
     }
     if (record.eventType === 'fuel') group.fuelValuations.push(record.valuation);
     if (record.eventType === 'sol_fee') group.solValuations.push(record.valuation);
@@ -197,6 +198,7 @@ function aggregateRawCostsByFleetDay(records = []) {
       starbases: [], completedCycleIds: [], cargoCycles: 0, cargoLegs: 0,
       travelModeTime: null, travelModeWarpPercent: null, sourceIds: group.sourceIds.sort(), sourceMode: 'canonical_raw',
       fuelValuation: aggregateValuation(group.fuelValuations), solValuation: aggregateValuation(group.solValuations),
+      hasFuelCoverage: group.hasFuelCoverage, hasFeeCoverage: group.hasFeeCoverage,
     };
   });
 }

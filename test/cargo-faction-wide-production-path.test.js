@@ -106,8 +106,9 @@ for (const scope of factions) {
     assert.equal(calculateCargoEfficiency(row).cargoEfficiencyPercent, 80.2);
 
     const [missing] = joinCanonicalCostsWithOperationalRows({ operationalRows: [operation] });
-    assert.equal(missing.costEvidenceStatus, 'unavailable');
-    assert.equal(missing.burnedFuel, null);
+    assert.equal(missing.costEvidenceStatus, 'legacy_fallback');
+    assert.equal(missing.sourceMode, 'legacy');
+    assert.equal(missing.burnedFuel, operation.burnedFuel);
     const [zero] = joinCanonicalCostsWithOperationalRows({ costRows: [canonicalCost(scope, account, { burnedFuelExact: '0', burnedFuel: 0, txFeeLamports: '0', txCostSolExact: '0', txCostSol: 0, fuelValuation: { status: 'complete', amountATL: 0 }, solValuation: { status: 'complete', amountATL: 0 } })], operationalRows: [operation] });
     assert.equal(zero.costEvidenceStatus, 'available');
     assert.equal(zero.burnedFuel, 0);

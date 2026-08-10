@@ -107,6 +107,35 @@ function emptyCanonicalCost(operation) {
   };
 }
 
+function componentCovered(cost, component) {
+  if (!cost || cost.allocationStatus === 'unallocated') return false;
+  if (component === 'fuel') return cost.hasFuelCoverage !== false && clean(cost.fleetAccount) && finiteOrNull(cost.burnedFuel) != null && cost.fuelValuation?.status !== 'unavailable';
+  if (component === 'fee') return cost.hasFeeCoverage !== false && clean(cost.fleetAccount) && clean(cost.txFeeLamports) !== '' && cost.solValuation?.status !== 'unavailable';
+  return false;
+}
+
+function mergeComponentCosts(operation, cost) {
+  const empty = emptyCanonicalCost(operation);
+  const fuelCovered = componentCovered(cost, 'fuel');
+  const feeCovered = componentCovered(cost, 'fee');
+  const sourceMode = fuelCovered && feeCovered ? 'canonical_raw' : (fuelCovered || feeCovered ? 'mixed_cost_source' : 'legacy');
+  return {
+    ...(sourceMode === 'legacy' ? operation : { ...empty, ...cost }),
+    sourceMode,
+    costEvidenceStatus: fuelCovered || feeCovered ? (fuelCovered && feeCovered ? 'available' : 'partial') : 'legacy_fallback',
+    costSourceSelection: { fuel: fuelCovered ? 'canonical' : 'legacy', fee: feeCovered ? 'canonical' : 'legacy' },
+    burnedFuelExact: fuelCovered ? cost.burnedFuelExact : operation.burnedFuelExact,
+    burnedFuel: fuelCovered ? cost.burnedFuel : operation.burnedFuel,
+    fuelValuation: fuelCovered ? cost.fuelValuation : null,
+    txFeeLamports: feeCovered ? cost.txFeeLamports : operation.txFeeLamports,
+    txCostSolExact: feeCovered ? cost.txCostSolExact : operation.txCostSolExact,
+    txCostSol: feeCovered ? cost.txCostSol : operation.txCostSol,
+    solValuation: feeCovered ? cost.solValuation : null,
+    txsDaily: feeCovered ? (finiteOrNull(cost.txsDaily) ?? 0) : (finiteOrNull(operation.txsDaily) ?? 0),
+    sourceIds: [...(fuelCovered || feeCovered ? cost.sourceIds || [] : [])],
+  };
+}
+
 function selectCutoverOwnedCargoRows({ legacyRows = [], operationalRows = [], cutover = null } = {}) {
   const cutoverDay = clean(cutover).slice(0, 10);
   if (!cutoverDay) return { legacyRows: [...legacyRows], operationalRows: [] };
@@ -162,7 +191,7 @@ function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [],
     .filter(([, operation]) => canonicalOperationalSection(operation.assignment) === 'cargo')
     .map(([identity, operation]) => {
       const matchedCost = costs.get(identity);
-      const cost = matchedCost || emptyCanonicalCost(operation);
+      const cost = mergeComponentCosts(operation, matchedCost);
       return {
         ...cost,
         fleet: operation.fleet,
@@ -170,6 +199,7 @@ function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [],
         faction: operation.faction,
         instance: operation.instance,
         isoDate: operation.isoDate,
+        label: operation.label,
         assignment: operation.assignment,
         txsDaily: finiteOrNull(cost.txsDaily) ?? finiteOrNull(operation.txsDaily) ?? 0,
         completedCycleIds: operation.completedCycleIds,
@@ -181,7 +211,7 @@ function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [],
         travelModeWarpPercent: operation.travelModeWarpPercent,
         cargoVolume: operation.cargoVolume ?? 0,
         fleetCargoCapacity: operation.fleetCargoCapacity,
-        costEvidenceStatus: matchedCost ? 'available' : 'unavailable',
+        costEvidenceStatus: cost.costEvidenceStatus,
         operationalStatus: 'joined',
         operationalReason: null,
       };
@@ -190,8 +220,36 @@ function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [],
   return [...legacyRows.filter((row) => canonicalOperationalSection(row?.assignment) === 'cargo'), ...canonical];
 }
 
+function cargoCostSourceSelectionStats(rows = [], rejected = []) {
+  const stats = {
+    canonicalFuelComponents: 0,
+    canonicalFeeComponents: 0,
+    legacyFallbackComponents: 0,
+    rowsCanonical: 0,
+    rowsLegacy: 0,
+    rowsMixed: 0,
+    rejectedCanonicalComponents: {},
+  };
+  for (const row of rows || []) {
+    const fuel = row?.costSourceSelection?.fuel;
+    const fee = row?.costSourceSelection?.fee;
+    if (fuel === 'canonical') stats.canonicalFuelComponents += 1;
+    if (fee === 'canonical') stats.canonicalFeeComponents += 1;
+    if (fuel === 'legacy') stats.legacyFallbackComponents += 1;
+    if (fee === 'legacy') stats.legacyFallbackComponents += 1;
+    if (row?.sourceMode === 'canonical_raw') stats.rowsCanonical += 1;
+    else if (row?.sourceMode === 'mixed_cost_source') stats.rowsMixed += 1;
+    else if (row?.sourceMode === 'legacy') stats.rowsLegacy += 1;
+  }
+  for (const entry of rejected || []) {
+    const reason = clean(entry?.reason) || 'unknown';
+    stats.rejectedCanonicalComponents[reason] = (stats.rejectedCanonicalComponents[reason] || 0) + 1;
+  }
+  return stats;
+}
+
 function operationalCargoDigest(rows = []) {
   return crypto.createHash('sha256').update(rows.map((row) => JSON.stringify(row)).join('\n')).digest('hex');
 }
 
-module.exports = { projectCargoTableRow, provisionalValuationTooltip, joinCanonicalCostsWithOperationalRows, operationalCargoDigest, aggregateOperationalCargoRows, canonicalOperationalSection, selectCutoverOwnedCargoRows, projectCargoFleetDateRows };
+module.exports = { projectCargoTableRow, provisionalValuationTooltip, joinCanonicalCostsWithOperationalRows, operationalCargoDigest, aggregateOperationalCargoRows, canonicalOperationalSection, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats };

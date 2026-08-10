@@ -50,7 +50,7 @@ const {
   applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
   valueNativeCost, requireSameDateCargoPrice,
 } = require('./cargo-cost-source');
-const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows } = require('./cargo-table-projection');
+const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
 const {
@@ -6995,24 +6995,25 @@ async function fetchEarningsSnapshot(payload) {
   const activeCargoFleetKeys = new Set();
   const activeMappedCargoFleetKeys = new Set();
   let cargo = await Promise.all(cargoRows.map(async (cargoRow) => {
-    const canonicalRaw = cargoRow.sourceMode === 'canonical_raw';
+    const canonicalRaw = cargoRow.sourceMode === 'canonical_raw' || cargoRow.sourceMode === 'mixed_cost_source';
+    const fuelCanonical = cargoRow.costSourceSelection?.fuel === 'canonical' || cargoRow.sourceMode === 'canonical_raw';
+    const feeCanonical = cargoRow.costSourceSelection?.fee === 'canonical' || cargoRow.sourceMode === 'canonical_raw';
     const authoritativeAccount = String(cargoRow.fleetAccount || '').trim();
     const fleet = (authoritativeAccount ? fleetByAccount.get(authoritativeAccount) : null)
       || (!authoritativeAccount ? fleetByLabel.get(normalizeFleetLabel(cargoRow.fleet)) : null);
     const activeKey = fleet?.key || (canonicalRaw ? String(cargoRow.allocationKey || '') : normalizeFleetLabel(cargoRow.fleet));
     activeCargoFleetKeys.add(activeKey);
     if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
-    const fuelPrice = canonicalRaw ? cargoRow.fuelValuation : requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate), cargoRow.isoDate);
-    const canonicalCostAvailable = !canonicalRaw || cargoRow.costEvidenceStatus === 'available';
-    const fuelCostsAtlas = canonicalRaw
-      ? (canonicalCostAvailable ? cargoRow.fuelValuation?.amountATL ?? null : null)
+    const fuelPrice = fuelCanonical ? cargoRow.fuelValuation : requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate), cargoRow.isoDate);
+    const fuelCostsAtlas = fuelCanonical
+      ? (cargoRow.fuelValuation?.amountATL ?? null)
       : (['complete', 'provisional'].includes(fuelPrice.status) ? cargoRow.burnedFuel * fuelPrice.priceATL : null);
-    const solValuation = canonicalRaw ? cargoRow.solValuation : null;
-    const txsCostsAtlas = canonicalRaw
-      ? (canonicalCostAvailable ? solValuation?.amountATL ?? null : null)
+    const solValuation = feeCanonical ? cargoRow.solValuation : null;
+    const txsCostsAtlas = feeCanonical
+      ? (solValuation?.amountATL ?? null)
       : (atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null);
     const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
-    const incompleteRawValuation = canonicalRaw && (!canonicalCostAvailable || (Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas)));
+    const incompleteRawValuation = (fuelCanonical && Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (feeCanonical && BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas));
     const costParts = [fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = !incompleteRawValuation && costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const netProfitAtlas = Number.isFinite(totalCostsAtlas) ? -totalCostsAtlas : null;
@@ -7052,6 +7053,7 @@ async function fetchEarningsSnapshot(payload) {
     };
   }));
   cargo = projectCargoFleetDateRows(cargo, { profile: profileName, faction: normalizeFaction(settings.faction) });
+  const rawCargoCostSelectionStats = cargoCostSourceSelectionStats(cargo, rawCargoCosts.rejected);
   const legacyCargoCostPool = buildCargoCostPool(cargo.filter((row) => row.sourceMode !== 'canonical_raw').map((row) => ({
     fleetAccount: row.fleetAccount || row.fleetName,
     isoDate: row.isoDate,
@@ -7063,14 +7065,14 @@ async function fetchEarningsSnapshot(payload) {
         amount: row.rentalRateAtlasPerDay, currency: 'ATLAS', timestamp: `${row.isoDate}T00:00:00.000Z`,
         valuation: { status: 'native' },
       }] : []),
-      ...(Number(row.burnedFuel) > 0 ? [{
+      ...(row.costSourceSelection?.fuel !== 'canonical' && Number(row.burnedFuel) > 0 ? [{
         kind: 'fuel', amount: Number(row.burnedFuel), currency: 'FUEL', timestamp: `${row.isoDate}T00:00:00.000Z`,
         valuation: row.fuelValuationStatus === 'complete' ? {
           status: 'complete', amountATL: row.fuelCostsAtlas, effectiveUtcDate: row.fuelPriceEffectiveUtcDate,
           source: row.fuelPriceSource, provenance: row.fuelPriceProvenance, estimated: row.fuelPriceEstimated,
         } : { status: 'incomplete', amountATL: null, effectiveUtcDate: row.isoDate },
       }] : []),
-      ...(Number(row.txCostSol) > 0 ? [{
+      ...(row.costSourceSelection?.fee !== 'canonical' && Number(row.txCostSol) > 0 ? [{
         kind: 'transaction_fee', amount: Number(row.txCostSol), currency: 'SOL', timestamp: `${row.isoDate}T00:00:00.000Z`,
         valuation: Number.isFinite(row.txsCostsAtlas) ? { status: 'complete', amountATL: row.txsCostsAtlas, source: prices.atlasPerSolSource } : { status: 'incomplete', amountATL: null },
       }] : []),
@@ -7577,6 +7579,7 @@ async function fetchEarningsSnapshot(payload) {
     rawCargoCostTrackingDisabled: cutoverSelection.trackingDisabled,
     rawCargoCostRecordCount: valuedCanonicalRawCosts.length,
     rawCargoCostRejectedCount: rawCargoCosts.rejected.length,
+    rawCargoCostSelectionStats,
     activeMiningFleetCount: activeMiningFleetKeys.size,
     activeMappedMiningFleetCount: activeMappedMiningFleetKeys.size,
     miningRowCount: mining.length,
