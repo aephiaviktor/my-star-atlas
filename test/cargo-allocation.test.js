@@ -7,10 +7,6 @@ const {
   groupCargoAllocationRows,
   enrichCargoAllocationRows,
   dedupeCargoAllocationFieldRows,
-  buildCargoAllocationRecords,
-  cargoAllocationUtcBatches,
-  cargoAllocationProcessingFailure,
-  buildCargoAllocationRecordsFromPivotRows,
 } = require('../electron/influx-data');
 
 test('cargo allocation field rows deduplicate repeated cycle allocations', () => {
@@ -29,71 +25,6 @@ test('cargo allocation field rows deduplicate repeated cycle allocations', () =>
     { _field: 'cargoVolume', _value: '200' },
     { _field: 'cargoVolume', _value: '200' },
   ]);
-});
-
-test('Cargo Allocation UTC batches cover exactly 30 days oldest to newest', () => {
-  const batches = cargoAllocationUtcBatches({ now: new Date('2026-08-10T16:00:00.000Z') });
-  assert.equal(batches.length, 6);
-  assert.deepEqual(batches[0], { start: '2026-07-12T00:00:00.000Z', stop: '2026-07-17T00:00:00.000Z' });
-  assert.deepEqual(batches[5], { start: '2026-08-06T00:00:00.000Z', stop: '2026-08-11T00:00:00.000Z' });
-  for (let index = 1; index < batches.length; index += 1) assert.equal(batches[index - 1].stop, batches[index].start);
-});
-
-test('upstream-positive downstream-zero Allocation processing fails closed with bounded stages', () => {
-  const failure = cargoAllocationProcessingFailure(42, 0, { parsedRecordCount: 42, exactCycleMatchCount: 0 });
-  assert.match(failure, /^cargo_allocation_processing_zero:/);
-  assert.match(failure, /"parsedRecordCount":42/);
-  assert.ok(failure.length <= 240);
-  assert.equal(cargoAllocationProcessingFailure(0, 0, {}), '');
-  assert.equal(cargoAllocationProcessingFailure(42, 3, {}), '');
-});
-
-test('pivoted Cargo allocations preserve exact identity and reject incomplete records', () => {
-  const base = {
-    _time: '2026-08-10T00:17:45.499845471Z',
-    cycleId: 'DDdAJk2KZZtJNVa7J1qdRzMW4tgfvJLrjMhU5Ct12uwy:35,16:1786320383633',
-    allocationIndex: '0', fleet: 'CF-22|01b', rss: 'Food', assignment: 'Transport',
-    originStarbase: 'MRZ-22', deliveryStarbase: 'UST-PHANTOM',
-    amount: '100', cargoVolume: '200', allocatedFuel: '3.5', allocatedTxCostSol: '0.00001',
-  };
-  const rows = buildCargoAllocationRecordsFromPivotRows([base, { ...base }, { ...base, allocationIndex: '1', cargoVolume: '' }]);
-  assert.equal(rows.length, 1);
-  assert.deepEqual({
-    fleetAccount: rows[0].fleetAccount, cycleId: rows[0].cycleId, allocationIndex: rows[0].allocationIndex,
-    amount: rows[0].amount, cargoVolume: rows[0].cargoVolume, allocatedFuel: rows[0].allocatedFuel,
-    allocatedTxCostSol: rows[0].allocatedTxCostSol, asset: rows[0].asset, origin: rows[0].origin, destination: rows[0].destination,
-  }, {
-    fleetAccount: 'DDdAJk2KZZtJNVa7J1qdRzMW4tgfvJLrjMhU5Ct12uwy', cycleId: base.cycleId, allocationIndex: '0',
-    amount: 100, cargoVolume: 200, allocatedFuel: 3.5, allocatedTxCostSol: 0.00001,
-    asset: 'Food', origin: 'MRZ-22', destination: 'UST-PHANTOM',
-  });
-});
-
-test('pivoted and four-field inputs produce identical Allocation rows and totals', () => {
-  const base = {
-    _time: '2026-08-10T01:00:00.000Z', cycleId: '11111111111111111111111111111111:1,2:1786320000000',
-    allocationIndex: '7', fleet: 'Fleet', rss: 'Food', assignment: 'Transport', originStarbase: 'MRZ-1', deliveryStarbase: 'MRZ-2',
-  };
-  const values = { amount: 12, cargoVolume: 24, allocatedFuel: 3.5, allocatedTxCostSol: 0.0002 };
-  const fieldRows = Object.entries(values).map(([_field, _value]) => ({ ...base, _field, _value }));
-  const legacy = buildCargoAllocationRecords(fieldRows);
-  const pivoted = buildCargoAllocationRecordsFromPivotRows([{ ...base, ...values }]);
-  assert.equal(legacy.length, 1);
-  assert.equal(pivoted.length, 1);
-  for (const key of ['isoDate', 'fleet', 'fleetAccount', 'asset', 'origin', 'destination', 'assignment', 'cycleId', 'amount', 'cargoVolume', 'allocatedFuel', 'allocatedTxCostSol']) {
-    assert.equal(pivoted[0][key], legacy[0][key], key);
-  }
-});
-
-test('production-sized pivot reduces 262004 field records to 65501 complete allocations', () => {
-  const rows = Array.from({ length: 65501 }, (_, index) => ({
-    _time: '2026-08-10T00:00:00.000Z',
-    cycleId: `11111111111111111111111111111111:0,0:${1786320000000 + index}`,
-    allocationIndex: '0', fleet: 'Fleet', rss: 'Food', assignment: 'Transport',
-    amount: '1', cargoVolume: '2', allocatedFuel: '3', allocatedTxCostSol: '0.000001',
-  }));
-  assert.equal(rows.length * 4, 262004);
-  assert.equal(buildCargoAllocationRecordsFromPivotRows(rows).length, 65501);
 });
 
 test('parseInfluxCsv realigns rows when Flux emits a new table header', () => {

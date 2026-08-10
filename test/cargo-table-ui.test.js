@@ -33,27 +33,16 @@ test('optional Cargo telemetry queries cannot discard core fleet rows', () => {
 
 test('Cargo query errors expose the actionable failure instead of a generic unavailable label', () => {
   assert.match(js, /Cargo query failed: \$\{formatInfluxError\(result\.cargoError\)\}/);
-  assert.match(js, /cargo_allocation_query_timeout_/);
-  assert.match(js, /cargo_allocation_response_rejected:/);
-  assert.match(js, /cargo_allocation_connectivity_failure/);
 });
 
-test('Cargo Allocation uses bounded complete pivot batches without changing filters or formulas', () => {
-  assert.match(main, /cargoAllocationUtcBatches/);
-  assert.match(main, /if \(!batches\.length\) throw new Error\('cargo_allocation_invalid_utc_batches'\)/);
-  assert.match(main, /pivot\(rowKey: \["_time", "cycleId", "allocationIndex"\]/);
-  assert.match(main, /exists r\.amount and exists r\.cargoVolume and exists r\.allocatedFuel and exists r\.allocatedTxCostSol/);
-  assert.match(main, /for \(const batch of batches\)/);
-  assert.doesNotMatch(main.slice(main.indexOf('function buildCargoAllocationPivotFlux'), main.indexOf('async function fetchCargoVolumeEarningsRows')), /sort\(columns:/);
-  assert.match(js, /earningsCargoAllocationDateFilter/);
-  assert.match(js, /earningsCargoAllocationFleetFilter/);
-  assert.match(js, /earningsCargoAllocationAssetFilter/);
-  assert.match(main, /cargo_allocation_processing_zero:/);
-  assert.match(js, /Cargo allocation processing rejected all upstream records/);
-  assert.match(main, /completedCycleIdentityCount/);
-  assert.match(main, /exactCycleMatchCount/);
-  assert.match(main, /completedCycleMatchedCount/);
-  assert.match(main, /ipcRowCount/);
+test('an unavailable Allocation query cannot fail or erase other Earnings results', () => {
+  const snapshot = main.slice(main.indexOf('async function fetchEarningsSnapshot'), main.indexOf('async function fetchFleetRentalSnapshot'));
+  assert.match(snapshot, /try \{\s*earningsRowResults\[index\] = \{ status: 'fulfilled', value: await earningsTasks\[index\]\(\) \};\s*\} catch \(reason\) \{\s*earningsRowResults\[index\] = \{ status: 'rejected', reason \};/);
+  assert.match(snapshot, /if \(scanningResult\.status === 'fulfilled'\) scanningRows = scanningResult\.value;/);
+  assert.match(snapshot, /if \(miningResult\.status === 'fulfilled'\) miningRows = miningResult\.value;/);
+  assert.match(snapshot, /if \(cargoResult\.status === 'fulfilled'\) cargoRows = cargoResult\.value;/);
+  assert.match(snapshot, /if \(cargoAllocationResult\.status === 'fulfilled'\) cargoAllocationRows = cargoAllocationResult\.value;\s*else cargoAllocationError =/);
+  assert.doesNotMatch(snapshot, /if \(cargoAllocationResult\.status === 'rejected'\)[\s\S]{0,200}(scanningRows|miningRows|cargoRows) = \[\]/);
 });
 
 test('Cargo table shows completed cycles immediately after Txs Daily', () => {
