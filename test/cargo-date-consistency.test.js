@@ -6,7 +6,7 @@ const path = require('node:path');
 const { projectCargoFleetDateRows } = require('../electron/cargo-table-projection');
 const { buildCargoVolumeByFleetDayAssignment } = require('../electron/earnings-math');
 const { enrichCargoAllocationRows } = require('../electron/influx-data');
-const { requireSameDateCargoPrice } = require('../electron/cargo-cost-source');
+const { requireSameDateCargoPrice, requireCargoFuelPrice } = require('../electron/cargo-cost-source');
 
 const row = (overrides = {}) => ({
   profile: 'Profile-A', faction: 'MUD', fleetAccount: 'account-a', fleetName: 'Hauler', fleet: 'Hauler',
@@ -53,6 +53,22 @@ test('Cargo valuation rejects a prior-day price instead of carrying it into the 
   assert.equal(rejected.status, 'incomplete');
   assert.equal(rejected.priceATL, null);
   assert.equal(requireSameDateCargoPrice({ status: 'complete', priceATL: 3, priceDay: '2026-08-06' }, '2026-08-06').priceATL, 3);
+});
+
+test('Cargo Fuel accepts only exact-day or resolver-approved provisional carry-forward prices', () => {
+  const exact = { status: 'complete', priceATL: 2, priceDay: '2026-08-10', effectiveUtcDate: '2026-08-10', source: 'aephia_historical' };
+  const provisional = { status: 'provisional', priceATL: 0.00102448, priceATLExact: '0.00102448', priceDay: '2026-08-04', effectiveUtcDate: '2026-08-10', source: 'provisional_seed_carry_forward' };
+  assert.equal(requireCargoFuelPrice(exact, '2026-08-10'), exact);
+  assert.equal(requireCargoFuelPrice(provisional, '2026-08-10'), provisional);
+  for (const price of [
+    { ...exact, effectiveUtcDate: '2026-08-09' },
+    { ...provisional, source: 'arbitrary_stale' },
+    { ...provisional, priceDay: '2026-08-11' },
+    { ...provisional, effectiveUtcDate: '2026-08-09' },
+    { ...provisional, priceATL: 0, priceATLExact: '0' },
+    { ...provisional, priceATL: -1, priceATLExact: '-1' },
+    { ...provisional, priceATL: NaN, priceATLExact: 'bad' },
+  ]) assert.equal(requireCargoFuelPrice(price, '2026-08-10').status, 'incomplete');
 });
 
 test('reused display labels never merge distinct authoritative fleet accounts', () => {

@@ -48,7 +48,7 @@ const {
   RAW_COST_CUTOVER_MANIFEST_VERSION, buildRawCostFluxQuery, projectRawCostEvents,
   selectLegacyRawCutover, exporterForFaction, aggregateRawCostsByFleetDay,
   applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
-  valueNativeCost, requireSameDateCargoPrice,
+  valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
 } = require('./cargo-cost-source');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
@@ -6578,11 +6578,32 @@ async function fetchCargoAllocationEarningsRows(settings) {
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
   |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
 ${scopeFilterFlux}
-  |> keep(columns: ["_time", "_field", "_value", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex"])
-  |> sort(columns: ["_time"])`;
+  |> keep(columns: ["_time", "_field", "_value", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex"])`;
   const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
   return buildCargoAllocationRecords(parseInfluxCsv(await queryInfluxFlux(settings, flux)), includedDays)
     .map((row) => ({ ...row, label: formatShortUtcDate(new Date(row.timestamp)) }));
+}
+
+async function fetchCargoVolumeEarningsRows(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
+    return { rows: [], durationMs: 0, returnedRecordCount: 0 };
+  }
+  const bucket = escapeFluxString(settings.influxBucket);
+  const scopeFilterFlux = buildInstanceScopeFilter(settings);
+  const includedUtcDays = getLastUtcDays(30);
+  const rangeStart = `${getUtcDateKey(includedUtcDays[includedUtcDays.length - 1])}T00:00:00.000Z`;
+  const flux = `from(bucket: "${bucket}")
+  |> range(start: time(v: "${rangeStart}"))
+  |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
+  |> filter(fn: (r) => r._field == "cargoVolume")
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.cycleId and exists r.allocationIndex)
+  |> keep(columns: ["_time", "_field", "_value", "fleet", "assignment", "cycleId", "allocationIndex"])`;
+  const includedDays = new Set(includedUtcDays.map((date) => getUtcDateKey(date)));
+  const startedAt = Date.now();
+  const fieldRows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
+  const rows = buildCargoAllocationRecords(fieldRows, includedDays);
+  return { rows, durationMs: Date.now() - startedAt, returnedRecordCount: fieldRows.length };
 }
 
 async function fetchCargoCompletionEvidenceRows(settings) {
@@ -6796,6 +6817,7 @@ async function fetchEarningsSnapshot(payload) {
     () => fetchCraftingEarningsRows(settings),
     () => fetchUpgradingEarningsRows(settings),
     () => fetchCanonicalRawCargoCosts(settings),
+    () => fetchCargoVolumeEarningsRows(settings),
   ];
   const earningsRowResults = new Array(earningsTasks.length);
   let nextEarningsTask = 0;
@@ -6809,7 +6831,7 @@ async function fetchEarningsSnapshot(payload) {
       }
     }
   }));
-  const [scanningResult, miningResult, cargoResult, cargoAllocationResult, craftingResult, upgradingResult, rawCargoCostResult] = earningsRowResults;
+  const [scanningResult, miningResult, cargoResult, cargoAllocationResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult] = earningsRowResults;
   if (scanningResult.status === 'fulfilled') scanningRows = scanningResult.value;
   else scanningError = String(scanningResult.reason?.message || scanningResult.reason || 'scan_rows_unavailable');
   if (miningResult.status === 'fulfilled') miningRows = miningResult.value;
@@ -6836,6 +6858,13 @@ async function fetchEarningsSnapshot(payload) {
   else upgradingError = String(upgradingResult.reason?.message || upgradingResult.reason || 'upgrading_rows_unavailable');
   if (rawCargoCostResult.status === 'fulfilled') rawCargoCosts = rawCargoCostResult.value;
   else rawCargoCostError = String(rawCargoCostResult.reason?.message || rawCargoCostResult.reason || 'raw_cargo_cost_rows_unavailable');
+  const cargoVolumeFetch = cargoVolumeResult.status === 'fulfilled'
+    ? cargoVolumeResult.value
+    : { rows: [], durationMs: null, returnedRecordCount: 0 };
+  const cargoVolumeRows = cargoVolumeFetch.rows;
+  const cargoVolumeError = cargoVolumeResult.status === 'fulfilled'
+    ? ''
+    : String(cargoVolumeResult.reason?.message || cargoVolumeResult.reason || 'cargo_volume_rows_unavailable').slice(0, 240);
 
   const compatibilityCargoRows = cargoRows;
   const rawExporter = exporterForFaction(settings.faction);
@@ -6843,7 +6872,9 @@ async function fetchEarningsSnapshot(payload) {
     ? selectLegacyRawCutover({ legacyRows: compatibilityCargoRows, rawRecords: rawCargoCosts.records, ...rawExporter })
     : { cutover: null, legacyRows: cargoRows, rawRecords: [], trackingDisabled: false };
   const valuedCanonicalRawCosts = await valueCanonicalRawCosts(cutoverSelection.rawRecords, {
-    resolvePrice: async (asset, date) => requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice(asset, date), date),
+    resolvePrice: async (asset, date) => asset === 'Fuel'
+      ? requireCargoFuelPrice(await atlasPriceResolver.resolveAtlasPrice(asset, date), date)
+      : requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice(asset, date), date),
   });
   const canonicalRawDailyRows = aggregateRawCostsByFleetDay(valuedCanonicalRawCosts)
     .map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) }));
@@ -7004,7 +7035,7 @@ async function fetchEarningsSnapshot(payload) {
     const activeKey = fleet?.key || (canonicalRaw ? String(cargoRow.allocationKey || '') : normalizeFleetLabel(cargoRow.fleet));
     activeCargoFleetKeys.add(activeKey);
     if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
-    const fuelPrice = fuelCanonical ? cargoRow.fuelValuation : requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate), cargoRow.isoDate);
+    const fuelPrice = fuelCanonical ? cargoRow.fuelValuation : requireCargoFuelPrice(await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate), cargoRow.isoDate);
     const fuelCostsAtlas = fuelCanonical
       ? (cargoRow.fuelValuation?.amountATL ?? null)
       : (['complete', 'provisional'].includes(fuelPrice.status) ? cargoRow.burnedFuel * fuelPrice.priceATL : null);
@@ -7099,7 +7130,7 @@ async function fetchEarningsSnapshot(payload) {
     enrichedCargoAllocationRows = applyRawCostsToCargoAllocations(enrichedCargoAllocationRows, canonicalRawDailyRows, cutoverSelection.cutover);
   }
   const valueCargoAllocation = async (row) => {
-    const fuelPrice = requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice('Fuel', row.isoDate), row.isoDate);
+    const fuelPrice = requireCargoFuelPrice(await atlasPriceResolver.resolveAtlasPrice('Fuel', row.isoDate), row.isoDate);
     const canonicalRaw = row.sourceMode === 'canonical_raw';
     const fuelValuation = canonicalRaw && Number(row.allocatedFuelExact || 0) > 0
       ? valueNativeCost({ eventType: 'fuel', timestamp: row.timestamp, fuelQuantity: row.allocatedFuelExact }, fuelPrice)
@@ -7145,14 +7176,23 @@ async function fetchEarningsSnapshot(payload) {
       costsPerUnitAtlas: Number.isFinite(totalCostsAtlas) && row.amount > 0 ? totalCostsAtlas / row.amount : null,
     };
   }));
-  const cargoVolumeByFleetDayMap = buildCargoVolumeByFleetDay(cargoAllocations);
+  const completedCargoCycleIds = new Set(compatibilityCargoRows
+    .flatMap((row) => Array.isArray(row.completedCycleIds) ? row.completedCycleIds : [])
+    .map((cycleId) => String(cycleId || '').trim())
+    .filter(Boolean));
+  const scopedCargoVolumeRows = cargoVolumeRows.filter((row) =>
+    scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
+      && completedCargoCycleIds.has(String(row.cycleId || '').trim())
+  );
+  const cargoVolumeByFleetDayMap = buildCargoVolumeByFleetDay(scopedCargoVolumeRows);
+  const cargoVolumeAvailable = cargoVolumeResult.status === 'fulfilled';
   const cargoAllocationAvailable = cargoAllocationResult.status === 'fulfilled';
   const cargoAllocationAvailability = cargoAllocationAvailable
     ? (cargoAllocationRows.length ? 'available' : 'empty')
     : 'unavailable';
   for (const row of cargo) {
     const volumeKey = `${row.isoDate}\n${normalizeFleetLabel(row.fleetAccount)}`;
-    const cargoVolume = cargoAllocationAvailable && cargoVolumeByFleetDayMap.has(volumeKey)
+    const cargoVolume = cargoVolumeAvailable && cargoVolumeByFleetDayMap.has(volumeKey)
       ? cargoVolumeByFleetDayMap.get(volumeKey)
       : null;
     const efficiency = calculateCargoEfficiency({
@@ -7164,6 +7204,22 @@ async function fetchEarningsSnapshot(payload) {
     row.cargoCapacity = efficiency.cargoCapacity;
     row.cargoEfficiencyPercent = efficiency.cargoEfficiencyPercent;
   }
+
+  const cargoFetchDiagnostics = {
+    fuelPrices: cargo.reduce((summary, row) => {
+      const status = row.fuelValuationStatus === 'complete' ? 'exact' : row.fuelValuationStatus === 'provisional' ? 'provisional' : 'unavailable';
+      summary[status] += 1;
+      return summary;
+    }, { exact: 0, provisional: 0, unavailable: 0 }),
+    volume: {
+      durationMs: cargoVolumeFetch.durationMs,
+      returnedRecordCount: cargoVolumeFetch.returnedRecordCount,
+      deduplicatedAllocations: cargoVolumeRows.length,
+      completedCycleMatches: scopedCargoVolumeRows.length,
+      projectedFleetDayVolumes: cargoVolumeByFleetDayMap.size,
+      failureReason: cargoVolumeError || null,
+    },
+  };
 
   rows.sort((a, b) => {
     const dateSort = String(b.isoDate || '').localeCompare(String(a.isoDate || ''));
@@ -7572,6 +7628,7 @@ async function fetchEarningsSnapshot(payload) {
     cargoError,
     cargoAllocationError,
     cargoAllocationAvailability,
+    cargoFetchDiagnostics,
     rawCargoCostError,
     rawCargoCostQuery: rawCargoCosts.query,
     rawCargoCostCutoverManifestVersion: RAW_COST_CUTOVER_MANIFEST_VERSION,

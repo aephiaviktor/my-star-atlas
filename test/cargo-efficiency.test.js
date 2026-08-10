@@ -91,6 +91,13 @@ test('cargo volume is summed by UTC date, fleet, and assignment', () => {
   assert.equal(totals.get('2026-07-25\nfreight one\nTransport'), 300);
 });
 
+test('representative completed CF-22|01b volume restores existing efficiency calculation', () => {
+  const cargoVolume = 17609616;
+  const result = calculateCargoEfficiency({ cargoVolume, fleetCargoCapacity: 100000, cargoLegs: 108 });
+  assert.equal(result.cargoCapacity, 10800000);
+  assert.equal(result.cargoEfficiencyPercent, cargoVolume / 10800000 * 100);
+});
+
 test('travel mode time rounds to whole percentages totaling exactly 100', () => {
   assert.deepEqual(calculateTravelModeTime({ warp: 61, subwarp: 39 }), {
     warpPercent: 61,
@@ -122,7 +129,7 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(main, /cargoCycles: completedCycleEvidenceAvailable \? completedCycleIds\.length : null/);
   assert.match(main, /filterCargoAllocationsToCompletedCycles\(fleetScopedCargoAllocationRows, compatibilityCargoRows\)/);
   assert.match(main, /cargoLegs: completedCycleEvidenceAvailable[\s\S]*Array\.from\(row\.completedCycleLegs\.values\(\)\)/);
-  assert.match(main, /buildCargoVolumeByFleetDay\(cargoAllocations\)/);
+  assert.match(main, /buildCargoVolumeByFleetDay\(scopedCargoVolumeRows\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);
   assert.match(main, /const moveTimeFlux =/);
   assert.match(main, /travelModeByMovement\.get/);

@@ -247,6 +247,27 @@ function requireSameDateCargoPrice(price, isoDate) {
   return price;
 }
 
+function requireCargoFuelPrice(price, isoDate) {
+  const eventDay = clean(isoDate);
+  const priceDay = clean(price?.priceDay || price?.effectiveUtcDate);
+  const effectiveUtcDate = clean(price?.effectiveUtcDate);
+  const priceATL = Number(price?.priceATLExact ?? price?.priceATL);
+  const exact = price?.status === 'complete' && priceDay === eventDay && effectiveUtcDate === eventDay;
+  const approvedProvisional = price?.status === 'provisional'
+    && price?.source === 'provisional_seed_carry_forward'
+    && effectiveUtcDate === eventDay
+    && /^\d{4}-\d{2}-\d{2}$/.test(priceDay)
+    && priceDay <= eventDay;
+  if (!eventDay || !Number.isFinite(priceATL) || priceATL <= 0 || (!exact && !approvedProvisional)) {
+    return {
+      status: 'incomplete', priceATL: null, priceATLExact: null,
+      priceDay: priceDay || null, effectiveUtcDate: eventDay,
+      source: price?.source, reason: 'cargo_fuel_price_unavailable',
+    };
+  }
+  return price;
+}
+
 function exactShares(total, weights) {
   const { units, scale } = decimalUnits(total);
   const normalized = weights.map((weight) => decimalUnits(String(Math.max(0, Number(weight) || 0))));
@@ -324,5 +345,5 @@ module.exports = {
   projectRawCostEvents, selectLegacyRawCutover, getRawCostCutover, lamportsToSolDecimal, rawCostDigest,
   exporterForFaction, aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
   buildCanonicalRawCostPool, valueNativeCost, multiplyExactDecimals,
-  requireSameDateCargoPrice,
+  requireSameDateCargoPrice, requireCargoFuelPrice,
 };
