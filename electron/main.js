@@ -7139,6 +7139,9 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   })));
   const canonicalRawCostPool = buildCanonicalRawCostPool(valuedCanonicalRawCosts, rawCargoCosts.rejected);
   const cargoCostPool = mergeCargoCostPools(legacyCargoCostPool, canonicalRawCostPool);
+  const scopedCargoFleetAccounts = new Set(compatibilityCargoRows
+    .map((row) => String(row.fleetAccount || '').trim())
+    .filter(Boolean));
   const completedCargoCycleIds = new Set(compatibilityCargoRows
     .flatMap((row) => Array.isArray(row.completedCycleIds) ? row.completedCycleIds : [])
     .map((cycleId) => String(cycleId || '').trim())
