@@ -7186,17 +7186,39 @@ async function refreshEarnings() {
       setEarningsCargoStatus('Loading cargo earnings data...');
     }
 
+    let diagnosticStage = 'ipc_invoke';
     try {
       const result = await api.getEarningsSnapshot(settings);
       if (result && result.ok === false) {
         // IPC handler returns {ok: false, error} on failure. Throw so the
         // catch block can apply the same rate-limit / generic handling.
+        diagnosticStage = 'backend_response';
         throw new Error(result.error || 'Earnings snapshot failed');
       }
+      diagnosticStage = 'renderer_processing';
       if (!requestGuard.isCurrent(request, getRefreshContext())) return;
+      if (!result || typeof result !== 'object' || result.ok !== true) {
+        Promise.resolve(api.recordEarningsRendererError?.({
+          correlationId: `earnings-renderer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          faction,
+          stage: 'renderer_validation',
+          error: { name: 'Error', message: 'Invalid Earnings snapshot response', code: '', stack: '' },
+        })).catch(() => {});
+      }
       renderEarnings(result);
     } catch (error) {
       console.error(error);
+      Promise.resolve(api.recordEarningsRendererError?.({
+        correlationId: `earnings-renderer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        faction,
+        stage: typeof diagnosticStage === 'string' ? diagnosticStage : 'renderer_catch',
+        error: {
+          name: String(error?.name || 'Error').slice(0, 80),
+          message: String(error?.message || error || 'unknown_error').slice(0, 512),
+          code: String(error?.code || '').slice(0, 80),
+          stack: String(error?.stack || '').slice(0, 2048),
+        },
+      })).catch(() => {});
       if (!requestGuard.isCurrent(request, getRefreshContext())) return;
       if (cached) return; // keep stale UI visible; do not clobber with an error
       const message = String(error?.message || '');

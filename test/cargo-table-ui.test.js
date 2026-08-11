@@ -37,7 +37,7 @@ test('Cargo query errors expose the actionable failure instead of a generic unav
 
 test('an unavailable Allocation query cannot fail or erase other Earnings results', () => {
   const snapshot = main.slice(main.indexOf('async function fetchEarningsSnapshot'), main.indexOf('function createWindow'));
-  assert.match(snapshot, /try \{\s*earningsRowResults\[index\] = \{ status: 'fulfilled', value: await earningsTasks\[index\]\(\) \};\s*\} catch \(reason\) \{\s*earningsRowResults\[index\] = \{ status: 'rejected', reason \};/);
+  assert.match(snapshot, /try \{[\s\S]*?earningsRowResults\[index\] = \{ status: 'fulfilled', value: await earningsTasks\[index\]\(\) \};[\s\S]*?\} catch \(reason\) \{[\s\S]*?earningsRowResults\[index\] = \{ status: 'rejected', reason \};/);
   assert.match(snapshot, /if \(scanningResult\.status === 'fulfilled'\) scanningRows = scanningResult\.value;/);
   assert.match(snapshot, /if \(miningResult\.status === 'fulfilled'\) miningRows = miningResult\.value;/);
   assert.match(snapshot, /if \(cargoResult\.status === 'fulfilled'\) cargoRows = cargoResult\.value;/);

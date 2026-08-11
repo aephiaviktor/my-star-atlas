@@ -22,6 +22,7 @@ const packageJson = require('../package.json');
 const { createAsyncTtlCache, fetchWithInfluxRetry } = require('./influx-resilience');
 const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
+const { createEarningsErrorDiagnostic } = require('./earnings-error-diagnostic');
 const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher } = require('./rpc-resilience');
 const { createTelemetryLedger } = require('./telemetry-ledger');
@@ -114,6 +115,17 @@ const baseUserData = path.join(process.env.HOME || process.env.USERPROFILE, '.co
 const appIconPath = path.join(__dirname, 'assets', 'aephia-logo.png');
 
 app.setPath('userData', path.join(baseUserData, 'profiles', profileName));
+const earningsErrorDiagnostic = createEarningsErrorDiagnostic({
+  filePath: path.join(app.getPath('userData'), 'latest-earnings-error.json'),
+  appVersion: packageJson.version,
+  writeAtomic: writeJsonAtomic,
+});
+const earningsRendererErrorDiagnostic = createEarningsErrorDiagnostic({
+  filePath: path.join(app.getPath('userData'), 'latest-earnings-renderer-error.json'),
+  appVersion: packageJson.version,
+  writeAtomic: writeJsonAtomic,
+});
+const earningsDiagnosticContexts = new Map();
 const telemetryLedger = createTelemetryLedger({ userDataPath: app.getPath('userData'), profile: profileName });
 const getRpcUsageDay = createRpcUsageReader({ ledger: telemetryLedger, userDataPath: app.getPath('userData') });
 const atlasPriceResolver = createAtlasPriceResolver({
@@ -6652,7 +6664,7 @@ async function fetchCanonicalRawCargoCosts(settings) {
   return { ...projected, query };
 }
 
-async function fetchEarningsSnapshot(payload) {
+async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const rawPayload = payload || (await readSettings());
   const settings = normalizeSettings(rawPayload);
   const fleetResult = await fetchProfileFleets(settings);
@@ -6840,6 +6852,8 @@ async function fetchEarningsSnapshot(payload) {
     () => fetchCanonicalRawCargoCosts(settings),
     () => fetchCargoVolumeEarningsRows(settings),
   ];
+  const earningsCategoryNames = ['Scanning', 'Mining', 'Cargo', 'Crafting', 'Upgrading'];
+  if (diagnosticContext) diagnosticContext.stage = 'category_collection';
   const earningsRowResults = new Array(earningsTasks.length);
   let nextEarningsTask = 0;
   await Promise.all(Array.from({ length: 2 }, async () => {
@@ -6847,12 +6861,19 @@ async function fetchEarningsSnapshot(payload) {
       const index = nextEarningsTask++;
       try {
         earningsRowResults[index] = { status: 'fulfilled', value: await earningsTasks[index]() };
+        if (diagnosticContext && earningsCategoryNames[index]) {
+          diagnosticContext.categories[earningsCategoryNames[index]] = { status: 'fulfilled' };
+        }
       } catch (reason) {
         earningsRowResults[index] = { status: 'rejected', reason };
+        if (diagnosticContext && earningsCategoryNames[index]) {
+          diagnosticContext.categories[earningsCategoryNames[index]] = { status: 'rejected', error: reason };
+        }
       }
     }
   }));
   const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult] = earningsRowResults;
+  if (diagnosticContext) diagnosticContext.stage = 'projection';
   if (scanningResult.status === 'fulfilled') scanningRows = scanningResult.value;
   else scanningError = String(scanningResult.reason?.message || scanningResult.reason || 'scan_rows_unavailable');
   if (miningResult.status === 'fulfilled') miningRows = miningResult.value;
@@ -7653,16 +7674,34 @@ const rendererUrl = pathToFileURL(path.join(__dirname, 'renderer.html')).href;
 
 function handleTrustedIpc(channel, handler) {
   ipcMain.handle(channel, async (event, ...args) => {
-    assertTrustedSender(event, mainWindow?.webContents, rendererUrl);
-    args.forEach((arg) => validateIpcPayload(arg));
-    const hydratedArgs = channel === 'settings:save' || channel === 'rpc-limiter:send-settings'
-      ? args
-      : await Promise.all(args.map((arg) => (
-        arg && typeof arg === 'object' && !Array.isArray(arg)
-          ? hydrateSecureSettings(arg)
-          : arg
-      )));
-    return handler(event, ...hydratedArgs);
+    try {
+      assertTrustedSender(event, mainWindow?.webContents, rendererUrl);
+      args.forEach((arg) => validateIpcPayload(arg));
+      const hydratedArgs = channel === 'settings:save' || channel === 'rpc-limiter:send-settings'
+        ? args
+        : await Promise.all(args.map((arg) => (
+          arg && typeof arg === 'object' && !Array.isArray(arg)
+            ? hydrateSecureSettings(arg)
+            : arg
+        )));
+      return await handler(event, ...hydratedArgs);
+    } catch (error) {
+      if (channel === 'earnings:snapshot') {
+        const context = earningsDiagnosticContexts.get(error) || {};
+        earningsDiagnosticContexts.delete(error);
+        await earningsErrorDiagnostic.record({
+          correlationId: context.correlationId || `earnings-${crypto.randomUUID()}`,
+          channel,
+          faction: context.faction || normalizeFaction(args[0]?.faction),
+          boundary: 'main',
+          source: 'handleTrustedIpc',
+          stage: context.stage || 'trusted_ipc_preflight',
+          categories: context.categories || {},
+          error,
+        }).catch(() => {});
+      }
+      throw error;
+    }
   });
 }
 
@@ -7697,17 +7736,54 @@ handleTrustedIpc('fleet:list', async (_event, payload) => runTelemetryFeature(pa
     };
   }
 }));
-handleTrustedIpc('earnings:snapshot', async (_event, payload) => runTelemetryFeature(payload, 'Earnings', async () => {
+handleTrustedIpc('earnings:snapshot', async (_event, payload) => {
+  const diagnosticContext = {
+    correlationId: `earnings-${crypto.randomUUID()}`,
+    channel: 'earnings:snapshot',
+    faction: normalizeFaction(payload?.faction),
+    stage: 'preflight',
+    categories: {
+      Scanning: { status: 'pending' },
+      Mining: { status: 'pending' },
+      Cargo: { status: 'pending' },
+      Crafting: { status: 'pending' },
+      Upgrading: { status: 'pending' },
+    },
+  };
   try {
-    return await fetchEarningsSnapshot(payload);
+    return await runTelemetryFeature(payload, 'Earnings', async () => {
+      try {
+        return await fetchEarningsSnapshot(payload, diagnosticContext);
+      } catch (error) {
+        await earningsErrorDiagnostic.record({ ...diagnosticContext, boundary: 'main', source: 'fetchEarningsSnapshot', error }).catch(() => {});
+        return {
+          ok: false,
+          error: String(error?.message || error || 'earnings_snapshot_failed'),
+          checkedAt: new Date().toISOString(),
+        };
+      }
+    });
   } catch (error) {
-    return {
-      ok: false,
-      error: String(error?.message || error || 'earnings_snapshot_failed'),
-      checkedAt: new Date().toISOString(),
-    };
+    earningsDiagnosticContexts.set(error, { ...diagnosticContext, stage: 'telemetry_wrapper' });
+    throw error;
   }
-}));
+});
+handleTrustedIpc('diagnostic:earnings-renderer', async (_event, payload) => {
+  try {
+    await earningsRendererErrorDiagnostic.record({
+      correlationId: payload?.correlationId,
+      channel: 'earnings:snapshot',
+      faction: normalizeFaction(payload?.faction),
+      boundary: 'renderer',
+      source: 'refreshEarnings',
+      stage: payload?.stage || 'renderer_catch',
+      error: payload?.error,
+    });
+    return { ok: true };
+  } catch (_diagnosticError) {
+    return { ok: false };
+  }
+});
 registerCargoAllocationIpc(handleTrustedIpc, {
   runTelemetry: runTelemetryFeature,
   loadAllocation: fetchCargoAllocationSnapshot,
