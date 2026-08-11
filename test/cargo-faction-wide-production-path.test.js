@@ -11,6 +11,7 @@ const {
   selectCutoverOwnedCargoRows,
 } = require('../electron/cargo-table-projection');
 const { calculateCargoEfficiency } = require('../electron/earnings-math');
+const { acceptCargoAllocationResponse } = require('../electron/cargo-allocation-renderer');
 
 const DAY = '2026-07-20';
 const SHARED_LABEL = 'Shared Cargo Label';
@@ -127,14 +128,20 @@ test('cross-faction isolation survives overlapping dates, labels, assignments, r
   }
 });
 
-test('automatic prefetch preserves Cargo rows and all three allocation availability states through IPC and renderer', () => {
+test('automatic prefetch excludes Allocation and dedicated renderer owns availability', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+  const shared = main.slice(main.indexOf('async function fetchEarningsSnapshot'), main.indexOf('function createWindow'));
   assert.match(renderer, /async function runFactionBackgroundPrefetch[^]*refreshEarnings/);
   assert.match(renderer, /api\.getEarningsSnapshot\(settings\)/);
-  assert.match(main, /cargoAllocationAvailable[^]*cargoAllocationAvailability = cargoAllocationAvailable[^]*'available'[^]*'empty'[^]*'unavailable'/);
-  assert.match(renderer, /renderEarningsCargo\(result\)/);
-  assert.match(renderer, /renderEarningsCargoAllocations\(result\)/);
+  assert.doesNotMatch(shared, /fetchCargoAllocationSnapshot|cargoAllocationSource|cargoAllocationRows|cargoAllocationError/);
+  assert.match(renderer, /async function refreshCargoAllocation/);
+  assert.match(renderer, /api\.getCargoAllocation\(settings\)/);
   assert.match(renderer, /cargoAllocationAvailability === 'unavailable'/);
   assert.match(renderer, /cargoAllocationAvailability === 'empty'/);
+  const response = { ok: true, availability: 'available', rows: [{ asset: 'Fuel' }] };
+  const requested = { faction: 'MUD', playerProfile: 'mud-profile' };
+  assert.equal(acceptCargoAllocationResponse(response, requested, requested).accepted, true);
+  assert.deepEqual(acceptCargoAllocationResponse(response, requested, { ...requested, faction: 'ONI' }), { accepted: false, reason: 'stale_scope' });
+  assert.deepEqual(acceptCargoAllocationResponse(response, requested, { ...requested, playerProfile: 'other-profile' }), { accepted: false, reason: 'stale_scope' });
 });

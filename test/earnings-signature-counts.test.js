@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { CARGO_ALLOCATION_CHANNEL, registerCargoAllocationIpc } = require('../electron/cargo-allocation-ipc');
 
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
@@ -72,7 +73,7 @@ test('other earnings calculations and valid no-new-RPC transaction counts are un
     'fetchUpgradingEarningsRows(settings)',
   ]) assert.match(snapshot, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   const crafting = sourceBetween(main, 'async function fetchCraftingEarningsRows', 'async function fetchUpgradingEarningsRows');
-  const cargo = sourceBetween(main, 'async function fetchCargoEarningsRows', 'async function fetchCargoAllocationEarningsRows');
+  const cargo = sourceBetween(main, 'async function fetchCargoEarningsRows', 'async function fetchCargoVolumeEarningsRows');
   assert.match(crafting, /entry\.txsDaily \+= 1/);
   assert.match(cargo, /entry\.txsDaily \+= 1/);
 });
@@ -81,4 +82,18 @@ test('Marketplace and non-Earnings production regions are unchanged by this pack
   const changedFunctions = ['fetchMiningEarningsRows', 'fetchEarningsSnapshot'];
   assert.deepEqual(changedFunctions, ['fetchMiningEarningsRows', 'fetchEarningsSnapshot']);
   assert.doesNotMatch(renderer, /renderer-triggered diagnostic|historical signature scan/i);
+});
+
+test('dedicated Allocation entry point is invoked only on demand', async () => {
+ const snapshot=sourceBetween(main,'async function fetchEarningsSnapshot',"handleTrustedIpc('app:get-profile-name'");
+ assert.doesNotMatch(snapshot,/fetchCargoAllocationSnapshot|cargoAllocationSource/);
+ let registered;
+ const loadAllocation = async (payload) => ({ payload });
+ registerCargoAllocationIpc((channel, handler) => { registered = { channel, handler }; }, {
+   runTelemetry: async (payload, feature, operation) => ({ feature, value: await operation() }),
+   loadAllocation,
+ });
+ assert.equal(registered.channel, CARGO_ALLOCATION_CHANNEL);
+ assert.deepEqual(await registered.handler({}, { faction: 'MUD' }), { feature: 'Earnings Cargo Allocation', value: { payload: { faction: 'MUD' } } });
+ assert.match(renderer,/activeCargoTable === 'allocation'\) refreshCargoAllocation\(\)/);
 });

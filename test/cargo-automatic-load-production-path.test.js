@@ -6,6 +6,8 @@ const path=require('node:path');
 const fixture=require('./fixtures/cargo-b3.9-2e-a-real-cycle.json');
 const {buildCargoAllocationRecords,mergeCargoRowsWithCompletedAllocations,groupCargoAllocationRows}=require('../electron/influx-data');
 const {filterCargoAllocationsToCompletedCycles}=require('../electron/earnings-math');
+const {CARGO_ALLOCATION_CHANNEL,registerCargoAllocationIpc}=require('../electron/cargo-allocation-ipc');
+const {acceptCargoAllocationResponse}=require('../electron/cargo-allocation-renderer');
 const main=fs.readFileSync(path.join(__dirname,'..','electron','main.js'),'utf8');
 const renderer=fs.readFileSync(path.join(__dirname,'..','electron','renderer.js'),'utf8');
 const includedDays=new Set(['2026-07-25']);
@@ -27,32 +29,32 @@ test('healthy movement does not duplicate real costs, cycles, legs, volume, or a
  assert.equal(result.cargoRows.length,1); assert.equal(result.cargoAllocationRows.length,5);
  assert.equal(row.burnedFuel,17835.494841372823); assert.equal(row.txCostSol,0.000003750409485994295); assert.equal(row.cargoVolume,93888); assert.equal(row.cargoCycles,1); assert.equal(row.cargoLegs,3);
 });
-test('production orchestration merges completion evidence for any allocation-bearing result and keeps query availability separate',()=>{
- assert.match(main,/if \(cargoAllocationRows\.length\)[^]*fetchCargoCompletionEvidenceRows[^]*mergeCargoRowsWithCompletedAllocations/);
- assert.match(main,/const cargoAllocationAvailable = cargoAllocationResult\.status === 'fulfilled'/);
- assert.match(main,/cargoAllocationError,/);
+test('shared Earnings never starts, awaits, or returns Allocation',()=>{
+ const shared=main.slice(main.indexOf('async function fetchEarningsSnapshot'),main.indexOf('function createWindow'));
+ assert.doesNotMatch(shared,/fetchCargoAllocation|cargoAllocationSource|cargoAllocationResult|cargoAllocationRows|cargoAllocationError/);
+ let registered;
+ registerCargoAllocationIpc((channel,handler)=>{registered={channel,handler};},{runTelemetry:async(p,n,fn)=>fn(),loadAllocation:async()=>({ok:true})});
+ assert.equal(registered.channel,CARGO_ALLOCATION_CHANNEL);
 });
 test('faction/profile scope is applied independently to movement, completion, and allocation queries',()=>{
- const cargo=main.slice(main.indexOf('async function fetchCargoEarningsRows'),main.indexOf('async function fetchCargoAllocationEarningsRows'));
- const allocation=main.slice(main.indexOf('async function fetchCargoAllocationEarningsRows'),main.indexOf('async function fetchCargoCompletionEvidenceRows'));
- const completion=main.slice(main.indexOf('async function fetchCargoCompletionEvidenceRows'),main.indexOf('async function fetchCanonicalRawCargoCosts'));
- for(const source of [cargo,allocation,completion]) assert.match(source,/buildInstanceScopeFilter\(settings\)[^]*\$\{scopeFilterFlux\}/);
+ const cargo=main.slice(main.indexOf('async function fetchCargoEarningsRows'),main.indexOf('async function fetchCargoVolumeEarningsRows'));
+ const allocation=main.slice(main.indexOf('const cargoAllocationSource'),main.indexOf('async function fetchCargoAllocationSnapshot'));
+ const completion=main.slice(main.indexOf('async function fetchCargoCompletionEvidenceRows'),main.indexOf('const cargoAllocationSource'));
+ for(const source of [cargo,completion]) assert.match(source,/buildInstanceScopeFilter\(settings\)[^]*\$\{scopeFilterFlux\}/);
+ assert.match(allocation,/buildInstanceScopeFilter\(settings\)/);
 });
-test('automatic prefetch reaches earnings IPC and renderer preserves successful allocation availability',()=>{
+test('automatic prefetch reaches only shared Earnings while Allocation is on demand',()=>{
  assert.match(renderer,/async function runFactionBackgroundPrefetch[^]*refreshEarnings/);
  assert.match(renderer,/api\.getEarningsSnapshot\(settings\)/);
- assert.match(renderer,/renderEarningsCargo\(result\)/);
- assert.match(renderer,/renderEarningsCargoAllocations\(result\)/);
- const success=`${0} allocation rows at now${'' ? ' · Influx allocation rows unavailable' : ''}`;
- assert.doesNotMatch(success,/unavailable/);
- assert.match(renderer,/cargoAllocationAvailability === 'unavailable'/);
+ assert.match(renderer,/activeCargoTable === 'allocation'\) refreshCargoAllocation\(\)/);
 });
-
-test('allocation renderer distinguishes available-empty from unavailable without a false empty state',()=>{
- assert.match(main,/cargoAllocationAvailability,/);
+test('allocation renderer distinguishes empty, loading, and unavailable states',()=>{
+ const scope={faction:'MUD',playerProfile:'player'};
+ assert.equal(acceptCargoAllocationResponse({ok:true,availability:'empty',rows:[]},scope,scope).state.cargoAllocationAvailability,'empty');
+ assert.equal(acceptCargoAllocationResponse({ok:false},scope,scope).state.cargoAllocationAvailability,'unavailable');
  assert.match(renderer,/cargoAllocationAvailability === 'unavailable'/);
- assert.match(renderer,/Cargo allocation data unavailable/);
  assert.match(renderer,/cargoAllocationAvailability === 'empty'/);
+ assert.match(renderer,/cargoAllocationAvailability: 'loading'/);
 });
 
 test('production applies explicit cutover ownership before joining Cargo rows',()=>{

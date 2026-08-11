@@ -120,6 +120,7 @@ test('travel mode time rejects rows without usable movement duration', () => {
 test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+  const allocationProjector = readFileSync(path.join(__dirname, '..', 'electron', 'cargo-allocation-projector.js'), 'utf8');
   const html = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
 
   assert.match(main, /totalCargoCapacity/);
@@ -127,7 +128,7 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(main, /_measurement == "cargo_cycle_completed" and r\._field == "legCount"/);
   assert.match(main, /completedCycleLegs\.set\(cycleId, legCount\)/);
   assert.match(main, /cargoCycles: completedCycleEvidenceAvailable \? completedCycleIds\.length : null/);
-  assert.match(main, /filterCargoAllocationsToCompletedCycles\(fleetScopedCargoAllocationRows, compatibilityCargoRows\)/);
+  assert.match(allocationProjector, /filterCompleted\(fleetScopedCargoAllocationRows, compatibilityCargoRows\)/);
   assert.match(main, /cargoLegs: completedCycleEvidenceAvailable[\s\S]*Array\.from\(row\.completedCycleLegs\.values\(\)\)/);
   assert.match(main, /buildCargoVolumeByFleetDay\(scopedCargoVolumeRows\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);

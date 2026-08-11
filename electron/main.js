@@ -37,6 +37,9 @@ const {
 const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./telemetry-rpc-fetch');
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
+const { buildCargoAllocationPivotFlux, createCargoAllocationSource } = require('./cargo-allocation-source');
+const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
+const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
@@ -6569,20 +6572,6 @@ ${scopeFilterFlux}
     .filter((row) => row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0);
 }
 
-async function fetchCargoAllocationEarningsRows(settings) {
-  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
-  const bucket = escapeFluxString(settings.influxBucket);
-  const scopeFilterFlux = buildInstanceScopeFilter(settings);
-  const flux = `from(bucket: "${bucket}")
-  |> range(start: -31d)
-  |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
-  |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
-${scopeFilterFlux}
-  |> keep(columns: ["_time", "_field", "_value", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex"])`;
-  const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
-  return buildCargoAllocationRecords(parseInfluxCsv(await queryInfluxFlux(settings, flux)), includedDays)
-    .map((row) => ({ ...row, label: formatShortUtcDate(new Date(row.timestamp)) }));
-}
 
 async function fetchCargoVolumeEarningsRows(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
@@ -6618,6 +6607,41 @@ ${scopeFilterFlux}
   |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "assignment"])`;
   return parseInfluxCsv(await queryInfluxFlux(settings, flux));
+}
+
+const cargoAllocationSource = createCargoAllocationSource({
+  parseCsv: parseInfluxCsv,
+  queryBatch: async (settings, batch) => queryInfluxFlux(
+    settings,
+    buildCargoAllocationPivotFlux(escapeFluxString(settings.influxBucket), buildInstanceScopeFilter(settings), batch)
+  ),
+  projectRows: createCargoAllocationProjector({
+    fetchCargoRows: fetchCargoEarningsRows,
+    fetchCompletionRows: fetchCargoCompletionEvidenceRows,
+    fetchPrices: fetchCurrentEarningsPrices,
+    fetchRawCosts: fetchCanonicalRawCargoCosts,
+    getIncludedDays: () => getLastUtcDays(30).map((date) => getUtcDateKey(date)),
+    mergeCargoRows: mergeCargoRowsWithCompletedAllocations,
+    cargoFleetAccountFromCycleId,
+    filterCompleted: filterCargoAllocationsToCompletedCycles,
+    exporterForFaction,
+    selectCutover: selectLegacyRawCutover,
+    valueRawCosts: valueCanonicalRawCosts,
+    resolvePrice: (asset, date) => atlasPriceResolver.resolveAtlasPrice(asset, date),
+    requireFuelPrice: requireCargoFuelPrice,
+    requireSameDatePrice: requireSameDateCargoPrice,
+    aggregateRawCosts: aggregateRawCostsByFleetDay,
+    applyRawCosts: applyRawCostsToCargoAllocations,
+    groupRows: groupCargoAllocationRows,
+    valueNativeCost,
+    formatDate: formatShortUtcDate,
+  }),
+});
+
+async function fetchCargoAllocationSnapshot(payload) {
+  const settings = normalizeSettings(payload || (await readSettings()));
+  cargoAllocationSource.cancelExcept(settings);
+  return cargoAllocationSource.load(settings, { retry: Boolean(payload?.retry) });
 }
 
 async function fetchCanonicalRawCargoCosts(settings) {
@@ -6798,8 +6822,6 @@ async function fetchEarningsSnapshot(payload) {
   let miningError = '';
   let cargoRows = [];
   let cargoError = '';
-  let cargoAllocationRows = [];
-  let cargoAllocationError = '';
   let craftingRows = [];
   let craftingError = '';
   let upgradingRows = [];
@@ -6813,7 +6835,6 @@ async function fetchEarningsSnapshot(payload) {
     () => fetchScanningEarningsRows(settings),
     () => fetchMiningEarningsRows(settings),
     () => fetchCargoEarningsRows(settings),
-    () => fetchCargoAllocationEarningsRows(settings),
     () => fetchCraftingEarningsRows(settings),
     () => fetchUpgradingEarningsRows(settings),
     () => fetchCanonicalRawCargoCosts(settings),
@@ -6831,27 +6852,13 @@ async function fetchEarningsSnapshot(payload) {
       }
     }
   }));
-  const [scanningResult, miningResult, cargoResult, cargoAllocationResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult] = earningsRowResults;
+  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult] = earningsRowResults;
   if (scanningResult.status === 'fulfilled') scanningRows = scanningResult.value;
   else scanningError = String(scanningResult.reason?.message || scanningResult.reason || 'scan_rows_unavailable');
   if (miningResult.status === 'fulfilled') miningRows = miningResult.value;
   else miningError = String(miningResult.reason?.message || miningResult.reason || 'mining_rows_unavailable');
   if (cargoResult.status === 'fulfilled') cargoRows = cargoResult.value;
   else cargoError = String(cargoResult.reason?.message || cargoResult.reason || 'cargo_rows_unavailable');
-  if (cargoAllocationResult.status === 'fulfilled') cargoAllocationRows = cargoAllocationResult.value;
-  else cargoAllocationError = String(cargoAllocationResult.reason?.message || cargoAllocationResult.reason || 'cargo_allocation_rows_unavailable');
-  // Exact completion evidence repairs rejected, empty, and partially populated
-  // movement results. The merge excludes cycles already represented by movement.
-  if (cargoAllocationRows.length) {
-    try {
-      const includedDays = new Set(getLastUtcDays(30).map((date) => getUtcDateKey(date)));
-      const completionRows = await fetchCargoCompletionEvidenceRows(settings);
-      cargoRows = mergeCargoRowsWithCompletedAllocations({ movementRows: cargoRows, completionRows, allocationRows: cargoAllocationRows, includedDays })
-        .map((row) => ({ ...row, label: formatShortUtcDate(new Date(`${row.isoDate}T00:00:00.000Z`)) }));
-    } catch (error) {
-      cargoError = `${cargoError}; completion_fallback:${String(error?.message || error)}`;
-    }
-  }
   if (craftingResult.status === 'fulfilled') craftingRows = craftingResult.value;
   else craftingError = String(craftingResult.reason?.message || craftingResult.reason || 'crafting_rows_unavailable');
   if (upgradingResult.status === 'fulfilled') upgradingRows = upgradingResult.value;
@@ -7111,71 +7118,6 @@ async function fetchEarningsSnapshot(payload) {
   })));
   const canonicalRawCostPool = buildCanonicalRawCostPool(valuedCanonicalRawCosts, rawCargoCosts.rejected);
   const cargoCostPool = mergeCargoCostPools(legacyCargoCostPool, canonicalRawCostPool);
-  // Scope allocation rows through the already faction-scoped movement fleets,
-  // while preserving each fleet and route as separate cost dimensions.
-  const scopedCargoFleetAccounts = new Set(compatibilityCargoRows.map((row) => String(row.fleetAccount || '').trim()).filter(Boolean));
-  const scopedCargoFleetLabels = new Set(compatibilityCargoRows.filter((row) => !String(row.fleetAccount || '').trim()).map((row) => normalizeFleetLabel(row.fleet)).filter(Boolean));
-  const fleetScopedCargoAllocationRows = cargoAllocationRows.filter((row) =>
-    (String(row.fleetAccount || '').trim() && scopedCargoFleetAccounts.has(String(row.fleetAccount).trim()))
-      || (!String(row.fleetAccount || '').trim() && scopedCargoFleetLabels.has(normalizeFleetLabel(row.fleet)))
-  );
-  const scopedCargoAllocationRows = filterCargoAllocationsToCompletedCycles(fleetScopedCargoAllocationRows, compatibilityCargoRows);
-  let enrichedCargoAllocationRows = enrichCargoAllocationRows(
-    scopedCargoAllocationRows,
-    fleetByLabel,
-    normalizeFleetLabel,
-    fleetByAccount
-  );
-  if (cutoverSelection.cutover) {
-    enrichedCargoAllocationRows = applyRawCostsToCargoAllocations(enrichedCargoAllocationRows, canonicalRawDailyRows, cutoverSelection.cutover);
-  }
-  const valueCargoAllocation = async (row) => {
-    const fuelPrice = requireCargoFuelPrice(await atlasPriceResolver.resolveAtlasPrice('Fuel', row.isoDate), row.isoDate);
-    const canonicalRaw = row.sourceMode === 'canonical_raw';
-    const fuelValuation = canonicalRaw && Number(row.allocatedFuelExact || 0) > 0
-      ? valueNativeCost({ eventType: 'fuel', timestamp: row.timestamp, fuelQuantity: row.allocatedFuelExact }, fuelPrice)
-      : null;
-    const solPrice = canonicalRaw ? requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice('SOL', row.isoDate), row.isoDate) : null;
-    const solValuation = canonicalRaw && BigInt(row.allocatedTxFeeLamports || '0') > 0n
-      ? valueNativeCost({ eventType: 'sol_fee', timestamp: row.timestamp, txFeeLamports: row.allocatedTxFeeLamports }, solPrice)
-      : null;
-    const fuelCostsAtlas = canonicalRaw
-      ? (Number(row.allocatedFuelExact || 0) > 0 ? fuelValuation?.amountATL ?? null : 0)
-      : (['complete', 'provisional'].includes(fuelPrice.status) ? row.allocatedFuel * fuelPrice.priceATL : null);
-    const txsCostsAtlas = canonicalRaw
-      ? (BigInt(row.allocatedTxFeeLamports || '0') > 0n ? solValuation?.amountATL ?? null : 0)
-      : (atlasPerSol != null ? row.allocatedTxCostSol * atlasPerSol : null);
-    return { fuelPrice, fuelValuation, solValuation, fuelCostsAtlas, txsCostsAtlas };
-  };
-  const ledgerCargoAllocations = await Promise.all(enrichedCargoAllocationRows.map(async (row) => {
-    const { fuelCostsAtlas, txsCostsAtlas } = await valueCargoAllocation(row);
-    return {
-      ...row,
-      totalCostsAtlas: Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)
-        ? fuelCostsAtlas + txsCostsAtlas
-        : null,
-    };
-  }));
-  const cargoAllocations = await Promise.all(groupCargoAllocationRows(enrichedCargoAllocationRows).map(async (row) => {
-    const { fuelPrice, fuelValuation, solValuation, fuelCostsAtlas, txsCostsAtlas } = await valueCargoAllocation(row);
-    const totalCostsAtlas = Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)
-      ? fuelCostsAtlas + txsCostsAtlas
-      : null;
-    return {
-      ...row,
-      fuelCostsAtlas,
-      txsCostsAtlas,
-      totalCostsAtlas,
-      fuelPriceEffectiveUtcDate: fuelPrice.effectiveUtcDate,
-      fuelPriceSource: fuelPrice.source,
-      fuelPriceProvenance: fuelPrice.provenance,
-      fuelPriceEstimated: fuelPrice.estimated,
-      fuelValuationStatus: fuelPrice.status,
-      fuelValuation,
-      solValuation,
-      costsPerUnitAtlas: Number.isFinite(totalCostsAtlas) && row.amount > 0 ? totalCostsAtlas / row.amount : null,
-    };
-  }));
   const completedCargoCycleIds = new Set(compatibilityCargoRows
     .flatMap((row) => Array.isArray(row.completedCycleIds) ? row.completedCycleIds : [])
     .map((cycleId) => String(cycleId || '').trim())
@@ -7186,10 +7128,6 @@ async function fetchEarningsSnapshot(payload) {
   );
   const cargoVolumeByFleetDayMap = buildCargoVolumeByFleetDay(scopedCargoVolumeRows);
   const cargoVolumeAvailable = cargoVolumeResult.status === 'fulfilled';
-  const cargoAllocationAvailable = cargoAllocationResult.status === 'fulfilled';
-  const cargoAllocationAvailability = cargoAllocationAvailable
-    ? (cargoAllocationRows.length ? 'available' : 'empty')
-    : 'unavailable';
   for (const row of cargo) {
     const volumeKey = `${row.isoDate}\n${normalizeFleetLabel(row.fleetAccount)}`;
     const cargoVolume = cargoVolumeAvailable && cargoVolumeByFleetDayMap.has(volumeKey)
@@ -7277,7 +7215,7 @@ async function fetchEarningsSnapshot(payload) {
     openingInventoryRows,
     scanningRows: rows,
     miningRows: mining,
-    cargoRows: ledgerCargoAllocations,
+    cargoRows: [],
     craftingRows: ledgerCraftingRows,
     upgradingRows: upgradingRows.ledgerEvents || [],
     localMarketTrades: localMarketResult.trades,
@@ -7626,8 +7564,6 @@ async function fetchEarningsSnapshot(payload) {
     scanningError,
     miningError,
     cargoError,
-    cargoAllocationError,
-    cargoAllocationAvailability,
     cargoFetchDiagnostics,
     rawCargoCostError,
     rawCargoCostQuery: rawCargoCosts.query,
@@ -7643,7 +7579,6 @@ async function fetchEarningsSnapshot(payload) {
     activeCargoFleetCount: activeCargoFleetKeys.size,
     activeMappedCargoFleetCount: activeMappedCargoFleetKeys.size,
     cargoRowCount: cargo.length,
-    cargoAllocationRowCount: cargoAllocations.length,
     cargoCostPool,
     cargoCostCount: cargoCostPool.costs.length,
     cargoCostNeedsReviewCount: cargoCostPool.pending.length,
@@ -7672,7 +7607,6 @@ async function fetchEarningsSnapshot(payload) {
     rows,
     miningRows: mining,
     cargoRows: cargo,
-    cargoAllocationRows: cargoAllocations,
     craftingRows: crafting,
     upgradingRows: upgrading,
     breakevenRows,
@@ -7774,6 +7708,10 @@ handleTrustedIpc('earnings:snapshot', async (_event, payload) => runTelemetryFea
     };
   }
 }));
+registerCargoAllocationIpc(handleTrustedIpc, {
+  runTelemetry: runTelemetryFeature,
+  loadAllocation: fetchCargoAllocationSnapshot,
+});
 handleTrustedIpc('marketplace:snapshot', async (_event, payload) => fetchMarketplaceSnapshot(payload));
 handleTrustedIpc('marketplace:sync', async (_event, payload) => runTelemetryFeature(payload, 'Other', async () => {
   try {

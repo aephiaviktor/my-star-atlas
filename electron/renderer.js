@@ -360,6 +360,8 @@ let activeCargoTable = 'fleet';
 let latestSettings = null;
 let latestFleetResult = null;
 let latestEarningsResult = null;
+let latestCargoAllocationResult = null;
+let cargoAllocationRequestSequence = 0;
 let latestBreakevenResult = null;
 let latestUpgradingResult = null;
 let latestOptimizationResult = null;
@@ -5851,6 +5853,18 @@ function populateEarningsFilterOptions(subtab, rows) {
 
 function getFilteredEarningsRows(subtab, rows) {
   const filterState = earningsFilters[subtab] || {};
+  if (subtab === 'cargoAllocation') {
+    const filtered = CargoAllocationRenderer.filterCargoAllocationRows(rows, {
+      date: filterState.date,
+      fleet: filterState.fleet === EARNINGS_TOTAL_FLEETS_FILTER ? '' : filterState.fleet,
+      asset: filterState.asset === EARNINGS_TOTAL_ASSETS_FILTER ? '' : filterState.asset,
+    });
+    return filtered.filter((row) => {
+      if (filterState.assignment && row.assignment !== filterState.assignment) return false;
+      if (filterState.source && row.source !== filterState.source) return false;
+      return true;
+    });
+  }
   return rows.filter((row) => {
     if (filterState.date && row.isoDate !== filterState.date) return false;
     const fleet = row.fleetName || row.fleet;
@@ -6828,7 +6842,6 @@ function renderEarningsCargo(result) {
   }
 
   const rows = Array.isArray(result.cargoRows) ? result.cargoRows : [];
-  renderEarningsCargoAllocations(result);
   const colorMap = buildEarningsFleetColorMap(rows, 11);
   populateEarningsFilterOptions('cargo', rows);
   renderEarningsHeader('cargo');
@@ -7109,6 +7122,30 @@ async function refreshBreakeven({ force = false } = {}) {
     renderEarningsBreakevenEmpty(settled.entry.error?.message || 'Breakeven data unavailable');
   }
   return settled;
+}
+
+async function refreshCargoAllocation({ retry = false } = {}) {
+  const settings = { ...(latestSettings || getFormPayload()), retry };
+  const faction = normalizeFaction(settings.faction);
+  const playerProfile = getActivePlayerProfile(settings);
+  const requestSequence = ++cargoAllocationRequestSequence;
+  if (!playerProfile) {
+    latestCargoAllocationResult = { ok: false, cargoAllocationAvailability: 'unavailable', cargoAllocationRows: [], cargoAllocationError: `No ${faction} player profile configured` };
+    renderEarningsCargoAllocations(latestCargoAllocationResult);
+    return;
+  }
+  renderEarningsCargoAllocations({ ...(latestCargoAllocationResult || {}), cargoAllocationAvailability: 'loading', cargoAllocationRows: latestCargoAllocationResult?.cargoAllocationRows || [] });
+  const result = await api.getCargoAllocation(settings);
+  const currentSettings = latestSettings || getFormPayload();
+  if (requestSequence !== cargoAllocationRequestSequence) return;
+  const accepted = CargoAllocationRenderer.acceptCargoAllocationResponse(
+    result,
+    { faction, playerProfile },
+    { faction: normalizeFaction(currentSettings.faction), playerProfile: getActivePlayerProfile(currentSettings) }
+  );
+  if (!accepted.accepted) return;
+  latestCargoAllocationResult = accepted.state;
+  renderEarningsCargoAllocations(latestCargoAllocationResult);
 }
 
 async function refreshEarnings() {
@@ -9028,6 +9065,7 @@ document.querySelectorAll('[data-cargo-table-select]').forEach((button) => {
       view.hidden = !selected;
     });
     renderEarningsColumnControls();
+    if (activeCargoTable === 'allocation') refreshCargoAllocation();
   });
 });
 

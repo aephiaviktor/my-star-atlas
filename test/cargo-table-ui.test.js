@@ -36,13 +36,14 @@ test('Cargo query errors expose the actionable failure instead of a generic unav
 });
 
 test('an unavailable Allocation query cannot fail or erase other Earnings results', () => {
-  const snapshot = main.slice(main.indexOf('async function fetchEarningsSnapshot'), main.indexOf('async function fetchFleetRentalSnapshot'));
+  const snapshot = main.slice(main.indexOf('async function fetchEarningsSnapshot'), main.indexOf('function createWindow'));
   assert.match(snapshot, /try \{\s*earningsRowResults\[index\] = \{ status: 'fulfilled', value: await earningsTasks\[index\]\(\) \};\s*\} catch \(reason\) \{\s*earningsRowResults\[index\] = \{ status: 'rejected', reason \};/);
   assert.match(snapshot, /if \(scanningResult\.status === 'fulfilled'\) scanningRows = scanningResult\.value;/);
   assert.match(snapshot, /if \(miningResult\.status === 'fulfilled'\) miningRows = miningResult\.value;/);
   assert.match(snapshot, /if \(cargoResult\.status === 'fulfilled'\) cargoRows = cargoResult\.value;/);
-  assert.match(snapshot, /if \(cargoAllocationResult\.status === 'fulfilled'\) cargoAllocationRows = cargoAllocationResult\.value;\s*else cargoAllocationError =/);
-  assert.doesNotMatch(snapshot, /if \(cargoAllocationResult\.status === 'rejected'\)[\s\S]{0,200}(scanningRows|miningRows|cargoRows) = \[\]/);
+  assert.doesNotMatch(snapshot, /cargoAllocationResult|cargoAllocationRows|cargoAllocationError|fetchCargoAllocation/);
+  assert.match(js, /let latestCargoAllocationResult = null/);
+  assert.doesNotMatch(js, /latestEarningsResult\s*=\s*\{[^}]*cargoAllocation/);
 });
 
 test('Cargo table shows completed cycles immediately after Txs Daily', () => {

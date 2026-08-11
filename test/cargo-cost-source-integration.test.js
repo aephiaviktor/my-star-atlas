@@ -6,6 +6,7 @@ const path = require('node:path');
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron/main.js'), 'utf8');
 const source = fs.readFileSync(path.join(__dirname, '..', 'electron/cargo-cost-source.js'), 'utf8');
 const price = fs.readFileSync(path.join(__dirname, '..', 'electron/atlas-price-resolver.js'), 'utf8');
+const projector = fs.readFileSync(path.join(__dirname, '..', 'electron/cargo-allocation-projector.js'), 'utf8');
 
 test('earnings snapshot uses existing Influx path and bounded worker cadence for raw points', () => {
   assert.match(main, /fetchCanonicalRawCargoCosts/);
@@ -14,26 +15,27 @@ test('earnings snapshot uses existing Influx path and bounded worker cadence for
   assert.doesNotMatch(source, /fetch\(|Connection\(|setInterval|setTimeout|price.*fetch|RPC/i);
 });
 
-test('cutover is applied before authoritative cargo totals and allocation valuation', () => {
-  const selection = main.indexOf('selectLegacyRawCutover');
-  const cargoProjection = main.indexOf('const activeCargoFleetKeys');
-  const allocation = main.indexOf('enrichedCargoAllocationRows = applyRawCostsToCargoAllocations');
-  assert.ok(selection >= 0 && selection < cargoProjection);
-  assert.ok(allocation > cargoProjection);
-  assert.match(main, /const cutoverOwnedCargoRows = selectCutoverOwnedCargoRows\(\{[\s\S]*legacyRows: cutoverSelection\.legacyRows[\s\S]*cutover: cutoverSelection\.cutover/);
-  assert.match(main, /cargoRows = joinCanonicalCostsWithOperationalRows\(\{[\s\S]*legacyRows: cutoverOwnedCargoRows\.legacyRows\.map[\s\S]*costRows: canonicalRawDailyRows[\s\S]*operationalRows: cutoverOwnedCargoRows\.operationalRows/);
+test('dedicated Allocation applies cutover before canonical valuation', () => {
+  const dedicated = projector;
+  const selection = dedicated.indexOf('selectCutover(');
+  const application = dedicated.indexOf('applyRawCosts(');
+  const valuation = dedicated.indexOf("resolvePrice('Fuel', row.isoDate)");
+  assert.ok(selection >= 0 && selection < application && application < valuation);
+  assert.match(dedicated, /valueRawCosts[\s\S]*aggregateRawCosts[\s\S]*applyRawCosts/);
+  assert.match(dedicated, /valueNativeCost\(\{ eventType: 'fuel'/);
+  assert.match(dedicated, /valueNativeCost\(\{ eventType: 'sol_fee'/);
 });
 
-test('canonical allocation scope uses immutable fleet accounts and compatibility route evidence only', () => {
+test('dedicated Allocation scope uses immutable fleet accounts and exact completion evidence', () => {
+  const dedicated = projector;
   assert.doesNotMatch(source, /fleetAccount\s*\|\|\s*(?:record\.)?fleetLabel/);
   assert.doesNotMatch(source, /allocationKey[^\n]*(?:fleetLabel|assignment)/);
   assert.match(source, /allocationReason: unallocated \? 'allocation_scope_missing' : null/);
   assert.match(source, /rawDailyRows\.filter\(\(row\) => row\.allocationStatus !== 'unallocated' && clean\(row\.fleetAccount\)\)/);
-  assert.match(main, /fleetByAccount\.get\(authoritativeAccount\)/);
-  assert.match(main, /cargoFleetAccountFromCycleId\(row\.cycleId\)/);
-  assert.match(main, /group\(columns: \["fleet", "assignment", "starbase", "cycleId", "_time"\]\)/);
-  assert.match(main, /new Set\(compatibilityCargoRows\.map\(\(row\) => String\(row\.fleetAccount/);
-  assert.match(main, /enrichCargoAllocationRows\([\s\S]*fleetByAccount/);
+  assert.match(dedicated, /scopedCargoFleetAccounts = new Set\(compatibilityCargoRows\.map/);
+  assert.match(dedicated, /cargoFleetAccountFromCycleId\(row\.cycleId\)/);
+  assert.match(dedicated, /filterCompleted\(fleetScopedCargoAllocationRows, compatibilityCargoRows\)/);
+  assert.match(dedicated, /completedCycleIdentityCount[\s\S]*exactCycleMatchCount[\s\S]*fleetScopedCount[\s\S]*completedCycleMatchedCount/);
 });
 
 test('frozen price seed remains exactly July 6 through August 4', () => {
