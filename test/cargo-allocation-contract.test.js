@@ -63,8 +63,23 @@ test('rendered Allocation columns survive legacy persisted visibility and bind e
   assert.deepEqual(visible.map(({ label }) => label), [
     'Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Costs', 'TXS Costs', 'Total Cargo Costs', 'Cargo Cost/Unit',
   ]);
-  assert.deepEqual(visible.map(({ text }) => text), ['12', '24', '0.25', '--', '0', '--', '1.1215802e-10']);
+  assert.deepEqual(visible.map(({ text }) => text), ['12', '24', '0', '--', '0', '--', '0']);
   assert.equal(visible.some(({ label }) => ['Rental Costs', 'Base Cost/Unit', 'Total Cost/Unit'].includes(label)), false);
+});
+
+test('Allocation display rounds quantities and costs with the requested column precision', () => {
+  const rendered = Object.fromEntries(buildCargoAllocationRenderedColumns({
+    amount: 12.345, cargoVolume: 24.678, allocatedFuel: 167.958,
+    fuelCostsAtlas: 10.6, txsCostsAtlas: 0.49,
+    totalCostsAtlas: 11.09, costsPerUnitAtlas: 0.123456789,
+  }).map(({ id, text }) => [id, text]));
+  assert.equal(rendered.amount, formatAllocationNumber(12.345));
+  assert.equal(rendered.cargoVolume, formatAllocationNumber(24.678));
+  assert.equal(rendered.allocatedFuel, '168');
+  assert.equal(rendered.fuelCosts, '11');
+  assert.equal(rendered.txsCosts, '0');
+  assert.equal(rendered.totalCosts, '11');
+  assert.equal(rendered.costsPerUnit, '0.123457');
 });
 
 test('Allocation projector preserves independent component availability and exact aggregate formulas', async () => {

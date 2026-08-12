@@ -17,11 +17,17 @@
       && (!normalize(fleet) || normalize(row.fleetName || row.fleet) === normalize(fleet))
       && (!normalize(asset) || normalize(row.asset) === normalize(asset)));
   }
-  function formatAllocationNumber(value, { significantDigits = 8, scientificThreshold = 1e-6 } = {}) {
+  function formatAllocationNumber(value, { significantDigits = 8, scientificThreshold = 1e-6, maximumFractionDigits = null } = {}) {
     if (value == null || value === '') return '--';
     const number = Number(value);
     if (!Number.isFinite(number)) return '--';
     if (Object.is(number, 0) || Object.is(number, -0)) return '0';
+    if (maximumFractionDigits != null) {
+      return new Intl.NumberFormat(undefined, {
+        maximumFractionDigits,
+        useGrouping: true,
+      }).format(number);
+    }
     const absolute = Math.abs(number);
     if (absolute < scientificThreshold) {
       return number.toExponential(Math.max(0, significantDigits - 1)).replace(/\.0+(?=e)|(?<=\.\d*?)0+(?=e)/, '').replace(/\.e/, 'e');
@@ -48,7 +54,11 @@
     return renderedColumnContract.map(({ id, label, field }) => Object.freeze({
       id,
       label,
-      text: formatAllocationNumber(row[field]),
+      text: ['allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts'].includes(id)
+        ? formatAllocationNumber(row[field], { maximumFractionDigits: 0 })
+        : id === 'costsPerUnit'
+          ? formatAllocationNumber(row[field], { maximumFractionDigits: 6 })
+          : formatAllocationNumber(row[field]),
     }));
   }
   return { scopeKey, acceptCargoAllocationResponse, filterCargoAllocationRows, formatAllocationNumber, renderedColumnContract, getCargoAllocationVisibleColumns, buildCargoAllocationRenderedColumns };
