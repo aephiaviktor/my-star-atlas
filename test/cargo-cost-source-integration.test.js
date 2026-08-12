@@ -31,7 +31,7 @@ test('dedicated Allocation scope uses immutable fleet accounts and exact complet
   assert.doesNotMatch(source, /fleetAccount\s*\|\|\s*(?:record\.)?fleetLabel/);
   assert.doesNotMatch(source, /allocationKey[^\n]*(?:fleetLabel|assignment)/);
   assert.match(source, /allocationReason: unallocated \? 'allocation_scope_missing' : null/);
-  assert.match(source, /rawDailyRows\.filter\(\(row\) => row\.allocationStatus !== 'unallocated' && clean\(row\.fleetAccount\)\)/);
+  assert.match(source, /rawDailyRows\.filter\(\(entry\) => entry\.allocationStatus !== 'unallocated' && clean\(entry\.fleetAccount\)\)/);
   assert.match(dedicated, /scopedCargoFleetAccounts = new Set\(compatibilityCargoRows\.map/);
   assert.match(dedicated, /cargoFleetAccountFromCycleId\(row\.cycleId\)/);
   assert.match(dedicated, /filterCompleted\(fleetScopedCargoAllocationRows, compatibilityCargoRows\)/);

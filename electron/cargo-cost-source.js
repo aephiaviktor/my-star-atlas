@@ -282,7 +282,12 @@ function exactShares(total, weights) {
 
 function applyRawCostsToCargoAllocations(rows = [], rawDailyRows = [], cutoverUtc = RAW_COST_CUTOVER_UTC) {
   const cutoverDay = utcDay(cutoverUtc);
-  const rawByFleetDay = new Map(rawDailyRows.filter((row) => row.allocationStatus !== 'unallocated' && clean(row.fleetAccount)).map((row) => [`${row.isoDate}\n${clean(row.fleetAccount)}`, row]));
+  const rawByFleetDay = new Map();
+  for (const row of rawDailyRows.filter((entry) => entry.allocationStatus !== 'unallocated' && clean(entry.fleetAccount))) {
+    const key = `${row.isoDate}\n${clean(row.fleetAccount)}`;
+    if (!rawByFleetDay.has(key)) rawByFleetDay.set(key, []);
+    rawByFleetDay.get(key).push(row);
+  }
   const groups = new Map();
   for (const row of rows) {
     if (clean(row.isoDate) < cutoverDay) continue;
@@ -292,38 +297,41 @@ function applyRawCostsToCargoAllocations(rows = [], rawDailyRows = [], cutoverUt
   }
   const replacements = new Map();
   for (const [key, group] of groups) {
-    const raw = rawByFleetDay.get(key);
-    if (!raw) {
-      group.forEach((row) => replacements.set(row, {
-        ...row,
-        allocatedFuelExact: null,
-        allocatedFuel: null,
-        allocatedTxFeeLamports: null,
-        allocatedTxCostSolExact: null,
-        allocatedTxCostSol: null,
-        sourceMode: 'raw_missing',
-        allocationCostStatus: 'unavailable',
-        allocationCostReason: 'canonical_raw_cost_missing',
-      }));
-      continue;
-    }
+    const candidates = (rawByFleetDay.get(key) || []).filter((raw) => !clean(group[0]?.faction) || !clean(raw.faction) || clean(raw.faction) === clean(group[0].faction));
+    const ambiguous = candidates.length > 1;
+    const raw = candidates.length === 1 ? candidates[0] : null;
     const weights = group.map((row) => Math.max(0, Number(row.cargoVolume) || Number(row.amount) || 0));
-    const fuelShares = exactShares(raw.burnedFuelExact, weights);
-    const lamportShares = exactShares(raw.txFeeLamports, weights);
+    const hasFuelEvidence = Boolean(raw) && raw.hasFuelCoverage !== false;
+    const hasTxEvidence = Boolean(raw) && raw.hasFeeCoverage !== false;
+    const validFuel = hasFuelEvidence && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(clean(raw.burnedFuelExact));
+    const validTx = hasTxEvidence && /^\d+$/.test(clean(raw.txFeeLamports));
+    const fuelInvalid = ambiguous || (hasFuelEvidence && !validFuel);
+    const txInvalid = ambiguous || (hasTxEvidence && !validTx);
+    const fuelShares = validFuel ? exactShares(raw.burnedFuelExact, weights) : null;
+    const lamportShares = validTx ? exactShares(raw.txFeeLamports, weights) : null;
     group.forEach((row, index) => {
-      const allocatedFuelExact = fuelShares[index];
-      const allocatedTxFeeLamports = lamportShares[index];
-      const allocatedTxCostSolExact = lamportsToSolDecimal(allocatedTxFeeLamports);
+      const persistedFuelAvailable = row.allocatedFuel != null && Number.isFinite(Number(row.allocatedFuel));
+      const persistedTxAvailable = row.allocatedTxCostSol != null && Number.isFinite(Number(row.allocatedTxCostSol));
+      const allocatedFuelExact = fuelShares?.[index] ?? null;
+      const allocatedTxFeeLamports = lamportShares?.[index] ?? null;
+      const allocatedTxCostSolExact = allocatedTxFeeLamports == null ? null : lamportsToSolDecimal(allocatedTxFeeLamports);
+      const fuelAllocationStatus = fuelInvalid ? 'invalid' : validFuel ? (Number(allocatedFuelExact) === 0 ? 'canonical_zero' : 'canonical') : persistedFuelAvailable ? 'fallback' : 'unavailable';
+      const txAllocationStatus = txInvalid ? 'invalid' : validTx ? (allocatedTxFeeLamports === '0' ? 'canonical_zero' : 'canonical') : persistedTxAvailable ? 'fallback' : 'unavailable';
+      const fuelAllocationReason = fuelInvalid ? (ambiguous ? 'canonical_evidence_ambiguous' : 'canonical_evidence_invalid') : validFuel ? null : persistedFuelAvailable ? 'persisted_allocation_fallback_canonical_missing' : 'allocation_and_canonical_missing';
+      const txAllocationReason = txInvalid ? (ambiguous ? 'canonical_evidence_ambiguous' : 'canonical_evidence_invalid') : validTx ? null : persistedTxAvailable ? 'persisted_allocation_fallback_canonical_missing' : 'allocation_and_canonical_missing';
+      const fuelCanonical = fuelAllocationStatus === 'canonical' || fuelAllocationStatus === 'canonical_zero';
+      const txCanonical = txAllocationStatus === 'canonical' || txAllocationStatus === 'canonical_zero';
       replacements.set(row, {
         ...row,
-        allocatedFuelExact,
-        allocatedFuel: Number(allocatedFuelExact),
-        allocatedTxFeeLamports,
-        allocatedTxCostSolExact,
-        allocatedTxCostSol: Number(allocatedTxCostSolExact),
-        sourceMode: 'canonical_raw',
-        allocationCostStatus: 'available',
-        allocationCostReason: null,
+        allocatedFuelExact: fuelCanonical ? allocatedFuelExact : null,
+        allocatedFuel: fuelInvalid ? null : fuelCanonical ? Number(allocatedFuelExact) : persistedFuelAvailable ? Number(row.allocatedFuel) : null,
+        allocatedTxFeeLamports: txCanonical ? allocatedTxFeeLamports : null,
+        allocatedTxCostSolExact: txCanonical ? allocatedTxCostSolExact : null,
+        allocatedTxCostSol: txInvalid ? null : txCanonical ? Number(allocatedTxCostSolExact) : persistedTxAvailable ? Number(row.allocatedTxCostSol) : null,
+        fuelAllocationStatus, fuelAllocationReason, txAllocationStatus, txAllocationReason,
+        sourceMode: fuelCanonical && txCanonical ? 'canonical_raw' : (fuelCanonical || txCanonical) ? 'mixed_cost_source' : (fuelInvalid || txInvalid) ? 'raw_invalid' : (persistedFuelAvailable || persistedTxAvailable) ? 'allocation_fallback' : 'raw_missing',
+        allocationCostStatus: ['invalid', 'unavailable'].includes(fuelAllocationStatus) || ['invalid', 'unavailable'].includes(txAllocationStatus) ? 'unavailable' : 'available',
+        allocationCostReason: fuelAllocationReason || txAllocationReason,
       });
     });
   }

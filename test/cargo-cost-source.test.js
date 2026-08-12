@@ -160,11 +160,12 @@ test('missing fleet scope is explicit unallocated accounting and never falls bac
   const attemptedLabelMatch = applyRawCostsToCargoAllocations([
     { isoDate: '2026-08-05', fleetAccount: 'Mutable Fleet', fleet: 'Mutable Fleet', cargoVolume: 1, allocatedFuel: 99, allocatedTxCostSol: 99 },
   ], daily);
-  assert.equal(attemptedLabelMatch[0].sourceMode, 'raw_missing');
-  assert.equal(attemptedLabelMatch[0].allocationCostStatus, 'unavailable');
-  assert.equal(attemptedLabelMatch[0].allocationCostReason, 'canonical_raw_cost_missing');
-  assert.equal(attemptedLabelMatch[0].allocatedFuel, null);
-  assert.equal(attemptedLabelMatch[0].allocatedTxCostSol, null);
+  assert.equal(attemptedLabelMatch[0].sourceMode, 'allocation_fallback');
+  assert.equal(attemptedLabelMatch[0].allocationCostStatus, 'available');
+  assert.equal(attemptedLabelMatch[0].fuelAllocationReason, 'persisted_allocation_fallback_canonical_missing');
+  assert.equal(attemptedLabelMatch[0].txAllocationReason, 'persisted_allocation_fallback_canonical_missing');
+  assert.equal(attemptedLabelMatch[0].allocatedFuel, 99);
+  assert.equal(attemptedLabelMatch[0].allocatedTxCostSol, 99);
   assert.equal(attemptedLabelMatch[0].allocatedFuelExact, null);
   assert.equal(attemptedLabelMatch[0].allocatedTxFeeLamports, null);
 });
@@ -182,6 +183,69 @@ test('explicit canonical raw zero remains available zero', () => {
   assert.equal(allocated.allocationCostReason, null);
   assert.equal(allocated.allocatedFuel, 0);
   assert.equal(allocated.allocatedTxCostSol, 0);
+});
+
+test('missing canonical components preserve persisted Allocation quantities independently', () => {
+  const base = { isoDate: '2026-08-05', fleetAccount: 'fleet', cargoVolume: 1 };
+  const [both] = applyRawCostsToCargoAllocations([
+    { ...base, allocatedFuel: 1.25, allocatedTxCostSol: 0.0000042 },
+  ], []);
+  assert.equal(both.allocatedFuel, 1.25);
+  assert.equal(both.allocatedTxCostSol, 0.0000042);
+  assert.equal(both.fuelAllocationStatus, 'fallback');
+  assert.equal(both.fuelAllocationReason, 'persisted_allocation_fallback_canonical_missing');
+  assert.equal(both.txAllocationStatus, 'fallback');
+
+  const [fuelCanonical] = applyRawCostsToCargoAllocations([
+    { ...base, allocatedFuel: 99, allocatedTxCostSol: 0.0000042 },
+  ], [{ ...base, allocationStatus: 'scoped', burnedFuelExact: '2.5', txFeeLamports: '0', hasFuelCoverage: true, hasFeeCoverage: false }]);
+  assert.equal(fuelCanonical.allocatedFuel, 2.5);
+  assert.equal(fuelCanonical.fuelAllocationStatus, 'canonical');
+  assert.equal(fuelCanonical.allocatedTxCostSol, 0.0000042);
+  assert.equal(fuelCanonical.txAllocationStatus, 'fallback');
+});
+
+test('canonical values override persisted values and canonical genuine zero is diagnosed', () => {
+  const [row] = applyRawCostsToCargoAllocations([
+    { isoDate: '2026-08-05', fleetAccount: 'fleet', cargoVolume: 1, allocatedFuel: 99, allocatedTxCostSol: 99 },
+  ], [{ isoDate: '2026-08-05', fleetAccount: 'fleet', allocationStatus: 'scoped', burnedFuelExact: '0', txFeeLamports: '5000', hasFuelCoverage: true, hasFeeCoverage: true }]);
+  assert.equal(row.allocatedFuel, 0);
+  assert.equal(row.fuelAllocationStatus, 'canonical_zero');
+  assert.equal(row.allocatedTxCostSol, 0.000005);
+  assert.equal(row.txAllocationStatus, 'canonical');
+});
+
+test('missing persisted values remain unavailable and malformed or ambiguous canonical evidence fails closed', () => {
+  const persisted = { isoDate: '2026-08-05', fleetAccount: 'fleet', cargoVolume: 1, allocatedFuel: 7, allocatedTxCostSol: 0.1 };
+  const [missing] = applyRawCostsToCargoAllocations([{ ...persisted, allocatedFuel: null, allocatedTxCostSol: null }], []);
+  assert.equal(missing.allocatedFuel, null);
+  assert.equal(missing.allocatedTxCostSol, null);
+  assert.equal(missing.fuelAllocationStatus, 'unavailable');
+  assert.equal(missing.txAllocationReason, 'allocation_and_canonical_missing');
+
+  const [invalid] = applyRawCostsToCargoAllocations([persisted], [{ isoDate: '2026-08-05', fleetAccount: 'fleet', allocationStatus: 'scoped', burnedFuelExact: 'bad', txFeeLamports: '-1', hasFuelCoverage: true, hasFeeCoverage: true }]);
+  assert.equal(invalid.allocatedFuel, null);
+  assert.equal(invalid.allocatedTxCostSol, null);
+  assert.equal(invalid.fuelAllocationStatus, 'invalid');
+  assert.equal(invalid.txAllocationReason, 'canonical_evidence_invalid');
+
+  const duplicate = { isoDate: '2026-08-05', fleetAccount: 'fleet', allocationStatus: 'scoped', burnedFuelExact: '1', txFeeLamports: '1', hasFuelCoverage: true, hasFeeCoverage: true };
+  const [ambiguous] = applyRawCostsToCargoAllocations([persisted], [duplicate, { ...duplicate }]);
+  assert.equal(ambiguous.allocatedFuel, null);
+  assert.equal(ambiguous.allocatedTxCostSol, null);
+  assert.equal(ambiguous.fuelAllocationReason, 'canonical_evidence_ambiguous');
+  assert.equal(ambiguous.txAllocationStatus, 'invalid');
+});
+
+test('fallback remains strictly scoped to the allocation row identity', () => {
+  const rows = [
+    { isoDate: '2026-08-05', faction: 'MUD', fleetAccount: 'fleet-a', cargoVolume: 1, allocatedFuel: 3, allocatedTxCostSol: 0.3 },
+    { isoDate: '2026-08-06', faction: 'ONI', fleetAccount: 'fleet-b', cargoVolume: 1, allocatedFuel: null, allocatedTxCostSol: null },
+  ];
+  const projected = applyRawCostsToCargoAllocations(rows, []);
+  assert.equal(projected[0].allocatedFuel, 3);
+  assert.equal(projected[1].allocatedFuel, null);
+  assert.equal(projected[1].allocatedTxCostSol, null);
 });
 
 test('mutable metadata cannot change scoped allocation or unallocated results in either order', () => {
