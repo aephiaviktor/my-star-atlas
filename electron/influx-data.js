@@ -100,7 +100,7 @@ function groupCargoAllocationRows(rows) {
   for (const row of rows) {
     const key = `${row.isoDate}\n${row.fleet}\n${row.asset}\n${row.origin}\n${row.destination}\n${row.assignment}`;
     if (!groups.has(key)) {
-      const group = { ...row, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0 };
+      const group = { ...row, amount: 0, cargoVolume: 0, allocatedFuel: 0, allocatedTxCostSol: 0, fuelAllocationUnavailable: false, txAllocationUnavailable: false };
       if (row.allocatedFuelExact != null) group.allocatedFuelExact = '0';
       if (row.allocatedTxFeeLamports != null) group.allocatedTxFeeLamports = '0';
       groups.set(key, group);
@@ -108,12 +108,19 @@ function groupCargoAllocationRows(rows) {
     const group = groups.get(key);
     group.amount += Number(row.amount) || 0;
     group.cargoVolume += Number(row.cargoVolume) || 0;
-    group.allocatedFuel += Number(row.allocatedFuel) || 0;
+    if (row.allocatedFuel == null) group.fuelAllocationUnavailable = true;
+    else group.allocatedFuel += Number(row.allocatedFuel) || 0;
     if (row.allocatedFuelExact != null) group.allocatedFuelExact = sumExactDecimals([group.allocatedFuelExact || '0', row.allocatedFuelExact]);
-    group.allocatedTxCostSol += Number(row.allocatedTxCostSol) || 0;
+    if (row.allocatedTxCostSol == null) group.txAllocationUnavailable = true;
+    else group.allocatedTxCostSol += Number(row.allocatedTxCostSol) || 0;
     if (row.allocatedTxFeeLamports != null) group.allocatedTxFeeLamports = (BigInt(group.allocatedTxFeeLamports || '0') + BigInt(row.allocatedTxFeeLamports)).toString();
   }
-  return Array.from(groups.values());
+  return Array.from(groups.values()).map((group) => {
+    const { fuelAllocationUnavailable, txAllocationUnavailable, ...row } = group;
+    if (fuelAllocationUnavailable) { row.allocatedFuel = null; row.allocatedFuelExact = null; }
+    if (txAllocationUnavailable) { row.allocatedTxCostSol = null; row.allocatedTxFeeLamports = null; }
+    return row;
+  });
 }
 
 function dedupeCargoAllocationFieldRows(rows = []) {

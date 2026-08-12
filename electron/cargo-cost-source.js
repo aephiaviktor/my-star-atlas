@@ -293,14 +293,38 @@ function applyRawCostsToCargoAllocations(rows = [], rawDailyRows = [], cutoverUt
   const replacements = new Map();
   for (const [key, group] of groups) {
     const raw = rawByFleetDay.get(key);
+    if (!raw) {
+      group.forEach((row) => replacements.set(row, {
+        ...row,
+        allocatedFuelExact: null,
+        allocatedFuel: null,
+        allocatedTxFeeLamports: null,
+        allocatedTxCostSolExact: null,
+        allocatedTxCostSol: null,
+        sourceMode: 'raw_missing',
+        allocationCostStatus: 'unavailable',
+        allocationCostReason: 'canonical_raw_cost_missing',
+      }));
+      continue;
+    }
     const weights = group.map((row) => Math.max(0, Number(row.cargoVolume) || Number(row.amount) || 0));
-    const fuelShares = raw ? exactShares(raw.burnedFuelExact, weights) : group.map(() => '0');
-    const lamportShares = raw ? exactShares(raw.txFeeLamports, weights) : group.map(() => '0');
+    const fuelShares = exactShares(raw.burnedFuelExact, weights);
+    const lamportShares = exactShares(raw.txFeeLamports, weights);
     group.forEach((row, index) => {
       const allocatedFuelExact = fuelShares[index];
       const allocatedTxFeeLamports = lamportShares[index];
       const allocatedTxCostSolExact = lamportsToSolDecimal(allocatedTxFeeLamports);
-      replacements.set(row, { ...row, allocatedFuelExact, allocatedFuel: Number(allocatedFuelExact), allocatedTxFeeLamports, allocatedTxCostSolExact, allocatedTxCostSol: Number(allocatedTxCostSolExact), sourceMode: raw ? 'canonical_raw' : 'raw_missing' });
+      replacements.set(row, {
+        ...row,
+        allocatedFuelExact,
+        allocatedFuel: Number(allocatedFuelExact),
+        allocatedTxFeeLamports,
+        allocatedTxCostSolExact,
+        allocatedTxCostSol: Number(allocatedTxCostSolExact),
+        sourceMode: 'canonical_raw',
+        allocationCostStatus: 'available',
+        allocationCostReason: null,
+      });
     });
   }
   return rows.map((row) => replacements.get(row) || row);

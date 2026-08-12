@@ -716,13 +716,13 @@ const cargoAllocationEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'ships', label: 'Ships' }),
   Object.freeze({ id: 'requiredCrew', label: 'Required Crew' }),
   Object.freeze({ id: 'assignment', label: 'Assignment' }),
-  Object.freeze({ id: 'amount', label: 'Amount' }),
+  Object.freeze({ id: 'amount', label: 'Cargo Amount' }),
   Object.freeze({ id: 'cargoVolume', label: 'Cargo Volume' }),
   Object.freeze({ id: 'allocatedFuel', label: 'Allocated Fuel' }),
   Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
-  Object.freeze({ id: 'txsCosts', label: 'Txs Costs' }),
-  Object.freeze({ id: 'totalCosts', label: 'Total Costs' }),
-  Object.freeze({ id: 'costsPerUnit', label: 'Costs per Unit' }),
+  Object.freeze({ id: 'txsCosts', label: 'TXS Costs' }),
+  Object.freeze({ id: 'totalCosts', label: 'Total Cargo Costs' }),
+  Object.freeze({ id: 'costsPerUnit', label: 'Cargo Cost/Unit' }),
 ]);
 
 const craftingEarningsOptionalColumns = Object.freeze([
@@ -876,13 +876,13 @@ const earningsMetricGuideBySubtab = Object.freeze({
   }),
   cargoAllocation: Object.freeze({
     assignment: ['Logistics assignment that delivered this asset.', 'Recorded assignment: Transport or Supply Chain.', 'Use it to separate direct transport from supply-chain activity for the same asset.'],
-    amount: ['Units of the asset delivered during the UTC day.', 'Σ delivered asset amount.', 'This is the quantity used for Costs per Unit.'],
-    cargoVolume: ['Cargo-space volume represented by the delivered asset.', 'Σ delivered cargo volume.', 'Compare it with Amount to understand how much hold capacity the asset consumed.'],
+    amount: ['Units of the asset delivered during the UTC day.', 'Σ delivered Cargo Amount.', 'This is the denominator used for Cargo Cost/Unit.'],
+    cargoVolume: ['Cargo-space volume represented by the delivered asset.', 'Σ delivered Cargo Volume.', 'Compare it with Cargo Amount to understand how much hold capacity the asset consumed.'],
     allocatedFuel: ['Fuel attributed to delivery of this asset, including its share of empty-leg overhead.', 'Loaded-leg fuel + allocated empty-leg fuel overhead.', 'This assigns the complete cycle fuel cost across the assets delivered by that cycle.'],
-    fuelCosts: ['Current ATLAS value of the fuel allocated to this asset.', 'Allocated Fuel × current fuel price.', 'This is a current-price estimate; historical fuel acquisition prices are not retained.'],
-    txsCosts: ['ATLAS value of transaction fees allocated to this asset, including empty-leg overhead.', 'Allocated transaction cost in SOL × current ATLAS-per-SOL rate.', 'The cycle’s transaction fees are distributed across its delivered assets.'],
-    totalCosts: ['Total represented logistics cost allocated to this asset.', 'Fuel Costs + Txs Costs.', 'Use it to compare the absolute delivery cost of different assets.'],
-    costsPerUnit: ['Allocated logistics cost for one delivered asset unit.', 'Total Costs ÷ Amount.', 'Lower is better; compare it with the asset’s value or margin when judging route efficiency.'],
+    fuelCosts: ['ATLAS value of the fuel allocated to this asset.', 'Allocated Fuel × applicable fuel price.', 'Unavailable source or price evidence is shown as --, never as a manufactured zero.'],
+    txsCosts: ['ATLAS value of transaction fees allocated to this asset, including empty-leg overhead.', 'Allocated transaction cost in SOL × applicable ATLAS-per-SOL rate.', 'Unavailable source or valuation evidence is shown as --.'],
+    totalCosts: ['Total represented cargo logistics cost allocated to this asset.', 'Fuel Costs + TXS Costs.', 'Cargo cost currently includes Fuel and TXS only; Rental and inventory basis are not included.'],
+    costsPerUnit: ['Allocated cargo logistics cost for one delivered asset unit.', 'Total Cargo Costs ÷ Cargo Amount.', 'Available only when Fuel and TXS costs are available and Cargo Amount is positive.'],
   }),
   crafting: Object.freeze({
     crafted: ['Total output units crafted during the UTC day.', 'Σ crafted output quantity.', 'Use with unit prices and costs to understand production scale.'],
@@ -6958,13 +6958,13 @@ function renderEarningsCargoAllocations(result) {
     tr.appendChild(createTextCell(entry.destination || '--'));
     for (const column of remainingColumns) {
       if (column.id === 'assignment') tr.appendChild(createTextCell(entry.assignment || '--'));
-      else if (column.id === 'amount') tr.appendChild(createTextCell(entry.amount == null ? '--' : formatWholeNumber(entry.amount)));
-      else if (column.id === 'cargoVolume') tr.appendChild(createTextCell(entry.cargoVolume == null ? '--' : formatWholeNumber(entry.cargoVolume)));
-      else if (column.id === 'allocatedFuel') tr.appendChild(createTextCell(entry.allocatedFuel == null ? '--' : formatWholeNumber(entry.allocatedFuel)));
-      else if (column.id === 'fuelCosts') tr.appendChild(createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas)));
-      else if (column.id === 'txsCosts') tr.appendChild(createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas)));
-      else if (column.id === 'totalCosts') tr.appendChild(createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas)));
-      else if (column.id === 'costsPerUnit') tr.appendChild(createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6)));
+      else if (column.id === 'amount') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.amount)));
+      else if (column.id === 'cargoVolume') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.cargoVolume)));
+      else if (column.id === 'allocatedFuel') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.allocatedFuel)));
+      else if (column.id === 'fuelCosts') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.fuelCostsAtlas)));
+      else if (column.id === 'txsCosts') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.txsCostsAtlas)));
+      else if (column.id === 'totalCosts') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.totalCostsAtlas)));
+      else if (column.id === 'costsPerUnit') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.costsPerUnitAtlas)));
     }
     earningsCargoAllocationTableBody.appendChild(tr);
   }

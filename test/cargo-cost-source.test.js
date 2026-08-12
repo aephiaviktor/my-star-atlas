@@ -161,8 +161,27 @@ test('missing fleet scope is explicit unallocated accounting and never falls bac
     { isoDate: '2026-08-05', fleetAccount: 'Mutable Fleet', fleet: 'Mutable Fleet', cargoVolume: 1, allocatedFuel: 99, allocatedTxCostSol: 99 },
   ], daily);
   assert.equal(attemptedLabelMatch[0].sourceMode, 'raw_missing');
-  assert.equal(attemptedLabelMatch[0].allocatedFuel, 0);
-  assert.equal(attemptedLabelMatch[0].allocatedTxCostSol, 0);
+  assert.equal(attemptedLabelMatch[0].allocationCostStatus, 'unavailable');
+  assert.equal(attemptedLabelMatch[0].allocationCostReason, 'canonical_raw_cost_missing');
+  assert.equal(attemptedLabelMatch[0].allocatedFuel, null);
+  assert.equal(attemptedLabelMatch[0].allocatedTxCostSol, null);
+  assert.equal(attemptedLabelMatch[0].allocatedFuelExact, null);
+  assert.equal(attemptedLabelMatch[0].allocatedTxFeeLamports, null);
+});
+
+test('explicit canonical raw zero remains available zero', () => {
+  const rawZero = [{
+    isoDate: '2026-08-05', fleetAccount: 'fleet', allocationStatus: 'scoped',
+    burnedFuelExact: '0', txFeeLamports: '0',
+  }];
+  const [allocated] = applyRawCostsToCargoAllocations([
+    { isoDate: '2026-08-05', fleetAccount: 'fleet', cargoVolume: 1, allocatedFuel: 99, allocatedTxCostSol: 99 },
+  ], rawZero);
+  assert.equal(allocated.sourceMode, 'canonical_raw');
+  assert.equal(allocated.allocationCostStatus, 'available');
+  assert.equal(allocated.allocationCostReason, null);
+  assert.equal(allocated.allocatedFuel, 0);
+  assert.equal(allocated.allocatedTxCostSol, 0);
 });
 
 test('mutable metadata cannot change scoped allocation or unallocated results in either order', () => {

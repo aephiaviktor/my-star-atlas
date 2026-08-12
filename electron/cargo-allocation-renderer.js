@@ -17,5 +17,19 @@
       && (!normalize(fleet) || normalize(row.fleetName || row.fleet) === normalize(fleet))
       && (!normalize(asset) || normalize(row.asset) === normalize(asset)));
   }
-  return { scopeKey, acceptCargoAllocationResponse, filterCargoAllocationRows };
+  function formatAllocationNumber(value, { significantDigits = 8, scientificThreshold = 1e-6 } = {}) {
+    if (value == null || value === '') return '--';
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '--';
+    if (Object.is(number, 0) || Object.is(number, -0)) return '0';
+    const absolute = Math.abs(number);
+    if (absolute < scientificThreshold) {
+      return number.toExponential(Math.max(0, significantDigits - 1)).replace(/\.0+(?=e)|(?<=\.\d*?)0+(?=e)/, '').replace(/\.e/, 'e');
+    }
+    return new Intl.NumberFormat(undefined, {
+      maximumSignificantDigits: significantDigits,
+      useGrouping: true,
+    }).format(number);
+  }
+  return { scopeKey, acceptCargoAllocationResponse, filterCargoAllocationRows, formatAllocationNumber };
 });

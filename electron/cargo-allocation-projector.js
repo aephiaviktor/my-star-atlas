@@ -30,18 +30,46 @@ function createCargoAllocationProjector(deps) {
     }
     const grouped = await Promise.all(groupRows(completed).map(async (row) => {
       const canonicalRaw = row.sourceMode === 'canonical_raw';
+      const rawMissing = row.sourceMode === 'raw_missing' || row.allocationCostStatus === 'unavailable';
       const fuelPrice = requireFuelPrice(await resolvePrice('Fuel', row.isoDate), row.isoDate);
-      const fuelCostsAtlas = canonicalRaw && Number(row.allocatedFuelExact || 0) > 0
-        ? valueNativeCost({ eventType: 'fuel', timestamp: row.timestamp, fuelQuantity: row.allocatedFuelExact }, fuelPrice)?.amountATL ?? null
-        : (['complete', 'provisional'].includes(fuelPrice.status) ? row.allocatedFuel * fuelPrice.priceATL : null);
+      const fuelPriceAvailable = ['complete', 'provisional'].includes(fuelPrice.status);
+      const fuelQuantityAvailable = !rawMissing && row.allocatedFuel != null && Number.isFinite(Number(row.allocatedFuel));
+      const fuelCostsAtlas = !fuelQuantityAvailable || !fuelPriceAvailable
+        ? null
+        : canonicalRaw && Number(row.allocatedFuelExact) > 0
+          ? valueNativeCost({ eventType: 'fuel', timestamp: row.timestamp, fuelQuantity: row.allocatedFuelExact }, fuelPrice)?.amountATL ?? null
+          : Number(row.allocatedFuel) * fuelPrice.priceATL;
       const solPrice = canonicalRaw ? requireSameDatePrice(await resolvePrice('SOL', row.isoDate), row.isoDate) : null;
-      const txsCostsAtlas = canonicalRaw && BigInt(row.allocatedTxFeeLamports || '0') > 0n
-        ? valueNativeCost({ eventType: 'sol_fee', timestamp: row.timestamp, txFeeLamports: row.allocatedTxFeeLamports }, solPrice)?.amountATL ?? null
-        : (Number.isFinite(Number(prices.atlasPerSol)) ? row.allocatedTxCostSol * Number(prices.atlasPerSol) : null);
-      const totalCostsAtlas = Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas) ? fuelCostsAtlas + txsCostsAtlas : null;
-      return { ...row, label: formatDate(new Date(row.timestamp)), fleetName: row.fleet, fuelCostsAtlas, txsCostsAtlas, totalCostsAtlas, costsPerUnitAtlas: Number.isFinite(totalCostsAtlas) && row.amount > 0 ? totalCostsAtlas / row.amount : null };
+      const txQuantityAvailable = !rawMissing && row.allocatedTxCostSol != null && Number.isFinite(Number(row.allocatedTxCostSol));
+      const txPriceAvailable = canonicalRaw
+        ? ['complete', 'provisional'].includes(solPrice?.status)
+        : prices.atlasPerSol != null && Number.isFinite(Number(prices.atlasPerSol));
+      const txsCostsAtlas = !txQuantityAvailable || !txPriceAvailable
+        ? null
+        : canonicalRaw && BigInt(row.allocatedTxFeeLamports || '0') > 0n
+          ? valueNativeCost({ eventType: 'sol_fee', timestamp: row.timestamp, txFeeLamports: row.allocatedTxFeeLamports }, solPrice)?.amountATL ?? null
+          : Number(row.allocatedTxCostSol) * Number(prices.atlasPerSol);
+      const fuelCostStatus = Number.isFinite(fuelCostsAtlas) ? 'available' : 'unavailable';
+      const txsCostStatus = Number.isFinite(txsCostsAtlas) ? 'available' : 'unavailable';
+      const totalCostsAtlas = fuelCostStatus === 'available' && txsCostStatus === 'available' ? fuelCostsAtlas + txsCostsAtlas : null;
+      return {
+        ...row,
+        label: formatDate(new Date(row.timestamp)),
+        fleetName: row.fleet,
+        fuelCostStatus,
+        fuelCostReason: fuelCostStatus === 'available' ? null : (row.allocationCostReason || (fuelQuantityAvailable ? 'fuel_price_unavailable' : 'fuel_allocation_unavailable')),
+        txsCostStatus,
+        txsCostReason: txsCostStatus === 'available' ? null : (row.allocationCostReason || (txQuantityAvailable ? 'transaction_valuation_unavailable' : 'transaction_allocation_unavailable')),
+        fuelCostsAtlas,
+        txsCostsAtlas,
+        totalCostsAtlas,
+        costsPerUnitAtlas: Number.isFinite(totalCostsAtlas) && Number(row.amount) > 0 ? totalCostsAtlas / Number(row.amount) : null,
+      };
     }));
-    return { rows: grouped, diagnostics: { completedCycleIdentityCount: completedCycleIds.size, exactCycleMatchCount: completed.length, fleetScopedCount: fleetScopedCargoAllocationRows.length, completedCycleMatchedCount: completed.length } };
+    const unavailableRawCostCount = grouped.filter((row) => row.allocationCostReason === 'canonical_raw_cost_missing').length;
+    const unavailableFuelCostCount = grouped.filter((row) => row.fuelCostStatus === 'unavailable').length;
+    const unavailableTxsCostCount = grouped.filter((row) => row.txsCostStatus === 'unavailable').length;
+    return { rows: grouped, diagnostics: { completedCycleIdentityCount: completedCycleIds.size, exactCycleMatchCount: completed.length, fleetScopedCount: fleetScopedCargoAllocationRows.length, completedCycleMatchedCount: completed.length, unavailableRawCostCount, unavailableFuelCostCount, unavailableTxsCostCount } };
   };
 }
 module.exports = { createCargoAllocationProjector };
