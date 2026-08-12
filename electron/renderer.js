@@ -5673,6 +5673,9 @@ function getActiveEarningsColumnsSubtab() {
 
 function getVisibleEarningsColumns(subtab = currentEarningsSubtab) {
   const selected = earningsColumnState[subtab] || earningsColumnState.scanning;
+  if (subtab === 'cargoAllocation') {
+    return CargoAllocationRenderer.getCargoAllocationVisibleColumns(getEarningsColumns(subtab), selected);
+  }
   return getEarningsColumns(subtab).filter((column) => selected.has(column.id));
 }
 
@@ -6956,15 +6959,12 @@ function renderEarningsCargoAllocations(result) {
     tr.appendChild(createTextCell(entry.asset || '--'));
     tr.appendChild(createTextCell(entry.origin || '--'));
     tr.appendChild(createTextCell(entry.destination || '--'));
+    const renderedValues = new Map(
+      CargoAllocationRenderer.buildCargoAllocationRenderedColumns(entry).map(({ id, text }) => [id, text]),
+    );
     for (const column of remainingColumns) {
       if (column.id === 'assignment') tr.appendChild(createTextCell(entry.assignment || '--'));
-      else if (column.id === 'amount') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.amount)));
-      else if (column.id === 'cargoVolume') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.cargoVolume)));
-      else if (column.id === 'allocatedFuel') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.allocatedFuel)));
-      else if (column.id === 'fuelCosts') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.fuelCostsAtlas)));
-      else if (column.id === 'txsCosts') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.txsCostsAtlas)));
-      else if (column.id === 'totalCosts') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.totalCostsAtlas)));
-      else if (column.id === 'costsPerUnit') tr.appendChild(createTextCell(CargoAllocationRenderer.formatAllocationNumber(entry.costsPerUnitAtlas)));
+      else if (renderedValues.has(column.id)) tr.appendChild(createTextCell(renderedValues.get(column.id)));
     }
     earningsCargoAllocationTableBody.appendChild(tr);
   }

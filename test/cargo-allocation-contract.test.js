@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { formatAllocationNumber } = require('../electron/cargo-allocation-renderer');
+const { formatAllocationNumber, getCargoAllocationVisibleColumns, buildCargoAllocationRenderedColumns } = require('../electron/cargo-allocation-renderer');
 const { createCargoAllocationProjector } = require('../electron/cargo-allocation-projector');
 const { groupCargoAllocationRows } = require('../electron/influx-data');
 
@@ -48,6 +48,23 @@ test('Allocation-specific formatting preserves finite nonzero values and disting
   assert.equal(formatAllocationNumber(null), '--');
   assert.equal(formatAllocationNumber(undefined), '--');
   assert.equal(formatAllocationNumber(Number.NaN), '--');
+});
+
+test('rendered Allocation columns survive legacy persisted visibility and bind every approved value', () => {
+  const legacySelected = new Set(['assignment', 'amount', 'cargoVolume']);
+  const row = {
+    amount: 12, cargoVolume: 24, allocatedFuel: 0.25,
+    fuelCostsAtlas: null, txsCostsAtlas: 0,
+    totalCostsAtlas: null, costsPerUnitAtlas: 0.00000000011215801893402239,
+    rentalCostsAtlas: 99, baseCostsPerUnitAtlas: 88, landedCostsPerUnitAtlas: 77,
+  };
+  const rendered = buildCargoAllocationRenderedColumns(row);
+  const visible = getCargoAllocationVisibleColumns(rendered, legacySelected);
+  assert.deepEqual(visible.map(({ label }) => label), [
+    'Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Costs', 'TXS Costs', 'Total Cargo Costs', 'Cargo Cost/Unit',
+  ]);
+  assert.deepEqual(visible.map(({ text }) => text), ['12', '24', '0.25', '--', '0', '--', '1.1215802e-10']);
+  assert.equal(visible.some(({ label }) => ['Rental Costs', 'Base Cost/Unit', 'Total Cost/Unit'].includes(label)), false);
 });
 
 test('Allocation projector preserves independent component availability and exact aggregate formulas', async () => {

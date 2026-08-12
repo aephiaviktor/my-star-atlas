@@ -31,5 +31,25 @@
       useGrouping: true,
     }).format(number);
   }
-  return { scopeKey, acceptCargoAllocationResponse, filterCargoAllocationRows, formatAllocationNumber };
+  const renderedColumnContract = Object.freeze([
+    Object.freeze({ id: 'amount', label: 'Cargo Amount', field: 'amount' }),
+    Object.freeze({ id: 'cargoVolume', label: 'Cargo Volume', field: 'cargoVolume' }),
+    Object.freeze({ id: 'allocatedFuel', label: 'Allocated Fuel', field: 'allocatedFuel' }),
+    Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs', field: 'fuelCostsAtlas' }),
+    Object.freeze({ id: 'txsCosts', label: 'TXS Costs', field: 'txsCostsAtlas' }),
+    Object.freeze({ id: 'totalCosts', label: 'Total Cargo Costs', field: 'totalCostsAtlas' }),
+    Object.freeze({ id: 'costsPerUnit', label: 'Cargo Cost/Unit', field: 'costsPerUnitAtlas' }),
+  ]);
+  function getCargoAllocationVisibleColumns(columns = [], selected = new Set()) {
+    const requiredIds = new Set(renderedColumnContract.map(({ id }) => id));
+    return columns.filter((column) => column.id === 'assignment' ? selected.has(column.id) : requiredIds.has(column.id));
+  }
+  function buildCargoAllocationRenderedColumns(row = {}) {
+    return renderedColumnContract.map(({ id, label, field }) => Object.freeze({
+      id,
+      label,
+      text: formatAllocationNumber(row[field]),
+    }));
+  }
+  return { scopeKey, acceptCargoAllocationResponse, filterCargoAllocationRows, formatAllocationNumber, renderedColumnContract, getCargoAllocationVisibleColumns, buildCargoAllocationRenderedColumns };
 });
