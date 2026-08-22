@@ -7,6 +7,7 @@ const {
   calculateFleetCargoCapacity,
   calculateCargoEfficiency,
   buildCargoVolumeByFleetDayAssignment,
+  buildCargoVolumeRows,
   filterCargoAllocationsToCompletedCycles,
   calculateTravelModeTime,
 } = require('../electron/earnings-math');
@@ -91,6 +92,34 @@ test('cargo volume is summed by UTC date, fleet, and assignment', () => {
   assert.equal(totals.get('2026-07-25\nfreight one\nTransport'), 300);
 });
 
+test('cycle-aggregated Cargo volume rows preserve every historical UTC day', () => {
+  const account = 'A'.repeat(44);
+  const rows = buildCargoVolumeRows([
+    { _time: '2026-08-20T00:00:00.000Z', cycleId: `${account}:1,2:old`, fleet: 'Hauler', assignment: 'Transport', _value: '120' },
+    { _time: '2026-08-21T00:00:00.000Z', cycleId: `${account}:1,2:new`, fleet: 'Hauler', assignment: 'Transport', _value: '180' },
+  ], new Set(['2026-08-20', '2026-08-21']));
+
+  assert.deepEqual(rows.map((row) => [row.isoDate, row.fleetAccount, row.cycleId, row.cargoVolume]), [
+    ['2026-08-20', account, `${account}:1,2:old`, 120],
+    ['2026-08-21', account, `${account}:1,2:new`, 180],
+  ]);
+});
+
+test('cycle-aggregated Cargo volume rows reject malformed, out-of-window, and duplicate evidence', () => {
+  const account = 'B'.repeat(44);
+  const valid = { _time: '2026-08-20T00:00:00.000Z', cycleId: `${account}:1,2:cycle`, fleet: 'Hauler', assignment: 'Transport', _value: '120' };
+  assert.deepEqual(buildCargoVolumeRows([
+    valid,
+    { ...valid },
+    { ...valid, _time: '2026-08-19T00:00:00.000Z', cycleId: `${account}:1,2:outside` },
+    { ...valid, cycleId: 'malformed' },
+    { ...valid, cycleId: `${account}:1,2:nan`, _value: 'not-a-number' },
+  ], new Set(['2026-08-20'])), [{
+    isoDate: '2026-08-20', fleet: 'Hauler', fleetAccount: account, assignment: 'Transport',
+    cycleId: `${account}:1,2:cycle`, cargoVolume: 120,
+  }]);
+});
+
 test('representative completed CF-22|01b volume restores existing efficiency calculation', () => {
   const cargoVolume = 17609616;
   const result = calculateCargoEfficiency({ cargoVolume, fleetCargoCapacity: 100000, cargoLegs: 108 });
@@ -131,6 +160,7 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(allocationProjector, /filterCompleted\(fleetScopedCargoAllocationRows, compatibilityCargoRows\)/);
   assert.match(main, /cargoLegs: completedCycleEvidenceAvailable[\s\S]*Array\.from\(row\.completedCycleLegs\.values\(\)\)/);
   assert.match(main, /buildCargoVolumeByFleetDay\(scopedCargoVolumeRows\)/);
+  assert.match(main, /group\(columns: \["cycleId", "fleet", "assignment"\]\)[\s\S]*aggregateWindow\(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start"\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);
   assert.match(main, /const moveTimeFlux =/);
   assert.match(main, /travelModeByMovement\.get/);

@@ -41,7 +41,7 @@ const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargo
 const { buildCargoAllocationPivotFlux, createCargoAllocationSource } = require('./cargo-allocation-source');
 const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
 const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
-const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
+const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeRows, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
@@ -6598,13 +6598,16 @@ async function fetchCargoVolumeEarningsRows(settings) {
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
   |> filter(fn: (r) => r._field == "cargoVolume")
 ${scopeFilterFlux}
-  |> filter(fn: (r) => exists r.cycleId and exists r.allocationIndex)
-  |> keep(columns: ["_time", "_field", "_value", "fleet", "assignment", "cycleId", "allocationIndex"])`;
+  |> filter(fn: (r) => exists r.cycleId and exists r.allocationIndex and exists r.fleet and exists r.assignment)
+  |> group(columns: ["cycleId", "fleet", "assignment"])
+  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
+  |> group()
+  |> keep(columns: ["_time", "_value", "fleet", "assignment", "cycleId"])`;
   const includedDays = new Set(includedUtcDays.map((date) => getUtcDateKey(date)));
   const startedAt = Date.now();
-  const fieldRows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
-  const rows = buildCargoAllocationRecords(fieldRows, includedDays);
-  return { rows, durationMs: Date.now() - startedAt, returnedRecordCount: fieldRows.length };
+  const cycleRows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
+  const rows = buildCargoVolumeRows(cycleRows, includedDays);
+  return { rows, durationMs: Date.now() - startedAt, returnedRecordCount: cycleRows.length };
 }
 
 async function fetchCargoCompletionEvidenceRows(settings) {
