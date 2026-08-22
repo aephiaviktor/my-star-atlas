@@ -33,6 +33,12 @@ function calculateCargoEfficiency({ cargoVolume, fleetCargoCapacity, cargoLegs }
   };
 }
 
+function cargoVolumeRangeStart(includedUtcDays = []) {
+  const oldest = includedUtcDays[0];
+  if (!(oldest instanceof Date) || Number.isNaN(oldest.getTime())) return '';
+  return `${oldest.toISOString().slice(0, 10)}T00:00:00.000Z`;
+}
+
 function buildCargoVolumeRows(rows = [], includedDays = null) {
   const records = new Map();
   for (const row of rows) {
@@ -108,6 +114,7 @@ function calculateTravelModeTime(durations = {}) {
 module.exports = {
   calculateFleetCargoCapacity,
   calculateCargoEfficiency,
+  cargoVolumeRangeStart,
   buildCargoVolumeRows,
   buildCargoVolumeByFleetDayAssignment,
   buildCargoVolumeByFleetDay,

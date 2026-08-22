@@ -8,6 +8,7 @@ const {
   calculateCargoEfficiency,
   buildCargoVolumeByFleetDayAssignment,
   buildCargoVolumeRows,
+  cargoVolumeRangeStart,
   filterCargoAllocationsToCompletedCycles,
   calculateTravelModeTime,
 } = require('../electron/earnings-math');
@@ -92,6 +93,16 @@ test('cargo volume is summed by UTC date, fleet, and assignment', () => {
   assert.equal(totals.get('2026-07-25\nfreight one\nTransport'), 300);
 });
 
+test('Cargo volume query starts at the oldest included UTC day, not today', () => {
+  const includedUtcDays = [
+    new Date('2026-07-24T00:00:00.000Z'),
+    new Date('2026-08-21T00:00:00.000Z'),
+    new Date('2026-08-22T00:00:00.000Z'),
+  ];
+  assert.equal(cargoVolumeRangeStart(includedUtcDays), '2026-07-24T00:00:00.000Z');
+  assert.equal(cargoVolumeRangeStart([]), '');
+});
+
 test('cycle-aggregated Cargo volume rows preserve every historical UTC day', () => {
   const account = 'A'.repeat(44);
   const rows = buildCargoVolumeRows([
@@ -160,6 +171,7 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(allocationProjector, /filterCompleted\(fleetScopedCargoAllocationRows, compatibilityCargoRows\)/);
   assert.match(main, /cargoLegs: completedCycleEvidenceAvailable[\s\S]*Array\.from\(row\.completedCycleLegs\.values\(\)\)/);
   assert.match(main, /buildCargoVolumeByFleetDay\(scopedCargoVolumeRows\)/);
+  assert.match(main, /const rangeStart = cargoVolumeRangeStart\(includedUtcDays\)/);
   assert.match(main, /group\(columns: \["cycleId", "fleet", "assignment"\]\)[\s\S]*aggregateWindow\(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start"\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);
   assert.match(main, /const moveTimeFlux =/);
