@@ -5057,7 +5057,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   };
   const safeCheckpointDocument = {
     schemaVersion: 2, faction, profile, savedAt: new Date().toISOString(),
-    orders: scanned.orders, trades, ...cursorOutputSnapshot,
+    orders: scanned.orders, trades, immutableEvidence: scanned.immutableEvidence, coverage: scanned.coverage, ...cursorOutputSnapshot,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     marketplaceBackfilled: false, tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
   };
@@ -5094,6 +5094,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   });
   return {
     trades,
+    immutableEvidence: scanned.immutableEvidence, coverage: scanned.coverage,
     error: publishError,
     rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
     exhaustion: scanned.exhaustion || null,
@@ -5171,7 +5172,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
   };
   const safeCheckpointDocument = {
     schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets,
-    orders: scanned.orders, trades, assetFlows, ...cursorOutputSnapshot,
+    orders: scanned.orders, trades, assetFlows, immutableEvidence: scanned.immutableEvidence, coverage: scanned.coverage, ...cursorOutputSnapshot,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     publishedFlowIds: Array.from(checkpoint.publishedFlowIds).sort(),
     marketplaceBackfilled: false, assetFlowBackfilled: false,
@@ -5221,7 +5222,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     assetFlowBackfilled: assetFlowBackfilledNext,
   });
   return {
-    trades, assetFlows, error: publishError,
+    trades, assetFlows, immutableEvidence: scanned.immutableEvidence, coverage: scanned.coverage, error: publishError,
     rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
     exhaustion: scanned.exhaustion || null,
   };
