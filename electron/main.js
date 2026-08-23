@@ -7169,10 +7169,10 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
       && completedCargoCycleIds.has(String(row.cycleId || '').trim())
   );
-  const scopedCargoAllocationRows = (cargoVolumeFetch.allocations || []).filter((row) =>
+  const fleetScopedCargoAllocationRows = (cargoVolumeFetch.allocations || []).filter((row) =>
     scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
-      && completedCargoCycleIds.has(String(row.cycleId || '').trim())
   );
+  const scopedCargoAllocationRows = filterCargoAllocationsToCompletedCycles(fleetScopedCargoAllocationRows, compatibilityCargoRows);
   const cargoBreakevenBetaInputs = buildCargoBetaInputs({ allocations: scopedCargoAllocationRows, cargoRows: cargo });
   const ledgerCargoRows = cargoBreakevenBetaInputs.map((row) => row.ledgerRow).filter(Boolean);
   const cargoVolumeByFleetDayMap = buildCargoVolumeByFleetDay(scopedCargoVolumeRows);

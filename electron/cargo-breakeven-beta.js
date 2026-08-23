@@ -32,10 +32,13 @@ function buildCargoBetaInputs({ allocations = [], cargoRows = [] } = {}) {
     const transactionCost = costs ? valueNativeShare(allocation.allocatedTxCostSol, costs.txCostSol, costs.txsCostsAtlas) : null;
     const rentalCost = costs ? allocate(costs.rentalRateAtlasPerDay, allocation.cargoVolume, weights.volume) : null;
     const missing = [];
+    const currencyConversionMissing = (finite(allocation.allocatedFuel) && !finite(fuelCost))
+      || (finite(allocation.allocatedTxCostSol) && !finite(transactionCost));
     if (!finite(allocation.amount) || Number(allocation.amount) <= 0) missing.push('delivered quantity missing');
-    if (!finite(fuelCost)) missing.push('Fuel cost missing');
+    if (currencyConversionMissing) missing.push('currency conversion missing');
+    else if (!finite(fuelCost)) missing.push('Fuel cost missing');
     if (!finite(rentalCost)) missing.push('Rental cost missing');
-    if (!finite(transactionCost)) missing.push('Transaction cost missing');
+    if (!currencyConversionMissing && !finite(transactionCost)) missing.push('Transaction cost missing');
     const cargoCost = missing.length ? null : fuelCost + rentalCost + transactionCost;
     const ledgerRow = !missing.length ? {
       timestamp: allocation.timestamp, isoDate: allocation.isoDate, origin: allocation.origin, destination: allocation.destination,
@@ -46,7 +49,12 @@ function buildCargoBetaInputs({ allocations = [], cargoRows = [] } = {}) {
       isoDate: allocation.isoDate, timestamp: allocation.timestamp, fleetName: costs?.fleetName || allocation.fleet, fleetAccount: allocation.fleetAccount,
       cycleId: allocation.cycleId, allocationIndex: allocation.allocationIndex, origin: allocation.origin, destination: allocation.destination,
       asset: allocation.asset, deliveredQuantity: finite(allocation.amount) ? Number(allocation.amount) : null,
-      fuelCost, rentalCost, transactionCost, cargoCost, missing, ledgerRow };
+      fuelCost, fuelCostDisplay: finite(fuelCost) ? fuelCost : (finite(allocation.allocatedFuel) ? Number(allocation.allocatedFuel) : null),
+      fuelCostCurrency: finite(fuelCost) ? 'ATLAS' : (finite(allocation.allocatedFuel) ? 'FUEL' : null),
+      rentalCost, rentalCostCurrency: finite(rentalCost) ? 'ATLAS' : null,
+      transactionCost, transactionCostDisplay: finite(transactionCost) ? transactionCost : (finite(allocation.allocatedTxCostSol) ? Number(allocation.allocatedTxCostSol) : null),
+      transactionCostCurrency: finite(transactionCost) ? 'ATLAS' : (finite(allocation.allocatedTxCostSol) ? 'SOL' : null),
+      cargoCost, cargoCostCurrency: finite(cargoCost) ? 'ATLAS' : null, missing, ledgerRow };
   });
 }
 
@@ -71,7 +79,9 @@ function buildCargoBreakevenBetaRows({ betaInputs = [], appliedEventResults = []
     }
     const totalCostPerUnit = finite(cargoCostPerUnit) && finite(baseCostPerUnit) ? cargoCostPerUnit + baseCostPerUnit : null;
     const uniqueMissing = [...new Set(missing)];
-    return { ...input, ledgerRow: undefined, cargoCostPerUnit, baseCostPerUnit, totalCostPerUnit,
+    return { ...input, ledgerRow: undefined, cargoCostPerUnit, cargoCostPerUnitCurrency: finite(cargoCostPerUnit) ? 'ATLAS' : null,
+      baseCostPerUnit, baseCostPerUnitCurrency: finite(baseCostPerUnit) ? 'ATLAS' : null,
+      totalCostPerUnit, totalCostPerUnitCurrency: finite(totalCostPerUnit) ? 'ATLAS' : null,
       evidenceStatus: uniqueMissing.length ? `Incomplete — ${uniqueMissing.join('; ')}` : 'Estimated — legacy evidence',
       missingReason: uniqueMissing.join('; ') || null };
   });

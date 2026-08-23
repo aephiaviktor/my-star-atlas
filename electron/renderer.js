@@ -6798,25 +6798,37 @@ function renderEarningsBreakeven(result) {
 
 function renderCargoBreakevenBeta(result) {
   const rows = Array.isArray(result?.cargoBreakevenBetaRows) ? result.cargoBreakevenBetaRows : [];
-  setText(earningsCargoBreakevenBetaStatus, `${formatWholeNumber(rows.length)} completed Cargo allocations · Beta uses legacy evidence and never changes exact-ledger readiness`);
+  const sortedRows = [...rows].sort((left, right) => {
+    const timeDifference = Date.parse(right.timestamp || '') - Date.parse(left.timestamp || '');
+    if (Number.isFinite(timeDifference) && timeDifference !== 0) return timeDifference;
+    const leftIdentity = String(left.betaId || '');
+    const rightIdentity = String(right.betaId || '');
+    return leftIdentity < rightIdentity ? -1 : leftIdentity > rightIdentity ? 1 : 0;
+  });
+  const visibleRows = sortedRows.slice(0, 200);
+  const countLabel = rows.length > visibleRows.length
+    ? `Showing ${formatWholeNumber(visibleRows.length)} of ${formatWholeNumber(rows.length)}`
+    : `${formatWholeNumber(rows.length)} completed Cargo allocations`;
+  setText(earningsCargoBreakevenBetaStatus, `${countLabel} · Beta uses legacy evidence and never changes exact-ledger readiness`);
   if (!earningsCargoBreakevenBetaBody) return;
   earningsCargoBreakevenBetaBody.textContent = '';
   if (!rows.length) {
     const tr = document.createElement('tr'); tr.className = 'empty-row';
     const td = createTextCell('No completed Cargo allocations available for this faction/profile'); td.colSpan = 11; tr.appendChild(td); earningsCargoBreakevenBetaBody.appendChild(tr); return;
   }
-  for (const entry of rows) {
+  const cost = (value, currency) => value == null ? '--' : `${formatAtlasNumber(value, 6)} ${currency || '--'}`;
+  for (const entry of visibleRows) {
     const tr = document.createElement('tr');
     tr.appendChild(createTextCell(entry.isoDate || '--'));
     tr.appendChild(createTextCell(`${entry.origin || '--'} → ${entry.destination || '--'}`));
     tr.appendChild(createTextCell(entry.asset || '--'));
     tr.appendChild(createTextCell(entry.deliveredQuantity == null ? '--' : formatWholeNumber(entry.deliveredQuantity)));
-    tr.appendChild(createTextCell(entry.fuelCost == null ? '--' : formatAtlasNumber(entry.fuelCost, 6)));
-    tr.appendChild(createTextCell(entry.rentalCost == null ? '--' : formatAtlasNumber(entry.rentalCost, 6)));
-    tr.appendChild(createTextCell(entry.transactionCost == null ? '--' : formatAtlasNumber(entry.transactionCost, 6)));
-    tr.appendChild(createTextCell(entry.cargoCostPerUnit == null ? '--' : formatAtlasNumber(entry.cargoCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.baseCostPerUnit == null ? '--' : formatAtlasNumber(entry.baseCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.totalCostPerUnit == null ? '--' : formatAtlasNumber(entry.totalCostPerUnit, 6)));
+    tr.appendChild(createTextCell(cost(entry.fuelCostDisplay ?? entry.fuelCost, entry.fuelCostCurrency)));
+    tr.appendChild(createTextCell(cost(entry.rentalCost, entry.rentalCostCurrency)));
+    tr.appendChild(createTextCell(cost(entry.transactionCostDisplay ?? entry.transactionCost, entry.transactionCostCurrency)));
+    tr.appendChild(createTextCell(cost(entry.cargoCostPerUnit, entry.cargoCostPerUnitCurrency)));
+    tr.appendChild(createTextCell(cost(entry.baseCostPerUnit, entry.baseCostPerUnitCurrency)));
+    tr.appendChild(createTextCell(cost(entry.totalCostPerUnit, entry.totalCostPerUnitCurrency)));
     tr.appendChild(createTextCell(entry.evidenceStatus || 'Incomplete — status unavailable'));
     earningsCargoBreakevenBetaBody.appendChild(tr);
   }
