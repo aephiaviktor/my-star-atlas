@@ -37,7 +37,7 @@ const {
 } = require('./telemetry-context');
 const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./telemetry-rpc-fetch');
 const { dependencyInstallRequired } = require('./update-dependencies');
-const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
+const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, buildCargoAllocationRecordsFromPivotRows, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
 const { buildCargoAllocationPivotFlux, createCargoAllocationSource } = require('./cargo-allocation-source');
 const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
 const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
@@ -46,6 +46,7 @@ const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
+const { buildCargoBetaInputs, buildCargoBreakevenBetaRows } = require('./cargo-breakeven-beta');
 const { createAtlasPriceResolver } = require('./atlas-price-resolver');
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
 const {
@@ -6594,21 +6595,35 @@ async function fetchCargoVolumeEarningsRows(settings) {
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const includedUtcDays = getLastUtcDays(30);
   const rangeStart = cargoVolumeRangeStart(includedUtcDays);
-  const flux = `from(bucket: "${bucket}")
-  |> range(start: time(v: "${rangeStart}"))
+  const newestDay = includedUtcDays[includedUtcDays.length - 1];
+  const rangeStop = new Date(Date.UTC(newestDay.getUTCFullYear(), newestDay.getUTCMonth(), newestDay.getUTCDate() + 1)).toISOString();
+  const flux = `base = from(bucket: "${bucket}")
+  |> range(start: time(v: "${rangeStart}"), stop: time(v: "${rangeStop}"))
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
-  |> filter(fn: (r) => r._field == "cargoVolume")
 ${scopeFilterFlux}
+
+volume = base
+  |> filter(fn: (r) => r._field == "cargoVolume")
   |> filter(fn: (r) => exists r.cycleId and exists r.allocationIndex and exists r.fleet and exists r.assignment)
   |> group(columns: ["cycleId", "fleet", "assignment"])
   |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
   |> group()
-  |> keep(columns: ["_time", "_value", "fleet", "assignment", "cycleId"])`;
+  |> keep(columns: ["_time", "_value", "fleet", "assignment", "cycleId"])
+
+allocations = base
+  |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
+  |> filter(fn: (r) => exists r.fleet and exists r.rss and exists r.assignment and exists r.originStarbase and exists r.deliveryStarbase and exists r.cycleId and exists r.allocationIndex)
+  |> pivot(rowKey: ["_time", "cycleId", "allocationIndex"], columnKey: ["_field"], valueColumn: "_value")
+  |> filter(fn: (r) => exists r.amount and exists r.cargoVolume and exists r.allocatedFuel and exists r.allocatedTxCostSol)
+  |> keep(columns: ["_time", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex", "faction", "instance", "amount", "cargoVolume", "allocatedFuel", "allocatedTxCostSol"])
+
+union(tables: [volume, allocations])`;
   const includedDays = new Set(includedUtcDays.map((date) => getUtcDateKey(date)));
   const startedAt = Date.now();
-  const cycleRows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
-  const rows = buildCargoVolumeRows(cycleRows, includedDays);
-  return { rows, durationMs: Date.now() - startedAt, returnedRecordCount: cycleRows.length };
+  const pivotRows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
+  const allocations = buildCargoAllocationRecordsFromPivotRows(pivotRows, includedDays);
+  const rows = buildCargoVolumeRows(pivotRows, includedDays);
+  return { rows, allocations, durationMs: Date.now() - startedAt, returnedRecordCount: pivotRows.length };
 }
 
 async function fetchCargoCompletionEvidenceRows(settings) {
@@ -7154,6 +7169,12 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
       && completedCargoCycleIds.has(String(row.cycleId || '').trim())
   );
+  const scopedCargoAllocationRows = (cargoVolumeFetch.allocations || []).filter((row) =>
+    scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
+      && completedCargoCycleIds.has(String(row.cycleId || '').trim())
+  );
+  const cargoBreakevenBetaInputs = buildCargoBetaInputs({ allocations: scopedCargoAllocationRows, cargoRows: cargo });
+  const ledgerCargoRows = cargoBreakevenBetaInputs.map((row) => row.ledgerRow).filter(Boolean);
   const cargoVolumeByFleetDayMap = buildCargoVolumeByFleetDay(scopedCargoVolumeRows);
   const cargoVolumeAvailable = cargoVolumeResult.status === 'fulfilled';
   for (const row of cargo) {
@@ -7243,7 +7264,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     openingInventoryRows,
     scanningRows: rows,
     miningRows: mining,
-    cargoRows: [],
+    cargoRows: ledgerCargoRows,
     craftingRows: ledgerCraftingRows,
     upgradingRows: upgradingRows.ledgerEvents || [],
     localMarketTrades: localMarketResult.trades,
@@ -7253,6 +7274,10 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
   const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
   const inventoryCostLedgerRejectedEvents = inventoryCostLedgerResult.rejectedEvents;
+  const cargoBreakevenBetaRows = buildCargoBreakevenBetaRows({
+    betaInputs: cargoBreakevenBetaInputs,
+    appliedEventResults: inventoryCostLedgerAppliedEventResults,
+  });
   let ledgerCheckpointStatus = checkpoint.status === 'loaded' ? 'updated' : 'created';
   let ledgerCheckpointError = checkpoint.status === 'invalid' ? checkpoint.error : '';
   let ledgerCheckpointSavedAt = checkpoint.savedAt;
@@ -7635,6 +7660,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     rows,
     miningRows: mining,
     cargoRows: cargo,
+    cargoBreakevenBetaRows,
     craftingRows: crafting,
     upgradingRows: upgrading,
     breakevenRows,

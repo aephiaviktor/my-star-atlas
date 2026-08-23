@@ -193,7 +193,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
     }
     try {
       const result = ledger.applyEvent(event);
-      if (event.type === 'craft' || (event.type === 'consume' && event.purpose === 'upgrading')) {
+      if (event.type === 'transfer' || event.type === 'craft' || (event.type === 'consume' && event.purpose === 'upgrading')) {
         if (!currentResults[fingerprint]) currentResults[fingerprint] = [];
         currentResults[fingerprint][occurrence - 1] = result;
       }

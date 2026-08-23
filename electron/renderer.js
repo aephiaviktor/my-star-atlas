@@ -178,6 +178,8 @@ const earningsBreakevenSyncStatus = document.querySelector('#earnings-breakeven-
 const earningsBreakevenStarbaseFilter = document.querySelector('#earnings-breakeven-starbase-filter');
 const earningsBreakevenAssetFilter = document.querySelector('#earnings-breakeven-asset-filter');
 const earningsBreakevenHideLowInventory = document.querySelector('#earnings-breakeven-hide-low-inventory');
+const earningsCargoBreakevenBetaStatus = document.querySelector('#earnings-cargo-breakeven-beta-status');
+const earningsCargoBreakevenBetaBody = document.querySelector('#earnings-cargo-breakeven-beta-body');
 const earningsMarketplaceSyncStatus = document.querySelector('#earnings-marketplace-sync-status');
 const earningsMarketplaceTableBody = document.querySelector('#earnings-marketplace-table-body');
 const earningsMarketplaceSideSwitch = document.querySelector('#earnings-marketplace-side-switch');
@@ -6742,6 +6744,7 @@ function renderEarningsBreakevenHeader() {
 }
 
 function renderEarningsBreakeven(result) {
+  renderCargoBreakevenBeta(result);
   const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
   const baselineStatus = result?.openingInventoryError
     ? ` · opening baseline unavailable: ${result.openingInventoryError}`
@@ -6790,6 +6793,32 @@ function renderEarningsBreakeven(result) {
     tr.appendChild(createTextCell(status));
     for (const column of optionalColumns) tr.appendChild(createTextCell(entry[column.id] ?? '--'));
     earningsBreakevenTableBody.appendChild(tr);
+  }
+}
+
+function renderCargoBreakevenBeta(result) {
+  const rows = Array.isArray(result?.cargoBreakevenBetaRows) ? result.cargoBreakevenBetaRows : [];
+  setText(earningsCargoBreakevenBetaStatus, `${formatWholeNumber(rows.length)} completed Cargo allocations · Beta uses legacy evidence and never changes exact-ledger readiness`);
+  if (!earningsCargoBreakevenBetaBody) return;
+  earningsCargoBreakevenBetaBody.textContent = '';
+  if (!rows.length) {
+    const tr = document.createElement('tr'); tr.className = 'empty-row';
+    const td = createTextCell('No completed Cargo allocations available for this faction/profile'); td.colSpan = 11; tr.appendChild(td); earningsCargoBreakevenBetaBody.appendChild(tr); return;
+  }
+  for (const entry of rows) {
+    const tr = document.createElement('tr');
+    tr.appendChild(createTextCell(entry.isoDate || '--'));
+    tr.appendChild(createTextCell(`${entry.origin || '--'} → ${entry.destination || '--'}`));
+    tr.appendChild(createTextCell(entry.asset || '--'));
+    tr.appendChild(createTextCell(entry.deliveredQuantity == null ? '--' : formatWholeNumber(entry.deliveredQuantity)));
+    tr.appendChild(createTextCell(entry.fuelCost == null ? '--' : formatAtlasNumber(entry.fuelCost, 6)));
+    tr.appendChild(createTextCell(entry.rentalCost == null ? '--' : formatAtlasNumber(entry.rentalCost, 6)));
+    tr.appendChild(createTextCell(entry.transactionCost == null ? '--' : formatAtlasNumber(entry.transactionCost, 6)));
+    tr.appendChild(createTextCell(entry.cargoCostPerUnit == null ? '--' : formatAtlasNumber(entry.cargoCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.baseCostPerUnit == null ? '--' : formatAtlasNumber(entry.baseCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.totalCostPerUnit == null ? '--' : formatAtlasNumber(entry.totalCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.evidenceStatus || 'Incomplete — status unavailable'));
+    earningsCargoBreakevenBetaBody.appendChild(tr);
   }
 }
 
