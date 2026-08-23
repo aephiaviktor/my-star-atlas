@@ -1846,6 +1846,15 @@ function formatDecimal(value, digits = 2) {
   }).format(number);
 }
 
+function formatFixedNumber(value, digits = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '--';
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(number);
+}
+
 function formatCompactNumber(value) {
   const n = Number(value) || 0;
   const abs = Math.abs(n);
@@ -5705,6 +5714,11 @@ function renderEarningsMetricGuide(subtab = currentEarningsSubtab) {
   const container = document.querySelector(`#earnings-${subtab}-metric-guide`);
   if (!container) return;
   container.textContent = '';
+  if (subtab === 'breakeven') {
+    const currencyNote = document.createElement('p');
+    currencyNote.textContent = 'Costs and C/U are shown in ATLAS unless another currency is displayed.';
+    container.appendChild(currencyNote);
+  }
   const guideColumns = subtab === 'breakeven'
     ? [...breakevenEarningsBaseColumns, ...getVisibleEarningsColumns(subtab)]
     : getVisibleEarningsColumns(subtab);
@@ -6853,12 +6867,13 @@ function renderCargoBreakevenBeta(result) {
   }
   const cost = (value, currency, digits) => {
     const number = Number(value);
-    if (value == null || value === '' || !Number.isFinite(number)) return '--';
+    const currencyLabel = String(currency || '').trim();
+    if (value == null || value === '' || !Number.isFinite(number) || !currencyLabel) return '--';
     const threshold = 10 ** -digits;
     const display = number > 0 && number < threshold
-      ? `<${formatAtlasNumber(threshold, digits)}`
-      : formatAtlasNumber(number, digits);
-    return `${display} ${currency || '--'}`;
+      ? `<${formatFixedNumber(threshold, digits)}`
+      : formatFixedNumber(number, digits);
+    return currencyLabel.toUpperCase() === 'ATLAS' ? display : `${display} ${currencyLabel}`;
   };
   for (const entry of visibleRows) {
     const tr = document.createElement('tr');
