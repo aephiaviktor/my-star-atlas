@@ -11,6 +11,22 @@ function getRefreshContext(filters = {}) {
   };
 }
 
+function createLatestEarningsResponseCoordinator() {
+  let generation = 0;
+  return {
+    async run({ load, onLoading, onResult }) {
+      const requestGeneration = ++generation;
+      onLoading?.();
+      const value = await load();
+      if (requestGeneration !== generation) return { accepted: false, value: null };
+      onResult?.(value);
+      return { accepted: true, value };
+    },
+  };
+}
+
+const earningsResponseCoordinator = createLatestEarningsResponseCoordinator();
+
 const form = document.querySelector('#settings-form');
 const appShell = document.querySelector('.app-shell');
 const saveStatus = document.querySelector('#save-status');
@@ -6796,6 +6812,18 @@ function renderEarningsBreakeven(result) {
   }
 }
 
+function renderCargoBreakevenBetaLoading(message = 'Loading Cargo allocations…') {
+  setText(earningsCargoBreakevenBetaStatus, message);
+  if (!earningsCargoBreakevenBetaBody) return;
+  earningsCargoBreakevenBetaBody.textContent = '';
+  const tr = document.createElement('tr');
+  tr.className = 'empty-row';
+  const td = createTextCell(message);
+  td.colSpan = 11;
+  tr.appendChild(td);
+  earningsCargoBreakevenBetaBody.appendChild(tr);
+}
+
 function renderCargoBreakevenBeta(result) {
   const rows = Array.isArray(result?.cargoBreakevenBetaRows) ? result.cargoBreakevenBetaRows : [];
   if (result?.cargoBreakevenBetaUnavailable) {
@@ -7155,6 +7183,7 @@ async function refreshBreakeven({ force = false } = {}) {
   } else {
     renderEarningsBreakevenEmpty('Loading complete Breakeven data...');
   }
+  if (force || initial?.entry?.status !== 'ready') renderCargoBreakevenBetaLoading();
   const settled = await api.breakevenCache.ensure(input, async () => {
     const result = await api.getEarningsSnapshot(settings);
     if (result?.ok === false) throw new Error(result.error || 'Breakeven snapshot failed');
@@ -7197,11 +7226,12 @@ async function refreshCargoAllocation({ retry = false } = {}) {
 }
 
 async function refreshEarnings() {
+  const force = arguments[0]?.force === true;
   const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
     ? rendererTelemetryTrigger
     : 'unknown';
   if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
-  if (earningsRefreshInFlight) return earningsRefreshInFlight;
+  if (earningsRefreshInFlight && !force) return earningsRefreshInFlight;
   const refreshPromise = (async () => {
     const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: currentEarningsSubtab };
   settings.trigger = telemetryTrigger;
@@ -7236,7 +7266,17 @@ async function refreshEarnings() {
 
     let diagnosticStage = 'ipc_invoke';
     try {
-      const result = await api.getEarningsSnapshot(settings);
+      const responseCoordinator = typeof earningsResponseCoordinator !== 'undefined'
+        ? earningsResponseCoordinator
+        : { run: async ({ load }) => ({ accepted: true, value: await load() }) };
+      const coordinated = await responseCoordinator.run({
+        load: () => api.getEarningsSnapshot(settings),
+        onLoading: () => {
+          if (typeof renderCargoBreakevenBetaLoading === 'function') renderCargoBreakevenBetaLoading();
+        },
+      });
+      if (!coordinated.accepted) return;
+      const result = coordinated.value;
       if (result && result.ok === false) {
         // IPC handler returns {ok: false, error} on failure. Throw so the
         // catch block can apply the same rate-limit / generic handling.
@@ -7254,6 +7294,7 @@ async function refreshEarnings() {
         })).catch(() => {});
       }
       renderEarnings(result);
+      if (typeof renderCargoBreakevenBeta === 'function') renderCargoBreakevenBeta(result);
     } catch (error) {
       console.error(error);
       Promise.resolve(api.recordEarningsRendererError?.({
@@ -8906,7 +8947,7 @@ function refreshCurrentVisibleData() {
     if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: true });
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven({ force: true });
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading({ force: true });
-    return refreshEarnings();
+    return refreshEarnings({ force: true });
   }
   if (currentSection === 'optimization') {
     if(currentOptimizationSubtab === 'upgrading') return refreshUpgradingOptimization({ force: true });
