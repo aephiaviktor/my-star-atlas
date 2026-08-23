@@ -6798,6 +6798,13 @@ function renderEarningsBreakeven(result) {
 
 function renderCargoBreakevenBeta(result) {
   const rows = Array.isArray(result?.cargoBreakevenBetaRows) ? result.cargoBreakevenBetaRows : [];
+  if (result?.cargoBreakevenBetaUnavailable) {
+    setText(earningsCargoBreakevenBetaStatus, 'Cargo allocation data unavailable');
+    if (!earningsCargoBreakevenBetaBody) return;
+    earningsCargoBreakevenBetaBody.textContent = '';
+    const tr = document.createElement('tr'); tr.className = 'empty-row';
+    const td = createTextCell('Cargo allocation data unavailable'); td.colSpan = 11; tr.appendChild(td); earningsCargoBreakevenBetaBody.appendChild(tr); return;
+  }
   const sortedRows = [...rows].sort((left, right) => {
     const timeDifference = Date.parse(right.timestamp || '') - Date.parse(left.timestamp || '');
     if (Number.isFinite(timeDifference) && timeDifference !== 0) return timeDifference;
@@ -6805,7 +6812,7 @@ function renderCargoBreakevenBeta(result) {
     const rightIdentity = String(right.betaId || '');
     return leftIdentity < rightIdentity ? -1 : leftIdentity > rightIdentity ? 1 : 0;
   });
-  const visibleRows = sortedRows.slice(0, 200);
+  const visibleRows = sortedRows.slice(0, 50);
   const countLabel = rows.length > visibleRows.length
     ? `Showing ${formatWholeNumber(visibleRows.length)} of ${formatWholeNumber(rows.length)}`
     : `${formatWholeNumber(rows.length)} completed Cargo allocations`;
