@@ -108,6 +108,16 @@ class ExactInventoryCostLedger {
     return { status: INCOMPLETE, reason: 'rebuild-required' };
   }
 
+  static fromValidatedCheckpoint(document) {
+    if (!document || document.schemaVersion !== 2 || !Array.isArray(document.lots) || !Array.isArray(document.appliedEvents)) throw new Error('invalid exact checkpoint');
+    const ledger = new ExactInventoryCostLedger({ scope: { faction: document.faction, profile: document.playerProfile }, boundary: {
+      checkpointId: document.openingCheckpointId, boundaryAt: document.forwardBoundary, coverage: COMPLETE,
+    } });
+    ledger.lots = clone(document.lots);
+    ledger.eventIds = new Set(document.appliedEvents.map((event) => event.eventId));
+    return ledger;
+  }
+
   assertEvent(event) {
     const eventId = text(event?.eventId, 'eventId');
     if (event?.scope?.faction !== this.scope.faction || event?.scope?.profile !== this.scope.profile) throw new Error('scope-mismatch');
