@@ -38,7 +38,7 @@
     }).format(number);
   }
   const renderedColumnContract = Object.freeze([
-    Object.freeze({ id: 'amount', label: 'Cargo Amount', field: 'amount' }),
+    Object.freeze({ id: 'amount', label: 'Allocated Amount', field: 'amount' }),
     Object.freeze({ id: 'cargoVolume', label: 'Cargo Volume', field: 'cargoVolume' }),
     Object.freeze({ id: 'allocatedFuel', label: 'Allocated Fuel', field: 'allocatedFuel' }),
     Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs', field: 'fuelCostsAtlas' }),

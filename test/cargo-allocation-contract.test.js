@@ -33,10 +33,10 @@ function projector(overrides = {}) {
 test('Allocation business columns match the approved contract and order', () => {
   const block = rendererSource.slice(rendererSource.indexOf('const cargoAllocationEarningsOptionalColumns'), rendererSource.indexOf('const craftingEarningsOptionalColumns'));
   const labels = [...block.matchAll(/label: '([^']+)'/g)].map((match) => match[1]).filter((label) => !['Color', 'Ownership', 'Ships', 'Required Crew', 'Assignment'].includes(label));
-  assert.deepEqual(labels, ['Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Costs', 'TXS Costs', 'Total Cargo Costs', 'Cargo Cost/Unit']);
+  assert.deepEqual(labels, ['Allocated Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Costs', 'TXS Costs', 'Total Cargo Costs', 'Cargo Cost/Unit']);
   for (const forbidden of ['Rental Costs', 'Base Cost/Unit', 'Total Cost/Unit']) assert.doesNotMatch(block, new RegExp(forbidden));
   assert.match(rendererSource, /Fuel Costs \+ TXS Costs/);
-  assert.match(html, /Cargo Amount[\s\S]*Cargo Volume[\s\S]*Allocated Fuel[\s\S]*Fuel Costs[\s\S]*TXS Costs[\s\S]*Total Cargo Costs[\s\S]*Cargo Cost\/Unit/);
+  assert.match(html, /Allocated Amount[\s\S]*Cargo Volume[\s\S]*Allocated Fuel[\s\S]*Fuel Costs[\s\S]*TXS Costs[\s\S]*Total Cargo Costs[\s\S]*Cargo Cost\/Unit/);
 });
 
 test('Allocation-specific formatting preserves finite nonzero values and distinguishes zero/unavailable', () => {
@@ -61,7 +61,7 @@ test('rendered Allocation columns survive legacy persisted visibility and bind e
   const rendered = buildCargoAllocationRenderedColumns(row);
   const visible = getCargoAllocationVisibleColumns(rendered, legacySelected);
   assert.deepEqual(visible.map(({ label }) => label), [
-    'Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Costs', 'TXS Costs', 'Total Cargo Costs', 'Cargo Cost/Unit',
+    'Allocated Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Costs', 'TXS Costs', 'Total Cargo Costs', 'Cargo Cost/Unit',
   ]);
   assert.deepEqual(visible.map(({ text }) => text), ['12', '24', '0', '--', '0', '--', '0']);
   assert.equal(visible.some(({ label }) => ['Rental Costs', 'Base Cost/Unit', 'Total Cost/Unit'].includes(label)), false);
@@ -145,7 +145,7 @@ test('missing transaction valuation only invalidates TXS and aggregate fields', 
   assert.equal(row.totalCostsAtlas, null); assert.equal(row.costsPerUnitAtlas, null);
 });
 
-test('zero or non-positive Cargo Amount makes Cargo Cost/Unit unavailable', async () => {
+test('zero or non-positive Allocated Amount makes Cargo Cost/Unit unavailable', async () => {
   for (const amount of [0, -1]) {
     const { run, allocation } = projector();
     const { rows: [row] } = await run({ faction: 'MUD' }, [{ ...allocation, amount }], {}, new AbortController().signal);
