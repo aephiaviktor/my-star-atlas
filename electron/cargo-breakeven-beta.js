@@ -122,6 +122,7 @@ function buildAuthoritativeCargoBetaInputs({ joinedDeliveries = [], cargoRows = 
     } : null;
     return {
       betaId: delivery.deliveryEventId, deliveryEventId: delivery.deliveryEventId, evidenceAuthority: 'authoritative_v1',
+      replayCount: delivery.replayCount, confirmedBlockTime: delivery.confirmedBlockTime, confirmedSlot: delivery.confirmedSlot,
       profile: costs?.profile || delivery.profileAccount, faction: costs?.faction || delivery.faction,
       isoDate: timestamp.slice(0, 10), timestamp, fleetName: costs?.fleetName || delivery.fleetLabel,
       fleetAccount: delivery.fleetAccount, cycleId: delivery.cycleId, allocationIndex: delivery.allocationId,
