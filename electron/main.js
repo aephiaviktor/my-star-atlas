@@ -49,6 +49,7 @@ const { buildProductionEvents, buildProductionCompleteAccounting } = require('./
 const { loadCompleteAccountingCheckpoint, mergeCompleteAccountingEvents, saveCompleteAccountingCheckpoint } = require('./complete-accounting-checkpoint');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
+const { pathsFor: exactLedgerCheckpointPaths, validateDocument: validateExactLedgerCheckpointDocument } = require('./exact-ledger-checkpoint');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { buildCargoBetaInputs, buildAuthoritativeCargoBetaInputs, buildCargoBreakevenBetaRows } = require('./cargo-breakeven-beta');
 const { createAtlasPriceResolver } = require('./atlas-price-resolver');
@@ -262,6 +263,17 @@ function settingsPath() {
 
 function ledgerCheckpointPath(faction) {
   return path.join(app.getPath('userData'), 'inventory-cost-ledger', `${sanitizeProfileName(faction)}.json`);
+}
+
+async function loadVerifiedOpeningCheckpoint(faction, profile) {
+  try {
+    const paths = exactLedgerCheckpointPaths(app.getPath('userData'), faction, profile);
+    const document = validateExactLedgerCheckpointDocument(JSON.parse(await fs.readFile(paths.document, 'utf8')));
+    if (document.coverage !== 'Complete') return null;
+    return { status: 'verified', coverage: document.coverage, checkpointId: document.openingCheckpointId, checkpointHash: document.openingCheckpointHash, boundaryAt: document.forwardBoundary, faction: document.faction, profile: document.playerProfile };
+  } catch (_error) {
+    return null;
+  }
 }
 
 function completeAccountingCheckpointPath(faction) {
@@ -673,7 +685,7 @@ async function fetchSlyaAccountingEvidenceFromInflux(settings) {
   const flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -40d)
   |> filter(fn: (r) => r._measurement == "slya_accounting_evidence_v1")
-  |> filter(fn: (r) => contains(value: r._field, set: ["payloadHash", "signature", "outerInstructionIndex", "slot", "blockTime", "faction", "profile", "fleetAccount", "fleetLabel", "inputs", "outputs", "directFees", "transactionCosts", "lineage", "sourceProvenance"]))
+  |> filter(fn: (r) => contains(value: r._field, set: ["payloadHash", "signature", "programId", "operationId", "outerInstructionIndex", "slot", "blockTime", "faction", "profile", "fleetAccount", "fleetLabel", "inputs", "outputs", "directFees", "transactionCosts", "lineage", "sourceProvenance"]))
   |> pivot(rowKey: ["_time", "eventId", "evidenceType", "schemaVersion"], columnKey: ["_field"], valueColumn: "_value")
   |> filter(fn: (r) => r.faction == "${escapeFluxString(faction)}" and r.profile == "${escapeFluxString(profile)}")
   |> sort(columns: ["_time"], desc: false)`;
@@ -7415,6 +7427,9 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const checkpoint = needsInventoryLedger
     ? await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName })
     : { status: 'skipped', ledger: null, seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {}, savedAt: null };
+  const verifiedOpeningCheckpoint = needsInventoryLedger
+    ? await loadVerifiedOpeningCheckpoint(ledgerFaction, profileName)
+    : null;
   let openingInventoryRows = [];
   let openingInventoryError = '';
   if (needsInventoryLedger && checkpoint.status !== 'loaded') {
@@ -7465,6 +7480,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         eventResultByFingerprint: inventoryCostLedgerResult.eventResultByFingerprint,
         eventFingerprintCounts: inventoryCostLedgerResult.eventFingerprintCounts,
         eventResultsByFingerprint: inventoryCostLedgerResult.eventResultsByFingerprint,
+        verifiedOpeningCheckpoint,
       });
       ledgerCheckpointSavedAt = new Date().toISOString();
     } catch (error) {
@@ -7509,7 +7525,10 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   let completeAccountingStatus = 'skipped';
   let completeAccountingError = '';
   let completeAccountingSavedAt = null;
-  if (needsCompleteAccounting) {
+  if (needsCompleteAccounting && !verifiedOpeningCheckpoint) {
+    completeAccountingStatus = 'blocked';
+    completeAccountingError = 'verified_opening_checkpoint_required';
+  } else if (needsCompleteAccounting) {
     const accountingScope = { faction: ledgerFaction, profile: getSelectedPlayerProfile(settings) };
     const accountingPath = completeAccountingCheckpointPath(ledgerFaction);
     const durable = await loadCompleteAccountingCheckpoint(accountingPath, accountingScope);

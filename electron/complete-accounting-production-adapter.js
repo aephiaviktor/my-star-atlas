@@ -158,34 +158,85 @@ function parseEvidenceJson(value, fallback) {
   try { return JSON.parse(String(value || '')); } catch (_error) { return fallback; }
 }
 
+function normalizeSlyaFaction(value) {
+  const faction = String(value || '').trim().toUpperCase();
+  return faction === 'UST' ? 'USTUR' : faction;
+}
+
+function integerEvidenceField(value, minimum = 0) {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const parsed = Number(text);
+  return Number.isSafeInteger(parsed) && parsed >= minimum ? parsed : null;
+}
+
+function validSlyaEntry(entry) {
+  if (!entry || typeof entry !== 'object' || !String(entry.asset || '').trim()) return false;
+  try { exactText(entry.quantity); return true; } catch (_error) { return false; }
+}
+
+function slyaPayloadHash(payload) {
+  return hash(payload);
+}
+
+function parseSlyaMoney(value, fallback) {
+  if (typeof value === 'string' && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value.trim())) return value.trim();
+  return parseEvidenceJson(value, fallback);
+}
+
 function authoritativeSlyaAccountingEvents(rows = [], scope = null) {
   return rows.flatMap((row) => {
     const eventId = String(row?.eventId || '').trim();
-    const timestamp = normalizeTimestamp(row?.timestamp || row?._time);
     const evidenceType = String(row?.evidenceType || '').trim().toLowerCase();
     const payloadHash = String(row?.payloadHash || '').trim();
+    const signature = String(row?.signature || '').trim();
+    const programId = String(row?.programId || '').trim();
+    const operationId = String(row?.operationId || '').trim();
+    const outerInstructionIndex = integerEvidenceField(row?.outerInstructionIndex);
+    const slot = integerEvidenceField(row?.slot);
+    const blockTime = integerEvidenceField(row?.blockTime, 1);
+    const blockTimestamp = blockTime == null ? '' : new Date(blockTime * 1000).toISOString();
+    const influxTimestamp = normalizeTimestamp(row?.timestamp || row?._time);
+    const timestamp = blockTimestamp || influxTimestamp;
+    const faction = String(row?.faction || '').trim();
+    const profile = String(row?.profile || '').trim();
+    const fleetAccount = String(row?.fleetAccount || '').trim();
     const inputs = parseEvidenceJson(row?.inputs, null);
     const outputs = parseEvidenceJson(row?.outputs, null);
     const lineage = parseEvidenceJson(row?.lineage, {});
-    const directFees = parseEvidenceJson(row?.directFees, row?.directFees);
+    const directFees = parseSlyaMoney(row?.directFees, row?.directFees);
     const transactionCosts = parseEvidenceJson(row?.transactionCosts, row?.transactionCosts);
-    if (!eventId || !timestamp || !payloadHash || !['scanning', 'mining', 'crafting', 'upgrading'].includes(evidenceType) || !Array.isArray(inputs) || !Array.isArray(outputs)) return [];
-    const base = { eventId, sourceEventId: eventId, timestamp, source: evidenceType, payloadHash, signature: String(row?.signature || ''), slot: String(row?.slot || ''), profile: String(row?.profile || ''), fleet: String(row?.fleetAccount || ''), lineageStatus: 'confirmed', scope: scope || null };
+    const base = { eventId, sourceEventId: eventId, timestamp, source: evidenceType, payloadHash, signature, programId, operationId, slot: slot == null ? '' : String(slot), profile, fleet: fleetAccount, lineageStatus: 'confirmed', scope: scope || null };
+    const quarantine = (reason, output = outputs?.[0]) => [{ ...base, type: 'quarantined', asset: String(output?.asset || lineage?.asset || evidenceType), quantity: validSlyaEntry(output) ? exactText(output.quantity) : '0', reason }];
+    if (!eventId || !timestamp || !/^[0-9a-f]{64}$/.test(payloadHash) || !['scanning', 'mining', 'crafting', 'upgrading'].includes(evidenceType) || !Array.isArray(inputs) || !Array.isArray(outputs)) return eventId ? quarantine('slya-evidence-shape-invalid') : [];
+    if (!signature || !programId || outerInstructionIndex == null || slot == null || blockTime == null || !faction || !profile || !fleetAccount || !inputs.every(validSlyaEntry) || !outputs.length || !outputs.every(validSlyaEntry)) return quarantine('slya-authoritative-identity-incomplete');
+    if (influxTimestamp && influxTimestamp !== blockTimestamp) return quarantine('slya-block-time-mismatch');
+    const expectedScopeFaction = normalizeSlyaFaction(scope?.faction);
+    if ((expectedScopeFaction && normalizeSlyaFaction(faction) !== expectedScopeFaction) || (scope?.profile && profile !== String(scope.profile))) return quarantine('slya-scope-mismatch');
+    const expectedInstructionId = `slya-accounting:v1:${evidenceType}:${signature}:${outerInstructionIndex}`;
+    const expectedTransactionId = `slya-accounting:v1:${evidenceType}:${signature}:tx`;
+    const expectedOperationId = operationId ? `slya-accounting:v1:${evidenceType}:${signature}:op:${operationId}` : '';
+    if (eventId !== expectedInstructionId && eventId !== expectedTransactionId && eventId !== expectedOperationId) return quarantine('slya-event-identity-mismatch');
+    const canonicalPayload = {
+      schemaVersion: 1, evidenceType, eventId, signature, outerInstructionIndex, programId,
+      slot, blockTime, faction, profile, fleetAccount, fleetLabel: String(row?.fleetLabel || ''),
+      inputs, outputs, directFees, transactionCosts, operationId, lineage, sourceProvenance: String(row?.sourceProvenance || ''),
+    };
+    if (slyaPayloadHash(canonicalPayload) !== payloadHash) return quarantine('slya-payload-hash-mismatch');
     const output = outputs[0];
-    const validQuantity = (entry) => entry && String(entry.asset || '').trim() && (() => { try { exactText(entry.quantity); return true; } catch (_error) { return false; } })();
-    if (!inputs.every(validQuantity) || !validQuantity(output)) return [{ ...base, type: 'quarantined', asset: String(output?.asset || lineage?.asset || evidenceType), quantity: validQuantity(output) ? exactText(output.quantity) : '0', reason: 'slya-evidence-quantity-incomplete' }];
-    if ((evidenceType === 'crafting' || evidenceType === 'upgrading') && outputs.length !== 1) return [{ ...base, type: 'quarantined', asset: String(output.asset), quantity: exactText(output.quantity), reason: 'slya-output-lineage-ambiguous' }];
+    const baseWithCanonical = { ...base, timestamp: new Date(blockTime * 1000).toISOString() };
+    if ((evidenceType === 'crafting' || evidenceType === 'upgrading') && outputs.length !== 1) return [{ ...baseWithCanonical, type: 'quarantined', asset: String(output.asset), quantity: exactText(output.quantity), reason: 'slya-output-lineage-ambiguous' }];
     if (evidenceType === 'crafting' || evidenceType === 'upgrading') {
       const costs = transactionCosts && typeof transactionCosts === 'object' ? transactionCosts : null;
       const direct = typeof directFees === 'string' ? directFees : directFees?.atlas;
       const transaction = costs?.atlas;
-      if (direct == null || transaction == null) return [{ ...base, type: 'quarantined', asset: String(output.asset), quantity: exactText(output.quantity), reason: 'slya-transaction-cost-atlas-unavailable' }];
-      return [{ ...base, type: 'craft', location: String(output.location || lineage?.location || lineage?.starbase || ''), asset: String(output.asset), quantity: exactText(output.quantity), ingredients: inputs.map((entry) => ({ asset: String(entry.asset), quantity: exactText(entry.quantity) })), directCost: exactText(direct), transactionCost: exactText(transaction), lineageStatus: 'confirmed' }];
+      if (direct == null || transaction == null) return [{ ...baseWithCanonical, type: 'quarantined', asset: String(output.asset), quantity: exactText(output.quantity), reason: 'slya-transaction-cost-atlas-unavailable' }];
+      return [{ ...baseWithCanonical, type: 'craft', location: String(output.location || lineage?.location || lineage?.starbase || ''), asset: String(output.asset), quantity: exactText(output.quantity), ingredients: inputs.map((entry) => ({ asset: String(entry.asset), quantity: exactText(entry.quantity) })), directCost: exactText(direct), transactionCost: exactText(transaction), lineageStatus: 'confirmed' }];
     }
     return outputs.map((entry, index) => {
       const location = String(entry.location || lineage?.location || lineage?.starbase || lineage?.sector || '').trim();
-      if (!location) return { ...base, eventId: `${eventId}:output:${index}`, type: 'quarantined', asset: String(entry.asset), quantity: exactText(entry.quantity), reason: 'slya-lineage-location-unavailable' };
-      return { ...base, eventId: `${eventId}:output:${index}`, type: 'acquisition', location, asset: String(entry.asset), quantity: exactText(entry.quantity), basis: null, lineageStatus: 'confirmed' };
+      if (!location) return { ...baseWithCanonical, eventId: `${eventId}:output:${index}`, type: 'quarantined', asset: String(entry.asset), quantity: exactText(entry.quantity), reason: 'slya-lineage-location-unavailable' };
+      return { ...baseWithCanonical, eventId: `${eventId}:output:${index}`, type: 'acquisition', location, asset: String(entry.asset), quantity: exactText(entry.quantity), basis: null, lineageStatus: 'confirmed' };
     });
   });
 }

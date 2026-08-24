@@ -1,0 +1,208 @@
+{
+  "scope": {
+    "faction": "USTUR",
+    "profile": "fixture-profile"
+  },
+  "period": {
+    "start": "2026-08-04T00:00:00.000Z",
+    "end": "2026-08-05T00:00:00.000Z"
+  },
+  "opening": [
+    {
+      "eventId": "opening:ore",
+      "timestamp": "2026-08-02T00:00:00.000Z",
+      "type": "acquire",
+      "location": "S1",
+      "asset": "Ore",
+      "quantity": "10",
+      "totalCost": "5"
+    },
+    {
+      "eventId": "opening:fuel",
+      "timestamp": "2026-08-02T00:00:00.000Z",
+      "type": "acquire",
+      "location": "S1",
+      "asset": "Fuel",
+      "quantity": "2",
+      "totalCost": "1"
+    }
+  ],
+  "rows": [
+    {
+      "evidenceType": "scanning",
+      "eventId": "slya-accounting:v1:scanning:fixture-scan:0",
+      "signature": "fixture-scan",
+      "outerInstructionIndex": 0,
+      "slot": 1785830001,
+      "blockTime": 1785830001,
+      "faction": "UST",
+      "profile": "fixture-profile",
+      "fleetAccount": "fixture-fleet",
+      "fleetLabel": "Fixture Fleet",
+      "programId": "SAGE_PROGRAM",
+      "inputs": [],
+      "outputs": [
+        {
+          "asset": "SDU",
+          "mint": "SDU",
+          "quantity": "1",
+          "unit": "token",
+          "location": "S1"
+        }
+      ],
+      "directFees": "0",
+      "transactionCosts": {
+        "solLamports": "5000"
+      },
+      "lineage": {
+        "starbase": "S1"
+      },
+      "sourceProvenance": "confirmed_transaction",
+      "payloadHash": "d9a2f38235472483d2c7cbdcb5f96d805c6447da128bf718bc28cbd6fb941cd0",
+      "schemaVersion": 1,
+      "operationId": ""
+    },
+    {
+      "evidenceType": "mining",
+      "eventId": "slya-accounting:v1:mining:fixture-mine:1",
+      "signature": "fixture-mine",
+      "outerInstructionIndex": 1,
+      "slot": 1785830002,
+      "blockTime": 1785830002,
+      "faction": "UST",
+      "profile": "fixture-profile",
+      "fleetAccount": "fixture-fleet",
+      "fleetLabel": "Fixture Fleet",
+      "programId": "SAGE_PROGRAM",
+      "inputs": [],
+      "outputs": [
+        {
+          "asset": "Ore",
+          "mint": "ORE",
+          "quantity": "3",
+          "unit": "token",
+          "location": "S1"
+        }
+      ],
+      "directFees": "0",
+      "transactionCosts": {
+        "solLamports": "5000"
+      },
+      "lineage": {
+        "starbase": "S1"
+      },
+      "sourceProvenance": "confirmed_transaction",
+      "payloadHash": "b6a2091fc3bd5e685f95c085a7c7c3c7b68aceee7e44c7d5eaea645406aee1bc",
+      "schemaVersion": 1,
+      "operationId": ""
+    },
+    {
+      "evidenceType": "crafting",
+      "eventId": "slya-accounting:v1:crafting:fixture-craft:2",
+      "signature": "fixture-craft",
+      "outerInstructionIndex": 2,
+      "slot": 1785830003,
+      "blockTime": 1785830003,
+      "faction": "UST",
+      "profile": "fixture-profile",
+      "fleetAccount": "fixture-fleet",
+      "fleetLabel": "Fixture Fleet",
+      "programId": "SAGE_PROGRAM",
+      "inputs": [
+        {
+          "asset": "Ore",
+          "mint": "ORE",
+          "quantity": "2",
+          "unit": "token",
+          "location": "S1"
+        }
+      ],
+      "outputs": [
+        {
+          "asset": "Plate",
+          "mint": "PLATE",
+          "quantity": "1",
+          "unit": "token",
+          "location": "S1"
+        }
+      ],
+      "directFees": "1",
+      "transactionCosts": {
+        "atlas": "2"
+      },
+      "lineage": {
+        "craftingProcess": "fixture-process",
+        "starbase": "S1"
+      },
+      "sourceProvenance": "confirmed_transaction",
+      "payloadHash": "c1e7975a5bb07e377d8938cba9a7bee8c778f156c60f8133b2714693f23bcb79",
+      "schemaVersion": 1,
+      "operationId": ""
+    },
+    {
+      "evidenceType": "upgrading",
+      "eventId": "slya-accounting:v1:upgrading:fixture-upgrade:3",
+      "signature": "fixture-upgrade",
+      "outerInstructionIndex": 3,
+      "slot": 1785830004,
+      "blockTime": 1785830004,
+      "faction": "UST",
+      "profile": "fixture-profile",
+      "fleetAccount": "fixture-fleet",
+      "fleetLabel": "Fixture Fleet",
+      "programId": "SAGE_PROGRAM",
+      "inputs": [
+        {
+          "asset": "Fuel",
+          "mint": "FUEL",
+          "quantity": "1",
+          "unit": "token",
+          "location": "S1"
+        }
+      ],
+      "outputs": [
+        {
+          "asset": "Module",
+          "mint": "MODULE",
+          "quantity": "1",
+          "unit": "token",
+          "location": "S1"
+        }
+      ],
+      "directFees": "0.5",
+      "transactionCosts": {
+        "atlas": "1.5"
+      },
+      "lineage": {
+        "upgradeProcess": "fixture-process",
+        "starbase": "S1"
+      },
+      "sourceProvenance": "confirmed_transaction",
+      "payloadHash": "15322fd71d0817b50eb03fee2522d8d264182e37df032d7b490eec1ed676cc6a",
+      "schemaVersion": 1,
+      "operationId": ""
+    }
+  ],
+  "actualClosing": [
+    {
+      "asset": "Ore",
+      "quantity": "11"
+    },
+    {
+      "asset": "Fuel",
+      "quantity": "1"
+    },
+    {
+      "asset": "SDU",
+      "quantity": "1"
+    },
+    {
+      "asset": "Plate",
+      "quantity": "1"
+    },
+    {
+      "asset": "Module",
+      "quantity": "1"
+    }
+  ]
+}

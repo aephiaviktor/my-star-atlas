@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { InventoryCostLedger } = require('../electron/inventory-cost-ledger');
-const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('../electron/ledger-checkpoint');
+const { loadLedgerCheckpoint, saveLedgerCheckpoint, validateVerifiedOpeningCheckpoint } = require('../electron/ledger-checkpoint');
 
 test('ledger checkpoint round-trips basis and event fingerprints atomically', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'msa-ledger-checkpoint-'));
@@ -26,6 +26,20 @@ test('ledger checkpoint round-trips basis and event fingerprints atomically', as
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
+});
+
+test('verified opening checkpoint is explicit, scope-bound, and round-trips without being inferred', async () => {
+  const marker = { status: 'verified', coverage: 'Complete', checkpointId: 'opening-1', checkpointHash: 'a'.repeat(64), boundaryAt: '2026-08-01T00:00:00.000Z', faction: 'MUD', profile: 'MUD' };
+  assert.deepEqual(validateVerifiedOpeningCheckpoint(marker, { faction: 'MUD', profile: 'MUD' }), marker);
+  assert.equal(validateVerifiedOpeningCheckpoint({ ...marker, checkpointHash: 'bad' }, { faction: 'MUD', profile: 'MUD' }), null);
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'msa-ledger-checkpoint-'));
+  const filePath = path.join(directory, 'MUD.json');
+  try {
+    const ledger = new InventoryCostLedger();
+    await saveLedgerCheckpoint(filePath, { faction: 'MUD', profile: 'MUD', ledger, seenEventFingerprints: [], verifiedOpeningCheckpoint: marker });
+    const loaded = await loadLedgerCheckpoint(filePath, { faction: 'MUD', profile: 'MUD' });
+    assert.deepEqual(loaded.verifiedOpeningCheckpoint, marker);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
 test('missing checkpoint requests a fresh baseline', async () => {
