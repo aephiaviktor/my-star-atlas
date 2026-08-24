@@ -63,18 +63,42 @@ class AccountingEngine {
       const row = { asset: name, unit, acquisitions: {}, costsBySource: {}, details: [] };
       quantities.forEach((key) => { row[key] = zero(unit); });
       SOURCES.forEach((source) => { row.acquisitions[source] = zero(unit); row.costsBySource[source] = zero(this.currency); });
-      row.openingBasisKnown = zero(this.currency); row.salesNetProceeds = zero(this.currency); row.salesCogsKnown = zero(this.currency);
+      row.openingBasisKnown = zero(this.currency); row.openingKnownQuantity = zero(unit); row.salesNetProceeds = zero(this.currency); row.salesCogsKnown = zero(this.currency);
       row.salesKnownQuantity = zero(unit);
       this.rows.set(name, row);
     }
     return this.rows.get(name);
   }
   detail(event, status, extra = {}) {
-    const item = { eventId: event.eventId, timestamp: event.timestamp, type: event.type, source: event.source || null, asset: event.asset || event.outputAsset || null, status, tradeId: event.tradeId || null, originWallet: event.originWallet || null, lineageStatus: event.lineageStatus || null, ...extra };
+    const item = {
+      eventId: event.eventId, timestamp: event.timestamp, type: event.type, source: event.source || null,
+      asset: event.asset || event.outputAsset || null, status, tradeId: event.tradeId || null,
+      originWallet: event.originWallet || null, lineageStatus: event.lineageStatus || null,
+      location: event.location || null, destination: event.destination || null,
+      quantity: event.quantity ?? null, basis: event.basis ?? event.cost ?? null,
+      fees: event.fees ?? null, marketplaceFee: event.marketplaceFee ?? null,
+      transactionFee: event.transactionFee ?? event.transactionCost ?? null,
+      grossProceeds: event.grossProceeds ?? null, rentalCost: event.rentalCost ?? null,
+      cargoCost: event.cargoCost ?? null, ingredients: event.ingredients ? clone(event.ingredients) : null,
+      ...extra,
+    };
     this.details.push(item); if (item.asset) this.row(item.asset).details.push(item);
   }
   addLot({ event, location, asset, quantity, knownQuantity, cost, sourceCosts = {}, uncosted = false }) {
     this.lots.push({ lotId: `${event.eventId}:lot`, createdAt: event.timestamp, location, asset, quantity, knownQuantity, cost, sourceCosts: clone(sourceCosts), uncosted });
+  }
+  beginPeriod() {
+    const openingLots = this.lots.filter((lot) => BigInt(lot.quantity.atoms) > 0n);
+    this.rows = new Map();
+    this.details = [];
+    this.counts = { applied: 0, replayed: 0, pending: 0, unallocated: 0, rejected: 0, quarantined: 0 };
+    for (const asset of [...new Set(openingLots.map((lot) => lot.asset))].sort()) {
+      const row = this.row(asset);
+      const lots = openingLots.filter((lot) => lot.asset === asset);
+      row.openingQuantity = sum(lots.map((lot) => lot.quantity), row.unit);
+      row.openingKnownQuantity = sum(lots.map((lot) => lot.knownQuantity), row.unit);
+      row.openingBasisKnown = sum(lots.map((lot) => lot.cost), this.currency);
+    }
   }
   candidates(location, asset) { return this.lots.filter((lot) => lot.location === location && lot.asset === asset && BigInt(lot.quantity.atoms) > 0n).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.lotId.localeCompare(b.lotId)); }
   consume(event, quantity) {
@@ -104,7 +128,7 @@ class AccountingEngine {
       let cost = event.basis === null ? zero(this.currency) : exactDecimal(event.basis ?? event.cost ?? '0', this.currency);
       for (const key of ['fees', 'rentalCost']) if (event[key] != null) cost = add(cost, exactDecimal(event[key], this.currency));
       const source = event.type === 'opening' ? null : event.source;
-      if (event.type === 'opening') { row.openingQuantity = add(row.openingQuantity, quantity); row.openingBasisKnown = add(row.openingBasisKnown, cost); }
+      if (event.type === 'opening') { row.openingQuantity = add(row.openingQuantity, quantity); row.openingKnownQuantity = add(row.openingKnownQuantity, known); row.openingBasisKnown = add(row.openingBasisKnown, cost); }
       else { if (!SOURCES.includes(source)) throw new Error('unsupported acquisition source'); row.acquisitions[source] = add(row.acquisitions[source], quantity); row.costsBySource[source] = add(row.costsBySource[source], cost); }
       this.addLot({ event, location: event.location, asset: event.asset, quantity, knownQuantity: known, cost, sourceCosts: source ? { [source]: cost } : {}, uncosted: compare(known, quantity) < 0 });
       this.counts.applied += 1; this.detail(event, event.basis === null ? 'uncosted' : 'applied'); return;
@@ -136,17 +160,21 @@ class AccountingEngine {
     throw new Error(`unsupported event type: ${event.type}`);
   }
   finish(actualClosing = []) {
-    const actual = new Map(actualClosing.map((entry) => [entry.asset, entry.quantity]));
-    for (const entry of actualClosing) this.row(entry.asset);
+    const actual = new Map();
+    for (const entry of actualClosing) {
+      const row = this.row(entry.asset);
+      const quantity = exactDecimal(entry.quantity, row.unit);
+      actual.set(entry.asset, add(actual.get(entry.asset) || zero(row.unit), quantity));
+    }
     const rows = [...this.rows.values()].map((row) => {
       const lots = this.lots.filter((lot) => lot.asset === row.asset && BigInt(lot.quantity.atoms) > 0n);
       const remaining = sum(lots.map((lot) => lot.quantity), row.unit); const known = sum(lots.map((lot) => lot.knownQuantity), row.unit); const basis = sum(lots.map((lot) => lot.cost), this.currency); const uncosted = subtract(remaining, known);
       const acquisitionTotal = Object.values(row.acquisitions).reduce((total, value) => add(total, value), zero(row.unit));
       const expected = subtract(add(add(add(row.openingQuantity, acquisitionTotal), row.transferIn), row.craftingOut), add(add(add(row.craftingIn, row.transferOut), row.consumptionQuantity), row.salesQuantity));
-      const actualValue = actual.has(row.asset) ? exactDecimal(actual.get(row.asset), row.unit) : null; const difference = actualValue ? signedDifference(actualValue, expected) : null;
+      const actualValue = actual.get(row.asset) || null; const difference = actualValue ? signedDifference(actualValue, expected) : null;
       const fullyCosted = compare(uncosted, zero(row.unit)) === 0; const salesFully = compare(row.salesKnownQuantity, row.salesQuantity) === 0;
       const salesDifference = salesFully ? signedDifference(row.salesNetProceeds, row.salesCogsKnown) : null;
-      const result = { asset: row.asset, openingQuantity: rendered(row.openingQuantity), openingBasis: compare(row.openingQuantity, zero(row.unit)) === 0 ? rendered(row.openingBasisKnown) : compare(row.openingBasisKnown, zero(this.currency)) === 0 ? null : rendered(row.openingBasisKnown), acquisitions: Object.fromEntries(Object.entries(row.acquisitions).map(([key, value]) => [key, rendered(value)])), craftingIn: rendered(row.craftingIn), craftingOut: rendered(row.craftingOut), transferIn: rendered(row.transferIn), transferOut: rendered(row.transferOut), consumptionQuantity: rendered(row.consumptionQuantity), salesQuantity: rendered(row.salesQuantity), salesNetProceeds: rendered(row.salesNetProceeds), cogs: salesFully ? rendered(row.salesCogsKnown) : null, realizedProfit: salesDifference ? rendered(salesDifference.value, salesDifference.sign) : null, salesCoverage: { status: salesFully ? 'fully_costed' : compare(row.salesKnownQuantity, zero(row.unit)) === 0 ? 'uncosted' : 'partially_costed', knownQuantity: rendered(row.salesKnownQuantity), totalQuantity: rendered(row.salesQuantity) }, remainingQuantity: rendered(remaining), remainingCostBasis: fullyCosted ? rendered(basis) : null, knownRemainingCostBasis: rendered(basis), averageCostPerUnit: fullyCosted && BigInt(remaining.atoms) > 0n ? arithmetic.renderRatio(arithmetic.ratio(basis, remaining).value, 18).value : null, actualClosing: actualValue ? rendered(actualValue) : null, expectedClosing: rendered(expected), reconciliationDifference: difference ? { direction: difference.sign > 0 ? 'surplus' : difference.sign < 0 ? 'shortfall' : 'zero', value: rendered(difference.value) } : null, reconciliationStatus: !difference ? 'unavailable' : difference.sign === 0 ? 'reconciled' : 'quantity_mismatch', costCoverage: { status: fullyCosted ? 'fully_costed' : compare(known, zero(row.unit)) === 0 ? 'uncosted' : 'partially_costed', knownQuantity: rendered(known), totalQuantity: rendered(remaining) }, pendingQuantity: rendered(row.pendingQuantity), unallocatedQuantity: rendered(row.unallocatedQuantity), uncostedQuantity: rendered(uncosted), rejectedQuantity: rendered(row.rejectedQuantity), quarantinedQuantity: rendered(row.quarantinedQuantity), costsBySource: Object.fromEntries(Object.entries(row.costsBySource).map(([key, value]) => [key, rendered(value)])), details: row.details };
+      const result = { asset: row.asset, openingQuantity: rendered(row.openingQuantity), openingBasis: compare(row.openingKnownQuantity, zero(row.unit)) === 0 ? null : rendered(row.openingBasisKnown), openingCoverage: { status: compare(row.openingKnownQuantity, row.openingQuantity) === 0 ? 'fully_costed' : compare(row.openingKnownQuantity, zero(row.unit)) === 0 ? 'uncosted' : 'partially_costed', knownQuantity: rendered(row.openingKnownQuantity), totalQuantity: rendered(row.openingQuantity) }, acquisitions: Object.fromEntries(Object.entries(row.acquisitions).map(([key, value]) => [key, rendered(value)])), craftingIn: rendered(row.craftingIn), craftingOut: rendered(row.craftingOut), transferIn: rendered(row.transferIn), transferOut: rendered(row.transferOut), consumptionQuantity: rendered(row.consumptionQuantity), salesQuantity: rendered(row.salesQuantity), salesNetProceeds: rendered(row.salesNetProceeds), cogs: salesFully ? rendered(row.salesCogsKnown) : null, knownCogs: rendered(row.salesCogsKnown), realizedProfit: salesDifference ? rendered(salesDifference.value, salesDifference.sign) : null, salesCoverage: { status: salesFully ? 'fully_costed' : compare(row.salesKnownQuantity, zero(row.unit)) === 0 ? 'uncosted' : 'partially_costed', knownQuantity: rendered(row.salesKnownQuantity), totalQuantity: rendered(row.salesQuantity) }, remainingQuantity: rendered(remaining), remainingCostBasis: fullyCosted ? rendered(basis) : null, knownRemainingCostBasis: rendered(basis), averageCostPerUnit: fullyCosted && BigInt(remaining.atoms) > 0n ? arithmetic.renderRatio(arithmetic.ratio(basis, remaining).value, 18).value : null, actualClosing: actualValue ? rendered(actualValue) : null, expectedClosing: rendered(expected), reconciliationDifference: difference ? { direction: difference.sign > 0 ? 'surplus' : difference.sign < 0 ? 'shortfall' : 'zero', value: rendered(difference.value) } : null, reconciliationStatus: !difference ? 'unavailable' : difference.sign === 0 ? 'reconciled' : 'quantity_mismatch', costCoverage: { status: fullyCosted ? 'fully_costed' : compare(known, zero(row.unit)) === 0 ? 'uncosted' : 'partially_costed', knownQuantity: rendered(known), totalQuantity: rendered(remaining) }, pendingQuantity: rendered(row.pendingQuantity), unallocatedQuantity: rendered(row.unallocatedQuantity), uncostedQuantity: rendered(uncosted), rejectedQuantity: rendered(row.rejectedQuantity), quarantinedQuantity: rendered(row.quarantinedQuantity), costsBySource: Object.fromEntries(Object.entries(row.costsBySource).map(([key, value]) => [key, rendered(value)])), details: row.details };
       return result;
     }).sort((a, b) => a.asset.localeCompare(b.asset));
     return rows;
@@ -161,13 +189,26 @@ function buildCompleteBreakEvenAccounting(input = {}) {
   const byId = new Map();
   for (const event of events) { if (!event.eventId || !Number.isFinite(Date.parse(event.timestamp))) throw new Error('immutable event identity and timestamp are required'); const hash = digest(event); const list = byId.get(event.eventId) || []; list.push({ event, hash }); byId.set(event.eventId, list); }
   const process = [];
+  let replayCount = 0;
   for (const list of byId.values()) {
     const hashes = new Set(list.map((entry) => entry.hash));
-    if (hashes.size > 1) { for (const { event } of list) { const row = engine.row(event.asset || event.outputAsset); const quantity = exactDecimal(event.quantity || '0', row.unit); row.quarantinedQuantity = add(row.quarantinedQuantity, quantity); engine.counts.quarantined += 1; engine.detail(event, 'quarantined', { reason: 'immutable-event-conflict' }); } continue; }
-    process.push(list[0].event); engine.counts.replayed += list.length - 1;
+    if (hashes.size > 1) {
+      for (const { event } of list) process.push({ ...event, type: 'quarantined', reason: 'immutable-event-conflict' });
+      continue;
+    }
+    process.push(list[0].event); replayCount += list.length - 1;
   }
   process.sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.eventId.localeCompare(b.eventId));
-  for (const event of process) { try { engine.apply(event); } catch (error) { const row = engine.row(event.asset || event.outputAsset); if (event.quantity != null) row.rejectedQuantity = add(row.rejectedQuantity, exactDecimal(event.quantity, row.unit)); engine.counts.rejected += 1; engine.detail(event, 'rejected', { reason: String(error.message || error) }); } }
+  const start = Date.parse(input.period?.start);
+  const end = Date.parse(input.period?.end);
+  const hasBoundedPeriod = Number.isFinite(start) && Number.isFinite(end) && end >= start;
+  const apply = (event) => { try { engine.apply(event); } catch (error) { const row = engine.row(event.asset || event.outputAsset); if (event.quantity != null) row.rejectedQuantity = add(row.rejectedQuantity, exactDecimal(event.quantity, row.unit)); engine.counts.rejected += 1; engine.detail(event, 'rejected', { reason: String(error.message || error) }); } };
+  if (hasBoundedPeriod) {
+    process.filter((event) => Date.parse(event.timestamp) < start).forEach(apply);
+    engine.beginPeriod();
+    process.filter((event) => Date.parse(event.timestamp) >= start && Date.parse(event.timestamp) <= end).forEach(apply);
+  } else process.forEach(apply);
+  engine.counts.replayed = replayCount;
   const rows = engine.finish(input.actualClosing || []); const inputDigest = digest({ scope: input.scope, period: input.period, currency: input.currency, events: input.events, actualClosing: input.actualClosing });
   const checkpoint = { schemaVersion: 1, scope: clone(engine.scope), period: clone(engine.period), inputDigest, rows: clone(rows), eventCounts: clone(engine.counts) };
   return { scope: clone(engine.scope), period: clone(engine.period), rows, eventCounts: clone(engine.counts), checkpoint };

@@ -12,7 +12,7 @@ test('Breakeven canonical descriptor is complete and cannot collide with lightwe
   const light=keyBuilder({schemaVersion:'1',faction:'MUD',playerProfile:'ActualProfile',section:'earnings',subtab:'breakeven',datasetScope:'lightweight',filters:{}});
   assert.notEqual(complete,light);
   const refresh=between('function getBreakevenCacheInput','async function refreshEarnings');
-  assert.match(refresh,/getActivePlayerProfile\(settings\)/); assert.match(refresh,/filters: \{\}/);
+  assert.match(refresh,/getActivePlayerProfile\(settings\)/); assert.match(refresh,/filters: \{ periodDays \}/);
   assert.doesNotMatch(refresh,/getCachedFactionResult|latestEarningsResult/);
 });
 

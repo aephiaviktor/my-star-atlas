@@ -195,8 +195,9 @@ const earningsUpgradingAssetFilter = document.querySelector('#earnings-upgrading
 const earningsBreakevenTableHead = document.querySelector('#earnings-breakeven-table-head');
 const earningsBreakevenTableBody = document.querySelector('#earnings-breakeven-table-body');
 const earningsBreakevenSyncStatus = document.querySelector('#earnings-breakeven-sync-status');
-const earningsBreakevenStarbaseFilter = document.querySelector('#earnings-breakeven-starbase-filter');
 const earningsBreakevenAssetFilter = document.querySelector('#earnings-breakeven-asset-filter');
+const earningsBreakevenPeriodFilter = document.querySelector('#earnings-breakeven-period-filter');
+const earningsBreakevenSourceFilter = document.querySelector('#earnings-breakeven-source-filter');
 const earningsBreakevenHideLowInventory = document.querySelector('#earnings-breakeven-hide-low-inventory');
 const earningsCargoBreakevenBetaStatus = document.querySelector('#earnings-cargo-breakeven-beta-status');
 const earningsCargoBreakevenBetaBody = document.querySelector('#earnings-cargo-breakeven-beta-body');
@@ -776,22 +777,33 @@ const upgradingEarningsOptionalColumns = Object.freeze([
 ]);
 
 const breakevenEarningsBaseColumns = Object.freeze([
-  Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
-  Object.freeze({ id: 'inventory', label: 'Inventory' }),
-  Object.freeze({ id: 'scanningCost', label: 'Scanning C/U' }),
-  Object.freeze({ id: 'miningCost', label: 'Mining C/U' }),
-  Object.freeze({ id: 'craftingCost', label: 'Crafting C/U' }),
-  Object.freeze({ id: 'lmCost', label: 'LM C/U' }),
-  Object.freeze({ id: 'gmCost', label: 'GM C/U' }),
-  Object.freeze({ id: 'baseCost', label: 'Base Cost / Unit' }),
-  Object.freeze({ id: 'cargoCost', label: 'Cargo Cost / Unit' }),
-  Object.freeze({ id: 'landedCost', label: 'Total Cost / Unit' }),
-  Object.freeze({ id: 'inventoryValue', label: 'Inventory Cost Basis' }),
+  Object.freeze({ id: 'openingQuantity', label: 'Opening Qty' }),
+  Object.freeze({ id: 'openingBasis', label: 'Opening Basis' }),
+  Object.freeze({ id: 'lmIn', label: 'LM In' }),
+  Object.freeze({ id: 'gmIn', label: 'GM In' }),
+  Object.freeze({ id: 'scanningIn', label: 'Scanning In' }),
+  Object.freeze({ id: 'miningIn', label: 'Mining / Rental In' }),
+  Object.freeze({ id: 'craftingOut', label: 'Crafting Out' }),
+  Object.freeze({ id: 'transferIn', label: 'Cargo / Transfer In' }),
+  Object.freeze({ id: 'outflows', label: 'Consumption / Transfer Out' }),
+  Object.freeze({ id: 'salesQuantity', label: 'Sales Qty' }),
+  Object.freeze({ id: 'salesNetProceeds', label: 'Net Proceeds' }),
+  Object.freeze({ id: 'cogs', label: 'COGS' }),
+  Object.freeze({ id: 'realizedProfit', label: 'Realized Profit' }),
+  Object.freeze({ id: 'expectedClosing', label: 'Expected Closing' }),
+  Object.freeze({ id: 'remainingQuantity', label: 'Remaining Qty' }),
+  Object.freeze({ id: 'remainingCostBasis', label: 'Remaining Basis' }),
+  Object.freeze({ id: 'averageCostPerUnit', label: 'Avg Cost / Unit' }),
+  Object.freeze({ id: 'actualClosing', label: 'Actual Closing' }),
+  Object.freeze({ id: 'difference', label: 'Difference' }),
   Object.freeze({ id: 'costCoverage', label: 'Cost Coverage' }),
-  Object.freeze({ id: 'gmPrice', label: 'GM Price / Unit' }),
-  Object.freeze({ id: 'inventoryExternalValue', label: 'Inventory External Value' }),
-  Object.freeze({ id: 'ledgerStatus', label: 'Ledger Status' }),
+  Object.freeze({ id: 'pending', label: 'Pending' }),
+  Object.freeze({ id: 'unallocated', label: 'Unallocated' }),
+  Object.freeze({ id: 'uncosted', label: 'Uncosted' }),
+  Object.freeze({ id: 'rejected', label: 'Rejected' }),
+  Object.freeze({ id: 'quarantined', label: 'Quarantined' }),
+  Object.freeze({ id: 'ledgerStatus', label: 'Status' }),
 ]);
 
 const breakevenEarningsOptionalColumns = Object.freeze([]);
@@ -942,7 +954,7 @@ const earningsFilters = {
   cargoAllocation: { date: '', fleet: '', asset: '' },
   crafting: { date: '', starbase: '', asset: '' },
   upgrading: { date: '', starbase: '', asset: '' },
-  breakeven: { starbase: '', asset: '', hideLowInventory: false },
+  breakeven: { asset: '', source: '', hideLowInventory: false },
 };
 
 const earningsSort = {
@@ -1054,7 +1066,7 @@ const earningsFilterBarBySubtab = Object.freeze({
   cargoAllocation: () => ({ date: earningsCargoAllocationDateFilter, fleet: earningsCargoAllocationFleetFilter, asset: earningsCargoAllocationAssetFilter }),
   crafting: () => ({ date: earningsCraftingDateFilter, starbase: earningsCraftingStarbaseFilter, asset: earningsCraftingAssetFilter }),
   upgrading: () => ({ date: earningsUpgradingDateFilter, starbase: earningsUpgradingStarbaseFilter, asset: earningsUpgradingAssetFilter }),
-  breakeven: () => ({ starbase: earningsBreakevenStarbaseFilter, asset: earningsBreakevenAssetFilter }),
+  breakeven: () => ({ asset: earningsBreakevenAssetFilter }),
 });
 
 const earningsTableHeadBySubtab = Object.freeze({
@@ -6106,8 +6118,12 @@ function setupEarningsFilterHandlers() {
   wire('upgrading', earningsUpgradingDateFilter, 'date');
   wire('upgrading', earningsUpgradingStarbaseFilter, 'starbase');
   wire('upgrading', earningsUpgradingAssetFilter, 'asset');
-  wire('breakeven', earningsBreakevenStarbaseFilter, 'starbase');
   wire('breakeven', earningsBreakevenAssetFilter, 'asset');
+  earningsBreakevenSourceFilter?.addEventListener('change', () => {
+    earningsFilters.breakeven.source = earningsBreakevenSourceFilter.value;
+    renderEarningsBreakeven(latestBreakevenResult);
+  });
+  earningsBreakevenPeriodFilter?.addEventListener('change', () => refreshBreakeven({ force: false }));
   earningsBreakevenHideLowInventory?.addEventListener('change', () => {
     earningsFilters.breakeven.hideLowInventory = earningsBreakevenHideLowInventory.checked;
     renderEarningsBreakeven(latestBreakevenResult);
@@ -6760,7 +6776,7 @@ function renderEarningsBreakevenEmpty(message) {
   const row = document.createElement('tr');
   row.className = 'empty-row';
   const cell = document.createElement('td');
-  cell.colSpan = breakevenEarningsBaseColumns.length + getVisibleEarningsColumns('breakeven').length;
+  cell.colSpan = breakevenEarningsBaseColumns.length;
   cell.textContent = message;
   row.appendChild(cell);
   earningsBreakevenTableBody.appendChild(row);
@@ -6770,62 +6786,80 @@ function renderEarningsBreakevenHeader() {
   if (!earningsBreakevenTableHead) return;
   earningsBreakevenTableHead.textContent = '';
   const headRow = document.createElement('tr');
-  const sortState = earningsSort.breakeven;
-  for (const column of [...breakevenEarningsBaseColumns, ...getVisibleEarningsColumns('breakeven')]) {
-    appendEarningsHeaderCell(headRow, column.id, column.label, sortState);
+  for (const column of breakevenEarningsBaseColumns) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = column.label;
+    headRow.appendChild(th);
   }
   earningsBreakevenTableHead.appendChild(headRow);
 }
 
+function exactAccountingText(value, unavailable = 'Unavailable') {
+  if (value == null) return unavailable;
+  const text = typeof value === 'object' ? value.decimal : value;
+  return text == null || text === '' ? unavailable : String(text);
+}
+
+function nonzeroExact(value) {
+  const text = exactAccountingText(value, '0').replace(/^-/, '').replace('.', '').replace(/^0+/, '');
+  return text.length > 0;
+}
+
+function completeAccountingRowMatchesSource(row, source) {
+  if (!source) return true;
+  if (source === 'crafting') return nonzeroExact(row.acquisitions?.crafting) || nonzeroExact(row.craftingOut) || nonzeroExact(row.craftingIn) || nonzeroExact(row.costsBySource?.crafting);
+  if (source === 'cargo') return nonzeroExact(row.acquisitions?.cargo) || nonzeroExact(row.transferIn) || nonzeroExact(row.transferOut) || nonzeroExact(row.costsBySource?.cargo);
+  return nonzeroExact(row.acquisitions?.[source]) || nonzeroExact(row.costsBySource?.[source]) || row.details?.some((detail) => detail.source === source);
+}
+
 function renderEarningsBreakeven(result) {
   renderCargoBreakevenBeta(result);
-  const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
-  const baselineStatus = result?.openingInventoryError
-    ? ` · opening baseline unavailable: ${result.openingInventoryError}`
-    : Number(result?.openingInventoryCount || 0) > 0
-      ? ` · ${formatWholeNumber(result.openingInventoryCount)} opening lots`
-      : '';
-  const checkpointStatus = result?.ledgerCheckpointStatus
-    ? ` · checkpoint ${result.ledgerCheckpointStatus}${result?.ledgerCheckpointError ? ': ' + result.ledgerCheckpointError : ''}`
-    : '';
-  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${baselineStatus}${checkpointStatus}${result?.breakevenError ? ' · ' + result.breakevenError : ''}`;
+  const accounting = result?.completeAccounting;
+  const rows = Array.isArray(accounting?.rows) ? accounting.rows : [];
+  const period = accounting?.period;
+  const scope = accounting?.scope;
+  const freshness = accounting?.sourceFreshness || {};
+  const unavailable = result?.completeAccountingError || result?.breakevenError;
+  const syncMessage = unavailable
+    ? `Complete accounting unavailable at ${formatCheckedAt(result?.checkedAt)} · ${unavailable}`
+    : `${formatWholeNumber(rows.length)} assets · ${scope?.faction || '--'} · ${scope?.profile || '--'} · ${period?.days || 30} days · ${result?.completeAccountingStatus || 'unknown'} at ${formatCheckedAt(result?.completeAccountingSavedAt || result?.checkedAt)} · Marketplace ${freshness.marketplace || 'unavailable'} · Cargo ${freshness.cargo || 'unavailable'} · Closing inventory ${freshness.closingInventory || 'unavailable'}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
   populateEarningsFilterOptions('breakeven', rows);
+  if (earningsBreakevenSourceFilter) earningsBreakevenSourceFilter.value = earningsFilters.breakeven.source;
   if (earningsBreakevenHideLowInventory) earningsBreakevenHideLowInventory.checked = earningsFilters.breakeven.hideLowInventory;
   renderEarningsBreakevenHeader();
 
   if (!earningsBreakevenTableBody) return;
   earningsBreakevenTableBody.textContent = '';
-  const filteredRows = getFilteredEarningsRows('breakeven', rows);
-  const sortedRows = sortEarningsRows('breakeven', filteredRows);
-  if (!sortedRows.length) {
-    return renderEarningsBreakevenEmpty(rows.length ? 'No breakeven rows match the current filters' : 'No breakeven data available — check mining, cargo, and inventory telemetry');
-  }
-  const optionalColumns = getVisibleEarningsColumns('breakeven');
-  for (const entry of sortedRows) {
+  const filteredRows = rows.filter((row) => {
+    if (earningsFilters.breakeven.asset && row.asset !== earningsFilters.breakeven.asset) return false;
+    if (!completeAccountingRowMatchesSource(row, earningsFilters.breakeven.source)) return false;
+    if (earningsFilters.breakeven.hideLowInventory && Number(exactAccountingText(row.remainingQuantity, '0')) <= 2) return false;
+    return true;
+  }).sort((left, right) => String(left.asset).localeCompare(String(right.asset)));
+  if (!filteredRows.length) return renderEarningsBreakevenEmpty(rows.length ? 'No complete accounting rows match the current filters' : 'Complete accounting data unavailable — missing evidence is never treated as zero');
+
+  for (const entry of filteredRows) {
     const tr = document.createElement('tr');
-    tr.appendChild(createTextCell(entry.starbase || '--'));
-    tr.appendChild(createTextCell(entry.asset || '--'));
-    tr.appendChild(createTextCell(formatWholeNumber(entry.inventory || 0)));
-    tr.appendChild(createTextCell(entry.scanningCostPerUnit == null ? '--' : formatAtlasNumber(entry.scanningCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.miningCostPerUnit == null ? '--' : formatAtlasNumber(entry.miningCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.craftingCostPerUnit == null ? '--' : formatAtlasNumber(entry.craftingCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.lmCostPerUnit == null ? '--' : formatAtlasNumber(entry.lmCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.gmCostPerUnit == null ? '--' : formatAtlasNumber(entry.gmCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.baseCostPerUnit == null ? '--' : formatAtlasNumber(entry.baseCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.cargoCostPerUnit == null ? '--' : formatAtlasNumber(entry.cargoCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.landedCostPerUnit == null ? '--' : formatAtlasNumber(entry.landedCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.inventoryValue == null ? '--' : formatAtlasWhole(entry.inventoryValue)));
-    tr.appendChild(createTextCell(entry.fullyTracked ? '100% tracked' : `${formatWholeNumber(entry.estimatedPercent ?? 100)}% estimated`));
-    tr.appendChild(createTextCell(entry.gmPricePerUnit == null ? '--' : formatAtlasNumber(entry.gmPricePerUnit, 6)));
-    tr.appendChild(createTextCell(entry.inventoryExternalValue == null ? '--' : formatAtlasWhole(entry.inventoryExternalValue)));
-    const status = entry.reconciliationStatus === 'reconciled'
-      ? (Number(entry.uncostedQuantity || 0) > 1e-9 ? `Reconciled · ${formatWholeNumber(entry.uncostedQuantity)} uncosted` : 'Reconciled')
-      : entry.reconciliationStatus === 'surplus'
-        ? `Surplus +${formatWholeNumber(entry.quantityVariance)}`
-        : `Shortfall ${formatWholeNumber(Math.abs(Number(entry.quantityVariance || 0)))}`;
-    tr.appendChild(createTextCell(status));
-    for (const column of optionalColumns) tr.appendChild(createTextCell(entry[column.id] ?? '--'));
+    const outflows = `Consume ${exactAccountingText(entry.consumptionQuantity, '0')} · Craft ${exactAccountingText(entry.craftingIn, '0')} · Transfer ${exactAccountingText(entry.transferOut, '0')}`;
+    const transferIn = `${exactAccountingText(entry.transferIn, '0')} · Cargo basis ${exactAccountingText(entry.costsBySource?.cargo, '0')} ATLAS`;
+    const difference = entry.reconciliationDifference
+      ? `${entry.reconciliationDifference.direction} ${exactAccountingText(entry.reconciliationDifference.value, '0')}`
+      : 'Unavailable';
+    const coverage = `${String(entry.costCoverage?.status || 'unavailable').replaceAll('_', ' ')} · ${exactAccountingText(entry.costCoverage?.knownQuantity, '0')} / ${exactAccountingText(entry.costCoverage?.totalQuantity, '0')}`;
+    const statusParts = [String(entry.reconciliationStatus || 'unavailable').replaceAll('_', ' '), String(entry.salesCoverage?.status || 'unavailable').replaceAll('_', ' ') + ' sales'];
+    const cells = [
+      entry.asset || 'Unavailable', exactAccountingText(entry.openingQuantity), exactAccountingText(entry.openingBasis),
+      exactAccountingText(entry.acquisitions?.lm, '0'), exactAccountingText(entry.acquisitions?.gm, '0'), exactAccountingText(entry.acquisitions?.scanning, '0'), exactAccountingText(entry.acquisitions?.mining, '0'),
+      exactAccountingText(entry.craftingOut, '0'), transferIn, outflows,
+      exactAccountingText(entry.salesQuantity, '0'), exactAccountingText(entry.salesNetProceeds), entry.cogs == null ? `Unavailable · known ${exactAccountingText(entry.knownCogs, '0')}` : exactAccountingText(entry.cogs), exactAccountingText(entry.realizedProfit),
+      exactAccountingText(entry.expectedClosing), exactAccountingText(entry.remainingQuantity), entry.remainingCostBasis == null ? `Unavailable · known ${exactAccountingText(entry.knownRemainingCostBasis, '0')}` : exactAccountingText(entry.remainingCostBasis), exactAccountingText(entry.averageCostPerUnit), exactAccountingText(entry.actualClosing), difference, coverage,
+      exactAccountingText(entry.pendingQuantity, '0'), exactAccountingText(entry.unallocatedQuantity, '0'), exactAccountingText(entry.uncostedQuantity, '0'), exactAccountingText(entry.rejectedQuantity, '0'), exactAccountingText(entry.quarantinedQuantity, '0'), statusParts.join(' · '),
+    ];
+    for (const text of cells) tr.appendChild(createTextCell(text));
+    const detailText = (entry.details || []).map((detail) => `${detail.timestamp} · ${detail.type} · ${detail.status} · ${detail.eventId}${detail.reason ? ` · ${detail.reason}` : ''}`).join('\n');
+    if (detailText) { tr.title = detailText; tr.dataset.accountingDetails = 'available'; }
     earningsBreakevenTableBody.appendChild(tr);
   }
 }
@@ -7183,10 +7217,11 @@ async function refreshEarningsUpgrading({ force = false } = {}) {
 }
 
 function getBreakevenCacheInput(settings = latestSettings || getFormPayload(), force = false) {
+  const periodDays = Number(earningsBreakevenPeriodFilter?.value || settings?.breakevenPeriodDays || 30) === 7 ? 7 : 30;
   return {
     faction: normalizeFaction(settings?.faction),
     playerProfile: getActivePlayerProfile(settings),
-    filters: {},
+    filters: { periodDays },
     force,
   };
 }
@@ -7205,6 +7240,7 @@ async function refreshBreakeven({ force = false } = {}) {
     : 'unknown';
   if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: 'breakeven' };
+  settings.breakevenPeriodDays = Number(earningsBreakevenPeriodFilter?.value || 30) === 7 ? 7 : 30;
   settings.trigger = telemetryTrigger;
   const input = getBreakevenCacheInput(settings, force);
   if (!input.playerProfile) {

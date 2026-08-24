@@ -77,6 +77,40 @@ test('same immutable ID with changed payload is quarantined and cannot mutate in
   assert.equal(decimal(row(result, 'Carbon').expectedClosing), '25');
 });
 
+test('selected period derives exact opening inventory from chronological pre-period events', () => {
+  const result = buildCompleteBreakEvenAccounting({
+    scope: { faction: 'USTUR', profile: 'period-profile' },
+    period: { start: '2026-02-01T00:00:00.000Z', end: '2026-03-01T00:00:00.000Z' },
+    events: [
+      { eventId: 'opening', timestamp: '2026-01-01T00:00:00.000Z', type: 'opening', location: 'S1', asset: 'Ore', quantity: '10', basis: '5' },
+      { eventId: 'pre-buy', timestamp: '2026-01-15T00:00:00.000Z', type: 'acquisition', source: 'lm', location: 'S1', asset: 'Ore', quantity: '2', basis: '2' },
+      { eventId: 'period-sale', timestamp: '2026-02-10T00:00:00.000Z', type: 'sale', source: 'lm', location: 'S1', asset: 'Ore', quantity: '3', grossProceeds: '6', fees: '0.5' },
+    ],
+    actualClosing: [{ asset: 'Ore', quantity: '9' }],
+  });
+  const row = result.rows[0];
+  assert.equal(row.openingQuantity.decimal, '12');
+  assert.equal(row.openingBasis.decimal, '7');
+  assert.equal(row.acquisitions.lm.decimal, '0');
+  assert.equal(row.salesQuantity.decimal, '3');
+  assert.equal(row.expectedClosing.decimal, '9');
+  assert.equal(row.reconciliationStatus, 'reconciled');
+});
+
+test('closing inventory aggregates exact quantities across starbases and preserves known zero opening basis', () => {
+  const result = buildCompleteBreakEvenAccounting({
+    scope: { faction: 'MUD', profile: 'multi-location' },
+    period: { start: '2026-01-01T00:00:00.000Z', end: '2026-02-01T00:00:00.000Z' },
+    events: [{ eventId: 'free-opening', timestamp: '2026-01-01T00:00:00.000Z', type: 'opening', location: 'S1', asset: 'Free Ore', quantity: '3', basis: '0' }],
+    actualClosing: [{ asset: 'Free Ore', quantity: '1' }, { asset: 'Free Ore', quantity: '2' }],
+  });
+  const row = result.rows[0];
+  assert.equal(row.openingBasis.decimal, '0');
+  assert.equal(row.openingCoverage.status, 'fully_costed');
+  assert.equal(row.actualClosing.decimal, '3');
+  assert.equal(row.reconciliationStatus, 'reconciled');
+});
+
 test('checkpoint reload preserves replay idempotency and deterministic output', () => {
   const first = buildCompleteBreakEvenAccounting(fixture);
   const second = buildCompleteBreakEvenAccounting({ ...fixture, checkpoint: first.checkpoint });

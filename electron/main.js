@@ -45,6 +45,8 @@ const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
 const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, cargoVolumeRangeStart, buildCargoVolumeRows, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
+const { buildProductionEvents, buildProductionCompleteAccounting } = require('./complete-accounting-production-adapter');
+const { loadCompleteAccountingCheckpoint, mergeCompleteAccountingEvents, saveCompleteAccountingCheckpoint } = require('./complete-accounting-checkpoint');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
@@ -260,6 +262,10 @@ function settingsPath() {
 
 function ledgerCheckpointPath(faction) {
   return path.join(app.getPath('userData'), 'inventory-cost-ledger', `${sanitizeProfileName(faction)}.json`);
+}
+
+function completeAccountingCheckpointPath(faction) {
+  return path.join(app.getPath('userData'), 'complete-break-even-accounting', `${sanitizeProfileName(faction)}.json`);
 }
 
 function localMarketCheckpointPath(faction) {
@@ -6324,7 +6330,7 @@ ${scopeFilterFlux}
     const eventDate = new Date(raw._time);
     const timestamp = Number.isNaN(eventDate.getTime()) ? '' : eventDate.toISOString();
     if (!craftingId || !starbase || !output || !timestamp) continue;
-    if (!ledgerByCraftingId.has(craftingId)) ledgerByCraftingId.set(craftingId, { timestamp, starbase, output, crafted: 0, feeAmount: null, txCostSol: null, ingredients: [] });
+    if (!ledgerByCraftingId.has(craftingId)) ledgerByCraftingId.set(craftingId, { craftingId, timestamp, starbase, output, crafted: 0, feeAmount: null, txCostSol: null, ingredients: [] });
     const event = ledgerByCraftingId.get(craftingId);
     const value = Number(raw._value);
     if (!Number.isFinite(value)) continue;
@@ -7380,8 +7386,11 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const ledgerFaction = normalizeFaction(settings.faction);
   const snapshotScope = String(rawPayload.earningsScope || rawPayload.earningsSubtab || '').trim().toLowerCase();
   const needsInventoryLedger = ['breakeven', 'crafting', 'upgrading'].includes(snapshotScope);
+  const needsCompleteAccounting = snapshotScope === 'breakeven';
   const ledgerFactionStarbases = needsInventoryLedger ? await fetchFactionStarbases(settings) : null;
-  const localMarketResult = { trades: [], error: '' };
+  const localMarketResult = needsCompleteAccounting
+    ? await fetchMarketplaceTradesFromInflux(settings)
+    : { trades: [], error: '' };
   const marketplaceAssetFlowEvents = needsInventoryLedger ? await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []) : [];
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
   const checkpoint = needsInventoryLedger
@@ -7468,14 +7477,73 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   // can warn instead of crashing the rest of the snapshot.
   let breakevenRows = [];
   let breakevenError = '';
+  let currentInventoryRows = [];
   try {
-    const inventoryRows = await fetchCurrentPerStarbaseInventory(settings);
-    const factionStarbases = ledgerFactionStarbases || await fetchFactionStarbases(settings);
-    const faction = ledgerFaction;
-    breakevenRows = buildLedgerBreakevenRows({ ledgerRows: inventoryCostLedgerRows, inventoryRows, prices })
-      .filter((row) => isStarbaseIncluded(row.starbase, factionStarbases, faction));
+    currentInventoryRows = (await fetchCurrentPerStarbaseInventory(settings))
+      .filter((row) => isStarbaseIncluded(row.starbase, ledgerFactionStarbases, ledgerFaction));
+    breakevenRows = buildLedgerBreakevenRows({ ledgerRows: inventoryCostLedgerRows, inventoryRows: currentInventoryRows, prices });
   } catch (error) {
     breakevenError = String(error?.message || error || 'breakeven_unavailable');
+  }
+
+  let completeAccounting = null;
+  let completeAccountingStatus = 'skipped';
+  let completeAccountingError = '';
+  let completeAccountingSavedAt = null;
+  if (needsCompleteAccounting) {
+    const accountingScope = { faction: ledgerFaction, profile: getSelectedPlayerProfile(settings) };
+    const accountingPath = completeAccountingCheckpointPath(ledgerFaction);
+    const durable = await loadCompleteAccountingCheckpoint(accountingPath, accountingScope);
+    try {
+      const seedTimestamp = checkpoint.savedAt || new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const seedEvents = durable.status === 'missing' && checkpoint.status === 'loaded'
+        ? inventoryCostLedgerRows.flatMap((row) => {
+          const quantity = Number(row.quantity || 0);
+          if (!(quantity > 0)) return [];
+          return [{
+            type: 'acquire',
+            eventId: `checkpoint:${seedTimestamp}:${row.location}:${row.asset}:uncosted`,
+            timestamp: seedTimestamp,
+            location: row.location,
+            asset: row.asset,
+            quantity: String(quantity),
+            totalCost: null,
+          }];
+        })
+        : [];
+      const ledgerSourceEvents = durable.status === 'missing' && checkpoint.status === 'loaded'
+        ? [...seedEvents, ...inventoryCostLedgerResult.appliedEvents]
+        : inventoryCostLedgerResult.events;
+      const sourceCutoff = durable.status === 'missing' && checkpoint.status === 'loaded' ? Date.parse(seedTimestamp) : Number.NEGATIVE_INFINITY;
+      const currentEvents = buildProductionEvents({
+        scope: accountingScope,
+        ledgerEvents: ledgerSourceEvents,
+        authoritativeCargo: (inventoryCostLedgerResult.authoritativeCargoEvents || []).filter((event) => Date.parse(event.timestamp) > sourceCutoff),
+        marketplaceTrades: localMarketResult.trades.filter((trade) => Date.parse(trade.timestamp) > sourceCutoff),
+      });
+      const mergedEvents = mergeCompleteAccountingEvents(durable.events, currentEvents);
+      const now = new Date();
+      const periodDays = Number(rawPayload.breakevenPeriodDays) === 7 ? 7 : 30;
+      const period = { start: new Date(now.getTime() - periodDays * 86_400_000).toISOString(), end: now.toISOString(), days: periodDays };
+      completeAccounting = buildProductionCompleteAccounting({
+        scope: accountingScope,
+        period,
+        normalizedEvents: mergedEvents,
+        marketplaceTrades: localMarketResult.trades,
+        authoritativeCargo: inventoryCostLedgerResult.authoritativeCargoEvents || [],
+        actualClosing: currentInventoryRows,
+      });
+      completeAccountingSavedAt = await saveCompleteAccountingCheckpoint(accountingPath, {
+        scope: accountingScope,
+        events: mergedEvents,
+        createdAt: durable.createdAt,
+      });
+      completeAccountingStatus = durable.status === 'loaded' ? 'updated' : 'created';
+      completeAccounting.checkpointBaseline = checkpoint.status === 'loaded' && durable.status === 'missing' ? 'legacy-checkpoint-migration' : 'exact-event-journal';
+    } catch (error) {
+      completeAccountingStatus = 'unavailable';
+      completeAccountingError = String(error?.message || error || 'complete_accounting_unavailable');
+    }
   }
 
   // Crafting per-row enrichment: each row is per (starbase, output, date).
@@ -7808,6 +7876,10 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     upgradingRows: upgrading,
     breakevenRows,
     breakevenError,
+    completeAccounting,
+    completeAccountingStatus,
+    completeAccountingError,
+    completeAccountingSavedAt,
     localMarketTrades: localMarketResult.trades,
     localMarketTradeCount: localMarketResult.trades.length,
     localMarketError: localMarketResult.error,
