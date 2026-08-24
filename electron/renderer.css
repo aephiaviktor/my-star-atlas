@@ -328,6 +328,12 @@ select:focus {
 .optimization-upgrading-primary-chart-card .optimization-upgrading-tall-chart { width: 66.6667%; margin-inline: auto; }
 .optimization-upgrading-comparison-chart-card { grid-column: span 1; }
 .optimization-upgrading-comparison-chart-card .optimization-upgrading-tall-chart { width: 100%; }
+.optimization-upgrading-v1-chart { min-width: 0; overflow: hidden; }
+.optimization-upgrading-v1-chart svg { width: 100%; height: auto; aspect-ratio: 760 / 340; }
+.optimization-v1-warning { display: block; margin-top: 8px; color: #fbbf24; font-size: 11px; overflow-wrap: anywhere; }
+.optimization-v1-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 8px; color: var(--muted); font-size: 10px; }
+.optimization-v1-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.optimization-v1-legend span::before { width: 9px; height: 9px; border-radius: 2px; background: var(--legend-color); content: ''; }
 .optimization-upgrading-redemption-chart-row { grid-column: 1 / -1; min-width: 0; }
 .optimization-upgrading-redemption-legend { justify-content: center; margin: 0 0 6px; }
 .optimization-upgrading-redemption-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -377,7 +383,9 @@ select:focus {
 .optimization-analytics-empty p { max-width: 650px; color: var(--muted); }
 
 @media (max-width: 1100px) {
-  .optimization-analytics-grid { grid-template-columns: 1fr; }
+  body { min-width: 0; }
+  .optimization-analytics-grid { grid-template-columns: minmax(0, 1fr); padding-inline: 8px; }
+  .optimization-upgrading-v1-chart, .optimization-upgrading-v1-chart svg { max-width: 100%; min-width: 0; }
   .optimization-analytics-card { grid-column: 1; }
   .optimization-upgrading-primary-chart-card .optimization-upgrading-tall-chart { width: 100%; }
   .optimization-upgrading-comparison-chart-card { grid-column: 1; }

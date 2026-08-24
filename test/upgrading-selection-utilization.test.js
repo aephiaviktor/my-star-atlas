@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
 const { calculateUpgradingSelectionUtilization } = require('../electron/upgrading-selection-utilization');
+const acceptedFixture = require('./fixtures/upgrading-analytics-v1-accepted-10-days.json');
 
 function input() {
   return {
@@ -65,6 +66,38 @@ test('faction/profile provenance and feasible-neutral bounds are explicit', () =
   const row = result.utilization[1];
   assert.equal(row.feasible_neutral_lower_crew_hours, 50);
   assert.equal(row.feasible_neutral_upper_crew_hours, 75);
+});
+
+test('accepted 10-day fixture preserves exact active-capacity results and job counts', () => {
+  assert.deepEqual(acceptedFixture.dates.map((row) => row.jobs), [65, 73, 77, 58, 54, 55, 73, 89, 80, 64]);
+  const calculated = acceptedFixture.dates.map((row) => row.upliftAtlas / (row.activeCrewHours / 24));
+  assert.equal(calculated.length, 10);
+  assert.ok(Math.abs(calculated[4] - 1.3166348180) < 1e-10);
+  assert.ok(Math.abs(calculated[7] - 0.2796173712) < 1e-10);
+  for (const [index, row] of acceptedFixture.dates.entries()) assert.equal(calculated[index], row.upliftAtlas / (row.activeCrewHours / 24));
+});
+
+test('accepted UTC-calendar stacks are exhaustive and preserve the two outliers', () => {
+  for (const row of acceptedFixture.dates) assert.ok(Math.abs(row.active + row.claimLocked + row.eligibleIdle + row.hardUnavailable + row.notObserved - 96000) < 0.11);
+  const aug16 = acceptedFixture.dates.find((row) => row.date === '2026-08-16');
+  const aug20 = acceptedFixture.dates.find((row) => row.date === '2026-08-20');
+  assert.ok(Math.abs(aug16.active / 960 - 75.416875) < 1e-9);
+  assert.ok(Math.abs(aug16.claimLocked / 960 - 24.1040625) < 1e-9);
+  assert.equal(aug20.active, 79306.5);
+  assert.ok(Math.abs(aug20.claimLocked / 960 - 13.070729166666666) < 1e-9);
+});
+
+test('V1.1 renderer contains real scatter, trend, zero line, five-state stack, and responsive rules', () => {
+  const renderer = fs.readFileSync('electron/renderer.js', 'utf8');
+  const css = fs.readFileSync('electron/renderer.css', 'utf8');
+  assert.match(renderer, /xLabel:'ATLAS \/ LP'/);
+  assert.match(renderer, /yLabel:'Selection uplift ATLAS \/ active crew-day'/);
+  assert.match(renderer, /optimization-zero-line/);
+  assert.match(renderer, /optimization-trend-line/);
+  for (const label of ['Protocol active','Claim locked','Proven eligible idle','Proven hard unavailable','Capacity not observed']) assert.match(renderer, new RegExp(label));
+  assert.match(renderer, /filter\(\(row\) => row\.evidence_complete/);
+  assert.match(css, /optimization-upgrading-v1-chart svg[^}]+width:\s*100%/s);
+  assert.match(css, /grid-template-columns:\s*minmax\(0, 1fr\)/);
 });
 
 test('production integration reuses existing acquisition functions and exposes final V1 wording', () => {

@@ -1,0 +1,16 @@
+{
+  "faction": "USTUR",
+  "profile": "fixture-only",
+  "dates": [
+    {"date":"2026-08-11","atlasPerLp":0.00006625172101429021,"upliftAtlas":-583.9750890630876,"activeCrewHours":89228.10944423433,"jobs":65,"active":89217.5,"claimLocked":1132.0,"eligibleIdle":0,"hardUnavailable":0,"notObserved":5650.5},
+    {"date":"2026-08-13","atlasPerLp":0.00006867289526209922,"upliftAtlas":2426.932244977339,"activeCrewHours":93990.47000037954,"jobs":73,"active":93974.8,"claimLocked":1399.0,"eligibleIdle":0,"hardUnavailable":0,"notObserved":626.3},
+    {"date":"2026-08-14","atlasPerLp":0.00007257610876937063,"upliftAtlas":2446.9153882622577,"activeCrewHours":90458.69111110915,"jobs":77,"active":90505.4,"claimLocked":4895.2,"eligibleIdle":0,"hardUnavailable":0,"notObserved":599.3},
+    {"date":"2026-08-15","atlasPerLp":0.0000672795183627829,"upliftAtlas":2753.1905004440714,"activeCrewHours":94047.79388924528,"jobs":58,"active":94005.2,"claimLocked":1057.3,"eligibleIdle":0,"hardUnavailable":0,"notObserved":937.5},
+    {"date":"2026-08-16","atlasPerLp":0.00008413459901679544,"upliftAtlas":3972.087678270482,"activeCrewHours":72404.36222243482,"jobs":54,"active":72400.2,"claimLocked":23139.9,"eligibleIdle":0,"hardUnavailable":0,"notObserved":459.9},
+    {"date":"2026-08-17","atlasPerLp":0.00006363982578115811,"upliftAtlas":2278.3826982874425,"activeCrewHours":89939.49777752344,"jobs":55,"active":90002.0,"claimLocked":5216.4,"eligibleIdle":0,"hardUnavailable":0,"notObserved":781.7},
+    {"date":"2026-08-18","atlasPerLp":0.0000670231818176736,"upliftAtlas":1711.8698788114593,"activeCrewHours":88627.56277726058,"jobs":73,"active":88743.5,"claimLocked":1444.1,"eligibleIdle":0,"hardUnavailable":0,"notObserved":5812.4},
+    {"date":"2026-08-20","atlasPerLp":0.00009058151282369575,"upliftAtlas":962.266949364275,"activeCrewHours":82592.89000050056,"jobs":89,"active":79306.5,"claimLocked":12547.9,"eligibleIdle":0,"hardUnavailable":0,"notObserved":4145.6},
+    {"date":"2026-08-21","atlasPerLp":0.00007490319752221412,"upliftAtlas":2824.750265625791,"activeCrewHours":92686.45222219928,"jobs":80,"active":92220.3,"claimLocked":1389.7,"eligibleIdle":0,"hardUnavailable":0,"notObserved":2390.0},
+    {"date":"2026-08-22","atlasPerLp":0.00006346334536525464,"upliftAtlas":1990.5469685785783,"activeCrewHours":91213.92666640268,"jobs":64,"active":91190.4,"claimLocked":1540.0,"eligibleIdle":0,"hardUnavailable":0,"notObserved":3269.6}
+  ]
+}
