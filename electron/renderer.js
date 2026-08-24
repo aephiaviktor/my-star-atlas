@@ -785,6 +785,7 @@ const breakevenEarningsBaseColumns = Object.freeze([
   Object.freeze({ id: 'scanningIn', label: 'Scanning In' }),
   Object.freeze({ id: 'miningIn', label: 'Mining / Rental In' }),
   Object.freeze({ id: 'craftingOut', label: 'Crafting Out' }),
+  Object.freeze({ id: 'upgradingOut', label: 'Upgrading Out' }),
   Object.freeze({ id: 'transferIn', label: 'Cargo / Transfer In' }),
   Object.freeze({ id: 'outflows', label: 'Consumption / Transfer Out' }),
   Object.freeze({ id: 'salesQuantity', label: 'Sales Qty' }),
@@ -6810,6 +6811,7 @@ function completeAccountingRowMatchesSource(row, source) {
   if (!source) return true;
   if (source === 'crafting') return nonzeroExact(row.acquisitions?.crafting) || nonzeroExact(row.craftingOut) || nonzeroExact(row.craftingIn) || nonzeroExact(row.costsBySource?.crafting);
   if (source === 'cargo') return nonzeroExact(row.acquisitions?.cargo) || nonzeroExact(row.transferIn) || nonzeroExact(row.transferOut) || nonzeroExact(row.costsBySource?.cargo);
+  if (source === 'upgrading') return nonzeroExact(row.acquisitions?.upgrading) || nonzeroExact(row.costsBySource?.upgrading) || row.details?.some((detail) => detail.source === source);
   return nonzeroExact(row.acquisitions?.[source]) || nonzeroExact(row.costsBySource?.[source]) || row.details?.some((detail) => detail.source === source);
 }
 
@@ -6823,7 +6825,7 @@ function renderEarningsBreakeven(result) {
   const unavailable = result?.completeAccountingError || result?.breakevenError;
   const syncMessage = unavailable
     ? `Complete accounting unavailable at ${formatCheckedAt(result?.checkedAt)} · ${unavailable}`
-    : `${formatWholeNumber(rows.length)} assets · ${scope?.faction || '--'} · ${scope?.profile || '--'} · ${period?.days || 30} days · ${result?.completeAccountingStatus || 'unknown'} at ${formatCheckedAt(result?.completeAccountingSavedAt || result?.checkedAt)} · Scanning ${freshness.scanning || 'unavailable'} · Mining ${freshness.mining || 'unavailable'} · Crafting ${freshness.crafting || 'unavailable'} · Marketplace ${freshness.marketplace || 'unavailable'} · Cargo ${freshness.cargo || 'unavailable'} · Closing inventory ${freshness.closingInventory || 'unavailable'}`;
+    : `${formatWholeNumber(rows.length)} assets · ${scope?.faction || '--'} · ${scope?.profile || '--'} · ${period?.days || 30} days · ${result?.completeAccountingStatus || 'unknown'} at ${formatCheckedAt(result?.completeAccountingSavedAt || result?.checkedAt)} · Scanning ${freshness.scanning || 'unavailable'} · Mining ${freshness.mining || 'unavailable'} · Crafting ${freshness.crafting || 'unavailable'} · Upgrading ${freshness.upgrading || 'unavailable'} · Marketplace ${freshness.marketplace || 'unavailable'} · Cargo ${freshness.cargo || 'unavailable'} · Closing inventory ${freshness.closingInventory || 'unavailable'}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
   populateEarningsFilterOptions('breakeven', rows);
   if (earningsBreakevenSourceFilter) earningsBreakevenSourceFilter.value = earningsFilters.breakeven.source;
@@ -6846,7 +6848,7 @@ function renderEarningsBreakeven(result) {
       const freshnessKey = source === 'lm' || source === 'gm' ? 'marketplace' : source;
       return freshness[freshnessKey] === 'unavailable' ? 'Unavailable' : exactAccountingText(entry.acquisitions?.[source], '0');
     };
-    const outflows = `Consume ${exactAccountingText(entry.consumptionQuantity, '0')} · Craft ${exactAccountingText(entry.craftingIn, '0')} · Transfer ${exactAccountingText(entry.transferOut, '0')}`;
+    const outflows = `Consume ${exactAccountingText(entry.consumptionQuantity, '0')} · Craft ${exactAccountingText(entry.craftingIn, '0')} · Upgrade ${exactAccountingText(entry.acquisitions?.upgrading, '0')} · Transfer ${exactAccountingText(entry.transferOut, '0')}`;
     const transferIn = `${exactAccountingText(entry.transferIn, '0')} · Cargo basis ${exactAccountingText(entry.costsBySource?.cargo, '0')} ATLAS`;
     const difference = entry.reconciliationDifference
       ? `${entry.reconciliationDifference.direction} ${exactAccountingText(entry.reconciliationDifference.value, '0')}`
@@ -6856,7 +6858,7 @@ function renderEarningsBreakeven(result) {
     const cells = [
       entry.asset || 'Unavailable', exactAccountingText(entry.openingQuantity), exactAccountingText(entry.openingBasis),
       sourceQuantity('lm'), sourceQuantity('gm'), sourceQuantity('scanning'), sourceQuantity('mining'),
-      exactAccountingText(entry.craftingOut, '0'), transferIn, outflows,
+      exactAccountingText(entry.craftingOut, '0'), exactAccountingText(entry.acquisitions?.upgrading, '0'), transferIn, outflows,
       exactAccountingText(entry.salesQuantity, '0'), exactAccountingText(entry.salesNetProceeds), entry.cogs == null ? `Unavailable · known ${exactAccountingText(entry.knownCogs, '0')}` : exactAccountingText(entry.cogs), exactAccountingText(entry.realizedProfit),
       exactAccountingText(entry.expectedClosing), exactAccountingText(entry.remainingQuantity), entry.remainingCostBasis == null ? `Unavailable · known ${exactAccountingText(entry.knownRemainingCostBasis, '0')}` : exactAccountingText(entry.remainingCostBasis), exactAccountingText(entry.averageCostPerUnit), exactAccountingText(entry.actualClosing), difference, coverage,
       exactAccountingText(entry.pendingQuantity, '0'), exactAccountingText(entry.unallocatedQuantity, '0'), exactAccountingText(entry.uncostedQuantity, '0'), exactAccountingText(entry.rejectedQuantity, '0'), exactAccountingText(entry.quarantinedQuantity, '0'), statusParts.join(' · '),

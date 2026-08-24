@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { exactText, marketplaceEvents, buildProductionCompleteAccounting } = require('../electron/complete-accounting-production-adapter');
+const { exactText, marketplaceEvents, authoritativeSlyaAccountingEvents, buildProductionCompleteAccounting } = require('../electron/complete-accounting-production-adapter');
 
 const decimal = (value) => value?.decimal;
 
@@ -58,9 +58,28 @@ test('unavailable production sources remain explicit instead of rendering author
     actualClosing: [{ asset: 'Ore', quantity: '1' }],
     sourceAvailability: { marketplace: 'unavailable', cargo: 'unavailable', mining: 'unavailable' },
   });
-  assert.deepEqual(result.unavailableSources.sort(), ['cargo', 'marketplace', 'mining']);
+  assert.deepEqual(result.unavailableSources.sort(), ['cargo', 'marketplace', 'mining', 'upgrading']);
   assert.equal(result.rows[0].acquisitions.lm, null);
   assert.equal(result.rows[0].acquisitions.gm, null);
   assert.equal(result.rows[0].acquisitions.mining, null);
   assert.equal(result.rows[0].costsBySource.cargo, null);
+});
+
+test('SLYA confirmed evidence is consumed exactly and incomplete lineage is quarantined', () => {
+  const rows = authoritativeSlyaAccountingEvents([
+    { _time: '2026-01-03T00:00:00Z', eventId: 'slya-accounting:v1:mining:sig:0', evidenceType: 'mining', payloadHash: 'a'.repeat(64), faction: 'UST', profile: 'p', fleetAccount: 'fleet', outputs: JSON.stringify([{ asset: 'Ore', quantity: '2', location: 'S1' }]), inputs: '[]', directFees: '0', transactionCosts: JSON.stringify({ solLamports: '5' }), lineage: JSON.stringify({ starbase: 'S1' }) },
+    { _time: '2026-01-04T00:00:00Z', eventId: 'slya-accounting:v1:crafting:sig:1', evidenceType: 'crafting', payloadHash: 'b'.repeat(64), faction: 'UST', profile: 'p', outputs: JSON.stringify([{ asset: 'Plate', quantity: '1', location: 'S1' }]), inputs: JSON.stringify([{ asset: 'Ore', quantity: '1' }]), directFees: '1', transactionCosts: JSON.stringify({ solLamports: '5' }), lineage: '{}' },
+  ], { faction: 'USTUR', profile: 'p' });
+  assert.equal(rows[0].type, 'acquisition');
+  assert.equal(rows[0].basis, null);
+  assert.equal(rows[1].type, 'quarantined');
+  assert.equal(rows[1].reason, 'slya-transaction-cost-atlas-unavailable');
+  const result = buildProductionCompleteAccounting({
+    scope: { faction: 'USTUR', profile: 'p' }, period: { start: '2026-01-01T00:00:00Z', end: '2026-02-01T00:00:00Z' },
+    authoritativeSlyaEvidence: [{ _time: '2026-01-03T00:00:00Z', eventId: 'slya-accounting:v1:mining:sig:0', evidenceType: 'mining', payloadHash: 'a'.repeat(64), faction: 'UST', profile: 'p', fleetAccount: 'fleet', outputs: JSON.stringify([{ asset: 'Ore', quantity: '2', location: 'S1' }]), inputs: '[]', directFees: '0', transactionCosts: JSON.stringify({ solLamports: '5' }), lineage: JSON.stringify({ starbase: 'S1' }) }],
+    actualClosing: [{ asset: 'Ore', quantity: '2' }], sourceAvailability: { upgrading: 'unavailable' },
+  });
+  assert.equal(result.rows[0].acquisitions.mining.decimal, '2');
+  assert.equal(result.rows[0].costCoverage.status, 'uncosted');
+  assert.equal(result.unavailableSources.includes('upgrading'), true);
 });

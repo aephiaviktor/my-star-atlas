@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const arithmetic = require('./exact-arithmetic');
 
 const MONEY_UNIT = 'ATLAS';
-const SOURCES = Object.freeze(['lm', 'gm', 'scanning', 'mining', 'crafting', 'cargo']);
+const SOURCES = Object.freeze(['lm', 'gm', 'scanning', 'mining', 'crafting', 'upgrading', 'cargo']);
 const stable = (value) => Array.isArray(value) ? `[${value.map(stable).join(',')}]`
   : value && typeof value === 'object' ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}`
     : JSON.stringify(value);
@@ -142,11 +142,12 @@ class AccountingEngine {
       this.counts.applied += 1; this.detail(event, 'applied', { destination: event.destination, payloadHash: event.payloadHash || null }); return;
     }
     if (event.type === 'craft') {
+      const productionSource = event.source === 'upgrading' ? 'upgrading' : 'crafting';
       const outputRow = this.row(event.asset); const consumed = event.ingredients.map((ingredient, index) => this.consume({ ...event, eventId: `${event.eventId}:ingredient:${index}`, asset: ingredient.asset }, exactDecimal(ingredient.quantity, assetUnit(ingredient.asset))));
       consumed.forEach((part, index) => { const ingredientRow = this.row(event.ingredients[index].asset); ingredientRow.craftingIn = add(ingredientRow.craftingIn, part.quantity); });
-      const outputQuantity = exactDecimal(event.quantity, outputRow.unit); outputRow.craftingOut = add(outputRow.craftingOut, outputQuantity); outputRow.acquisitions.crafting = add(outputRow.acquisitions.crafting, outputQuantity);
+      const outputQuantity = exactDecimal(event.quantity, outputRow.unit); outputRow.craftingOut = add(outputRow.craftingOut, outputQuantity); outputRow.acquisitions[productionSource] = add(outputRow.acquisitions[productionSource], outputQuantity);
       let cost = sum(consumed.map((part) => part.cost), this.currency); const direct = add(exactDecimal(event.directCost || '0', this.currency), exactDecimal(event.transactionCost || '0', this.currency)); cost = add(cost, direct);
-      const sourceCosts = SOURCES.reduce((out, source) => ({ ...out, [source]: sum(consumed.map((part) => part.sourceCosts[source] || zero(this.currency)), this.currency) }), {}); sourceCosts.crafting = add(sourceCosts.crafting, direct); outputRow.costsBySource.crafting = add(outputRow.costsBySource.crafting, direct);
+      const sourceCosts = SOURCES.reduce((out, source) => ({ ...out, [source]: sum(consumed.map((part) => part.sourceCosts[source] || zero(this.currency)), this.currency) }), {}); sourceCosts[productionSource] = add(sourceCosts[productionSource], direct); outputRow.costsBySource[productionSource] = add(outputRow.costsBySource[productionSource], direct);
       const fully = consumed.every((part) => part.fullyCosted); this.addLot({ event, location: event.location, asset: event.asset, quantity: outputQuantity, knownQuantity: fully ? outputQuantity : zero(outputRow.unit), cost, sourceCosts, uncosted: !fully });
       this.counts.applied += 1; this.detail(event, fully ? 'applied' : 'uncosted'); return;
     }

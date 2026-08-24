@@ -665,6 +665,22 @@ async function fetchMarketplaceAssetFlowsFromInflux(settings) {
   });
 }
 
+async function fetchSlyaAccountingEvidenceFromInflux(settings) {
+  const bucket = String(settings.influxBucket || '').trim();
+  const profile = getSelectedPlayerProfile(settings);
+  if (!bucket || !profile) return { rows: [], error: 'influx_not_configured' };
+  const faction = normalizeFaction(settings.faction) === 'USTUR' ? 'UST' : normalizeFaction(settings.faction);
+  const flux = `from(bucket: "${escapeFluxString(bucket)}")
+  |> range(start: -40d)
+  |> filter(fn: (r) => r._measurement == "slya_accounting_evidence_v1")
+  |> filter(fn: (r) => contains(value: r._field, set: ["payloadHash", "signature", "outerInstructionIndex", "slot", "blockTime", "faction", "profile", "fleetAccount", "fleetLabel", "inputs", "outputs", "directFees", "transactionCosts", "lineage", "sourceProvenance"]))
+  |> pivot(rowKey: ["_time", "eventId", "evidenceType", "schemaVersion"], columnKey: ["_field"], valueColumn: "_value")
+  |> filter(fn: (r) => r.faction == "${escapeFluxString(faction)}" and r.profile == "${escapeFluxString(profile)}")
+  |> sort(columns: ["_time"], desc: false)`;
+  try { return { rows: parseInfluxCsv(await queryInfluxFlux(settings, flux)), error: '' }; }
+  catch (error) { return { rows: [], error: String(error?.message || error || 'slya_accounting_evidence_unavailable') }; }
+}
+
 async function resolveInfluxOrgId(influxUrl, token, bucket) {
   const baseUrl = getInfluxBaseUrl(influxUrl);
   const cacheKey = `${baseUrl}\n${token}\n${bucket}`;
@@ -7391,6 +7407,9 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const localMarketResult = needsCompleteAccounting
     ? await fetchMarketplaceTradesFromInflux(settings)
     : { trades: [], error: '' };
+  const slyaAccountingEvidenceResult = needsCompleteAccounting
+    ? await fetchSlyaAccountingEvidenceFromInflux(settings)
+    : { rows: [], error: '' };
   const marketplaceAssetFlowEvents = needsInventoryLedger ? await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []) : [];
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
   const checkpoint = needsInventoryLedger
@@ -7519,6 +7538,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         scope: accountingScope,
         ledgerEvents: ledgerSourceEvents,
         authoritativeCargo: (inventoryCostLedgerResult.authoritativeCargoEvents || []).filter((event) => Date.parse(event.timestamp) > sourceCutoff),
+        authoritativeSlyaEvidence: slyaAccountingEvidenceResult.rows.filter((event) => Date.parse(event._time || event.timestamp) > sourceCutoff),
         marketplaceTrades: localMarketResult.trades.filter((trade) => Date.parse(trade.timestamp) > sourceCutoff),
       });
       const mergedEvents = mergeCompleteAccountingEvents(durable.events, currentEvents);
@@ -7531,11 +7551,13 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         normalizedEvents: mergedEvents,
         marketplaceTrades: localMarketResult.trades,
         authoritativeCargo: inventoryCostLedgerResult.authoritativeCargoEvents || [],
+        authoritativeSlyaEvidence: slyaAccountingEvidenceResult.rows,
         actualClosing: currentInventoryRows,
         sourceAvailability: {
           scanning: scanningError ? 'unavailable' : 'available',
           mining: miningError ? 'unavailable' : 'available',
           crafting: craftingError ? 'unavailable' : 'available',
+          upgrading: slyaAccountingEvidenceResult.error ? 'unavailable' : 'available',
           marketplace: localMarketResult.error ? 'unavailable' : 'available',
           cargo: cargoError ? 'unavailable' : 'available',
           closingInventory: breakevenError ? 'unavailable' : 'available',

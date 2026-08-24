@@ -153,19 +153,57 @@ function actualClosingRows(rows = []) {
   });
 }
 
-function buildProductionEvents({ scope = null, ledgerEvents = [], authoritativeCargo = [], marketplaceTrades = [] } = {}) {
-  return [...legacyLedgerEvents(ledgerEvents), ...authoritativeCargoEvents(authoritativeCargo), ...marketplaceEvents(marketplaceTrades, scope)]
+function parseEvidenceJson(value, fallback) {
+  if (value && typeof value === 'object') return value;
+  try { return JSON.parse(String(value || '')); } catch (_error) { return fallback; }
+}
+
+function authoritativeSlyaAccountingEvents(rows = [], scope = null) {
+  return rows.flatMap((row) => {
+    const eventId = String(row?.eventId || '').trim();
+    const timestamp = normalizeTimestamp(row?.timestamp || row?._time);
+    const evidenceType = String(row?.evidenceType || '').trim().toLowerCase();
+    const payloadHash = String(row?.payloadHash || '').trim();
+    const inputs = parseEvidenceJson(row?.inputs, null);
+    const outputs = parseEvidenceJson(row?.outputs, null);
+    const lineage = parseEvidenceJson(row?.lineage, {});
+    const directFees = parseEvidenceJson(row?.directFees, row?.directFees);
+    const transactionCosts = parseEvidenceJson(row?.transactionCosts, row?.transactionCosts);
+    if (!eventId || !timestamp || !payloadHash || !['scanning', 'mining', 'crafting', 'upgrading'].includes(evidenceType) || !Array.isArray(inputs) || !Array.isArray(outputs)) return [];
+    const base = { eventId, sourceEventId: eventId, timestamp, source: evidenceType, payloadHash, signature: String(row?.signature || ''), slot: String(row?.slot || ''), profile: String(row?.profile || ''), fleet: String(row?.fleetAccount || ''), lineageStatus: 'confirmed', scope: scope || null };
+    const output = outputs[0];
+    const validQuantity = (entry) => entry && String(entry.asset || '').trim() && (() => { try { exactText(entry.quantity); return true; } catch (_error) { return false; } })();
+    if (!inputs.every(validQuantity) || !validQuantity(output)) return [{ ...base, type: 'quarantined', asset: String(output?.asset || lineage?.asset || evidenceType), quantity: validQuantity(output) ? exactText(output.quantity) : '0', reason: 'slya-evidence-quantity-incomplete' }];
+    if ((evidenceType === 'crafting' || evidenceType === 'upgrading') && outputs.length !== 1) return [{ ...base, type: 'quarantined', asset: String(output.asset), quantity: exactText(output.quantity), reason: 'slya-output-lineage-ambiguous' }];
+    if (evidenceType === 'crafting' || evidenceType === 'upgrading') {
+      const costs = transactionCosts && typeof transactionCosts === 'object' ? transactionCosts : null;
+      const direct = typeof directFees === 'string' ? directFees : directFees?.atlas;
+      const transaction = costs?.atlas;
+      if (direct == null || transaction == null) return [{ ...base, type: 'quarantined', asset: String(output.asset), quantity: exactText(output.quantity), reason: 'slya-transaction-cost-atlas-unavailable' }];
+      return [{ ...base, type: 'craft', location: String(output.location || lineage?.location || lineage?.starbase || ''), asset: String(output.asset), quantity: exactText(output.quantity), ingredients: inputs.map((entry) => ({ asset: String(entry.asset), quantity: exactText(entry.quantity) })), directCost: exactText(direct), transactionCost: exactText(transaction), lineageStatus: 'confirmed' }];
+    }
+    return outputs.map((entry, index) => {
+      const location = String(entry.location || lineage?.location || lineage?.starbase || lineage?.sector || '').trim();
+      if (!location) return { ...base, eventId: `${eventId}:output:${index}`, type: 'quarantined', asset: String(entry.asset), quantity: exactText(entry.quantity), reason: 'slya-lineage-location-unavailable' };
+      return { ...base, eventId: `${eventId}:output:${index}`, type: 'acquisition', location, asset: String(entry.asset), quantity: exactText(entry.quantity), basis: null, lineageStatus: 'confirmed' };
+    });
+  });
+}
+
+function buildProductionEvents({ scope = null, ledgerEvents = [], authoritativeCargo = [], authoritativeSlyaEvidence = [], marketplaceTrades = [] } = {}) {
+  return [...legacyLedgerEvents(ledgerEvents), ...authoritativeCargoEvents(authoritativeCargo), ...authoritativeSlyaAccountingEvents(authoritativeSlyaEvidence, scope), ...marketplaceEvents(marketplaceTrades, scope)]
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.eventId.localeCompare(right.eventId));
 }
 
-function buildProductionCompleteAccounting({ scope, period, ledgerEvents = [], authoritativeCargo = [], marketplaceTrades = [], normalizedEvents = null, actualClosing = [], checkpoint = null, sourceAvailability = {} } = {}) {
-  const events = normalizedEvents || buildProductionEvents({ scope, ledgerEvents, authoritativeCargo, marketplaceTrades });
+function buildProductionCompleteAccounting({ scope, period, ledgerEvents = [], authoritativeCargo = [], authoritativeSlyaEvidence = [], marketplaceTrades = [], normalizedEvents = null, actualClosing = [], checkpoint = null, sourceAvailability = {} } = {}) {
+  const events = normalizedEvents || buildProductionEvents({ scope, ledgerEvents, authoritativeCargo, authoritativeSlyaEvidence, marketplaceTrades });
   const result = buildCompleteBreakEvenAccounting({ scope, period, currency: 'ATLAS', events, actualClosing: actualClosingRows(actualClosing), checkpoint });
   const freshness = {
     generatedAt: new Date().toISOString(),
     scanning: sourceAvailability.scanning || 'available',
     mining: sourceAvailability.mining || 'available',
     crafting: sourceAvailability.crafting || 'available',
+    upgrading: sourceAvailability.upgrading || (authoritativeSlyaEvidence.some((row) => row.evidenceType === 'upgrading') ? 'available' : 'unavailable'),
     marketplace: sourceAvailability.marketplace || (marketplaceTrades.length ? 'available' : 'unavailable'),
     cargo: sourceAvailability.cargo || (authoritativeCargo.length ? 'available' : 'unavailable'),
     closingInventory: sourceAvailability.closingInventory || (actualClosing.length ? 'available' : 'unavailable'),
@@ -174,10 +212,10 @@ function buildProductionCompleteAccounting({ scope, period, ledgerEvents = [], a
   if (freshness.marketplace === 'unavailable') for (const row of result.rows) {
     row.acquisitions.lm = null; row.acquisitions.gm = null; row.costsBySource.lm = null; row.costsBySource.gm = null;
   }
-  for (const source of ['scanning', 'mining', 'crafting', 'cargo']) if (freshness[source] === 'unavailable') for (const row of result.rows) {
+  for (const source of ['scanning', 'mining', 'crafting', 'upgrading', 'cargo']) if (freshness[source] === 'unavailable') for (const row of result.rows) {
     row.acquisitions[source] = null; row.costsBySource[source] = null;
   }
   return { ...result, sourceFreshness: freshness, unavailableSources, inputEventCount: events.length };
 }
 
-module.exports = { exactText, marketplaceEvents, legacyLedgerEvents, authoritativeCargoEvents, actualClosingRows, buildProductionEvents, buildProductionCompleteAccounting };
+module.exports = { exactText, marketplaceEvents, legacyLedgerEvents, authoritativeCargoEvents, authoritativeSlyaAccountingEvents, actualClosingRows, buildProductionEvents, buildProductionCompleteAccounting };
