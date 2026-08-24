@@ -1,0 +1,26 @@
+{
+  "scope": { "faction": "USTUR", "profile": "fixture-profile" },
+  "period": { "from": "2026-08-01T00:00:00.000Z", "to": "2026-08-31T23:59:59.999Z" },
+  "currency": "ATLAS",
+  "events": [
+    { "eventId": "opening:carbon", "timestamp": "2026-08-01T00:00:00.000Z", "type": "opening", "location": "UST-1", "asset": "Carbon", "quantity": "10", "basis": null },
+    { "eventId": "lm:buy:1", "timestamp": "2026-08-02T01:00:00.000Z", "type": "acquisition", "source": "lm", "location": "UST-1", "asset": "Carbon", "quantity": "5", "cost": "10", "fees": "2" },
+    { "eventId": "gm:buy:1:split:1", "timestamp": "2026-08-03T01:00:00.000Z", "type": "acquisition", "source": "gm", "location": "UST-1", "asset": "Iron Ore", "quantity": "6", "cost": "12", "fees": "0.6", "tradeId": "gm:buy:1", "originWallet": "wallet:gm", "lineageStatus": "allocated" },
+    { "eventId": "gm:buy:1:split:2", "timestamp": "2026-08-03T01:00:01.000Z", "type": "acquisition", "source": "gm", "location": "UST-2", "asset": "Iron Ore", "quantity": "4", "cost": "8", "fees": "0.4", "tradeId": "gm:buy:1", "originWallet": "wallet:gm", "lineageStatus": "allocated" },
+    { "eventId": "scan:1", "timestamp": "2026-08-04T01:00:00.000Z", "type": "acquisition", "source": "scanning", "location": "UST-1", "asset": "Survey Data Unit", "quantity": "100", "cost": "5", "fees": "0" },
+    { "eventId": "mine:1", "timestamp": "2026-08-05T01:00:00.000Z", "type": "acquisition", "source": "mining", "location": "UST-1", "asset": "Carbon", "quantity": "20", "cost": "4", "fees": "1", "rentalCost": "1" },
+    { "eventId": "craft:1", "timestamp": "2026-08-06T01:00:00.000Z", "type": "craft", "location": "UST-1", "ingredients": [{ "asset": "Carbon", "quantity": "10" }], "asset": "Framework", "quantity": "2", "directCost": "3", "transactionCost": "1" },
+    { "eventId": "cargo-delivery:v1:fixture", "timestamp": "2026-08-07T01:00:00.000Z", "type": "transfer", "source": "cargo", "location": "UST-1", "destination": "UST-2", "asset": "Carbon", "quantity": "5", "cargoCost": "2", "payloadHash": "fixture-cargo-hash" },
+    { "eventId": "cargo-delivery:v1:fixture", "timestamp": "2026-08-07T01:00:00.000Z", "type": "transfer", "source": "cargo", "location": "UST-1", "destination": "UST-2", "asset": "Carbon", "quantity": "5", "cargoCost": "2", "payloadHash": "fixture-cargo-hash" },
+    { "eventId": "transfer:1", "timestamp": "2026-08-08T01:00:00.000Z", "type": "transfer", "source": "internal", "location": "UST-1", "destination": "UST-2", "asset": "Carbon", "quantity": "2", "cargoCost": "0" },
+    { "eventId": "sale:carbon:1", "timestamp": "2026-08-09T01:00:00.000Z", "type": "sale", "source": "lm", "location": "UST-2", "asset": "Carbon", "quantity": "3", "grossProceeds": "9", "fees": "1" },
+    { "eventId": "sale:framework:1", "timestamp": "2026-08-10T01:00:00.000Z", "type": "sale", "source": "gm", "location": "UST-1", "asset": "Framework", "quantity": "1", "grossProceeds": "10", "fees": "1" },
+    { "eventId": "ambiguous:iron:1", "timestamp": "2026-08-11T01:00:00.000Z", "type": "quarantined", "source": "gm", "location": "wallet:gm", "asset": "Iron Ore", "quantity": "2", "reason": "ambiguous wallet/CSS lineage" }
+  ],
+  "actualClosing": [
+    { "asset": "Carbon", "quantity": "22" },
+    { "asset": "Iron Ore", "quantity": "10" },
+    { "asset": "Survey Data Unit", "quantity": "100" },
+    { "asset": "Framework", "quantity": "1" }
+  ]
+}
