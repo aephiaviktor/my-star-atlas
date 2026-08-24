@@ -25,6 +25,7 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { createEarningsErrorDiagnostic } = require('./earnings-error-diagnostic');
 const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher } = require('./rpc-resilience');
+const { calculateUpgradingSelectionUtilization } = require('./upgrading-selection-utilization');
 const { createTelemetryLedger } = require('./telemetry-ledger');
 const { createRpcUsageReader } = require('./telemetry-day-summary');
 const {
@@ -918,7 +919,7 @@ async function fetchDailyUpgradingNetAtlas(settings, redemptionRates) {
     else if (transactionCost != null) current.transactionCost += transactionCost;
     daily.set(date, current);
   }
-  return [...daily.values()].map((row) => ({
+  const result = [...daily.values()].map((row) => ({
     date: row.date,
     lp: row.lp || 0,
     netAtlas: row.complete ? row.revenue - row.componentCost - row.transactionCost : null,
@@ -926,6 +927,9 @@ async function fetchDailyUpgradingNetAtlas(settings, redemptionRates) {
     componentCost: row.complete ? row.componentCost : null,
     transactionCost: row.transactionCost,
   })).filter((row) => Number.isFinite(row.lp) && row.lp > 0);
+  result.jobs = Array.isArray(rows.jobs) ? rows.jobs : [];
+  result.priceSnapshotAt = new Date().toISOString();
+  return result;
 }
 
 async function fetchDailyNeutralUpgradingPlan(settings) {
@@ -936,9 +940,9 @@ async function fetchDailyNeutralUpgradingPlan(settings) {
   |> range(start: -30d)
   |> filter(fn: (r) => r._measurement == "lp_auto_comp")
 ${scopeFilterFlux}
-  |> filter(fn: (r) => r._field == "neutral_upgrading_hour")
+  |> filter(fn: (r) => r._field == "neutral_upgrading_hour" or r._field == "neutral_crew")
   |> pivot(rowKey: ["_time", "component"], columnKey: ["_field"], valueColumn: "_value")
-  |> keep(columns: ["_time", "component", "neutral_upgrading_hour"])
+  |> keep(columns: ["_time", "component", "neutral_upgrading_hour", "neutral_crew"])
   |> sort(columns: ["_time", "component"])`;
   const resources = await fetchAephiaResourceData().catch(() => []);
   const pricesByAsset = new Map();
@@ -952,10 +956,11 @@ ${scopeFilterFlux}
     const time = String(row._time || '');
     const component = normalizeShipName(row.component);
     const rate = Number(row.neutral_upgrading_hour);
+    const neutralCrew = Number(row.neutral_crew);
     const ms = Date.parse(time);
     if (!component || !Number.isFinite(ms) || !Number.isFinite(rate) || rate < 0) continue;
     const key = `${time.slice(0, 13)}|${component}`;
-    if (!latestByComponentHour.has(key) || time > latestByComponentHour.get(key).time) latestByComponentHour.set(key, { time, component, rate });
+    if (!latestByComponentHour.has(key) || time > latestByComponentHour.get(key).time) latestByComponentHour.set(key, { time, component, rate, neutralCrew });
   }
   const byDay = new Map();
   for (const row of latestByComponentHour.values()) {
@@ -966,7 +971,7 @@ ${scopeFilterFlux}
     if (!day.has(hour)) day.set(hour, []);
     day.get(hour).push(row);
   }
-  return [...byDay.entries()].map(([date, hours]) => {
+  const result = [...byDay.entries()].map(([date, hours]) => {
     if (hours.size < 24) return null;
     let lp = 0;
     let componentCost = 0;
@@ -979,6 +984,8 @@ ${scopeFilterFlux}
     }
     return { date, lp, componentCost, hours: hours.size, complete: true };
   }).filter(Boolean);
+  result.hourlyAllocations = [...latestByComponentHour.values()].map((row) => ({ time: row.time, component: row.component, neutral_crew: row.neutralCrew }));
+  return result;
 }
 
 function optimizationNumberQuantile(values, fraction) {
@@ -1107,7 +1114,16 @@ async function fetchUpgradingOptimization(payload = {}) {
     fetchDailyUpgradingNetAtlas(factionSettings, redemptionRates),
     fetchDailyNeutralUpgradingPlan(factionSettings),
   ]);
-  return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, neutralUpgradingDaily, playerProfile: String(settings.playerProfiles?.[aephiaFaction] || settings.playerProfile || ''), componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
+  const playerProfile = String(settings.playerProfiles?.[aephiaFaction] || settings.playerProfile || '');
+  const configuredCrewByHour = {};
+  for (const row of rows) {
+    const time = String(row.time || row._time || '');
+    const crew = Number(row.phantom_crew ?? row.phantomCrew);
+    if (Number.isFinite(Date.parse(time)) && Number.isFinite(crew) && crew >= 0) configuredCrewByHour[new Date(time).toISOString().slice(0, 13)] = crew;
+  }
+  const atlasPerLpByDate = Object.fromEntries(redemptionRates.map((row) => [row.date, row.atlasPerLp]));
+  const selectionUtilizationV1 = calculateUpgradingSelectionUtilization({ jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations, configuredCrewByHour, prices: componentPricesAtl, atlasPerLpByDate, faction, profile: playerProfile, priceSnapshotAt: netAtlasDaily.priceSnapshotAt });
+  return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, neutralUpgradingDaily, selectionUtilizationV1, playerProfile, componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 
 function getInfluxScopeNote(settings) {
@@ -6330,19 +6346,24 @@ async function fetchUpgradingEarningsRows(settings) {
   |> range(start: -30d)
   |> filter(fn: (r) => r._measurement == "upgrade")
 ${scopeFilterFlux}
-  |> filter(fn: (r) => r._field == "amount" or r._field == "crew" or r._field == "txCostSol")
+  |> filter(fn: (r) => r._field == "amount" or r._field == "crew" or r._field == "txCostSol" or r._field == "startedAt" or r._field == "completedAt" or r._field == "started_at" or r._field == "completed_at" or r._field == "craftingId" or r._field == "state")
   |> filter(fn: (r) => exists r.starbase and exists r.input)
-  |> keep(columns: ["starbase", "input", "_field", "_time", "_value"])
+  |> keep(columns: ["starbase", "input", "instance", "faction", "_field", "_time", "_value"])
   |> sort(columns: ["_time"])`;
   const rows = new Map();
   const crewObservations = new Map();
   const ledgerEvents = [];
+  const jobsByEvent = new Map();
   for (const raw of parseInfluxCsv(await queryInfluxFlux(settings, flux))) {
     const starbase = resolveStarbaseName(raw, coordinateMap);
     const asset = String(raw.input || '').trim();
     const date = new Date(raw._time);
     const value = Number(raw._value);
-    if (!starbase || !asset || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
+    if (!starbase || !asset || Number.isNaN(date.getTime())) continue;
+    const eventKey = `${date.toISOString()}\n${starbase}\n${asset}`;
+    if (!jobsByEvent.has(eventKey)) jobsByEvent.set(eventKey, { _time: date.toISOString(), component: asset, starbase, instance: raw.instance, faction: raw.faction });
+    jobsByEvent.get(eventKey)[raw._field] = Number.isFinite(value) ? value : raw._value;
+    if (!Number.isFinite(value)) continue;
     const groupKey = `${starbase}\n${asset}`;
     if (raw._field === 'amount' && value > 0) {
       ledgerEvents.push({ timestamp: date.toISOString(), starbase, asset, installed: value });
@@ -6388,6 +6409,7 @@ ${asset}`;
   }
   const result = Array.from(rows.values()).filter((row) => row.installed > 0 || row.crew > 0 || row.txCostSol > 0);
   result.ledgerEvents = ledgerEvents;
+  result.jobs = [...jobsByEvent.values()].filter((job) => Number(job.amount) > 0 && Number(job.crew) > 0);
   return result;
 }
 

@@ -110,6 +110,10 @@ const optimizationAnalyticsRankingHead = document.querySelector('#optimization-a
 const optimizationAnalyticsRanking = document.querySelector('#optimization-analytics-ranking');
 const optimizationAnalyticsTooltip = document.querySelector('#optimization-analytics-tooltip');
 const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
+const optimizationUpgradingSelectionV1 = document.querySelector('#optimization-upgrading-selection-v1');
+const optimizationUpgradingUtilizationV1 = document.querySelector('#optimization-upgrading-utilization-v1');
+const optimizationUpgradingClaimLockV1 = document.querySelector('#optimization-upgrading-claim-lock-v1');
+const optimizationUpgradingOperationalV1 = document.querySelector('#optimization-upgrading-operational-v1');
 const optimizationUpgradingRedemptionLegend = document.querySelector('#optimization-upgrading-redemption-legend');
 const optimizationUpgradingNetAtlasChart = document.querySelector('#optimization-upgrading-net-atlas-chart');
 const optimizationUpgradingLpPerCrewByRateChart = document.querySelector('#optimization-upgrading-lp-per-crew-by-rate-chart');
@@ -8523,8 +8527,28 @@ function renderUpgradingMarginChart(analytics) {
   bindUpgradingRedemptionChartNavigation(svg, axes, analytics, 'margin', minY, maxY);
 }
 
+function renderUpgradingSelectionUtilizationV1(result) {
+  const data = result?.selectionUtilizationV1;
+  const unavailable = (container, reason) => { if (container) container.textContent = reason || 'Required cohort, hourly allocation, identity, or provenance evidence is incomplete.'; };
+  if (!data) { for (const container of [optimizationUpgradingSelectionV1, optimizationUpgradingUtilizationV1, optimizationUpgradingClaimLockV1, optimizationUpgradingOperationalV1]) unavailable(container, 'Selection/utilization evidence is not available.'); return; }
+  const completeSelection = (data.selection || []).filter((row) => row.evidence_complete);
+  if (optimizationUpgradingSelectionV1) {
+    optimizationUpgradingSelectionV1.replaceChildren();
+    if (!completeSelection.length) unavailable(optimizationUpgradingSelectionV1, data.selection?.[0]?.incomplete_reason || 'Matched completion-cohort evidence is incomplete.');
+    else for (const row of completeSelection) { const line=document.createElement('p'); line.textContent=`${row.date} · ${row.selection_uplift_atlas_per_active_crew_day.toLocaleString(undefined,{maximumFractionDigits:2})} ATLAS / active crew-day · ${row.selection_uplift_lp_per_active_crew_hour.toLocaleString(undefined,{maximumFractionDigits:2})} LP / active crew-hour · ${row.completed_job_count} jobs`; line.title='Actual completed component mix versus neutral component mix replayed over the same completed-job population and protocol-active crew time. This measures selection, not uptime.'; optimizationUpgradingSelectionV1.append(line); }
+    const warning=document.createElement('strong'); warning.textContent=data.price_warning; optimizationUpgradingSelectionV1.append(warning);
+  }
+  if (optimizationUpgradingUtilizationV1) {
+    optimizationUpgradingUtilizationV1.replaceChildren();
+    for (const row of data.utilization || []) { const line=document.createElement('p'); line.textContent=`${row.date} · Active ${row.protocol_active_percent?.toFixed(2) ?? '--'}% · Claim locked ${row.claim_locked_percent?.toFixed(2) ?? '--'}% · Eligible idle ${row.proven_eligible_idle_percent?.toFixed(2) ?? '--'}% · Hard unavailable ${row.proven_hard_unavailable_percent?.toFixed(2) ?? '--'}% · Capacity not observed ${row.capacity_not_observed_percent?.toFixed(2) ?? '--'}%`; line.title='Physical crew state inside this UTC period. States are mutually exclusive and sum to configured capacity. Unknown time is shown, never silently assigned.'; optimizationUpgradingUtilizationV1.append(line); }
+  }
+  if (optimizationUpgradingClaimLockV1) { const claim=data.claim_lock||{}; optimizationUpgradingClaimLockV1.textContent=`${claim.claim_locked_crew_hours?.toLocaleString(undefined,{maximumFractionDigits:1}) ?? '--'} crew-hours · ${claim.claim_locked_percent?.toFixed(2) ?? '--'}% · delay median ${claim.median_claim_delay_seconds?.toFixed(1) ?? '--'}s · P90 ${claim.p90_claim_delay_seconds?.toFixed(1) ?? '--'}s · P95 ${claim.p95_claim_delay_seconds?.toFixed(1) ?? '--'}s · max ${claim.maximum_claim_delay_seconds?.toFixed(1) ?? '--'}s · attempts/retries/failures: NOT OBSERVED`; optimizationUpgradingClaimLockV1.title='Crew whose protocol work ended but whose completion/claim had not succeeded. This is not active or idle and is not presumed unavoidable.'; }
+  if (optimizationUpgradingOperationalV1) { const rows=data.utilization||[]; const lower=rows.reduce((s,r)=>s+r.feasible_neutral_lower_crew_hours,0), upper=rows.reduce((s,r)=>s+r.feasible_neutral_upper_crew_hours,0); optimizationUpgradingOperationalV1.textContent=`UTC-calendar operational measurement combines selection and utilization; it is not component-selection uplift. Feasible-neutral capacity: ${lower.toLocaleString(undefined,{maximumFractionDigits:1})}–${upper.toLocaleString(undefined,{maximumFractionDigits:1})} crew-hours. Residual NOT OBSERVED remains uncertainty.`; }
+}
+
 function renderUpgradingOptimizationAnalytics() {
   const analytics = buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {});
+  renderUpgradingSelectionUtilizationV1(latestUpgradingOptimizationResult || {});
   const comparisonScales = getUpgradingComparisonScales(latestUpgradingComparisonResults.length ? latestUpgradingComparisonResults : [latestUpgradingOptimizationResult || {}]);
   const normalizedFaction = normalizeFaction(latestSettings?.faction);
   const factionLabel = normalizedFaction === 'USTUR' ? 'UST' : normalizedFaction;
