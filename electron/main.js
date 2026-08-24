@@ -40,6 +40,7 @@ const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
 const { buildCargoAllocationPivotFlux, createCargoAllocationSource } = require('./cargo-allocation-source');
+const { DELIVERY_EVIDENCE_FIELDS, projectCargoDeliveryEvidence, joinCargoDeliveryAllocations } = require('./cargo-delivery-evidence');
 const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
 const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, cargoVolumeRangeStart, buildCargoVolumeRows, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
@@ -47,7 +48,7 @@ const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
-const { buildCargoBetaInputs, buildCargoBreakevenBetaRows } = require('./cargo-breakeven-beta');
+const { buildCargoBetaInputs, buildAuthoritativeCargoBetaInputs, buildCargoBreakevenBetaRows } = require('./cargo-breakeven-beta');
 const { createAtlasPriceResolver } = require('./atlas-price-resolver');
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
 const {
@@ -6609,8 +6610,9 @@ ${scopeFilterFlux}
 }
 
 
-function buildBoundedCargoAllocationRecords(fieldRows, includedDays, limit = 50) {
+function buildBoundedCargoAllocationRecords(fieldRows, includedDays, limit = Infinity) {
   const requiredFields = ['amount', 'cargoVolume', 'allocatedFuel', 'allocatedTxCostSol'];
+  const acceptedFields = new Set([...requiredFields, ...DELIVERY_EVIDENCE_FIELDS]);
   const grouped = new Map();
   for (const row of fieldRows) {
     const cycleId = String(row?.cycleId || '').trim();
@@ -6620,21 +6622,24 @@ function buildBoundedCargoAllocationRecords(fieldRows, includedDays, limit = 50)
     const fleetAccount = cargoFleetAccountFromCycleId(cycleId) || '';
     const timestamp = new Date(row?._time);
     const isoDate = Number.isNaN(timestamp.getTime()) ? '' : timestamp.toISOString().slice(0, 10);
-    const value = Number(row?._value);
-    if (!cycleId || !allocationIndex || !requiredFields.includes(field) || !fleet || !fleetAccount
-      || !isoDate || (includedDays && !includedDays.has(isoDate)) || !Number.isFinite(value)) continue;
+    const rawValue = String(row?._value ?? '').trim();
+    const numericValue = Number(rawValue);
+    if (!cycleId || !allocationIndex || !acceptedFields.has(field) || !fleet || !fleetAccount
+      || !isoDate || (includedDays && !includedDays.has(isoDate)) || !rawValue
+      || (requiredFields.includes(field) && !Number.isFinite(numericValue))) continue;
     const key = `${cycleId}\n${allocationIndex}`;
     if (!grouped.has(key)) grouped.set(key, {
       isoDate, timestamp: timestamp.toISOString(), label: isoDate,
       faction: String(row?.faction || '').trim(), instance: String(row?.instance || '').trim(),
       fleet, fleetAccount, asset: String(row?.rss || 'Unknown asset').trim() || 'Unknown asset',
+      assetMint: String(row?.assetMint || '').trim(),
       origin: String(row?.originStarbase || '').trim() || '--',
       destination: String(row?.deliveryStarbase || '').trim() || '--',
       assignment: String(row?.assignment || 'Unknown').trim() || 'Unknown',
       cycleId, allocationIndex, fields: new Set(),
     });
     const record = grouped.get(key);
-    record[field] = value;
+    record[field] = requiredFields.includes(field) ? numericValue : rawValue;
     record.fields.add(field);
     if (timestamp.toISOString() > record.timestamp) record.timestamp = timestamp.toISOString();
   }
@@ -6643,7 +6648,7 @@ function buildBoundedCargoAllocationRecords(fieldRows, includedDays, limit = 50)
     .sort((left, right) => right.timestamp.localeCompare(left.timestamp)
       || left.cycleId.localeCompare(right.cycleId)
       || left.allocationIndex.localeCompare(right.allocationIndex))
-    .slice(0, limit)
+    .slice(0, Number.isInteger(limit) && limit >= 0 ? limit : undefined)
     .map(({ fields, ...record }) => record);
 }
 
@@ -6718,27 +6723,33 @@ ${fleetFilterFlux}
       const cycleId = String(row?.cycleId || '').trim();
       if (cycleId && !ids.has(cycleId)) ids.set(cycleId, true);
       return ids;
-    }, new Map()).keys()).slice(0, 50);
+    }, new Map()).keys());
   if (!newestCompletedCycleIds.length) {
-    return { allocations: [], selectedCycleIds: [], completionDurationMs, allocationDurationMs: 0, allocationFieldRowCount: 0 };
+    return { allocations: [], joinedDeliveries: [], legacyAllocations: [], evidenceConflicts: [], ambiguousEvidenceJoins: [], logicalDeliveryCount: 0, selectedCycleIds: [], completionDurationMs, allocationDurationMs: 0, allocationFieldRowCount: 0 };
   }
   const cycleFilterFlux = newestCompletedCycleIds
     .map((cycleId) => `r.cycleId == "${escapeFluxString(cycleId)}"`).join(' or ');
+  const allocationFieldFilter = [...['amount', 'cargoVolume', 'allocatedFuel', 'allocatedTxCostSol'], ...DELIVERY_EVIDENCE_FIELDS]
+    .map((field) => `r._field == "${field}"`).join(' or ');
   const allocationFlux = `from(bucket: "${bucket}")
   |> range(start: time(v: "${rangeStart}"), stop: time(v: "${rangeStop}"))
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
 ${scopeFilterFlux}
   |> filter(fn: (r) => ${cycleFilterFlux})
-  |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
+  |> filter(fn: (r) => ${allocationFieldFilter})
   |> filter(fn: (r) => exists r.fleet and exists r.rss and exists r.assignment and exists r.originStarbase and exists r.deliveryStarbase and exists r.cycleId and exists r.allocationIndex)
-  |> keep(columns: ["_time", "_value", "_field", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex", "faction", "instance"])`;
+  |> keep(columns: ["_time", "_value", "_field", "fleet", "rss", "assetMint", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex", "faction", "instance"])`;
   const allocationStartedAt = Date.now();
   const allocationFieldRows = parseInfluxCsv(await queryInfluxFlux(settings, allocationFlux));
   const allocationDurationMs = Date.now() - allocationStartedAt;
   const includedDays = new Set(includedUtcDays.map((date) => getUtcDateKey(date)));
-  const allocations = buildBoundedCargoAllocationRecords(allocationFieldRows, includedDays, 50);
+  const allocations = buildBoundedCargoAllocationRecords(allocationFieldRows, includedDays);
+  const evidenceProjection = projectCargoDeliveryEvidence(allocations);
+  const joinedEvidence = joinCargoDeliveryAllocations(evidenceProjection, { limit: 50 });
   return {
-    allocations, selectedCycleIds: newestCompletedCycleIds,
+    allocations, joinedDeliveries: joinedEvidence.joinedDeliveries, legacyAllocations: joinedEvidence.legacyAllocations,
+    evidenceConflicts: evidenceProjection.conflicts, ambiguousEvidenceJoins: joinedEvidence.ambiguous,
+    logicalDeliveryCount: joinedEvidence.logicalDeliveryCount, selectedCycleIds: newestCompletedCycleIds,
     completionDurationMs, allocationDurationMs, allocationFieldRowCount: allocationFieldRows.length,
   };
 }
@@ -7033,7 +7044,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     : String(cargoVolumeResult.reason?.message || cargoVolumeResult.reason || 'cargo_volume_rows_unavailable').slice(0, 240);
   const cargoBetaAllocationFetch = cargoBetaAllocationResult.status === 'fulfilled'
     ? cargoBetaAllocationResult.value
-    : { allocations: [], selectedCycleIds: [], completionDurationMs: null, allocationDurationMs: null, allocationFieldRowCount: 0 };
+    : { allocations: [], joinedDeliveries: [], legacyAllocations: [], evidenceConflicts: [], ambiguousEvidenceJoins: [], logicalDeliveryCount: 0, selectedCycleIds: [], completionDurationMs: null, allocationDurationMs: null, allocationFieldRowCount: 0 };
   const cargoBreakevenBetaUnavailable = cargoBetaAllocationResult.status !== 'fulfilled';
 
   const compatibilityCargoRows = cargoRows;
@@ -7296,8 +7307,16 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
   );
   const scopedCargoAllocationRows = filterCargoAllocationsToCompletedCycles(fleetScopedCargoAllocationRows, compatibilityCargoRows);
-  const cargoBreakevenBetaInputs = buildCargoBetaInputs({ allocations: scopedCargoAllocationRows, cargoRows: cargo });
-  const ledgerCargoRows = cargoBreakevenBetaInputs.map((row) => row.ledgerRow).filter(Boolean);
+  const scopedAuthoritativeDeliveries = (cargoBetaAllocationFetch.joinedDeliveries || []).filter((row) =>
+    scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
+  );
+  const scopedLegacyAllocations = (cargoBetaAllocationFetch.legacyAllocations || []).filter((row) =>
+    scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
+  );
+  const authoritativeCargoBreakevenBetaInputs = buildAuthoritativeCargoBetaInputs({ joinedDeliveries: scopedAuthoritativeDeliveries, cargoRows: cargo });
+  const legacyCargoBreakevenBetaInputs = buildCargoBetaInputs({ allocations: scopedLegacyAllocations, cargoRows: cargo });
+  const cargoBreakevenBetaInputs = [...authoritativeCargoBreakevenBetaInputs, ...legacyCargoBreakevenBetaInputs];
+  const ledgerCargoRows = authoritativeCargoBreakevenBetaInputs.map((row) => row.ledgerRow).filter(Boolean);
   const cargoVolumeByFleetDayMap = buildCargoVolumeByFleetDay(scopedCargoVolumeRows);
   const cargoVolumeAvailable = cargoVolumeResult.status === 'fulfilled';
   for (const row of cargo) {

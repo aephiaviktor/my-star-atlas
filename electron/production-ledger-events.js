@@ -95,6 +95,7 @@ function normalizeTimestamp(value, isoDate) {
 function buildCargoTransferEvents(rows) {
   const events = [];
   for (const row of rows || []) {
+    if (row?.evidenceAuthority === 'authoritative_v1') continue;
     const timestamp = normalizeTimestamp(row.timestamp, row.isoDate);
     const origin = String(row.origin || '').trim();
     const destination = String(row.destination || '').trim();
@@ -115,6 +116,34 @@ function buildCargoTransferEvents(rows) {
     });
   }
   return events;
+}
+
+function buildAuthoritativeCargoTransferEvents(rows) {
+  const events = [];
+  const seen = new Set();
+  for (const row of rows || []) {
+    if (row?.evidenceAuthority !== 'authoritative_v1') continue;
+    const eventId = String(row.deliveryEventId || '').trim();
+    const origin = String(row.origin || '').trim();
+    const destination = String(row.destination || '').trim();
+    const asset = String(row.asset || '').trim();
+    const mint = String(row.assetMint || '').trim();
+    const rawAmount = String(row.rawAmount || '').trim();
+    const decimals = String(row.mintDecimals ?? '').trim();
+    const timestamp = normalizeTimestamp(row.timestamp);
+    if (!eventId || seen.has(eventId) || !timestamp || !origin || origin === '--' || !destination || destination === '--'
+      || origin === destination || !asset || !mint || !/^(0|[1-9]\d*)$/.test(rawAmount) || rawAmount === '0'
+      || !/^(0|[1-9]\d*)$/.test(decimals) || BigInt(decimals) > 36n) continue;
+    seen.add(eventId);
+    events.push({
+      type: 'authoritative_cargo_transfer', eventId, timestamp, confirmedSlot: String(row.confirmedSlot || ''),
+      confirmedBlockTime: String(row.confirmedBlockTime || ''), provenance: `cargo_delivery_v1:${eventId}`,
+      scope: row.scope, currency: row.currency || 'ATLAS', origin, destination, asset, assetMint: mint,
+      quantity: { atoms: rawAmount, decimals: Number(decimals), unit: `asset:${mint}` },
+      cargoCostAtlas: row.totalCostsAtlas, addedCargo: row.addedCargo || {},
+    });
+  }
+  return events.sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.eventId.localeCompare(right.eventId));
 }
 
 function buildCraftingEvents(rows) {
@@ -153,6 +182,7 @@ function buildUpgradingConsumptionEvents(rows) {
 
 function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [] } = {}) {
   const ledger = initialLedger || new InventoryCostLedger();
+  const authoritativeCargoEvents = buildAuthoritativeCargoTransferEvents(cargoRows);
   const previousCounts = { ...(eventFingerprintCounts || {}) };
   for (const fingerprint of seenEventFingerprints || []) previousCounts[fingerprint] = Math.max(1, Number(previousCounts[fingerprint] || 0));
   const previousResults = { ...(eventResultsByFingerprint || {}) };
@@ -216,6 +246,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
     eventResultsByFingerprint: currentResults,
     seenEventFingerprints: Object.keys(currentCounts).sort(),
     eventResultByFingerprint: Object.fromEntries(Object.entries(currentResults).map(([fingerprint, results]) => [fingerprint, results[0]])),
+    authoritativeCargoEvents,
   };
 }
 
@@ -229,6 +260,7 @@ module.exports = {
   buildScanningAcquisitionEvents,
   buildMiningAcquisitionEvents,
   buildCargoTransferEvents,
+  buildAuthoritativeCargoTransferEvents,
   buildCraftingEvents,
   buildUpgradingConsumptionEvents,
   buildCostLedgerResult,

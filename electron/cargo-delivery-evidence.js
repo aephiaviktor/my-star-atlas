@@ -9,7 +9,7 @@ const DELIVERY_EVIDENCE_FIELDS = Object.freeze([
   'deliveryRawAmount', 'deliveryMintDecimals', 'deliveryDecimalAmount',
   'deliveryEventId', 'deliveryEvidencePayloadHash', 'deliveryProgramId',
   'deliveryFleetAccount', 'deliveryFactionProfile', 'deliveryProfileAccount',
-  'deliveryRoute', 'deliveryAllocationId', 'deliveryIndex', 'cycleDeliveryCount',
+  'deliveryRoute', 'deliveryAllocationId', 'deliveryIndex', 'cycleDeliveryCount', 'assetMint',
 ]);
 const REQUIRED_V1_FIELDS = Object.freeze([
   'deliveryEvidenceSchemaVersion', 'deliveryMovementType', 'deliverySignature',
@@ -131,6 +131,7 @@ function compareProvenance(left, right) {
 }
 
 function logicalDelivery(row, validation, provenance) {
+  const timestamp = clean(row._time);
   return {
     deliveryEventId: validation.eventId,
     payloadHash: validation.payloadHash,
@@ -152,9 +153,30 @@ function logicalDelivery(row, validation, provenance) {
     route: clean(row.deliveryRoute),
     cycleId: clean(row.cycleId),
     allocationId: clean(row.deliveryAllocationId),
+    timestamp,
+    isoDate: Number.isFinite(Date.parse(timestamp)) ? new Date(timestamp).toISOString().slice(0, 10) : '',
+    asset: clean(row.rss),
+    origin: clean(row.originStarbase),
+    destination: clean(row.deliveryStarbase),
+    assignment: clean(row.assignment),
+    faction: clean(row.faction),
+    instance: clean(row.instance),
     replayCount: provenance.length,
     provenance,
   };
+}
+
+function exactDecimalSum(values) {
+  const parsed = values.map((value) => {
+    const match = clean(value).match(/^(\d+)(?:\.(\d+))?$/);
+    if (!match) return null;
+    const fraction = match[2] || '';
+    return { atoms: BigInt(`${match[1]}${fraction}`), decimals: fraction.length };
+  });
+  if (parsed.some((value) => value == null)) return null;
+  const decimals = parsed.reduce((maximum, value) => Math.max(maximum, value.decimals), 0);
+  const atoms = parsed.reduce((sum, value) => sum + value.atoms * (10n ** BigInt(decimals - value.decimals)), 0n);
+  return canonicalDecimalAmount(atoms.toString(), String(decimals));
 }
 
 function projectCargoDeliveryEvidence(allocationRows = []) {
@@ -200,6 +222,54 @@ function projectCargoDeliveryEvidence(allocationRows = []) {
   };
 }
 
+function joinCargoDeliveryAllocations(projection, { limit = Infinity } = {}) {
+  const allocationRows = Array.from(projection?.allocationRows || []);
+  const logicalDeliveries = Array.from(projection?.logicalDeliveries || []);
+  const keyFor = (row) => `${clean(row.cycleId)}\n${clean(row.assetMint)}`;
+  const deliveriesByKey = new Map();
+  for (const delivery of logicalDeliveries) {
+    const key = keyFor(delivery);
+    if (!deliveriesByKey.has(key)) deliveriesByKey.set(key, []);
+    deliveriesByKey.get(key).push(delivery);
+  }
+  const joinedDeliveries = [];
+  const ambiguous = [];
+  const consumedRows = new Set();
+  for (const [key, deliveries] of Array.from(deliveriesByKey.entries()).sort(([left], [right]) => left.localeCompare(right))) {
+    const candidates = allocationRows.filter((row) => keyFor(row) === key);
+    const untagged = candidates.filter((row) => !clean(row.deliveryEventId));
+    if (!candidates.length || (deliveries.length > 1 && untagged.length)) {
+      for (const delivery of deliveries) ambiguous.push({ deliveryEventId: delivery.deliveryEventId, reason: 'ambiguous_allocation_evidence_join' });
+      continue;
+    }
+    for (const delivery of deliveries) {
+      const matched = deliveries.length === 1 ? candidates : candidates.filter((row) => clean(row.deliveryEventId) === delivery.deliveryEventId);
+      if (!matched.length) {
+        ambiguous.push({ deliveryEventId: delivery.deliveryEventId, reason: 'allocation_evidence_join_missing' });
+        continue;
+      }
+      matched.forEach((row) => consumedRows.add(row));
+      const allocatedFuelExact = exactDecimalSum(matched.map((row) => row.allocatedFuel));
+      const allocatedTxCostSolExact = exactDecimalSum(matched.map((row) => row.allocatedTxCostSol));
+      const cargoVolumeExact = exactDecimalSum(matched.map((row) => row.cargoVolume));
+      if (allocatedFuelExact == null || allocatedTxCostSolExact == null || cargoVolumeExact == null) {
+        ambiguous.push({ deliveryEventId: delivery.deliveryEventId, reason: 'allocation_cost_evidence_invalid' });
+        continue;
+      }
+      joinedDeliveries.push({ ...delivery, allocationRows: matched, allocatedFuelExact, allocatedTxCostSolExact, cargoVolumeExact });
+    }
+  }
+  joinedDeliveries.sort((left, right) => right.timestamp.localeCompare(left.timestamp) || left.deliveryEventId.localeCompare(right.deliveryEventId));
+  const boundedLimit = Number.isInteger(limit) && limit >= 0 ? limit : Infinity;
+  return {
+    allocationRows,
+    logicalDeliveryCount: joinedDeliveries.length,
+    joinedDeliveries: joinedDeliveries.slice(0, boundedLimit),
+    ambiguous: ambiguous.sort((left, right) => left.deliveryEventId.localeCompare(right.deliveryEventId)),
+    legacyAllocations: allocationRows.filter((row) => !consumedRows.has(row) && !clean(row.deliveryEventId)),
+  };
+}
+
 module.exports = {
   DELIVERY_EVIDENCE_FIELDS,
   REQUIRED_V1_FIELDS,
@@ -209,5 +279,7 @@ module.exports = {
   payloadForRow,
   payloadHash,
   validateEvidenceRow,
+  exactDecimalSum,
   projectCargoDeliveryEvidence,
+  joinCargoDeliveryAllocations,
 };

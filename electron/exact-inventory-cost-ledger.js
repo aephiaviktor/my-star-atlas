@@ -246,6 +246,28 @@ class ExactInventoryCostLedger {
       base: this.aggregateComponents(portions, 'base'), cargo: this.aggregateComponents(portions, 'cargo') };
   }
 
+  applyAuthoritativeCargoTransfer(event) {
+    if (event?.type !== 'authoritative_cargo_transfer' || !String(event.eventId || '').startsWith('cargo-delivery:v1:')) {
+      throw new Error('authoritative cargo delivery evidence is required');
+    }
+    const mint = text(event.assetMint, 'assetMint');
+    const quantity = exact(event.quantity, 'quantity', { positive: true });
+    if (quantity.unit !== `asset:${mint}`) throw new Error('authoritative cargo quantity unit mismatch');
+    return this.transfer({
+      eventId: event.eventId,
+      provenance: text(event.provenance, 'provenance'),
+      scope: event.scope,
+      timestamp: event.timestamp,
+      location: event.origin,
+      destination: event.destination,
+      asset: event.asset,
+      quantity,
+      currency: event.currency,
+      addedCargo: event.addedCargo || {},
+      coverage: COMPLETE,
+    });
+  }
+
   transfer(event) {
     return this.atomic(() => {
       const consumed = this.consume(event);
