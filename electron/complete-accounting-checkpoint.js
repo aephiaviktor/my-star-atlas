@@ -21,17 +21,6 @@ async function loadCompleteAccountingCheckpoint(filePath, scope) {
 }
 
 function mergeCompleteAccountingEvents(previous = [], current = []) {
-  const identities = new Map();
-  const append = (event) => {
-    const identity = String(event?.eventId || '');
-    if (!identity) return;
-    const payload = JSON.stringify(event);
-    const payloads = identities.get(identity) || new Set();
-    if (payloads.has(payload)) return;
-    payloads.add(payload);
-    identities.set(identity, payloads);
-  };
-  previous.forEach(append); current.forEach(append);
   const byPayload = new Map();
   for (const event of [...previous, ...current]) {
     if (!event?.eventId) continue;

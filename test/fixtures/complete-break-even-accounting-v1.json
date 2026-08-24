@@ -1,6 +1,6 @@
 {
   "scope": { "faction": "USTUR", "profile": "fixture-profile" },
-  "period": { "from": "2026-08-01T00:00:00.000Z", "to": "2026-08-31T23:59:59.999Z" },
+  "period": { "start": "2026-08-01T00:00:00.000Z", "end": "2026-08-31T23:59:59.999Z", "days": 31 },
   "currency": "ATLAS",
   "events": [
     { "eventId": "opening:carbon", "timestamp": "2026-08-01T00:00:00.000Z", "type": "opening", "location": "UST-1", "asset": "Carbon", "quantity": "10", "basis": null },

@@ -52,12 +52,14 @@ test('LM scanner resolves the configured profile through the existing settings h
   assert.match(main, /const profile = getSelectedPlayerProfile\(settings\);/);
 });
 
-test('Earnings snapshot stays on the fast path and leaves Marketplace to its own loader', () => {
+test('Earnings snapshot stays on the fast path except bounded cached Marketplace evidence for complete Breakeven', () => {
   const snapshotStart = main.indexOf('async function fetchEarningsSnapshot');
   const snapshot = main.slice(snapshotStart, main.indexOf("handleTrustedIpc('app:get-profile-name'", snapshotStart));
   assert.doesNotMatch(snapshot, /fetchLocalMarketTrades\(/);
   assert.match(snapshot, /needsInventoryLedger/);
-  assert.match(snapshot, /const localMarketResult = \{ trades: \[\], error: '' \}/);
+  assert.match(snapshot, /const needsCompleteAccounting = snapshotScope === 'breakeven'/);
+  assert.match(snapshot, /const localMarketResult = needsCompleteAccounting\s*\? await fetchMarketplaceTradesFromInflux\(settings\)\s*: \{ trades: \[\], error: '' \}/);
+  assert.doesNotMatch(snapshot, /needsCompleteAccounting[\s\S]{0,1000}(?:scanLocalMarketTrades|syncMarketplace|setInterval)/);
   assert.match(renderer, /earningsSubtab: currentEarningsSubtab/);
   assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading Marketplace data\.\.\.'\)/);
 });

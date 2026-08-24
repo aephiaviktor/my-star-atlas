@@ -49,3 +49,18 @@ test('production shape produces visible equation, COGS, coverage, quarantine and
   assert.equal(result.eventCounts.quarantined, 1);
   assert.equal(result.inputEventCount, 5);
 });
+
+test('unavailable production sources remain explicit instead of rendering authoritative zero', () => {
+  const result = buildProductionCompleteAccounting({
+    scope: { faction: 'ONI', profile: 'p' },
+    period: { start: '2026-01-01T00:00:00.000Z', end: '2026-02-01T00:00:00.000Z' },
+    ledgerEvents: [{ type: 'acquire', timestamp: '2026-01-01T00:00:00Z', location: 'S1', asset: 'Ore', quantity: '1', totalCost: null }],
+    actualClosing: [{ asset: 'Ore', quantity: '1' }],
+    sourceAvailability: { marketplace: 'unavailable', cargo: 'unavailable', mining: 'unavailable' },
+  });
+  assert.deepEqual(result.unavailableSources.sort(), ['cargo', 'marketplace', 'mining']);
+  assert.equal(result.rows[0].acquisitions.lm, null);
+  assert.equal(result.rows[0].acquisitions.gm, null);
+  assert.equal(result.rows[0].acquisitions.mining, null);
+  assert.equal(result.rows[0].costsBySource.cargo, null);
+});

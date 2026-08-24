@@ -39,9 +39,12 @@ test('weighted basis, sales, fees and partial coverage remain exact and explicit
   assert.equal(carbon.salesCoverage.status, 'fully_costed');
   assert.equal(decimal(carbon.remainingQuantity), '22');
   assert.equal(decimal(carbon.remainingCostBasis), '11.6');
+  assert.equal(carbon.costCoverage.status, 'fully_costed');
   assert.equal(decimal(carbon.uncostedQuantity), '0');
 
   const framework = row(result, 'Framework');
+  assert.equal(decimal(framework.expectedClosing), '1');
+  assert.equal(framework.reconciliationStatus, 'reconciled');
   assert.equal(decimal(framework.remainingQuantity), '1');
   assert.equal(framework.costCoverage.status, 'uncosted');
   assert.equal(decimal(framework.salesNetProceeds), '9');
@@ -116,5 +119,5 @@ test('checkpoint reload preserves replay idempotency and deterministic output', 
   const second = buildCompleteBreakEvenAccounting({ ...fixture, checkpoint: first.checkpoint });
   assert.deepEqual(second.rows, first.rows);
   assert.deepEqual(second.checkpoint, first.checkpoint);
-  assert.equal(second.eventCounts.replayed, fixture.events.length - 1);
+  assert.deepEqual(second.eventCounts, first.eventCounts);
 });

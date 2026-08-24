@@ -117,7 +117,8 @@ class AccountingEngine {
       lot.quantity = keep; lot.knownQuantity = retainedKnown; lot.cost = retainedCost; lot.sourceCosts = retainedSources;
       remaining = subtract(remaining, take);
     }
-    return { quantity, knownQuantity: sum(moved.map((part) => part.knownQuantity), quantity.unit), cost: sum(moved.map((part) => part.cost), this.currency), sourceCosts: SOURCES.reduce((out, source) => ({ ...out, [source]: sum(moved.map((part) => part.sourceCosts[source] || zero(this.currency)), this.currency) }), {}), fullyCosted: moved.every((part) => !part.uncosted) };
+    const knownQuantity = sum(moved.map((part) => part.knownQuantity), quantity.unit);
+    return { quantity, knownQuantity, cost: sum(moved.map((part) => part.cost), this.currency), sourceCosts: SOURCES.reduce((out, source) => ({ ...out, [source]: sum(moved.map((part) => part.sourceCosts[source] || zero(this.currency)), this.currency) }), {}), fullyCosted: compare(knownQuantity, quantity) === 0 };
   }
   apply(event) {
     const row = event.asset ? this.row(event.asset) : null;
@@ -170,7 +171,7 @@ class AccountingEngine {
       const lots = this.lots.filter((lot) => lot.asset === row.asset && BigInt(lot.quantity.atoms) > 0n);
       const remaining = sum(lots.map((lot) => lot.quantity), row.unit); const known = sum(lots.map((lot) => lot.knownQuantity), row.unit); const basis = sum(lots.map((lot) => lot.cost), this.currency); const uncosted = subtract(remaining, known);
       const acquisitionTotal = Object.values(row.acquisitions).reduce((total, value) => add(total, value), zero(row.unit));
-      const expected = subtract(add(add(add(row.openingQuantity, acquisitionTotal), row.transferIn), row.craftingOut), add(add(add(row.craftingIn, row.transferOut), row.consumptionQuantity), row.salesQuantity));
+      const expected = subtract(add(add(row.openingQuantity, acquisitionTotal), row.transferIn), add(add(add(row.craftingIn, row.transferOut), row.consumptionQuantity), row.salesQuantity));
       const actualValue = actual.get(row.asset) || null; const difference = actualValue ? signedDifference(actualValue, expected) : null;
       const fullyCosted = compare(uncosted, zero(row.unit)) === 0; const salesFully = compare(row.salesKnownQuantity, row.salesQuantity) === 0;
       const salesDifference = salesFully ? signedDifference(row.salesNetProceeds, row.salesCogsKnown) : null;
@@ -183,7 +184,7 @@ class AccountingEngine {
 
 function buildCompleteBreakEvenAccounting(input = {}) {
   if (input.checkpoint && input.checkpoint.inputDigest === digest({ scope: input.scope, period: input.period, currency: input.currency, events: input.events, actualClosing: input.actualClosing })) {
-    return { scope: clone(input.scope), period: clone(input.period), rows: clone(input.checkpoint.rows), eventCounts: { ...input.checkpoint.eventCounts, replayed: Math.max(0, (input.events || []).length - 1) }, checkpoint: clone(input.checkpoint) };
+    return { scope: clone(input.scope), period: clone(input.period), rows: clone(input.checkpoint.rows), eventCounts: clone(input.checkpoint.eventCounts), checkpoint: clone(input.checkpoint) };
   }
   const engine = new AccountingEngine(input); const events = [...(input.events || [])].sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)) || String(a.eventId).localeCompare(String(b.eventId)));
   const byId = new Map();

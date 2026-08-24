@@ -158,10 +158,26 @@ function buildProductionEvents({ scope = null, ledgerEvents = [], authoritativeC
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.eventId.localeCompare(right.eventId));
 }
 
-function buildProductionCompleteAccounting({ scope, period, ledgerEvents = [], authoritativeCargo = [], marketplaceTrades = [], normalizedEvents = null, actualClosing = [], checkpoint = null } = {}) {
+function buildProductionCompleteAccounting({ scope, period, ledgerEvents = [], authoritativeCargo = [], marketplaceTrades = [], normalizedEvents = null, actualClosing = [], checkpoint = null, sourceAvailability = {} } = {}) {
   const events = normalizedEvents || buildProductionEvents({ scope, ledgerEvents, authoritativeCargo, marketplaceTrades });
   const result = buildCompleteBreakEvenAccounting({ scope, period, currency: 'ATLAS', events, actualClosing: actualClosingRows(actualClosing), checkpoint });
-  return { ...result, sourceFreshness: { generatedAt: new Date().toISOString(), marketplace: marketplaceTrades.length ? 'available' : 'unavailable', cargo: authoritativeCargo.length ? 'available' : 'unavailable', closingInventory: actualClosing.length ? 'available' : 'unavailable' }, inputEventCount: events.length };
+  const freshness = {
+    generatedAt: new Date().toISOString(),
+    scanning: sourceAvailability.scanning || 'available',
+    mining: sourceAvailability.mining || 'available',
+    crafting: sourceAvailability.crafting || 'available',
+    marketplace: sourceAvailability.marketplace || (marketplaceTrades.length ? 'available' : 'unavailable'),
+    cargo: sourceAvailability.cargo || (authoritativeCargo.length ? 'available' : 'unavailable'),
+    closingInventory: sourceAvailability.closingInventory || (actualClosing.length ? 'available' : 'unavailable'),
+  };
+  const unavailableSources = Object.entries(freshness).filter(([key, value]) => key !== 'generatedAt' && value === 'unavailable').map(([key]) => key);
+  if (freshness.marketplace === 'unavailable') for (const row of result.rows) {
+    row.acquisitions.lm = null; row.acquisitions.gm = null; row.costsBySource.lm = null; row.costsBySource.gm = null;
+  }
+  for (const source of ['scanning', 'mining', 'crafting', 'cargo']) if (freshness[source] === 'unavailable') for (const row of result.rows) {
+    row.acquisitions[source] = null; row.costsBySource[source] = null;
+  }
+  return { ...result, sourceFreshness: freshness, unavailableSources, inputEventCount: events.length };
 }
 
 module.exports = { exactText, marketplaceEvents, legacyLedgerEvents, authoritativeCargoEvents, actualClosingRows, buildProductionEvents, buildProductionCompleteAccounting };

@@ -5395,7 +5395,7 @@ async function fetchCurrentPerStarbaseInventory(settings) {
   |> filter(fn: (r) => r._value > 0)
   |> keep(columns: ["rss", "starbase", "_value", "_time"])
   |> sort(columns: ["starbase", "rss"])`;
-  const csv = await queryInfluxFlux(settings, flux).catch(() => '');
+  const csv = await queryInfluxFlux(settings, flux);
   const rows = parseInfluxCsv(csv);
   const result = [];
   for (const row of rows) {
@@ -7532,13 +7532,23 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         marketplaceTrades: localMarketResult.trades,
         authoritativeCargo: inventoryCostLedgerResult.authoritativeCargoEvents || [],
         actualClosing: currentInventoryRows,
+        sourceAvailability: {
+          scanning: scanningError ? 'unavailable' : 'available',
+          mining: miningError ? 'unavailable' : 'available',
+          crafting: craftingError ? 'unavailable' : 'available',
+          marketplace: localMarketResult.error ? 'unavailable' : 'available',
+          cargo: cargoError ? 'unavailable' : 'available',
+          closingInventory: breakevenError ? 'unavailable' : 'available',
+        },
       });
       completeAccountingSavedAt = await saveCompleteAccountingCheckpoint(accountingPath, {
         scope: accountingScope,
         events: mergedEvents,
         createdAt: durable.createdAt,
       });
-      completeAccountingStatus = durable.status === 'loaded' ? 'updated' : 'created';
+      completeAccountingStatus = completeAccounting.unavailableSources.length
+        ? 'partial'
+        : durable.status === 'loaded' ? 'updated' : 'created';
       completeAccounting.checkpointBaseline = checkpoint.status === 'loaded' && durable.status === 'missing' ? 'legacy-checkpoint-migration' : 'exact-event-journal';
     } catch (error) {
       completeAccountingStatus = 'unavailable';

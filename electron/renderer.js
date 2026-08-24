@@ -6823,7 +6823,7 @@ function renderEarningsBreakeven(result) {
   const unavailable = result?.completeAccountingError || result?.breakevenError;
   const syncMessage = unavailable
     ? `Complete accounting unavailable at ${formatCheckedAt(result?.checkedAt)} · ${unavailable}`
-    : `${formatWholeNumber(rows.length)} assets · ${scope?.faction || '--'} · ${scope?.profile || '--'} · ${period?.days || 30} days · ${result?.completeAccountingStatus || 'unknown'} at ${formatCheckedAt(result?.completeAccountingSavedAt || result?.checkedAt)} · Marketplace ${freshness.marketplace || 'unavailable'} · Cargo ${freshness.cargo || 'unavailable'} · Closing inventory ${freshness.closingInventory || 'unavailable'}`;
+    : `${formatWholeNumber(rows.length)} assets · ${scope?.faction || '--'} · ${scope?.profile || '--'} · ${period?.days || 30} days · ${result?.completeAccountingStatus || 'unknown'} at ${formatCheckedAt(result?.completeAccountingSavedAt || result?.checkedAt)} · Scanning ${freshness.scanning || 'unavailable'} · Mining ${freshness.mining || 'unavailable'} · Crafting ${freshness.crafting || 'unavailable'} · Marketplace ${freshness.marketplace || 'unavailable'} · Cargo ${freshness.cargo || 'unavailable'} · Closing inventory ${freshness.closingInventory || 'unavailable'}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
   populateEarningsFilterOptions('breakeven', rows);
   if (earningsBreakevenSourceFilter) earningsBreakevenSourceFilter.value = earningsFilters.breakeven.source;
@@ -6842,6 +6842,10 @@ function renderEarningsBreakeven(result) {
 
   for (const entry of filteredRows) {
     const tr = document.createElement('tr');
+    const sourceQuantity = (source) => {
+      const freshnessKey = source === 'lm' || source === 'gm' ? 'marketplace' : source;
+      return freshness[freshnessKey] === 'unavailable' ? 'Unavailable' : exactAccountingText(entry.acquisitions?.[source], '0');
+    };
     const outflows = `Consume ${exactAccountingText(entry.consumptionQuantity, '0')} · Craft ${exactAccountingText(entry.craftingIn, '0')} · Transfer ${exactAccountingText(entry.transferOut, '0')}`;
     const transferIn = `${exactAccountingText(entry.transferIn, '0')} · Cargo basis ${exactAccountingText(entry.costsBySource?.cargo, '0')} ATLAS`;
     const difference = entry.reconciliationDifference
@@ -6851,7 +6855,7 @@ function renderEarningsBreakeven(result) {
     const statusParts = [String(entry.reconciliationStatus || 'unavailable').replaceAll('_', ' '), String(entry.salesCoverage?.status || 'unavailable').replaceAll('_', ' ') + ' sales'];
     const cells = [
       entry.asset || 'Unavailable', exactAccountingText(entry.openingQuantity), exactAccountingText(entry.openingBasis),
-      exactAccountingText(entry.acquisitions?.lm, '0'), exactAccountingText(entry.acquisitions?.gm, '0'), exactAccountingText(entry.acquisitions?.scanning, '0'), exactAccountingText(entry.acquisitions?.mining, '0'),
+      sourceQuantity('lm'), sourceQuantity('gm'), sourceQuantity('scanning'), sourceQuantity('mining'),
       exactAccountingText(entry.craftingOut, '0'), transferIn, outflows,
       exactAccountingText(entry.salesQuantity, '0'), exactAccountingText(entry.salesNetProceeds), entry.cogs == null ? `Unavailable · known ${exactAccountingText(entry.knownCogs, '0')}` : exactAccountingText(entry.cogs), exactAccountingText(entry.realizedProfit),
       exactAccountingText(entry.expectedClosing), exactAccountingText(entry.remainingQuantity), entry.remainingCostBasis == null ? `Unavailable · known ${exactAccountingText(entry.knownRemainingCostBasis, '0')}` : exactAccountingText(entry.remainingCostBasis), exactAccountingText(entry.averageCostPerUnit), exactAccountingText(entry.actualClosing), difference, coverage,
@@ -7260,6 +7264,7 @@ async function refreshBreakeven({ force = false } = {}) {
   const settled = await api.breakevenCache.ensure(input, async () => {
     const result = await api.getEarningsSnapshot(settings);
     if (result?.ok === false) throw new Error(result.error || 'Breakeven snapshot failed');
+    if (result?.completeAccountingStatus === 'partial' && displayable) throw new Error(result.completeAccountingError || 'Complete accounting source temporarily unavailable');
     return result;
   });
   if (!isActiveBreakevenContext(settled.key, settled.entry.generation)) return settled;
