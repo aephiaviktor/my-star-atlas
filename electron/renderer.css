@@ -1491,8 +1491,17 @@ select:focus {
 .marketplace-v2-surface > h3 { margin: 2px 12px -4px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
 .earnings-surface > .marketplace-v2-table-wrap { height: min(360px, 40vh); }
 .earnings-surface > .marketplace-v2-secondary { height: min(240px, 28vh); }
-.marketplace-v2-table { min-width: 1680px; }
-.marketplace-v2-table td { max-width: 260px; overflow-wrap: anywhere; }
+.marketplace-v2-table { min-width: 2140px; table-layout: auto; }
+.marketplace-v2-table th,
+.marketplace-v2-table td { min-width: 96px; max-width: 280px; overflow-wrap: anywhere; vertical-align: top; }
+.marketplace-v2-table th:nth-child(9),
+.marketplace-v2-table td:nth-child(9),
+.marketplace-v2-table th:nth-child(10),
+.marketplace-v2-table td:nth-child(10),
+.marketplace-v2-table th:nth-child(12),
+.marketplace-v2-table td:nth-child(12),
+.marketplace-v2-table th:nth-child(14),
+.marketplace-v2-table td:nth-child(14) { min-width: 180px; }
 .marketplace-v2-table tr[data-reconciliation-state="unallocated"],
 .marketplace-v2-table tr[data-reconciliation-state="pending_allocation"] { background: rgba(201, 155, 48, .08); }
 .marketplace-v2-table tr[data-reconciliation-state="quarantined"] { background: rgba(248, 113, 113, .08); }

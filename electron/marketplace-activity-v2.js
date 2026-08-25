@@ -116,15 +116,24 @@ function buildMarketplaceActivityV2({ scope = {}, trades = [], transfers = [] } 
     else rows.forEach((row) => activities.push({ ...row, confidence: 'conflicting', reconciliationState: 'quarantined', reason: 'immutable-event-conflict' }));
   }
   activities.sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.eventId.localeCompare(right.eventId) || eventHash(left).localeCompare(eventHash(right)));
-  const attributed = activities.filter((row) => row.reconciliationState === 'attributed');
-  const pendingAllocation = activities.filter((row) => ['pending_allocation', 'unallocated'].includes(row.reconciliationState));
-  const quarantined = activities.filter((row) => row.reconciliationState === 'quarantined');
+  const scopeFaction = clean(scope.faction).toUpperCase();
+  const scopeProfile = clean(scope.profile);
+  const isGlobal = (row) => row.market === 'GM' && row.faction === 'GLOBAL' && row.profile === 'GLOBAL';
+  const isScoped = (row) => row.faction === scopeFaction && row.profile === scopeProfile;
+  const globalUnallocated = activities.filter(isGlobal);
+  const scopedActivities = activities.filter(isScoped);
+  const attributed = scopedActivities.filter((row) => row.reconciliationState === 'attributed');
+  const pendingAllocation = scopedActivities.filter((row) => ['pending_allocation', 'unallocated'].includes(row.reconciliationState));
+  const quarantined = scopedActivities.filter((row) => row.reconciliationState === 'quarantined');
   const quantity = (rows, types) => decimalAdd(rows.filter((row) => types.has(row.transactionType)).map((row) => row.exactQuantity));
+  const newestSourceTimestamp = activities.reduce((newest, row) => !row.timestamp || row.timestamp <= newest ? newest : row.timestamp, '');
   return {
-    activities, attributed, pendingAllocation, quarantined,
+    activities: scopedActivities, attributed, pendingAllocation, quarantined, globalUnallocated,
+    newestSourceTimestamp,
     reconciliation: {
-      activityCount: activities.length, attributedCount: attributed.length,
+      activityCount: scopedActivities.length, attributedCount: attributed.length,
       pendingAllocationCount: pendingAllocation.length, quarantinedCount: quarantined.length,
+      globalUnallocatedCount: globalUnallocated.length,
       attributedPurchaseQuantity: quantity(attributed, new Set(['purchase'])),
       attributedSaleQuantity: quantity(attributed, new Set(['sale'])),
       attributedTransferQuantity: quantity(attributed, new Set(['inbound_transfer', 'outbound_transfer'])),
@@ -179,6 +188,8 @@ function projectMarketplaceEvidenceV2({ trades = [], transfers = [], scope = {} 
   const projectedTrades = trades.map((trade) => {
     const market = clean(trade.market || trade.marketplace).toUpperCase();
     const isV2 = trade.schemaGeneration === 'v2' && clean(trade.tradeId) && trade.representationRank !== 'identity_uncertain';
+    const legacyLmInFactionScope = market === 'LM' && trade.schemaGeneration !== 'v2'
+      && clean(trade.faction).toUpperCase() === clean(scope.faction).toUpperCase();
     const lineageProven = market === 'LM'
       ? isV2 && clean(trade.faction).toUpperCase() === clean(scope.faction).toUpperCase() && clean(trade.profile) === clean(scope.profile) && clean(trade.starbase)
       : isV2 && clean(trade.lineageStatus).toLowerCase() === 'proven'
@@ -196,8 +207,10 @@ function projectMarketplaceEvidenceV2({ trades = [], transfers = [], scope = {} 
       exactQuantity: exactFromFinite(trade.quantity), grossAtlas: gross, marketplaceFeeAtlas: marketplaceFee,
       transactionFeeAtlas: transactionFee, netAtlas: net, wallet: clean(trade.wallet) || 'unknown',
       location: market === 'LM' ? clean(trade.starbase) : clean(trade.lineageLocation) || `wallet:${clean(trade.wallet) || 'unknown'}`,
-      faction: lineageProven ? (market === 'LM' ? clean(trade.faction).toUpperCase() : clean(trade.lineageFaction).toUpperCase()) : 'GLOBAL',
-      profile: lineageProven ? (market === 'LM' ? clean(trade.profile) : clean(trade.lineageProfile)) : 'GLOBAL',
+      faction: lineageProven ? (market === 'LM' ? clean(trade.faction).toUpperCase() : clean(trade.lineageFaction).toUpperCase())
+        : market === 'LM' ? clean(trade.faction).toUpperCase() : 'GLOBAL',
+      profile: lineageProven ? (market === 'LM' ? clean(trade.profile) : clean(trade.lineageProfile))
+        : legacyLmInFactionScope ? clean(scope.profile) : market === 'LM' ? clean(trade.profile) : 'GLOBAL',
       provenance: isV2 ? `marketplace_v2_${trade.representationRank}` : 'legacy_compatibility_read',
       confidence: lineageProven ? 'verified' : isV2 ? 'ambiguous' : 'unverified',
       reconciliationState: lineageProven ? 'attributed' : isV2 ? 'unallocated' : 'quarantined',
@@ -206,7 +219,9 @@ function projectMarketplaceEvidenceV2({ trades = [], transfers = [], scope = {} 
     };
   });
   const projectedTransfers = transfers.map((flow) => {
-    const lineageProven = Number(flow.schemaVersion) === 2 && clean(flow.lineageStatus).toLowerCase() === 'proven'
+    const hasProvenLineage = Number(flow.schemaVersion) === 2 && clean(flow.lineageStatus).toLowerCase() === 'proven'
+      && clean(flow.faction) && clean(flow.profile);
+    const lineageProven = hasProvenLineage
       && clean(flow.faction).toUpperCase() === clean(scope.faction).toUpperCase() && clean(flow.profile) === clean(scope.profile);
     const origin = clean(flow.origin);
     const destination = clean(flow.destination);
@@ -217,10 +232,10 @@ function projectMarketplaceEvidenceV2({ trades = [], transfers = [], scope = {} 
       asset: clean(flow.asset) || 'Unknown', rawMint: clean(flow.rawMint) || 'unknown',
       exactQuantity: exactFromFinite(flow.exactQuantity ?? flow.quantity), transactionFeeAtlas: exactFromFinite(flow.txFeeAtlas ?? flow.cargoCost),
       grossAtlas: '0', marketplaceFeeAtlas: '0', netAtlas: '0', wallet: clean(flow.wallet) || clean(origin.replace(/^wallet:/, '')) || 'unknown',
-      origin, destination, faction: lineageProven ? clean(flow.faction).toUpperCase() : 'GLOBAL',
-      profile: lineageProven ? clean(flow.profile) : 'GLOBAL', provenance: clean(flow.provenance || flow.flow) || 'asset_flow',
-      confidence: lineageProven ? 'verified' : 'ambiguous', reconciliationState: lineageProven ? 'attributed' : 'unallocated',
-      reason: lineageProven ? '' : 'transfer-lineage-unproven', signature: clean(flow.signature),
+      origin, destination, faction: hasProvenLineage ? clean(flow.faction).toUpperCase() : 'GLOBAL',
+      profile: hasProvenLineage ? clean(flow.profile) : 'GLOBAL', provenance: clean(flow.provenance || flow.flow) || 'asset_flow',
+      confidence: hasProvenLineage ? 'verified' : 'ambiguous', reconciliationState: lineageProven ? 'attributed' : 'unallocated',
+      reason: lineageProven ? '' : hasProvenLineage ? 'transfer-outside-selected-scope' : 'transfer-lineage-unproven', signature: clean(flow.signature),
     };
   });
   return buildMarketplaceActivityV2({ scope, trades: projectedTrades, transfers: projectedTransfers });

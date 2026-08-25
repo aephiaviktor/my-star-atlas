@@ -205,11 +205,13 @@ const earningsMarketplaceSyncStatus = document.querySelector('#earnings-marketpl
 const earningsMarketplaceTableBody = document.querySelector('#earnings-marketplace-table-body');
 const earningsMarketplacePendingBody = document.querySelector('#earnings-marketplace-pending-body');
 const earningsMarketplaceQuarantinedBody = document.querySelector('#earnings-marketplace-quarantined-body');
+const earningsMarketplaceGlobalBody = document.querySelector('#earnings-marketplace-global-body');
 const earningsMarketplaceMarketFilter = document.querySelector('#earnings-marketplace-market-filter');
 const earningsMarketplaceTypeFilter = document.querySelector('#earnings-marketplace-type-filter');
 const earningsMarketplaceAttributedTotal = document.querySelector('#earnings-marketplace-attributed-total');
 const earningsMarketplacePendingTotal = document.querySelector('#earnings-marketplace-pending-total');
 const earningsMarketplaceQuarantinedTotal = document.querySelector('#earnings-marketplace-quarantined-total');
+const earningsMarketplaceGlobalTotal = document.querySelector('#earnings-marketplace-global-total');
 const earningsMarketplaceTransferTotal = document.querySelector('#earnings-marketplace-transfer-total');
 const earningsMarketplaceSideSwitch = document.querySelector('#earnings-marketplace-side-switch');
 const earningsMarketplaceSideButtons = Array.from(document.querySelectorAll('[data-marketplace-side]'));
@@ -6715,6 +6717,23 @@ function marketplaceActivityMatchesFilters(entry) {
   return !selectedType || entry.transactionType === selectedType;
 }
 
+function sumMarketplaceExactQuantities(rows) {
+  let scale = 0;
+  let atoms = 0n;
+  for (const row of rows) {
+    const value = String(row?.exactQuantity ?? '0');
+    if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return 'Unavailable';
+    const [whole, fraction = ''] = value.split('.');
+    if (fraction.length > scale) {
+      atoms *= 10n ** BigInt(fraction.length - scale);
+      scale = fraction.length;
+    }
+    atoms += BigInt(`${whole}${fraction.padEnd(scale, '0')}`);
+  }
+  const digits = atoms.toString().padStart(scale + 1, '0');
+  return scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}`.replace(/0+$/, '').replace(/\.$/, '') : digits;
+}
+
 function renderMarketplaceActivityRows(body, rows, emptyMessage, limit) {
   if (!body) return;
   body.textContent = '';
@@ -6723,7 +6742,7 @@ function renderMarketplaceActivityRows(body, rows, emptyMessage, limit) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     const td = createTextCell(emptyMessage);
-    td.colSpan = 13;
+    td.colSpan = 15;
     tr.appendChild(td);
     body.appendChild(tr);
     return;
@@ -6738,13 +6757,12 @@ function renderMarketplaceActivityRows(body, rows, emptyMessage, limit) {
     const price = Number.isFinite(quantityNumber) && quantityNumber > 0 && Number.isFinite(valueNumber)
       ? valueNumber / quantityNumber : null;
     const fee = Number(entry.marketplaceFeeAtlas || 0) + Number(entry.transactionFeeAtlas || 0);
-    const attribution = entry.profile && entry.faction ? `${entry.profile} / ${entry.faction}` : 'Unallocated';
-    const provenance = `${entry.provenance || 'Unavailable'} / ${entry.confidence || 'Unavailable'}`;
     const state = `${String(entry.reconciliationState || 'unavailable').replaceAll('_', ' ')}${entry.reason ? ` · ${entry.reason}` : ''}`;
     const values = [
       formatMarketplaceTimestamp(entry.timestamp), entry.market || '--', String(entry.transactionType || '--').replaceAll('_', ' '),
       entry.asset || '--', quantity || '--', value || '--', price == null ? '--' : formatMarketplaceAtlas(price, 8),
-      Number.isFinite(fee) ? formatMarketplaceAtlas(fee, 8) : '--', entry.wallet || '--', attribution, provenance, state,
+      Number.isFinite(fee) ? formatMarketplaceAtlas(fee, 8) : '--', entry.wallet || '--', entry.profile || 'Unallocated',
+      entry.faction || 'Unallocated', entry.provenance || 'Unavailable', entry.confidence || 'Unavailable', state,
     ];
     values.forEach((text) => tr.appendChild(createTextCell(text)));
     const signatureCell = document.createElement('td');
@@ -6766,14 +6784,24 @@ function renderEarningsMarketplace(result) {
   const attributed = Array.isArray(activity?.attributed) ? activity.attributed : [];
   const pending = Array.isArray(activity?.pendingAllocation) ? activity.pendingAllocation : [];
   const quarantined = Array.isArray(activity?.quarantined) ? activity.quarantined : [];
-  const reconciliation = activity?.reconciliation;
+  const globalUnallocated = Array.isArray(activity?.globalUnallocated) ? activity.globalUnallocated : [];
+  const filteredAttributed = attributed.filter(marketplaceActivityMatchesFilters);
+  const filteredPending = pending.filter(marketplaceActivityMatchesFilters);
+  const filteredQuarantined = quarantined.filter(marketplaceActivityMatchesFilters);
+  const filteredGlobal = globalUnallocated.filter(marketplaceActivityMatchesFilters);
   const errorSuffix = result?.localMarketError ? ` · Cached read failed: ${result.localMarketError}` : '';
-  const availability = activity ? `${formatMarketplaceWhole(attributed.length + pending.length + quarantined.length)} cached activities` : 'Marketplace activity unavailable';
-  setText(earningsMarketplaceSyncStatus, `${availability} at ${formatCheckedAt(result?.checkedAt)} · opening and switching use zero Solana RPC${errorSuffix}`);
-  setText(earningsMarketplaceAttributedTotal, reconciliation ? formatMarketplaceWhole(reconciliation.attributedCount) : 'Unavailable');
-  setText(earningsMarketplacePendingTotal, reconciliation ? formatMarketplaceWhole(reconciliation.pendingAllocationCount) : 'Unavailable');
-  setText(earningsMarketplaceQuarantinedTotal, reconciliation ? formatMarketplaceWhole(reconciliation.quarantinedCount) : 'Unavailable');
-  setText(earningsMarketplaceTransferTotal, reconciliation ? reconciliation.attributedTransferQuantity : 'Unavailable');
+  const availability = activity ? `${formatMarketplaceWhole(attributed.length + pending.length + quarantined.length)} faction activities · ${formatMarketplaceWhole(globalUnallocated.length)} global` : 'Marketplace activity unavailable';
+  const freshness = activity?.sourceFreshness;
+  const newest = freshness?.displayedNewestTimestamp || activity?.newestSourceTimestamp;
+  const freshnessText = freshness?.status === 'partial'
+    ? ` · Partial/stale: displayed through ${formatMarketplaceTimestamp(newest)}, source through ${formatMarketplaceTimestamp(freshness.authoritativeNewestTimestamp)}`
+    : newest ? ` · newest source ${formatMarketplaceTimestamp(newest)}` : ' · newest source unavailable';
+  setText(earningsMarketplaceSyncStatus, `${availability} at ${formatCheckedAt(result?.checkedAt)}${freshnessText} · opening and switching use zero Solana RPC${errorSuffix}`);
+  setText(earningsMarketplaceAttributedTotal, activity ? formatMarketplaceWhole(filteredAttributed.length) : 'Unavailable');
+  setText(earningsMarketplacePendingTotal, activity ? formatMarketplaceWhole(filteredPending.length) : 'Unavailable');
+  setText(earningsMarketplaceQuarantinedTotal, activity ? formatMarketplaceWhole(filteredQuarantined.length) : 'Unavailable');
+  setText(earningsMarketplaceGlobalTotal, activity ? formatMarketplaceWhole(filteredGlobal.length) : 'Unavailable');
+  setText(earningsMarketplaceTransferTotal, activity ? sumMarketplaceExactQuantities(filteredAttributed.filter((entry) => entry.transactionType.endsWith('_transfer'))) : 'Unavailable');
   earningsMarketplaceSideButtons.forEach((button) => {
     const active = button.dataset.marketplaceSide === earningsMarketplaceSide;
     button.classList.toggle('active', active);
@@ -6783,6 +6811,7 @@ function renderEarningsMarketplace(result) {
   renderMarketplaceActivityRows(earningsMarketplaceTableBody, ordered(attributed), activity ? 'No attributed activity matches the current filters' : 'Attributed Marketplace activity unavailable', 200);
   renderMarketplaceActivityRows(earningsMarketplacePendingBody, ordered(pending), activity ? 'No pending allocation activity matches the current filters' : 'Pending allocation activity unavailable', 100);
   renderMarketplaceActivityRows(earningsMarketplaceQuarantinedBody, ordered(quarantined), activity ? 'No quarantined activity matches the current filters' : 'Quarantined activity unavailable', 100);
+  renderMarketplaceActivityRows(earningsMarketplaceGlobalBody, ordered(globalUnallocated), activity ? 'No global unallocated activity matches the current filters' : 'Global Marketplace activity unavailable', 100);
 }
 
 function renderEarningsMarketplaceLoading(message = 'Loading cached Marketplace data...') {
@@ -6790,10 +6819,12 @@ function renderEarningsMarketplaceLoading(message = 'Loading cached Marketplace 
   setText(earningsMarketplaceAttributedTotal, '—');
   setText(earningsMarketplacePendingTotal, '—');
   setText(earningsMarketplaceQuarantinedTotal, '—');
+  setText(earningsMarketplaceGlobalTotal, '—');
   setText(earningsMarketplaceTransferTotal, '—');
   renderMarketplaceActivityRows(earningsMarketplaceTableBody, [], message, 200);
   renderMarketplaceActivityRows(earningsMarketplacePendingBody, [], message, 100);
   renderMarketplaceActivityRows(earningsMarketplaceQuarantinedBody, [], message, 100);
+  renderMarketplaceActivityRows(earningsMarketplaceGlobalBody, [], message, 100);
 }
 
 function renderEarningsBreakevenEmpty(message) {

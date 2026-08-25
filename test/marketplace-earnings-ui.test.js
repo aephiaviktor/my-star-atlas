@@ -15,11 +15,11 @@ test('Marketplace V2 sits between Mining and Cargo with market/type controls and
   assert.match(html, /id="earnings-marketplace-side-switch"[\s\S]*data-marketplace-side="all"[^>]*>ALL<[\s\S]*data-marketplace-side="buy"[^>]*>BUY<[\s\S]*data-marketplace-side="sell"[^>]*>SELL</);
   assert.match(html, /id="earnings-marketplace-market-filter"[\s\S]*LM \+ GM[\s\S]*id="earnings-marketplace-type-filter"[\s\S]*Inbound transfer[\s\S]*Outbound transfer/);
   const panel = html.match(/data-earnings-panel="marketplace"[\s\S]*?<\/div>\s*<div class="earnings-panel" data-earnings-panel="cargo"/)?.[0] || '';
-  for (const label of ['Timestamp \\(UTC\\)', 'Market', 'Type', 'Asset', 'Exact quantity', 'Value ATLAS', 'Price / unit', 'Fees ATLAS', 'Wallet', 'Profile / faction', 'Provenance / confidence', 'Reconciliation', 'Signature']) {
+  for (const label of ['Timestamp \\(UTC\\)', 'Market', 'Type', 'Asset', 'Exact quantity', 'Value ATLAS', 'Price / unit', 'Fees ATLAS', 'Wallet', 'Profile', 'Faction', 'Provenance', 'Confidence', 'Reconciliation', 'Signature']) {
     assert.match(panel, new RegExp(label));
   }
-  assert.match(panel, /Attributed activity[\s\S]*Pending allocation \/ Unallocated[\s\S]*Quarantined activity/);
-  assert.match(panel, /earnings-marketplace-attributed-total[\s\S]*earnings-marketplace-pending-total[\s\S]*earnings-marketplace-quarantined-total/);
+  assert.match(panel, /Attributed activity[\s\S]*Pending allocation \/ Unallocated[\s\S]*Quarantined activity[\s\S]*Global \/ Unallocated GM activity/);
+  assert.match(panel, /earnings-marketplace-attributed-total[\s\S]*earnings-marketplace-pending-total[\s\S]*earnings-marketplace-quarantined-total[\s\S]*earnings-marketplace-global-total/);
 });
 
 test('Marketplace V2 renderer filters market/type, preserves exact quantity text, and bounds every reconciliation section', () => {
@@ -30,6 +30,9 @@ test('Marketplace V2 renderer filters market/type, preserves exact quantity text
   assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplaceTableBody[\s\S]*200\)/);
   assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplacePendingBody[\s\S]*100\)/);
   assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplaceQuarantinedBody[\s\S]*100\)/);
+  assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplaceGlobalBody[\s\S]*100\)/);
+  assert.match(renderer, /filteredAttributed\.length/);
+  assert.match(renderer, /Partial\/stale: displayed through/);
   assert.match(renderer, /opening and switching use zero Solana RPC/);
 });
 

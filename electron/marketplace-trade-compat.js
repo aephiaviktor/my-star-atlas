@@ -63,10 +63,13 @@ function resolveMarketplaceProfileScope(input = {}) {
   const selectedProfile = clean(input.selectedProfile || input.selectedPlayerProfile);
   const rowProfile = clean(input.rowProfile ?? input.profile);
   if (!applicationProfile) return { profileScope: rowProfile, certain: false, historicalProfile: rowProfile };
-  if (rowProfile === applicationProfile || (selectedProfile && rowProfile === selectedProfile)) {
+  if (selectedProfile && rowProfile === selectedProfile) {
+    return { profileScope: selectedProfile, certain: true, historicalProfile: rowProfile };
+  }
+  if (rowProfile === applicationProfile) {
     return { profileScope: applicationProfile, certain: true, historicalProfile: rowProfile };
   }
-  if (!rowProfile && input.scopeProven === true) return { profileScope: applicationProfile, certain: true, historicalProfile: '' };
+  if (!rowProfile && input.scopeProven === true) return { profileScope: selectedProfile || applicationProfile, certain: true, historicalProfile: '' };
   return { profileScope: rowProfile || applicationProfile, certain: false, historicalProfile: rowProfile };
 }
 

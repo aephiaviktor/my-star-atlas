@@ -33,8 +33,8 @@ function harness(queryImpl) {
 }
 const settings = { influxBucket: 'Bucket A', playerProfile: 'PlayerKey', faction: 'USTUR' };
 const v1 = { _time: '2026-08-01T00:00:00Z', tradeId: 'legacy', market: 'LM', faction: 'USTUR', profile: 'PlayerKey', signature: 'sig', rawMint: 'mint', side: 'buy', quantity: 2, settledAtlas: 20, grossAtlas: 20, marketplaceFeeAtlas: 1, netAtlas: 19, unitPriceAtlas: 10, wallet: 'wallet', starbase: 'star', asset: 'asset', certificateMint: 'cert' };
-const id = point.deriveMarketplaceTradeId({ market: 'LM', faction: 'USTUR', profileScope: 'USTUR', executionSignature: 'sig', rawMint: 'mint', side: 'buy', quantity: 2 });
-const v2 = { _time: '2026-08-01T00:00:00Z', market: 'LM', faction: 'USTUR', profile: 'USTUR', executionSignature: 'sig', rawMint: 'mint', side: 'buy', tradeId: id, fallbackQuantity: 2, fallbackSettledAtlas: 20, fallbackGrossAtlas: 20, fallbackMarketplaceFeeAtlas: 1, fallbackNetAtlas: 19, fallbackUnitPriceAtlas: 10, fallbackWallet: 'wallet', fallbackStarbase: 'star', fallbackAsset: 'asset', fallbackCertificateMint: 'cert' };
+const id = point.deriveMarketplaceTradeId({ market: 'LM', faction: 'USTUR', profileScope: 'PlayerKey', executionSignature: 'sig', rawMint: 'mint', side: 'buy', quantity: 2 });
+const v2 = { _time: '2026-08-01T00:00:00Z', market: 'LM', faction: 'USTUR', profile: 'PlayerKey', executionSignature: 'sig', rawMint: 'mint', side: 'buy', tradeId: id, fallbackQuantity: 2, fallbackSettledAtlas: 20, fallbackGrossAtlas: 20, fallbackMarketplaceFeeAtlas: 1, fallbackNetAtlas: 19, fallbackUnitPriceAtlas: 10, fallbackWallet: 'wallet', fallbackStarbase: 'star', fallbackAsset: 'asset', fallbackCertificateMint: 'cert' };
 
 function routed({ v1Rows = [], v2Rows = [], failV1 = false, failV2 = false, newestRows = null } = {}) {
   const calls = [];
@@ -54,8 +54,9 @@ test('trade dual-read uses separate exact v1 and v2 Flux branches and point-iden
   await api.fetchMarketplaceTradesFromInflux(settings);
   assert.equal(calls.length, 2);
   const scope = '(r.faction == "USTUR" and (not exists r.profile or r.profile == "USTUR" or r.profile == "PlayerKey")) or (r.market == "GM" and r.faction == "GLOBAL" and r.profile == "GLOBAL")';
+  const v2Scope = '(r.faction == "USTUR" and r.profile == "PlayerKey") or (r.market == "GM" and r.faction == "GLOBAL" and r.profile == "GLOBAL")';
   assert.equal(calls[0], `from(bucket: "Bucket A")\n  |> range(start: -40d)\n  |> filter(fn: (r) => r._measurement == "marketplace")\n  |> filter(fn: (r) => ${scope})\n  |> pivot(rowKey: ["_time", "tradeId"], columnKey: ["_field"], valueColumn: "_value")\n  |> sort(columns: ["_time"], desc: true)`);
-  assert.equal(calls[1], `from(bucket: "Bucket A")\n  |> range(start: -40d)\n  |> filter(fn: (r) => r._measurement == "marketplace_v2")\n  |> filter(fn: (r) => ${scope})\n  |> pivot(rowKey: ["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"], columnKey: ["_field"], valueColumn: "_value")\n  |> sort(columns: ["_time"], desc: true)`);
+  assert.equal(calls[1], `from(bucket: "Bucket A")\n  |> range(start: -40d)\n  |> filter(fn: (r) => r._measurement == "marketplace_v2")\n  |> filter(fn: (r) => ${v2Scope})\n  |> pivot(rowKey: ["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"], columnKey: ["_field"], valueColumn: "_value")\n  |> sort(columns: ["_time"], desc: true)`);
   for (const flux of calls) assert.ok(flux.indexOf('|> filter(fn: (r) =>') < flux.indexOf('|> pivot'));
 });
 
@@ -92,7 +93,8 @@ test('existing newest empty behavior and v1-only, v2-only, mixed maxima are pres
     assert.equal(value, rows.length ? Math.max(...rows.map((row) => Date.parse(row._time))) : null);
     assert.equal(calls.length, 1);
     const scope = '(r.faction == "USTUR" and (not exists r.profile or r.profile == "USTUR" or r.profile == "PlayerKey")) or (r.market == "GM" and r.faction == "GLOBAL" and r.profile == "GLOBAL")';
-    assert.equal(calls[0], `v1 = from(bucket: "Bucket A")\n  |> range(start: -40d)\n  |> filter(fn: (r) => r._measurement == "marketplace" and r._field == "quantity")\n  |> filter(fn: (r) => ${scope})\nv2 = from(bucket: "Bucket A")\n  |> range(start: -40d)\n  |> filter(fn: (r) => r._measurement == "marketplace_v2" and (r._field == "fallbackQuantity" or r._field == "enrichedQuantity"))\n  |> filter(fn: (r) => ${scope})\nunion(tables: [v1, v2])\n  |> group()\n  |> sort(columns: ["_time"], desc: false)\n  |> last(column: "_time")\n  |> keep(columns: ["_time"])`);
+    const v2Scope = '(r.faction == "USTUR" and r.profile == "PlayerKey") or (r.market == "GM" and r.faction == "GLOBAL" and r.profile == "GLOBAL")';
+    assert.equal(calls[0], `v1 = from(bucket: "Bucket A")\n  |> range(start: -40d)\n  |> filter(fn: (r) => r._measurement == "marketplace" and r._field == "quantity")\n  |> filter(fn: (r) => ${scope})\nv2 = from(bucket: "Bucket A")\n  |> range(start: -40d)\n  |> filter(fn: (r) => r._measurement == "marketplace_v2" and (r._field == "fallbackQuantity" or r._field == "enrichedQuantity"))\n  |> filter(fn: (r) => ${v2Scope})\nunion(tables: [v1, v2])\n  |> group()\n  |> sort(columns: ["_time"], desc: false)\n  |> last(column: "_time")\n  |> keep(columns: ["_time"])`);
     assert.match(calls[0], /union\(tables: \[v1, v2\]\)[\s\S]*\|> group\(\)[\s\S]*\|> sort\(columns: \["_time"\], desc: false\)[\s\S]*\|> last\(column: "_time"\)/);
     assert.doesNotMatch(calls[0], /\|> last\(\)/);
   }
@@ -100,6 +102,7 @@ test('existing newest empty behavior and v1-only, v2-only, mixed maxima are pres
 
 test('scope is exact and read path contains no mutation or adjacent integration', () => {
   assert.match(main, /not exists r\.profile or r\.profile == "\$\{escapeFluxString\(profileName\)\}" or r\.profile == "\$\{escapeFluxString\(profile\)\}"/);
+  assert.match(main, /r\.faction == "\$\{escapeFluxString\(faction\)\}" and r\.profile == "\$\{escapeFluxString\(profile\)\}"/);
   assert.match(main, /r\.market == "GM" and r\.faction == "GLOBAL" and r\.profile == "GLOBAL"/);
   for (const forbidden of ['writeInflux', 'marketplace-outbox', 'publication-coordinator', 'saveMarketplace', 'cursor', 'checkpoint', 'fetchMarketplaceAssetFlowsFromInflux']) assert.doesNotMatch(tradesSource, new RegExp(forbidden));
 });

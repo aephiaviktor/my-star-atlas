@@ -6,10 +6,10 @@ const point = require('../electron/marketplace-v2-point');
 
 const context = { applicationProfile: 'USTUR', selectedProfile: 'PlayerKey', faction: 'USTUR', scopeProven: true };
 const base = { _time: '2026-08-01T00:00:00Z', tradeId: 'legacy-id', market: 'LM', faction: 'USTUR', profile: 'PlayerKey', signature: 'sig', rawMint: 'mint', side: 'buy', quantity: 2, settledAtlas: 20, grossAtlas: 20, marketplaceFeeAtlas: 1, netAtlas: 19, unitPriceAtlas: 10, wallet: 'wallet', starbase: 'star', asset: 'asset', certificateMint: 'cert' };
-const stableId = point.deriveMarketplaceTradeId({ market: 'LM', faction: 'USTUR', profileScope: 'USTUR', executionSignature: 'sig', rawMint: 'mint', side: 'buy', quantity: 2 });
+const stableId = point.deriveMarketplaceTradeId({ market: 'LM', faction: 'USTUR', profileScope: 'PlayerKey', executionSignature: 'sig', rawMint: 'mint', side: 'buy', quantity: 2 });
 function v2(rank='fallback') {
   const prefix = rank;
-  const row = { _time: base._time, market: 'LM', faction: 'USTUR', profile: 'USTUR', executionSignature: 'sig', rawMint: 'mint', side: 'buy', tradeId: stableId };
+  const row = { _time: base._time, market: 'LM', faction: 'USTUR', profile: 'PlayerKey', executionSignature: 'sig', rawMint: 'mint', side: 'buy', tradeId: stableId };
   Object.assign(row, { [`${prefix}Quantity`]:2, [`${prefix}SettledAtlas`]:20, [`${prefix}GrossAtlas`]:20, [`${prefix}MarketplaceFeeAtlas`]:1, [`${prefix}NetAtlas`]:19, [`${prefix}UnitPriceAtlas`]:10, [`${prefix}Wallet`]:'wallet', [`${prefix}Starbase`]:'star', [`${prefix}Asset`]:'asset', [`${prefix}CertificateMint`]:'cert' });
   if (rank === 'enriched') Object.assign(row, { enrichedTxFeeAtlas:0.1, enrichedOrderId:'order', enrichedCreationSignature:'create' });
   return row;
@@ -21,9 +21,10 @@ test('canonical recursive serialization is order-independent and rejects unsuppo
   for (const value of [{x:undefined},{x:Infinity},{x:()=>{}},{x:Symbol('x')}]) assert.throws(() => compat.canonicalRecursiveSerialize(value));
   const cycle={}; cycle.x=cycle; assert.throws(() => compat.canonicalRecursiveSerialize(cycle));
 });
-test('profile scope maps LM alias/pubkey/scoped missing, rejects mismatches, and GM is GLOBAL', () => {
-  for (const rowProfile of ['USTUR','PlayerKey']) assert.equal(compat.resolveMarketplaceProfileScope({market:'LM',applicationProfile:'USTUR',selectedProfile:'PlayerKey',rowProfile}).profileScope,'USTUR');
-  assert.equal(compat.resolveMarketplaceProfileScope({market:'LM',applicationProfile:'USTUR',selectedProfile:'PlayerKey',rowProfile:'',scopeProven:true}).certain,true);
+test('profile scope preserves authoritative LM pubkeys, keeps legacy aliases isolated, rejects mismatches, and GM is GLOBAL', () => {
+  assert.equal(compat.resolveMarketplaceProfileScope({market:'LM',applicationProfile:'USTUR',selectedProfile:'PlayerKey',rowProfile:'USTUR'}).profileScope,'USTUR');
+  assert.equal(compat.resolveMarketplaceProfileScope({market:'LM',applicationProfile:'USTUR',selectedProfile:'PlayerKey',rowProfile:'PlayerKey'}).profileScope,'PlayerKey');
+  assert.equal(compat.resolveMarketplaceProfileScope({market:'LM',applicationProfile:'USTUR',selectedProfile:'PlayerKey',rowProfile:'',scopeProven:true}).profileScope,'PlayerKey');
   assert.equal(compat.resolveMarketplaceProfileScope({market:'LM',applicationProfile:'USTUR',rowProfile:'',scopeProven:false}).certain,false);
   assert.equal(compat.resolveMarketplaceProfileScope({market:'LM',applicationProfile:'USTUR',rowProfile:'OTHER'}).certain,false);
   assert.equal(compat.resolveMarketplaceProfileScope({market:'GM',rowProfile:'anything'}).profileScope,'GLOBAL');
@@ -57,7 +58,7 @@ test('uncertain rows dedupe only when bounded normalized bytes are identical', (
 test('normalized public rows have exactly the consumer schema and preserve v1 profile metadata privately', () => {
   const row=compat.normalizeMarketplaceV1Row(base,context);
   assert.deepEqual(Object.keys(row), ['id','tradeId','timestamp','marketplace','faction','profile','starbase','asset','side','wallet','quantity','settledAtlas','grossAtlas','marketplaceFeeAtlas','txFeeAtlas','netAtlas','unitPriceAtlas','signature','creationSignature','rawMint','certificateMint','orderId','representationRank','schemaGeneration','lineageStatus','lineageFaction','lineageProfile','lineageLocation']);
-  assert.equal(row.profile,'USTUR'); assert.equal(row.historicalProfile,'PlayerKey');
+  assert.equal(row.profile,'PlayerKey'); assert.equal(row.historicalProfile,'PlayerKey');
 });
 
 test('all completeness-vector positions are compared lexicographically before canonical bytes', () => {

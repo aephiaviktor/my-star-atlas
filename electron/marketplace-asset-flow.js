@@ -107,13 +107,14 @@ function escapeTag(value) { return String(value ?? '').replace(/([ ,=])/g, '\\$1
 function escapeFieldString(value) { return `"${String(value ?? '').replace(/(["\\])/g, '\\$1')}"`; }
 function formatAssetFlowInfluxLine(event) {
   const timestamp = new Date(event?.timestamp);
-  if (Number.isNaN(timestamp.getTime()) || !(Number(event?.quantity) > 0)) return '';
+  const quantity = String(event?.exactQuantity ?? event?.quantity ?? '').trim();
+  if (Number.isNaN(timestamp.getTime()) || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(quantity) || !/[1-9]/.test(quantity)) return '';
   const tags = {
     flowId: event.id, flow: event.flow, asset: event.asset, origin: event.origin, destination: event.destination,
     faction: event.faction || '', profile: event.profile || '', lineageStatus: event.lineageStatus || 'unallocated',
   };
   const tagText = Object.entries(tags).map(([key, value]) => `${key}=${escapeTag(value)}`).join(',');
-  return `asset_flow,${tagText} quantity=${Number(event.quantity)},txFeeAtlas=${Number(event.txFeeAtlas || 0)},signature=${escapeFieldString(event.signature)},rawMint=${escapeFieldString(event.rawMint)} ${BigInt(timestamp.getTime()) * 1000000n}`;
+  return `asset_flow,${tagText} quantity=${quantity},txFeeAtlas=${Number(event.txFeeAtlas || 0)},schemaVersion=${Number(event.schemaVersion || 1)}i,signature=${escapeFieldString(event.signature)},rawMint=${escapeFieldString(event.rawMint)},wallet=${escapeFieldString(event.wallet || '')},provenance=${escapeFieldString(event.provenance || event.flow || '')} ${BigInt(timestamp.getTime()) * 1000000n}`;
 }
 
 function buildAssetFlowLedgerEvents(events) {
