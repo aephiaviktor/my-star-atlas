@@ -7129,42 +7129,37 @@ function renderEarningsCargoAllocations(result) {
 // refresh) used to fan out into a parallel RPC storm and surface HTTP 429
 // to the UI on first app start.
 let earningsRefreshInFlight = null;
-const marketplaceRefreshInFlight = new Map();
+let marketplaceSyncInFlight = null;
 const MARKETPLACE_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 
-async function refreshMarketplace({ sync = false } = {}) {
-  const pendingTelemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
-    ? rendererTelemetryTrigger
-    : 'unknown';
-  const telemetryTrigger = pendingTelemetryTrigger === 'unknown' && sync ? 'background' : pendingTelemetryTrigger;
-  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
-  const settings = { ...(latestSettings || getFormPayload()), trigger: telemetryTrigger };
-  const faction = normalizeFaction(settings.faction);
-  if (marketplaceRefreshInFlight.has(faction)) return marketplaceRefreshInFlight.get(faction);
-  const promise = (async () => {
-    renderEarningsMarketplaceLoading(sync ? 'Syncing Marketplace data...' : 'Loading Marketplace data...');
-    if (sync) {
-      setText(earningsMarketplaceSyncStatus, 'Marketplace sync running in background...');
-      await api.syncMarketplace(settings);
-    }
+async function refreshMarketplace() {
+  const settings = { ...(latestSettings || getFormPayload()), trigger: 'browse' };
+  const identity = `${normalizeFaction(settings.faction)}\n${getActivePlayerProfile(settings)}`;
+  return (async () => {
+    renderEarningsMarketplaceLoading('Loading cached Marketplace data...');
     const result = await api.getMarketplaceSnapshot(settings);
-    if (faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return result;
+    const current = latestSettings || getFormPayload();
+    if (identity !== `${normalizeFaction(current.faction)}\n${getActivePlayerProfile(current)}`) return result;
     latestEarningsResult = { ...(latestEarningsResult || {}), ...result, ok: latestEarningsResult?.ok ?? result.ok };
     renderEarningsMarketplace(latestEarningsResult);
     return result;
   })().catch((error) => {
     console.error(error);
-    setText(earningsMarketplaceSyncStatus, 'Marketplace sync unavailable');
-  }).finally(() => {
-    if (marketplaceRefreshInFlight.get(faction) === promise) marketplaceRefreshInFlight.delete(faction);
+    setText(earningsMarketplaceSyncStatus, 'Marketplace cache unavailable');
   });
-  marketplaceRefreshInFlight.set(faction, promise);
-  return promise;
 }
 
 function runMarketplaceBackgroundSync() {
   if (!latestSettings || !getActivePlayerProfile(latestSettings)) return Promise.resolve();
-  return refreshMarketplace({ sync: true });
+  if (marketplaceSyncInFlight) return marketplaceSyncInFlight;
+  const promise = api.syncMarketplace({ ...latestSettings, trigger: 'background' }).catch((error) => {
+    console.error(error);
+    return null;
+  }).finally(() => {
+    if (marketplaceSyncInFlight === promise) marketplaceSyncInFlight = null;
+  });
+  marketplaceSyncInFlight = promise;
+  return promise;
 }
 
 function getUpgradingCacheInput(settings = latestSettings || getFormPayload(), force = false) {
@@ -9012,7 +9007,7 @@ function refreshVisibleFactionViews() {
   if (currentSection === 'earnings') {
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven();
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading();
-    return currentEarningsSubtab === 'marketplace' ? refreshMarketplace({ sync: true }) : refreshEarnings();
+    return currentEarningsSubtab === 'marketplace' ? refreshMarketplace({ sync: false }) : refreshEarnings();
   }
   if (currentSection === 'optimization') {
     if(currentOptimizationSubtab === 'upgrading') return refreshUpgradingOptimization();
@@ -9036,7 +9031,7 @@ function refreshVisibleConsumptionIdentity({ force = false } = {}) {
 function refreshVisibleIdentity({ force = false } = {}) {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') {
-    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: true });
+    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: false });
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven({ force });
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading({ force });
     return refreshEarnings();
@@ -9059,7 +9054,7 @@ function refreshVisibleIdentity({ force = false } = {}) {
 function refreshCurrentVisibleData() {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') {
-    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: true });
+    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: false });
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven({ force: true });
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading({ force: true });
     return refreshEarnings({ force: true });

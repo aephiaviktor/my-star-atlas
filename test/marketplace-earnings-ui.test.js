@@ -61,14 +61,14 @@ test('Earnings snapshot stays on the fast path except bounded cached Marketplace
   assert.match(snapshot, /const localMarketResult = needsCompleteAccounting\s*\? await fetchMarketplaceTradesFromInflux\(settings\)\s*: \{ trades: \[\], error: '' \}/);
   assert.doesNotMatch(snapshot, /needsCompleteAccounting[\s\S]{0,1000}(?:scanLocalMarketTrades|syncMarketplace|setInterval)/);
   assert.match(renderer, /earningsSubtab: currentEarningsSubtab/);
-  assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading Marketplace data\.\.\.'\)/);
+  assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading cached Marketplace data\.\.\.'\)/);
 });
 
-test('Marketplace loader uses cached snapshots on tab activation while faction refresh still syncs', () => {
+test('Marketplace loader uses cached snapshots on tab activation and faction refresh', () => {
   assert.match(renderer, /function renderEarningsMarketplaceLoading/);
-  assert.match(renderer, /renderEarningsMarketplaceLoading\(sync \? 'Syncing Marketplace data\.\.\.' : 'Loading Marketplace data\.\.\.'\)/);
+  assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading cached Marketplace data\.\.\.'\)/);
   assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: false \}\);/);
-  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: true \}\) : refreshEarnings\(\)/);
+  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: false \}\) : refreshEarnings\(\)/);
 });
 
 test('Marketplace chain synchronization is exposed separately and runs in the background', () => {
@@ -124,13 +124,13 @@ test('ONI and MUD earnings accept second-instance SDU tags', () => {
   assert.match(main, /instance: \['MUD', 'MUD2'\]/);
 });
 
-test('Marketplace activation loads snapshots while background, faction refresh, and manual refresh sync through the guard', async () => {
+test('Marketplace activation, faction refresh, and manual refresh browse cache while background discovery uses its own global guard', async () => {
   assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: false \}\);/);
-  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: true \}\) : refreshEarnings\(\)/);
-  assert.match(renderer, /function refreshCurrentVisibleData\([\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: true \}\)/);
+  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: false \}\) : refreshEarnings\(\)/);
+  assert.match(renderer, /function refreshCurrentVisibleData\([\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: false \}\)/);
   assert.match(renderer, /refreshDataButton\?\.addEventListener\('click'[\s\S]*await refreshCurrentVisibleData\(\)/);
 
-  const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
+  const sourceStart = renderer.indexOf('let marketplaceSyncInFlight = null;');
   const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
   const snapshotPayloads = [];
   let syncCalls = 0;
@@ -175,11 +175,11 @@ test('Marketplace activation loads snapshots while background, faction refresh, 
   releaseSync();
   await Promise.all([startupBackground, scheduledTick, manualRefresh, factionRefresh]);
   assert.equal(syncCalls, 1);
-  assert.equal(snapshotCalls, 3);
+  assert.equal(snapshotCalls, 4);
 });
 
 test('Marketplace skipped cross-faction sync still loads and uses the requested faction snapshot', async () => {
-  const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
+  const sourceStart = renderer.indexOf('let marketplaceSyncInFlight = null;');
   const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
   const rendered = [];
   const syncPayloads = [];
@@ -219,8 +219,7 @@ test('Marketplace skipped cross-faction sync still loads and uses the requested 
   vm.runInNewContext(`${renderer.slice(sourceStart, sourceEnd)}\nthis.refreshMarketplace = refreshMarketplace;`, context);
 
   const result = await context.refreshMarketplace({ sync: true });
-  assert.equal(syncPayloads.length, 1);
-  assert.equal(syncPayloads[0].faction, 'ONI');
+  assert.equal(syncPayloads.length, 0);
   assert.equal(snapshotPayloads.length, 1);
   assert.equal(snapshotPayloads[0].faction, 'ONI');
   assert.equal(result, oniSnapshot);
@@ -235,11 +234,11 @@ test('Marketplace scheduler uses hourly guarded background synchronization', () 
   assert.doesNotMatch(renderer, /const MARKETPLACE_SYNC_INTERVAL_MS = 5 \* 60 \* 1000;/);
   assert.match(renderer, /void runMarketplaceBackgroundSync\(\);/);
   assert.match(renderer, /setInterval\(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS\)/);
-  assert.match(renderer, /function runMarketplaceBackgroundSync\(\) \{\s*if \(!latestSettings \|\| !getActivePlayerProfile\(latestSettings\)\) return Promise\.resolve\(\);\s*return refreshMarketplace\(\{ sync: true \}\);\s*\}/);
+  assert.match(renderer, /function runMarketplaceBackgroundSync\(\)[\s\S]*marketplaceSyncInFlight[\s\S]*api\.syncMarketplace\(/);
 });
 
 test('Marketplace budget exhaustion still loads only the requested cached snapshot', async () => {
-  const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
+  const sourceStart = renderer.indexOf('let marketplaceSyncInFlight = null;');
   const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
   const rendered = [];
   let snapshotCalls = 0;
@@ -270,4 +269,16 @@ test('Marketplace budget exhaustion still loads only the requested cached snapsh
   assert.equal(rendered[0].localMarketTrades[0].id, 'oni-cached');
   assert.match(renderer, /const MARKETPLACE_SYNC_INTERVAL_MS = 60 \* 60 \* 1000/);
   assert.match(renderer, /refreshMarketplace\(\{ sync: false \}\)/);
+});
+
+test('Marketplace browsing and identity switches are cached zero-RPC while one application-wide background sync owns discovery', () => {
+  assert.match(renderer, /let marketplaceSyncInFlight = null;/);
+  assert.doesNotMatch(renderer, /marketplaceRefreshInFlight/);
+  assert.match(renderer, /function runMarketplaceBackgroundSync\(\)[\s\S]*api\.syncMarketplace\(/);
+  assert.match(renderer, /function setActiveEarningsSubtab[\s\S]*subtab === 'marketplace'[\s\S]*refreshMarketplace\(\{ sync: false \}\)/);
+  assert.match(renderer, /function refreshVisibleFactionViews[\s\S]*currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: false \}\)/);
+  assert.match(renderer, /function refreshVisibleIdentity[\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: false \}\)/);
+  assert.match(renderer, /function refreshCurrentVisibleData[\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: false \}\)/);
+  const refreshSource = renderer.slice(renderer.indexOf('async function refreshMarketplace'), renderer.indexOf('function runMarketplaceBackgroundSync'));
+  assert.doesNotMatch(refreshSource, /syncMarketplace/);
 });
