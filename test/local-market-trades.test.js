@@ -150,6 +150,54 @@ test('production-shaped backlog hydrates newest evidence first and resumes a dur
   assert.ok(restartConnection.attempts <= 300);
 });
 
+test('durable Marketplace candidates outrank 20,000 newer wallet signatures and remain scope-safe across restart', async () => {
+  const wallet = 'wallet-1';
+  const assetMint = 'certificate-1';
+  const candidateSignature = 'older-known-lm-candidate';
+  const wrongScopeSignature = 'wrong-wallet-candidate';
+  const valid = { ...tx({ signature: candidateSignature, wallet, assetMint, assetBefore: 0, assetAfter: 12, atlasBefore: 10, atlasAfter: 10 }), blockTime: 1787000000 };
+  const wrongScope = { ...tx({ signature: wrongScopeSignature, wallet: 'other-wallet', assetMint, assetBefore: 0, assetAfter: 12, atlasBefore: 10, atlasAfter: 10 }), blockTime: 1787000001 };
+  const pendingHydration = Array.from({ length: 20001 }, (_, index) => ({
+    signature: index === 20000 ? candidateSignature : `newer-unrelated-${String(index).padStart(5, '0')}`,
+    blockTime: 1788000000 - index,
+  }));
+  const calls = [];
+  const connection = {
+    async getSignaturesForAddress() { throw new Error('durable queue must bypass discovery'); },
+    async getParsedTransaction(signature) {
+      if (calls.length >= 300) throw new MarketplaceRpcBudgetExhaustedError('LM', 'getParsedTransaction');
+      calls.push(signature);
+      if (signature === candidateSignature) return valid;
+      if (signature === wrongScopeSignature) return wrongScope;
+      return { signature, blockTime: 1788000000, meta: { err: null, logMessages: [] }, transaction: { message: { accountKeys: [] } } };
+    },
+  };
+  const first = await scanLocalMarketTrades(connection, {
+    trackedWallets: [wallet], marketAssetsByMint: { [assetMint]: { starbase: 'UST-1', asset: 'Food' } },
+    pendingHydration, priorityHydration: [
+      { signature: candidateSignature, blockTime: valid.blockTime },
+      { signature: candidateSignature, blockTime: valid.blockTime },
+      { signature: wrongScopeSignature, blockTime: wrongScope.blockTime },
+    ],
+    pendingWalletCursors: { [wallet]: 'staged-cursor' }, startIso: '2026-08-01T00:00:00.000Z', requestsPerSecond: 100000,
+  });
+  assert.deepEqual(new Set(calls.slice(0, 2)), new Set([wrongScopeSignature, candidateSignature]));
+  assert.equal(first.trades.length, 1);
+  assert.equal(first.trades[0].signature, candidateSignature);
+  assert.equal(first.trades[0].wallet, wallet);
+  assert.equal(first.pendingHydration.some((row) => row.signature === candidateSignature), false);
+  assert.equal(new Set(first.pendingHydration.map((row) => row.signature)).size, first.pendingHydration.length);
+
+  const completed = new Set(calls);
+  const restartCalls = [];
+  const second = await scanLocalMarketTrades({
+    async getSignaturesForAddress() { throw new Error('restart repeated discovery'); },
+    async getParsedTransaction(signature) { restartCalls.push(signature); return { signature, blockTime: 1788000000, meta: { err: null, logMessages: [] }, transaction: { message: { accountKeys: [] } } }; },
+  }, { trackedWallets: [wallet], pendingHydration: first.pendingHydration, pendingWalletCursors: first.pendingWalletCursors, startIso: '2026-08-01T00:00:00.000Z', requestsPerSecond: 100000 });
+  assert.equal(restartCalls.some((signature) => completed.has(signature)), false);
+  assert.ok(second.pendingHydration.length < first.pendingHydration.length);
+});
+
 test('incremental scanner uses durable wallet and active-order cursors', async () => {
   const calls = [];
   const connection = {

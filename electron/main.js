@@ -4329,6 +4329,7 @@ async function loadLocalMarketTradeCheckpoint(filePath) {
       orderCursors: document?.orderCursors && typeof document.orderCursors === 'object' ? document.orderCursors : {},
       activeOrderIds: Array.isArray(document?.activeOrderIds) ? document.activeOrderIds : [],
       archivedOrderIds: Array.isArray(document?.archivedOrderIds) ? document.archivedOrderIds : [],
+      immutableEvidence: Array.isArray(document?.immutableEvidence) ? document.immutableEvidence : [],
       pendingHydration: Array.isArray(document?.pendingHydration) ? document.pendingHydration : [],
       pendingWalletCursors: document?.pendingWalletCursors && typeof document.pendingWalletCursors === 'object' ? document.pendingWalletCursors : {},
       marketplaceBackfilled: document?.marketplaceBackfilled === true,
@@ -4339,12 +4340,47 @@ async function loadLocalMarketTradeCheckpoint(filePath) {
     if (error?.code === 'ENOENT') return {
       orders: [], trades: [], assetFlows: [], publishedTradeIds: new Set(), publishedFlowIds: new Set(), walletCursors: {}, orderCursors: {},
       activeOrderIds: [], archivedOrderIds: [], marketplaceBackfilled: false,
+      immutableEvidence: [],
       pendingHydration: [], pendingWalletCursors: {},
       assetFlowBackfilled: false,
       tradeEnrichmentVersion: 0,
     };
     throw error;
   }
+}
+
+function marketplacePriorityHydrationRows(checkpoint, holds, market) {
+  const rows = new Map();
+  const pendingSignatures = new Set((checkpoint.pendingHydration || []).map((row) => String(row?.signature || '').trim()).filter(Boolean));
+  const add = (signature, time) => {
+    const value = String(signature || '').trim();
+    if (!value || !pendingSignatures.has(value)) return;
+    const parsed = typeof time === 'number' ? time : Date.parse(time || '');
+    rows.set(value, { signature: value, blockTime: Number.isFinite(parsed) ? (parsed > 1e12 ? Math.floor(parsed / 1000) : parsed) : null, priority: true });
+  };
+  for (const trade of checkpoint.trades || []) add(trade.signature || trade.executionSignature, trade.timestamp || trade.blockTime);
+  for (const flow of checkpoint.assetFlows || []) add(flow.signature || flow.executionSignature || flow.transactionSignature, flow.timestamp || flow.blockTime);
+  for (const order of checkpoint.orders || []) add(order.creationSignature || order.signature, order.createdAt || order.timestamp);
+  for (const evidence of checkpoint.immutableEvidence || []) {
+    if (!(evidence?.executions?.length || evidence?.flows?.length)) continue;
+    add(evidence.transaction?.signature, evidence.transaction?.blockTime);
+  }
+  const holdValues = Array.isArray(holds) ? holds : Object.values(holds || {});
+  for (const hold of holdValues) {
+    if (hold?.market !== market || ['released', 'abandoned'].includes(hold?.state)) continue;
+    const snapshot = hold.candidateSnapshot || {};
+    add(snapshot.signature || snapshot.executionSignature, snapshot.timestamp || hold.candidateTimestamp);
+    add(snapshot.creationSignature, snapshot.timestamp || hold.candidateTimestamp);
+    for (const input of snapshot.publicationInputs || []) {
+      add(input?.identity?.executionSignature || input?.executionSignature || input?.signature, input?.timestamp || snapshot.timestamp || hold.candidateTimestamp);
+    }
+  }
+  return Array.from(rows.values());
+}
+
+async function loadMarketplacePriorityHolds() {
+  const loaded = await loadMarketplacePublicationHolds({ installationRoot: getAppRoot() });
+  return loaded.status === 'loaded' ? loaded.document?.holds || {} : {};
 }
 
 async function fetchOpenLocalMarketOrderIds(connection, trackedWallets) {
@@ -5127,11 +5163,13 @@ async function fetchLocalMarketTrades(settings, connection) {
     checkpoint.activeOrderIds,
     checkpoint.archivedOrderIds,
   );
+  const priorityHydration = marketplacePriorityHydrationRows(checkpoint, await loadMarketplacePriorityHolds(), 'LM');
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
     marketAssetsByMint,
     knownOrders: checkpoint.orders,
     pendingHydration: checkpoint.pendingHydration,
+    priorityHydration,
     pendingWalletCursors: checkpoint.pendingWalletCursors,
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
@@ -5256,11 +5294,13 @@ async function fetchGlobalMarketTrades(settings, connection) {
     checkpoint.activeOrderIds,
     checkpoint.archivedOrderIds,
   );
+  const priorityHydration = marketplacePriorityHydrationRows(checkpoint, await loadMarketplacePriorityHolds(), 'GM');
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
     marketAssetsByMint: buildGlobalMarketAssetMap(),
     knownOrders: checkpoint.orders,
     pendingHydration: checkpoint.pendingHydration,
+    priorityHydration,
     pendingWalletCursors: checkpoint.pendingWalletCursors,
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,

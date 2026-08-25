@@ -205,8 +205,18 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
 function normalizePendingHydration(rows) {
   return Array.from(new Map(Array.from(rows || []).filter((row) => row?.signature).map((row) => [String(row.signature), {
     signature: String(row.signature), blockTime: row.blockTime == null ? null : Number(row.blockTime),
-    slot: row.slot == null ? null : String(row.slot),
-  }])).values()).sort((a, b) => Number(b.blockTime || 0) - Number(a.blockTime || 0) || a.signature.localeCompare(b.signature));
+    slot: row.slot == null ? null : String(row.slot), priority: row.priority === true,
+  }])).values()).sort((a, b) => Number(b.priority) - Number(a.priority)
+    || Number(b.blockTime || 0) - Number(a.blockTime || 0) || a.signature.localeCompare(b.signature));
+}
+
+function mergePendingHydration(rows, priorityRows) {
+  const merged = new Map(normalizePendingHydration(rows).map((row) => [row.signature, row]));
+  for (const candidate of normalizePendingHydration(priorityRows)) {
+    const prior = merged.get(candidate.signature);
+    merged.set(candidate.signature, { ...candidate, ...prior, priority: true });
+  }
+  return normalizePendingHydration(merged.values());
 }
 
 async function fetchTransactions(connection, rows, pacer, stats) {
@@ -241,7 +251,7 @@ async function fetchTransactions(connection, rows, pacer, stats) {
 async function scanLocalMarketTrades(connection, {
   trackedWallets = [], marketAssetsByMint = {}, knownOrders = [], startIso,
   walletCursors = {}, orderCursors = {}, activeOrderIds = [], archivedOrderIds = [], openOrderIds = [],
-  pendingHydration = [], pendingWalletCursors = {},
+  pendingHydration = [], priorityHydration = [], pendingWalletCursors = {},
   addressFactory = (value) => value, maxPages = MAX_SIGNATURE_PAGES,
   requestsPerSecond = DEFAULT_REQUESTS_PER_SECOND,
   atlasPerSol, decodeAssetFlows,
@@ -312,7 +322,7 @@ async function scanLocalMarketTrades(connection, {
     const enriched = decodeLocalMarketOrder({ ...transaction, signature: order.creationSignature }, { trackedWallets, marketAssetsByMint, atlasPerSol });
     if (enriched) ordersById.set(enriched.orderId, enriched);
   }
-  const durablePending = normalizePendingHydration(pendingHydration);
+  const durablePending = mergePendingHydration(pendingHydration, priorityHydration);
   if (durablePending.length) {
     const pendingTransactions = await fetchTransactions(connection, new Map(durablePending.map((row) => [row.signature, row])), pacer, stats);
     const result = partialResult(pendingTransactions, pendingTransactions.exhaustion, pendingTransactions.pendingHydration);
@@ -418,5 +428,5 @@ module.exports = {
   DEFAULT_START_ISO, MAX_LOOKBACK_MS, DEFAULT_REQUESTS_PER_SECOND,
   resolveLocalMarketStartIso, createLocalMarketPacer,
   scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, computeTxFeeAtlas, fetchTransactions,
-  preserveTransactionEvidence, buildCoverage, normalizePendingHydration,
+  preserveTransactionEvidence, buildCoverage, normalizePendingHydration, mergePendingHydration,
 };
