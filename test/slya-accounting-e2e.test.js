@@ -10,9 +10,10 @@ const { authoritativeSlyaAccountingEvents, buildProductionCompleteAccounting } =
 const decimal = (value) => value?.decimal ?? null;
 const row = (result, asset) => result.rows.find((entry) => entry.asset === asset);
 
-test('deterministic SLYA-shaped rows reach MSA reconciliation and UI evidence states', () => {
+test('legacy generic SLYA-shaped rows remain visible but cannot mutate authoritative inventory', () => {
   const events = authoritativeSlyaAccountingEvents(fixture.rows, fixture.scope);
   assert.deepEqual(events.map((event) => event.source), ['scanning', 'mining', 'crafting', 'upgrading']);
+  assert.deepEqual(events.map((event) => event.type), ['quarantined', 'quarantined', 'pending', 'pending']);
   const result = buildProductionCompleteAccounting({
     scope: fixture.scope,
     period: fixture.period,
@@ -22,10 +23,10 @@ test('deterministic SLYA-shaped rows reach MSA reconciliation and UI evidence st
     sourceAvailability: { scanning: 'available', mining: 'available', crafting: 'available', upgrading: 'available' },
   });
   assert.equal(decimal(row(result, 'Ore').actualClosing), '11');
-  assert.equal(row(result, 'Ore').reconciliationStatus, 'reconciled');
-  assert.equal(decimal(row(result, 'Plate').acquisitions.crafting), '1');
-  assert.equal(decimal(row(result, 'Module').acquisitions.upgrading), '1');
-  assert.equal(row(result, 'Module').details.some((detail) => detail.source === 'upgrading' && detail.status === 'applied'), true);
+  assert.equal(row(result, 'Ore').reconciliationStatus, 'quantity_mismatch');
+  assert.equal(decimal(row(result, 'Plate').acquisitions.crafting), '0');
+  assert.equal(decimal(row(result, 'Module').acquisitions.upgrading), '0');
+  assert.equal(row(result, 'Module').details.some((detail) => detail.source === 'upgrading' && detail.status === 'pending'), true);
   assert.equal(result.sourceFreshness.upgrading, 'available');
 });
 

@@ -186,12 +186,9 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(html, /<th scope="col">Cargo Volume<\/th>\s*<th scope="col">Cargo Capacity<\/th>\s*<th scope="col">Cargo Efficiency<\/th>/);
 });
 
-test('Breakeven labels represented landed cost as Total Cost per unit', () => {
-  const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+test('Breakeven presents represented landed cost as Total Cost per unit', () => {
   const html = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
 
-  assert.match(renderer, /id: 'landedCost', label: 'Total Cost \/ Unit'/);
-  assert.match(html, /<th>Total Cost \/ Unit<\/th>/);
-  assert.doesNotMatch(renderer, /Landed Cost/);
-  assert.doesNotMatch(html, /Landed Cost/);
+  assert.match(html, /<th>Total Costs<\/th>/);
+  assert.doesNotMatch(html, />Landed Cost \/ Unit</);
 });

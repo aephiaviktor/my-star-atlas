@@ -7,8 +7,12 @@ const { exactText, marketplaceEvents, authoritativeSlyaAccountingEvents, buildPr
 const decimal = (value) => value?.decimal;
 const stable = (value) => Array.isArray(value) ? `[${value.map(stable).join(',')}]` : value && typeof value === 'object' ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(',')}}` : JSON.stringify(value);
 const hash = (value) => require('node:crypto').createHash('sha256').update(stable(value)).digest('hex');
-function slyaRow({ evidenceType, eventId, signature, outerInstructionIndex, slot = 178583, blockTime = 1785830000, faction = 'UST', profile = 'p', fleetAccount = 'fleet', fleetLabel = 'Fleet', inputs, outputs, directFees, transactionCosts, lineage = { starbase: 'S1' }, sourceProvenance = 'confirmed_transaction' }) {
-  const payload = { schemaVersion: 1, evidenceType, eventId, signature, outerInstructionIndex, programId: 'SAGE_PROGRAM', operationId: '', slot, blockTime, faction, profile, fleetAccount, fleetLabel, inputs, outputs, directFees, transactionCosts, lineage, sourceProvenance };
+function slyaRow({ evidenceType, eventId, signature, outerInstructionIndex, operationId = 'op-1', slot = 178583, blockTime = 1785830000, faction = 'UST', profile = 'p', fleetAccount = 'fleet', fleetLabel = 'Fleet', inputs, outputs, directFees, transactionCosts, lineage, sourceProvenance = 'confirmed_transaction' }) {
+  const assetMint = String(outputs?.[0]?.mint || '');
+  const canonicalLineage = lineage || (evidenceType === 'crafting' || evidenceType === 'upgrading'
+    ? { operationIdentity: operationId, fleetAccount, location: 'S1', stageSignatures: { input: signature, output: signature } }
+    : { operationIdentity: operationId, fleetAccount, location: 'S1', sourceAccount: 'source-token-account', destinationAccount: 'destination-token-account', assetMint });
+  const payload = { schemaVersion: 1, evidenceType, eventId, signature, outerInstructionIndex, programId: 'SAGE_PROGRAM', operationId, slot, blockTime, faction, profile, fleetAccount, fleetLabel, inputs, outputs, directFees, transactionCosts, lineage: canonicalLineage, sourceProvenance };
   return { _time: new Date(blockTime * 1000).toISOString(), ...payload, payloadHash: hash(payload), programId: 'SAGE_PROGRAM' };
 }
 
@@ -73,16 +77,16 @@ test('unavailable production sources remain explicit instead of rendering author
 
 test('SLYA confirmed evidence is consumed exactly and incomplete lineage is quarantined', () => {
   const rows = authoritativeSlyaAccountingEvents([
-    slyaRow({ evidenceType: 'mining', eventId: 'slya-accounting:v1:mining:sig:0', signature: 'sig', outerInstructionIndex: 0, inputs: [], outputs: [{ asset: 'Ore', quantity: '2', location: 'S1' }], directFees: '0', transactionCosts: { solLamports: '5' } }),
+    slyaRow({ evidenceType: 'mining', eventId: 'slya-accounting:v1:mining:sig:0', signature: 'sig', outerInstructionIndex: 0, inputs: [], outputs: [{ asset: 'Ore', mint: 'ore-mint', quantity: '2', location: 'S1' }], directFees: '0', transactionCosts: { solLamports: '5' } }),
     slyaRow({ evidenceType: 'crafting', eventId: 'slya-accounting:v1:crafting:sig:1', signature: 'sig', outerInstructionIndex: 1, inputs: [{ asset: 'Ore', quantity: '1' }], outputs: [{ asset: 'Plate', quantity: '1', location: 'S1' }], directFees: '1', transactionCosts: { solLamports: '5' }, lineage: {} }),
   ], { faction: 'USTUR', profile: 'p' });
   assert.equal(rows[0].type, 'acquisition');
   assert.equal(rows[0].basis, null);
-  assert.equal(rows[1].type, 'quarantined');
-  assert.equal(rows[1].reason, 'slya-transaction-cost-atlas-unavailable');
+  assert.equal(rows[1].type, 'pending');
+  assert.equal(rows[1].reason, 'slya-operation-identity-unmatched');
   const result = buildProductionCompleteAccounting({
     scope: { faction: 'USTUR', profile: 'p' }, period: { start: '2026-08-01T00:00:00Z', end: '2026-09-01T00:00:00Z' },
-    authoritativeSlyaEvidence: [slyaRow({ evidenceType: 'mining', eventId: 'slya-accounting:v1:mining:sig:0', signature: 'sig', outerInstructionIndex: 0, inputs: [], outputs: [{ asset: 'Ore', quantity: '2', location: 'S1' }], directFees: '0', transactionCosts: { solLamports: '5' } })],
+    authoritativeSlyaEvidence: [slyaRow({ evidenceType: 'mining', eventId: 'slya-accounting:v1:mining:sig:0', signature: 'sig', outerInstructionIndex: 0, inputs: [], outputs: [{ asset: 'Ore', mint: 'ore-mint', quantity: '2', location: 'S1' }], directFees: '0', transactionCosts: { solLamports: '5' } })],
     actualClosing: [{ asset: 'Ore', quantity: '2' }], sourceAvailability: { upgrading: 'unavailable' },
   });
   assert.equal(result.rows[0].acquisitions.mining.decimal, '2');
@@ -91,7 +95,7 @@ test('SLYA confirmed evidence is consumed exactly and incomplete lineage is quar
 });
 
 test('SLYA payload hash, block time, and scope are independently verified before accounting', () => {
-  const valid = slyaRow({ evidenceType: 'mining', eventId: 'slya-accounting:v1:mining:verify:0', signature: 'verify', outerInstructionIndex: 0, inputs: [], outputs: [{ asset: 'Ore', quantity: '2', location: 'S1' }], directFees: '0', transactionCosts: { solLamports: '5' } });
+  const valid = slyaRow({ evidenceType: 'mining', eventId: 'slya-accounting:v1:mining:verify:0', signature: 'verify', outerInstructionIndex: 0, inputs: [], outputs: [{ asset: 'Ore', mint: 'ore-mint', quantity: '2', location: 'S1' }], directFees: '0', transactionCosts: { solLamports: '5' } });
   assert.equal(authoritativeSlyaAccountingEvents([{ ...valid, payloadHash: 'a'.repeat(64) }], { faction: 'USTUR', profile: 'p' })[0].reason, 'slya-payload-hash-mismatch');
   assert.equal(authoritativeSlyaAccountingEvents([{ ...valid, faction: 'ONI' }], { faction: 'USTUR', profile: 'p' })[0].reason, 'slya-scope-mismatch');
   assert.equal(authoritativeSlyaAccountingEvents([{ ...valid, _time: '2026-08-04T07:53:21.000Z' }], { faction: 'USTUR', profile: 'p' })[0].reason, 'slya-block-time-mismatch');

@@ -148,8 +148,8 @@ class AccountingEngine {
       const outputQuantity = exactDecimal(event.quantity, outputRow.unit); outputRow.craftingOut = add(outputRow.craftingOut, outputQuantity); outputRow.acquisitions[productionSource] = add(outputRow.acquisitions[productionSource], outputQuantity);
       let cost = sum(consumed.map((part) => part.cost), this.currency); const direct = add(exactDecimal(event.directCost || '0', this.currency), exactDecimal(event.transactionCost || '0', this.currency)); cost = add(cost, direct);
       const sourceCosts = SOURCES.reduce((out, source) => ({ ...out, [source]: sum(consumed.map((part) => part.sourceCosts[source] || zero(this.currency)), this.currency) }), {}); sourceCosts[productionSource] = add(sourceCosts[productionSource], direct); outputRow.costsBySource[productionSource] = add(outputRow.costsBySource[productionSource], direct);
-      const fully = consumed.every((part) => part.fullyCosted); this.addLot({ event, location: event.location, asset: event.asset, quantity: outputQuantity, knownQuantity: fully ? outputQuantity : zero(outputRow.unit), cost, sourceCosts, uncosted: !fully });
-      this.counts.applied += 1; this.detail(event, fully ? 'applied' : 'uncosted'); return;
+      const fully = consumed.every((part) => part.fullyCosted) && event.forceUncosted !== true; this.addLot({ event, location: event.location, asset: event.asset, quantity: outputQuantity, knownQuantity: fully ? outputQuantity : zero(outputRow.unit), cost, sourceCosts, uncosted: !fully });
+      this.counts.applied += 1; this.detail(event, fully ? 'applied' : 'uncosted', { transactionFeeStatus: event.transactionFeeStatus || null, txFeeLamports: event.txFeeLamports || null, txFeeSolExact: event.txFeeSolExact || null }); return;
     }
     if (event.type === 'sale' || event.type === 'consume') {
       const quantity = exactDecimal(event.quantity, row.unit); const consumed = this.consume(event, quantity);

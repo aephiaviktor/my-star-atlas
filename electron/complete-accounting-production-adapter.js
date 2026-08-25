@@ -170,6 +170,28 @@ function integerEvidenceField(value, minimum = 0) {
   return Number.isSafeInteger(parsed) && parsed >= minimum ? parsed : null;
 }
 
+function lamportsToSolExact(value) {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const digits = BigInt(text).toString().padStart(10, '0');
+  return `${digits.slice(0, -9)}.${digits.slice(-9)}`.replace(/\.0+$/, '');
+}
+
+function authoritativeOperationLineage({ evidenceType, operationId, signature, fleetAccount, inputs, outputs, lineage }) {
+  if (!lineage || typeof lineage !== 'object' || !operationId || lineage.operationIdentity !== operationId) return 'operation-identity-unmatched';
+  if (String(lineage.fleetAccount || '') !== fleetAccount || !String(lineage.location || '').trim()) return 'operation-scope-incomplete';
+  if (evidenceType === 'scanning' || evidenceType === 'mining') {
+    if (!String(lineage.sourceAccount || '').trim() || !String(lineage.destinationAccount || '').trim()) return 'asset-account-lineage-incomplete';
+    if (!outputs.every((entry) => String(entry.mint || '').trim() && String(entry.mint) === String(lineage.assetMint || ''))) return 'asset-mint-lineage-unmatched';
+    return '';
+  }
+  const stages = lineage.stageSignatures;
+  if (!stages || typeof stages !== 'object' || !String(stages.input || '').trim() || !String(stages.output || '').trim()) return 'production-stage-unmatched';
+  if (!Object.values(stages).map(String).includes(signature)) return 'production-signature-unmatched';
+  if (!inputs.length || outputs.length !== 1) return 'production-stage-incomplete';
+  return '';
+}
+
 function validSlyaEntry(entry) {
   if (!entry || typeof entry !== 'object' || !String(entry.asset || '').trim()) return false;
   try { exactText(entry.quantity); return true; } catch (_error) { return false; }
@@ -225,13 +247,18 @@ function authoritativeSlyaAccountingEvents(rows = [], scope = null) {
     if (slyaPayloadHash(canonicalPayload) !== payloadHash) return quarantine('slya-payload-hash-mismatch');
     const output = outputs[0];
     const baseWithCanonical = { ...base, timestamp: new Date(blockTime * 1000).toISOString() };
+    const lineageFailure = authoritativeOperationLineage({ evidenceType, operationId, signature, fleetAccount, inputs, outputs, lineage });
+    if (lineageFailure) return [{ ...baseWithCanonical, type: evidenceType === 'crafting' || evidenceType === 'upgrading' ? 'pending' : 'quarantined', asset: String(output.asset), quantity: exactText(output.quantity), reason: `slya-${lineageFailure}` }];
     if ((evidenceType === 'crafting' || evidenceType === 'upgrading') && outputs.length !== 1) return [{ ...baseWithCanonical, type: 'quarantined', asset: String(output.asset), quantity: exactText(output.quantity), reason: 'slya-output-lineage-ambiguous' }];
     if (evidenceType === 'crafting' || evidenceType === 'upgrading') {
       const costs = transactionCosts && typeof transactionCosts === 'object' ? transactionCosts : null;
       const direct = typeof directFees === 'string' ? directFees : directFees?.atlas;
       const transaction = costs?.atlas;
-      if (direct == null || transaction == null) return [{ ...baseWithCanonical, type: 'quarantined', asset: String(output.asset), quantity: exactText(output.quantity), reason: 'slya-transaction-cost-atlas-unavailable' }];
-      return [{ ...baseWithCanonical, type: 'craft', location: String(output.location || lineage?.location || lineage?.starbase || ''), asset: String(output.asset), quantity: exactText(output.quantity), ingredients: inputs.map((entry) => ({ asset: String(entry.asset), quantity: exactText(entry.quantity) })), directCost: exactText(direct), transactionCost: exactText(transaction), lineageStatus: 'confirmed' }];
+      if (direct == null) return [{ ...baseWithCanonical, type: 'pending', asset: String(output.asset), quantity: exactText(output.quantity), reason: 'slya-direct-cost-unavailable' }];
+      const txFeeLamports = String(costs?.solLamports ?? '').trim();
+      const txFeeSolExact = lamportsToSolExact(txFeeLamports);
+      if (transaction == null && txFeeSolExact == null) return [{ ...baseWithCanonical, type: 'pending', asset: String(output.asset), quantity: exactText(output.quantity), reason: 'slya-transaction-fee-unavailable' }];
+      return [{ ...baseWithCanonical, type: 'craft', location: String(lineage.location), asset: String(output.asset), quantity: exactText(output.quantity), ingredients: inputs.map((entry) => ({ asset: String(entry.asset), quantity: exactText(entry.quantity) })), directCost: exactText(direct), transactionCost: transaction == null ? '0' : exactText(transaction), transactionFeeStatus: transaction == null ? 'uncosted' : 'costed', txFeeLamports: txFeeLamports || null, txFeeSolExact, forceUncosted: transaction == null, lineageStatus: 'confirmed' }];
     }
     return outputs.map((entry, index) => {
       const location = String(entry.location || lineage?.location || lineage?.starbase || lineage?.sector || '').trim();
@@ -269,4 +296,4 @@ function buildProductionCompleteAccounting({ scope, period, ledgerEvents = [], a
   return { ...result, sourceFreshness: freshness, unavailableSources, inputEventCount: events.length };
 }
 
-module.exports = { exactText, marketplaceEvents, legacyLedgerEvents, authoritativeCargoEvents, authoritativeSlyaAccountingEvents, actualClosingRows, buildProductionEvents, buildProductionCompleteAccounting };
+module.exports = { exactText, lamportsToSolExact, marketplaceEvents, legacyLedgerEvents, authoritativeCargoEvents, authoritativeSlyaAccountingEvents, actualClosingRows, buildProductionEvents, buildProductionCompleteAccounting };
