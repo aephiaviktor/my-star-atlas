@@ -268,13 +268,19 @@ function authoritativeSlyaAccountingEvents(rows = [], scope = null) {
   });
 }
 
-function buildProductionEvents({ scope = null, ledgerEvents = [], authoritativeCargo = [], authoritativeSlyaEvidence = [], marketplaceTrades = [] } = {}) {
-  return [...legacyLedgerEvents(ledgerEvents), ...authoritativeCargoEvents(authoritativeCargo), ...authoritativeSlyaAccountingEvents(authoritativeSlyaEvidence, scope), ...marketplaceEvents(marketplaceTrades, scope)]
+function authoritativeMarketplaceEvents(events = []) {
+  return events.filter((event) => event?.evidenceAuthority === 'marketplace_v2'
+    && String(event.eventId || '').startsWith('marketplace:v2:')
+    && ['acquisition', 'sale', 'transfer', 'pending', 'unallocated', 'quarantined'].includes(event.type));
+}
+
+function buildProductionEvents({ scope = null, ledgerEvents = [], authoritativeCargo = [], authoritativeSlyaEvidence = [], marketplaceTrades = [], marketplaceActivityEvents = [] } = {}) {
+  return [...legacyLedgerEvents(ledgerEvents), ...authoritativeCargoEvents(authoritativeCargo), ...authoritativeSlyaAccountingEvents(authoritativeSlyaEvidence, scope), ...marketplaceEvents(marketplaceTrades, scope), ...authoritativeMarketplaceEvents(marketplaceActivityEvents)]
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.eventId.localeCompare(right.eventId));
 }
 
-function buildProductionCompleteAccounting({ scope, period, ledgerEvents = [], authoritativeCargo = [], authoritativeSlyaEvidence = [], marketplaceTrades = [], normalizedEvents = null, actualClosing = [], checkpoint = null, sourceAvailability = {} } = {}) {
-  const events = normalizedEvents || buildProductionEvents({ scope, ledgerEvents, authoritativeCargo, authoritativeSlyaEvidence, marketplaceTrades });
+function buildProductionCompleteAccounting({ scope, period, ledgerEvents = [], authoritativeCargo = [], authoritativeSlyaEvidence = [], marketplaceTrades = [], marketplaceActivityEvents = [], normalizedEvents = null, actualClosing = [], checkpoint = null, sourceAvailability = {} } = {}) {
+  const events = normalizedEvents || buildProductionEvents({ scope, ledgerEvents, authoritativeCargo, authoritativeSlyaEvidence, marketplaceTrades, marketplaceActivityEvents });
   const result = buildCompleteBreakEvenAccounting({ scope, period, currency: 'ATLAS', events, actualClosing: actualClosingRows(actualClosing), checkpoint });
   const freshness = {
     generatedAt: new Date().toISOString(),
@@ -296,4 +302,4 @@ function buildProductionCompleteAccounting({ scope, period, ledgerEvents = [], a
   return { ...result, sourceFreshness: freshness, unavailableSources, inputEventCount: events.length };
 }
 
-module.exports = { exactText, lamportsToSolExact, marketplaceEvents, legacyLedgerEvents, authoritativeCargoEvents, authoritativeSlyaAccountingEvents, actualClosingRows, buildProductionEvents, buildProductionCompleteAccounting };
+module.exports = { exactText, lamportsToSolExact, marketplaceEvents, legacyLedgerEvents, authoritativeCargoEvents, authoritativeMarketplaceEvents, authoritativeSlyaAccountingEvents, actualClosingRows, buildProductionEvents, buildProductionCompleteAccounting };

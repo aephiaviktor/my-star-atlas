@@ -34,7 +34,7 @@ function flowTimestamp(transaction) {
 function txSignature(transaction) { return String(transaction?.signature || transaction?.transaction?.signatures?.[0] || ''); }
 function amountFromData(data) { return data.length >= 16 ? Number(data.readBigUInt64LE(8)) : 0; }
 
-function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsByMint = {}, starbasesByKey = {}, atlasPerSol } = {}) {
+function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], walletLineage = {}, assetsByMint = {}, starbasesByKey = {}, atlasPerSol } = {}) {
   if (!transaction || transaction.meta?.err) return [];
   const timestamp = flowTimestamp(transaction);
   const signature = txSignature(transaction);
@@ -61,12 +61,16 @@ function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsB
       const starbase = starbasesByKey[starbaseKey];
       const quantity = amountFromData(data);
       if (!asset || !starbase || !tracked.has(wallet) || !(quantity > 0)) return;
+      const lineage = walletLineage[wallet];
       events.push({
         id: `${signature}:${index}:${isDeposit ? 'deposit' : 'withdraw'}`, timestamp, signature,
         type: 'transfer', asset: asset.name || asset.asset || String(asset), rawMint: mint, quantity,
         origin: isDeposit ? `wallet:${wallet}` : starbase,
         destination: isDeposit ? starbase : `wallet:${wallet}`,
-        txFeeAtlas, flow: isDeposit ? 'css-deposit' : 'css-withdraw',
+        txFeeAtlas, flow: isDeposit ? 'css-deposit' : 'css-withdraw', schemaVersion: 2, wallet,
+        faction: lineage?.faction || '', profile: lineage?.profile || '',
+        lineageStatus: lineage?.faction && lineage?.profile ? 'proven' : 'unallocated',
+        provenance: 'sage_css_transfer',
       });
       return;
     }
@@ -79,11 +83,18 @@ function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsB
     const asset = assetsByMint[mint];
     const quantity = Number(info.tokenAmount?.uiAmountString ?? info.tokenAmount?.uiAmount ?? info.amount);
     if (!asset || !source || !destination || !tracked.has(source.owner) || !tracked.has(destination.owner) || source.owner === destination.owner || !(quantity > 0)) return;
+    const sourceLineage = walletLineage[source.owner];
+    const destinationLineage = walletLineage[destination.owner];
+    const lineage = sourceLineage && destinationLineage
+      && sourceLineage.faction === destinationLineage.faction
+      && sourceLineage.profile === destinationLineage.profile ? sourceLineage : null;
     events.push({
       id: `${signature}:${index}:wallet-transfer`, timestamp, signature, type: 'transfer',
       asset: asset.name || asset.asset || String(asset), rawMint: mint, quantity,
       origin: `wallet:${source.owner}`, destination: `wallet:${destination.owner}`,
-      txFeeAtlas, flow: 'wallet-transfer',
+      txFeeAtlas, flow: 'wallet-transfer', schemaVersion: 2, wallet: source.owner,
+      faction: lineage?.faction || '', profile: lineage?.profile || '',
+      lineageStatus: lineage ? 'proven' : 'unallocated', provenance: 'spl_token_transfer',
     });
   });
   if (events.length > 1 && txFeeAtlas > 0) {
@@ -97,7 +108,10 @@ function escapeFieldString(value) { return `"${String(value ?? '').replace(/(["\
 function formatAssetFlowInfluxLine(event) {
   const timestamp = new Date(event?.timestamp);
   if (Number.isNaN(timestamp.getTime()) || !(Number(event?.quantity) > 0)) return '';
-  const tags = { flowId: event.id, flow: event.flow, asset: event.asset, origin: event.origin, destination: event.destination };
+  const tags = {
+    flowId: event.id, flow: event.flow, asset: event.asset, origin: event.origin, destination: event.destination,
+    faction: event.faction || '', profile: event.profile || '', lineageStatus: event.lineageStatus || 'unallocated',
+  };
   const tagText = Object.entries(tags).map(([key, value]) => `${key}=${escapeTag(value)}`).join(',');
   return `asset_flow,${tagText} quantity=${Number(event.quantity)},txFeeAtlas=${Number(event.txFeeAtlas || 0)},signature=${escapeFieldString(event.signature)},rawMint=${escapeFieldString(event.rawMint)} ${BigInt(timestamp.getTime()) * 1000000n}`;
 }

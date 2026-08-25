@@ -203,9 +203,16 @@ const earningsCargoBreakevenBetaStatus = document.querySelector('#earnings-cargo
 const earningsCargoBreakevenBetaBody = document.querySelector('#earnings-cargo-breakeven-beta-body');
 const earningsMarketplaceSyncStatus = document.querySelector('#earnings-marketplace-sync-status');
 const earningsMarketplaceTableBody = document.querySelector('#earnings-marketplace-table-body');
+const earningsMarketplacePendingBody = document.querySelector('#earnings-marketplace-pending-body');
+const earningsMarketplaceQuarantinedBody = document.querySelector('#earnings-marketplace-quarantined-body');
+const earningsMarketplaceMarketFilter = document.querySelector('#earnings-marketplace-market-filter');
+const earningsMarketplaceTypeFilter = document.querySelector('#earnings-marketplace-type-filter');
+const earningsMarketplaceAttributedTotal = document.querySelector('#earnings-marketplace-attributed-total');
+const earningsMarketplacePendingTotal = document.querySelector('#earnings-marketplace-pending-total');
+const earningsMarketplaceQuarantinedTotal = document.querySelector('#earnings-marketplace-quarantined-total');
+const earningsMarketplaceTransferTotal = document.querySelector('#earnings-marketplace-transfer-total');
 const earningsMarketplaceSideSwitch = document.querySelector('#earnings-marketplace-side-switch');
 const earningsMarketplaceSideButtons = Array.from(document.querySelectorAll('[data-marketplace-side]'));
-const earningsMarketplaceUnitHeader = document.querySelector('#earnings-marketplace-unit-header');
 const earningsScanningDateFilter = document.querySelector('#earnings-scanning-date-filter');
 const earningsScanningFleetFilter = document.querySelector('#earnings-scanning-fleet-filter');
 const earningsMiningDateFilter = document.querySelector('#earnings-mining-date-filter');
@@ -378,7 +385,9 @@ const factionButtons = Array.from(document.querySelectorAll('.faction-button'));
 let currentSection = 'production';
 let currentSubtab = 'scanning';
 let currentEarningsSubtab = 'scanning';
-let earningsMarketplaceSide = 'buy';
+let earningsMarketplaceSide = 'all';
+let earningsMarketplaceMarket = '';
+let earningsMarketplaceType = '';
 let activeCargoTable = 'fleet';
 let latestSettings = null;
 let latestFleetResult = null;
@@ -6700,46 +6709,44 @@ function renderEarningsCrafting(result) {
   }
 }
 
-function renderEarningsMarketplace(result) {
-  const rows = Array.isArray(result?.localMarketTrades) ? result.localMarketTrades : [];
-  const visibleRows = rows.filter((entry) => entry.side === earningsMarketplaceSide);
-  const errorSuffix = result?.localMarketError ? ` · Influx read failed: ${result.localMarketError}` : '';
-  setText(earningsMarketplaceSyncStatus, `${formatMarketplaceWhole(visibleRows.length)} LM ${earningsMarketplaceSide} executions at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
-  setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
-  earningsMarketplaceSideButtons.forEach((button) => {
-    const active = button.dataset.marketplaceSide === earningsMarketplaceSide;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
-  });
-  if (!earningsMarketplaceTableBody) return;
-  earningsMarketplaceTableBody.textContent = '';
-  if (!visibleRows.length) {
+function marketplaceActivityMatchesFilters(entry) {
+  if (earningsMarketplaceMarket && entry.market !== earningsMarketplaceMarket) return false;
+  const selectedType = earningsMarketplaceType || (earningsMarketplaceSide === 'buy' ? 'purchase' : earningsMarketplaceSide === 'sell' ? 'sale' : '');
+  return !selectedType || entry.transactionType === selectedType;
+}
+
+function renderMarketplaceActivityRows(body, rows, emptyMessage, limit) {
+  if (!body) return;
+  body.textContent = '';
+  const visible = rows.filter(marketplaceActivityMatchesFilters).slice(0, limit);
+  if (!visible.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
-    const td = createTextCell(result?.localMarketError ? `Marketplace Influx read failed: ${result.localMarketError}` : `No Marketplace ${earningsMarketplaceSide} executions found`);
+    const td = createTextCell(emptyMessage);
     td.colSpan = 13;
     tr.appendChild(td);
-    earningsMarketplaceTableBody.appendChild(tr);
+    body.appendChild(tr);
     return;
   }
-  for (const entry of [...visibleRows].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))) {
+  for (const entry of visible) {
     const tr = document.createElement('tr');
-    const quantity = Number(entry.quantity) || 0;
-    const gross = Number(entry.grossAtlas) || 0;
-    const txFee = Number(entry.txFeeAtlas) || 0;
-    const net = Number(entry.netAtlas ?? entry.settledAtlas ?? 0);
-    const unitMetric = quantity > 0
-      ? (earningsMarketplaceSide === 'buy' ? (gross + txFee) / quantity : net / quantity)
-      : null;
+    tr.dataset.reconciliationState = entry.reconciliationState || 'unavailable';
+    const quantity = String(entry.exactQuantity ?? '');
+    const value = String(entry.transactionType === 'sale' ? entry.netAtlas ?? '' : entry.grossAtlas ?? '');
+    const quantityNumber = Number(quantity);
+    const valueNumber = Number(value);
+    const price = Number.isFinite(quantityNumber) && quantityNumber > 0 && Number.isFinite(valueNumber)
+      ? valueNumber / quantityNumber : null;
+    const fee = Number(entry.marketplaceFeeAtlas || 0) + Number(entry.transactionFeeAtlas || 0);
+    const attribution = entry.profile && entry.faction ? `${entry.profile} / ${entry.faction}` : 'Unallocated';
+    const provenance = `${entry.provenance || 'Unavailable'} / ${entry.confidence || 'Unavailable'}`;
+    const state = `${String(entry.reconciliationState || 'unavailable').replaceAll('_', ' ')}${entry.reason ? ` · ${entry.reason}` : ''}`;
     const values = [
-      formatMarketplaceTimestamp(entry.timestamp), entry.marketplace || 'LM',
-      entry.starbase || '--', entry.asset || '--', formatMarketplaceWhole(quantity),
-      formatMarketplaceAtlas(gross, 6), formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
-      formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6), formatMarketplaceAtlas(txFee, 2),
-      formatMarketplaceAtlas(net, 2), unitMetric == null ? '--' : formatMarketplaceAtlas(unitMetric, 8),
-      entry.orderId || '--', entry.signature || '--',
+      formatMarketplaceTimestamp(entry.timestamp), entry.market || '--', String(entry.transactionType || '--').replaceAll('_', ' '),
+      entry.asset || '--', quantity || '--', value || '--', price == null ? '--' : formatMarketplaceAtlas(price, 8),
+      Number.isFinite(fee) ? formatMarketplaceAtlas(fee, 8) : '--', entry.wallet || '--', attribution, provenance, state,
     ];
-    for (const value of values.slice(0, -1)) tr.appendChild(createTextCell(value));
+    values.forEach((text) => tr.appendChild(createTextCell(text)));
     const signatureCell = document.createElement('td');
     if (entry.signature) {
       const link = document.createElement('a');
@@ -6748,25 +6755,45 @@ function renderEarningsMarketplace(result) {
       link.rel = 'noopener noreferrer';
       link.textContent = entry.signature;
       signatureCell.appendChild(link);
-    } else {
-      signatureCell.textContent = '--';
-    }
+    } else signatureCell.textContent = '--';
     tr.appendChild(signatureCell);
-    earningsMarketplaceTableBody.appendChild(tr);
+    body.appendChild(tr);
   }
 }
 
-function renderEarningsMarketplaceLoading(message = 'Loading Marketplace data...') {
+function renderEarningsMarketplace(result) {
+  const activity = result?.marketplaceActivity;
+  const attributed = Array.isArray(activity?.attributed) ? activity.attributed : [];
+  const pending = Array.isArray(activity?.pendingAllocation) ? activity.pendingAllocation : [];
+  const quarantined = Array.isArray(activity?.quarantined) ? activity.quarantined : [];
+  const reconciliation = activity?.reconciliation;
+  const errorSuffix = result?.localMarketError ? ` · Cached read failed: ${result.localMarketError}` : '';
+  const availability = activity ? `${formatMarketplaceWhole(attributed.length + pending.length + quarantined.length)} cached activities` : 'Marketplace activity unavailable';
+  setText(earningsMarketplaceSyncStatus, `${availability} at ${formatCheckedAt(result?.checkedAt)} · opening and switching use zero Solana RPC${errorSuffix}`);
+  setText(earningsMarketplaceAttributedTotal, reconciliation ? formatMarketplaceWhole(reconciliation.attributedCount) : 'Unavailable');
+  setText(earningsMarketplacePendingTotal, reconciliation ? formatMarketplaceWhole(reconciliation.pendingAllocationCount) : 'Unavailable');
+  setText(earningsMarketplaceQuarantinedTotal, reconciliation ? formatMarketplaceWhole(reconciliation.quarantinedCount) : 'Unavailable');
+  setText(earningsMarketplaceTransferTotal, reconciliation ? reconciliation.attributedTransferQuantity : 'Unavailable');
+  earningsMarketplaceSideButtons.forEach((button) => {
+    const active = button.dataset.marketplaceSide === earningsMarketplaceSide;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  const ordered = (rows) => [...rows].sort((left, right) => String(right.timestamp || '').localeCompare(String(left.timestamp || '')) || String(left.eventId || '').localeCompare(String(right.eventId || '')));
+  renderMarketplaceActivityRows(earningsMarketplaceTableBody, ordered(attributed), activity ? 'No attributed activity matches the current filters' : 'Attributed Marketplace activity unavailable', 200);
+  renderMarketplaceActivityRows(earningsMarketplacePendingBody, ordered(pending), activity ? 'No pending allocation activity matches the current filters' : 'Pending allocation activity unavailable', 100);
+  renderMarketplaceActivityRows(earningsMarketplaceQuarantinedBody, ordered(quarantined), activity ? 'No quarantined activity matches the current filters' : 'Quarantined activity unavailable', 100);
+}
+
+function renderEarningsMarketplaceLoading(message = 'Loading cached Marketplace data...') {
   setText(earningsMarketplaceSyncStatus, message);
-  setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
-  if (!earningsMarketplaceTableBody) return;
-  earningsMarketplaceTableBody.textContent = '';
-  const tr = document.createElement('tr');
-  tr.className = 'empty-row';
-  const td = createTextCell(message);
-  td.colSpan = 13;
-  tr.appendChild(td);
-  earningsMarketplaceTableBody.appendChild(tr);
+  setText(earningsMarketplaceAttributedTotal, '—');
+  setText(earningsMarketplacePendingTotal, '—');
+  setText(earningsMarketplaceQuarantinedTotal, '—');
+  setText(earningsMarketplaceTransferTotal, '—');
+  renderMarketplaceActivityRows(earningsMarketplaceTableBody, [], message, 200);
+  renderMarketplaceActivityRows(earningsMarketplacePendingBody, [], message, 100);
+  renderMarketplaceActivityRows(earningsMarketplaceQuarantinedBody, [], message, 100);
 }
 
 function renderEarningsBreakevenEmpty(message) {
@@ -9206,9 +9233,23 @@ document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
 
 earningsMarketplaceSideButtons.forEach((button) => {
   button.addEventListener('click', () => {
-    earningsMarketplaceSide = button.dataset.marketplaceSide === 'sell' ? 'sell' : 'buy';
+    earningsMarketplaceSide = ['buy', 'sell'].includes(button.dataset.marketplaceSide) ? button.dataset.marketplaceSide : 'all';
+    earningsMarketplaceType = earningsMarketplaceSide === 'buy' ? 'purchase' : earningsMarketplaceSide === 'sell' ? 'sale' : '';
+    if (earningsMarketplaceTypeFilter) earningsMarketplaceTypeFilter.value = earningsMarketplaceType;
     if (latestEarningsResult) renderEarningsMarketplace(latestEarningsResult);
   });
+});
+
+earningsMarketplaceMarketFilter?.addEventListener('change', () => {
+  earningsMarketplaceMarket = ['LM', 'GM'].includes(earningsMarketplaceMarketFilter.value) ? earningsMarketplaceMarketFilter.value : '';
+  if (latestEarningsResult) renderEarningsMarketplace(latestEarningsResult);
+});
+
+earningsMarketplaceTypeFilter?.addEventListener('change', () => {
+  earningsMarketplaceType = ['purchase', 'sale', 'inbound_transfer', 'outbound_transfer'].includes(earningsMarketplaceTypeFilter.value)
+    ? earningsMarketplaceTypeFilter.value : '';
+  earningsMarketplaceSide = earningsMarketplaceType === 'purchase' ? 'buy' : earningsMarketplaceType === 'sale' ? 'sell' : 'all';
+  if (latestEarningsResult) renderEarningsMarketplace(latestEarningsResult);
 });
 
 document.querySelectorAll('.optimization-subtab-button').forEach((button) => {

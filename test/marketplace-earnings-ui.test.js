@@ -10,28 +10,27 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.ht
 const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 
-test('Marketplace earnings tab sits between Mining and Cargo with a BUY/SELL switch and side-specific unit column', () => {
+test('Marketplace V2 sits between Mining and Cargo with market/type controls and separate reconciliation tables', () => {
   assert.match(html, /data-earnings-subtab="mining"[\s\S]*data-earnings-subtab="marketplace"[\s\S]*data-earnings-subtab="cargo"/);
-  assert.match(html, /id="earnings-marketplace-side-switch"[\s\S]*data-marketplace-side="buy"[^>]*>BUY<[\s\S]*data-marketplace-side="sell"[^>]*>SELL</);
-  assert.doesNotMatch(html, /data-marketplace-side="(?:buy|sell)"[^>]*>\s*(?:BUY|SELL)\s*\(/);
+  assert.match(html, /id="earnings-marketplace-side-switch"[\s\S]*data-marketplace-side="all"[^>]*>ALL<[\s\S]*data-marketplace-side="buy"[^>]*>BUY<[\s\S]*data-marketplace-side="sell"[^>]*>SELL</);
+  assert.match(html, /id="earnings-marketplace-market-filter"[\s\S]*LM \+ GM[\s\S]*id="earnings-marketplace-type-filter"[\s\S]*Inbound transfer[\s\S]*Outbound transfer/);
   const panel = html.match(/data-earnings-panel="marketplace"[\s\S]*?<\/div>\s*<div class="earnings-panel" data-earnings-panel="cargo"/)?.[0] || '';
-  for (const label of ['Timestamp \\(UTC\\)', 'Marketplace', 'Starbase', 'Asset', 'Amount', 'Gross ATLAS', 'Price', 'Marketplace Fee', 'Txs Fee', 'Net ATLAS', 'Cost / Unit', 'Order ID', 'Signature']) {
+  for (const label of ['Timestamp \\(UTC\\)', 'Market', 'Type', 'Asset', 'Exact quantity', 'Value ATLAS', 'Price / unit', 'Fees ATLAS', 'Wallet', 'Profile / faction', 'Provenance / confidence', 'Reconciliation', 'Signature']) {
     assert.match(panel, new RegExp(label));
   }
-  assert.doesNotMatch(panel, /<th>Side<\/th>/);
-  assert.match(panel, /id="earnings-marketplace-unit-header"/);
-  assert.ok(panel.indexOf('Net ATLAS') < panel.indexOf('Cost / Unit'));
-  assert.ok(panel.indexOf('Cost / Unit') < panel.indexOf('Order ID'));
-  assert.ok(panel.indexOf('Order ID') < panel.indexOf('Signature'));
+  assert.match(panel, /Attributed activity[\s\S]*Pending allocation \/ Unallocated[\s\S]*Quarantined activity/);
+  assert.match(panel, /earnings-marketplace-attributed-total[\s\S]*earnings-marketplace-pending-total[\s\S]*earnings-marketplace-quarantined-total/);
 });
 
-test('Marketplace renderer filters rows by selected side and swaps the unit metric', () => {
-  assert.match(renderer, /let earningsMarketplaceSide = 'buy'/);
-  assert.match(renderer, /entry\.side === earningsMarketplaceSide/);
-  assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Cost \/ Unit' : 'Income \/ Unit'/);
-  assert.match(renderer, /earningsMarketplaceSide === 'buy'[\s\S]*\(gross \+ txFee\) \/ quantity[\s\S]*net \/ quantity/);
-  assert.match(renderer, /formatMarketplaceAtlas\(txFee, 2\)/);
-  assert.match(renderer, /formatMarketplaceAtlas\(net, 2\)/);
+test('Marketplace V2 renderer filters market/type, preserves exact quantity text, and bounds every reconciliation section', () => {
+  assert.match(renderer, /let earningsMarketplaceSide = 'all'/);
+  assert.match(renderer, /entry\.market !== earningsMarketplaceMarket/);
+  assert.match(renderer, /entry\.transactionType === selectedType/);
+  assert.match(renderer, /String\(entry\.exactQuantity \?\? ''\)/);
+  assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplaceTableBody[\s\S]*200\)/);
+  assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplacePendingBody[\s\S]*100\)/);
+  assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplaceQuarantinedBody[\s\S]*100\)/);
+  assert.match(renderer, /opening and switching use zero Solana RPC/);
 });
 
 test('Update shares a row with Refresh data while the BUY SELL switch stays below', () => {

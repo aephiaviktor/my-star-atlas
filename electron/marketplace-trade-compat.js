@@ -13,6 +13,7 @@ const OUTPUT_KEYS = Object.freeze([
   'side', 'wallet', 'quantity', 'settledAtlas', 'grossAtlas', 'marketplaceFeeAtlas',
   'txFeeAtlas', 'netAtlas', 'unitPriceAtlas', 'signature', 'creationSignature', 'rawMint',
   'certificateMint', 'orderId', 'representationRank', 'schemaGeneration',
+  'lineageStatus', 'lineageFaction', 'lineageProfile', 'lineageLocation',
 ]);
 const VECTOR_KEYS = Object.freeze([
   'hasOrderId', 'hasCreationSignature', 'hasNonzeroTxFeeAtlas', 'hasSettledAtlas',
@@ -171,6 +172,8 @@ function normalizeMarketplaceV2Row(row = {}, context = {}) {
     signature: identity.signature, creationSignature: rank === 'enriched' ? clean(row.enrichedCreationSignature) : '', rawMint: identity.rawMint,
     certificateMint: clean(row[cap('certificateMint')]), orderId: rank === 'enriched' ? clean(row.enrichedOrderId) : '',
     representationRank: rank, schemaGeneration: 'v2',
+    lineageStatus: clean(row[`${rank}LineageStatus`]), lineageFaction: clean(row[`${rank}LineageFaction`]),
+    lineageProfile: clean(row[`${rank}LineageProfile`]), lineageLocation: clean(row[`${rank}LineageLocation`]),
   });
 }
 

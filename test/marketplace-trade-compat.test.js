@@ -56,7 +56,7 @@ test('uncertain rows dedupe only when bounded normalized bytes are identical', (
 
 test('normalized public rows have exactly the consumer schema and preserve v1 profile metadata privately', () => {
   const row=compat.normalizeMarketplaceV1Row(base,context);
-  assert.deepEqual(Object.keys(row), ['id','tradeId','timestamp','marketplace','faction','profile','starbase','asset','side','wallet','quantity','settledAtlas','grossAtlas','marketplaceFeeAtlas','txFeeAtlas','netAtlas','unitPriceAtlas','signature','creationSignature','rawMint','certificateMint','orderId','representationRank','schemaGeneration']);
+  assert.deepEqual(Object.keys(row), ['id','tradeId','timestamp','marketplace','faction','profile','starbase','asset','side','wallet','quantity','settledAtlas','grossAtlas','marketplaceFeeAtlas','txFeeAtlas','netAtlas','unitPriceAtlas','signature','creationSignature','rawMint','certificateMint','orderId','representationRank','schemaGeneration','lineageStatus','lineageFaction','lineageProfile','lineageLocation']);
   assert.equal(row.profile,'USTUR'); assert.equal(row.historicalProfile,'PlayerKey');
 });
 

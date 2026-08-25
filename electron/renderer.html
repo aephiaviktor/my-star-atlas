@@ -127,8 +127,9 @@
                 <button class="refresh-data-btn" id="refresh-data-btn" type="button" title="Refresh the visible view">Refresh data</button>
                 <button class="update-btn" id="update-btn" type="button">Update</button>
               </div>
-              <div id="earnings-marketplace-side-switch" class="marketplace-side-switch" role="group" aria-label="Marketplace order side" hidden>
-                <button class="marketplace-side-button marketplace-side-buy active" type="button" data-marketplace-side="buy" aria-pressed="true">BUY</button>
+              <div id="earnings-marketplace-side-switch" class="marketplace-side-switch" role="group" aria-label="Marketplace transaction type" hidden>
+                <button class="marketplace-side-button active" type="button" data-marketplace-side="all" aria-pressed="true">ALL</button>
+                <button class="marketplace-side-button marketplace-side-buy" type="button" data-marketplace-side="buy" aria-pressed="false">BUY</button>
                 <button class="marketplace-side-button marketplace-side-sell" type="button" data-marketplace-side="sell" aria-pressed="false">SELL</button>
               </div>
             </div>
@@ -1247,13 +1248,32 @@
           </div>
 
           <div class="earnings-panel" data-earnings-panel="marketplace">
-            <section class="work-surface earnings-surface">
-              <div id="earnings-marketplace-sync-status" class="fleet-sync-status" role="status">Awaiting LM executions</div>
-              <div class="fleet-table-wrap">
-                <table class="fleet-table earnings-table">
-                  <thead><tr><th>Timestamp (UTC)</th><th>Marketplace</th><th>Starbase</th><th>Asset</th><th>Amount</th><th>Gross ATLAS</th><th>Price</th><th>Marketplace Fee</th><th>Txs Fee</th><th>Net ATLAS</th><th id="earnings-marketplace-unit-header">Cost / Unit</th><th>Order ID</th><th>Signature</th></tr></thead>
-                  <tbody id="earnings-marketplace-table-body"><tr class="empty-row"><td colspan="13">No LM buy executions loaded</td></tr></tbody>
+            <section class="work-surface earnings-surface marketplace-v2-surface">
+              <div id="earnings-marketplace-sync-status" class="fleet-sync-status" role="status">Awaiting cached Marketplace activity</div>
+              <div class="activity-filter-bar marketplace-v2-filters">
+                <label class="activity-filter"><span>Market</span><select id="earnings-marketplace-market-filter"><option value="">LM + GM</option><option value="LM">LM</option><option value="GM">GM</option></select></label>
+                <label class="activity-filter"><span>Transaction type</span><select id="earnings-marketplace-type-filter"><option value="">All activity</option><option value="purchase">Purchase</option><option value="sale">Sale</option><option value="inbound_transfer">Inbound transfer</option><option value="outbound_transfer">Outbound transfer</option></select></label>
+              </div>
+              <div class="marketplace-v2-summary" aria-label="Marketplace reconciliation totals">
+                <div><span>Attributed</span><strong id="earnings-marketplace-attributed-total">—</strong></div>
+                <div><span>Pending allocation</span><strong id="earnings-marketplace-pending-total">—</strong></div>
+                <div><span>Quarantined</span><strong id="earnings-marketplace-quarantined-total">—</strong></div>
+                <div><span>Transfers</span><strong id="earnings-marketplace-transfer-total">—</strong></div>
+              </div>
+              <h3>Attributed activity</h3>
+              <div class="fleet-table-wrap marketplace-v2-table-wrap">
+                <table class="fleet-table earnings-table marketplace-v2-table">
+                  <thead><tr><th>Timestamp (UTC)</th><th>Market</th><th>Type</th><th>Asset</th><th>Exact quantity</th><th>Value ATLAS</th><th>Price / unit</th><th>Fees ATLAS</th><th>Wallet</th><th>Profile / faction</th><th>Provenance / confidence</th><th>Reconciliation</th><th>Signature</th></tr></thead>
+                  <tbody id="earnings-marketplace-table-body"><tr class="empty-row"><td colspan="13">No attributed Marketplace activity loaded</td></tr></tbody>
                 </table>
+              </div>
+              <h3>Pending allocation / Unallocated</h3>
+              <div class="fleet-table-wrap marketplace-v2-table-wrap marketplace-v2-secondary">
+                <table class="fleet-table earnings-table marketplace-v2-table"><thead><tr><th>Timestamp (UTC)</th><th>Market</th><th>Type</th><th>Asset</th><th>Exact quantity</th><th>Value ATLAS</th><th>Price / unit</th><th>Fees ATLAS</th><th>Wallet</th><th>Profile / faction</th><th>Provenance / confidence</th><th>Reconciliation</th><th>Signature</th></tr></thead><tbody id="earnings-marketplace-pending-body"><tr class="empty-row"><td colspan="13">No pending Marketplace activity</td></tr></tbody></table>
+              </div>
+              <h3>Quarantined activity</h3>
+              <div class="fleet-table-wrap marketplace-v2-table-wrap marketplace-v2-secondary">
+                <table class="fleet-table earnings-table marketplace-v2-table"><thead><tr><th>Timestamp (UTC)</th><th>Market</th><th>Type</th><th>Asset</th><th>Exact quantity</th><th>Value ATLAS</th><th>Price / unit</th><th>Fees ATLAS</th><th>Wallet</th><th>Profile / faction</th><th>Provenance / confidence</th><th>Reconciliation</th><th>Signature</th></tr></thead><tbody id="earnings-marketplace-quarantined-body"><tr class="empty-row"><td colspan="13">No quarantined Marketplace activity</td></tr></tbody></table>
               </div>
             </section>
           </div>

@@ -63,6 +63,7 @@ const {
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
+const { projectMarketplaceEvidenceV2, buildMarketplaceLedgerEvents } = require('./marketplace-activity-v2');
 const {
   normalizeMarketplaceV1Row,
   normalizeMarketplaceV2Row,
@@ -4454,6 +4455,10 @@ function marketplaceTradePublicationCandidate(trade, { market, faction, profileS
     [`${rank}Starbase`]: String(trade.starbase || ''),
     [`${rank}Asset`]: String(trade.asset || ''),
     [`${rank}CertificateMint`]: String(trade.certificateMint || ''),
+    [`${rank}LineageStatus`]: String(trade.lineageStatus || ''),
+    [`${rank}LineageFaction`]: String(trade.lineageFaction || ''),
+    [`${rank}LineageProfile`]: String(trade.lineageProfile || ''),
+    [`${rank}LineageLocation`]: String(trade.lineageLocation || ''),
   };
   if (rank === 'enriched') {
     common.enrichedTxFeeAtlas = trade.txFeeAtlas ?? 0;
@@ -4468,7 +4473,7 @@ function marketplaceTradePublicationCandidate(trade, { market, faction, profileS
     record: {
       eventType: 'trade', identity,
       pointTimestampNs: String(BigInt(new Date(trade.timestamp).getTime()) * 1000000n),
-      sourceVersion: `${rank}_v1`, fields: common,
+      sourceVersion: `${rank}_v2`, fields: common,
     },
   };
 }
@@ -5397,8 +5402,22 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
 
 async function fetchMarketplaceSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
-  const result = await fetchMarketplaceTradesFromInflux(settings);
-  return { ok: !result.error, localMarketTrades: result.trades, localMarketTradeCount: result.trades.length, localMarketError: result.error, checkedAt: new Date().toISOString() };
+  const [result, flowResult] = await Promise.allSettled([
+    fetchMarketplaceTradesFromInflux(settings), fetchMarketplaceAssetFlowsFromInflux(settings),
+  ]);
+  const trades = result.status === 'fulfilled' ? result.value.trades : [];
+  const tradeError = result.status === 'fulfilled' ? result.value.error : String(result.reason?.message || result.reason || 'marketplace_influx_unavailable');
+  const transfers = flowResult.status === 'fulfilled' ? flowResult.value : [];
+  const flowError = flowResult.status === 'rejected' ? String(flowResult.reason?.message || flowResult.reason || 'asset_flow_influx_unavailable') : '';
+  const marketplaceActivity = projectMarketplaceEvidenceV2({
+    trades, transfers,
+    scope: { faction: normalizeFaction(settings.faction), profile: getSelectedPlayerProfile(settings) },
+  });
+  const error = [tradeError, flowError].filter(Boolean).join('; ');
+  return {
+    ok: !error, localMarketTrades: trades, localMarketTradeCount: trades.length, localMarketError: error,
+    marketplaceActivity, checkedAt: new Date().toISOString(),
+  };
 }
 
 function getCurrentResourcePriceAtl(prices, resourceName) {
@@ -7423,6 +7442,14 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     ? await fetchSlyaAccountingEvidenceFromInflux(settings)
     : { rows: [], error: '' };
   const marketplaceAssetFlowEvents = needsInventoryLedger ? await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []) : [];
+  const marketplaceActivity = needsCompleteAccounting ? projectMarketplaceEvidenceV2({
+    trades: localMarketResult.trades,
+    transfers: marketplaceAssetFlowEvents,
+    scope: { faction: ledgerFaction, profile: getSelectedPlayerProfile(settings) },
+  }) : { activities: [], attributed: [], pendingAllocation: [], quarantined: [], reconciliation: null };
+  const marketplaceActivityEvents = needsCompleteAccounting
+    ? buildMarketplaceLedgerEvents(marketplaceActivity, { faction: ledgerFaction, profile: getSelectedPlayerProfile(settings) })
+    : [];
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
   const checkpoint = needsInventoryLedger
     ? await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName })
@@ -7452,8 +7479,10 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     cargoRows: ledgerCargoRows,
     craftingRows: ledgerCraftingRows,
     upgradingRows: upgradingRows.ledgerEvents || [],
-    localMarketTrades: localMarketResult.trades,
-    assetFlowEvents: marketplaceAssetFlowEvents,
+    // Compatibility rows remain visible, but only strict Marketplace V2
+    // activity events may enter the authoritative complete ledger below.
+    localMarketTrades: [],
+    assetFlowEvents: [],
   }) : { events: [], appliedEventResults: [], ledger: { snapshot: () => [] }, rejectedEvents: [], seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {} };
   const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
   const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
@@ -7558,7 +7587,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         ledgerEvents: ledgerSourceEvents,
         authoritativeCargo: (inventoryCostLedgerResult.authoritativeCargoEvents || []).filter((event) => Date.parse(event.timestamp) > sourceCutoff),
         authoritativeSlyaEvidence: slyaAccountingEvidenceResult.rows.filter((event) => Date.parse(event._time || event.timestamp) > sourceCutoff),
-        marketplaceTrades: localMarketResult.trades.filter((trade) => Date.parse(trade.timestamp) > sourceCutoff),
+        marketplaceActivityEvents: marketplaceActivityEvents.filter((event) => Date.parse(event.timestamp) > sourceCutoff),
       });
       const mergedEvents = mergeCompleteAccountingEvents(durable.events, currentEvents);
       const now = new Date();
@@ -7568,7 +7597,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         scope: accountingScope,
         period,
         normalizedEvents: mergedEvents,
-        marketplaceTrades: localMarketResult.trades,
+        marketplaceActivityEvents,
         authoritativeCargo: inventoryCostLedgerResult.authoritativeCargoEvents || [],
         authoritativeSlyaEvidence: slyaAccountingEvidenceResult.rows,
         actualClosing: currentInventoryRows,
@@ -7934,6 +7963,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     localMarketTrades: localMarketResult.trades,
     localMarketTradeCount: localMarketResult.trades.length,
     localMarketError: localMarketResult.error,
+    marketplaceActivity,
     inventoryCostLedgerEvents,
     inventoryCostLedgerAppliedEventResults,
     inventoryCostLedgerRows,
