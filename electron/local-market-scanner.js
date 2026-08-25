@@ -202,10 +202,19 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
   return { signatures, cursors: nextCursors };
 }
 
+function normalizePendingHydration(rows) {
+  return Array.from(new Map(Array.from(rows || []).filter((row) => row?.signature).map((row) => [String(row.signature), {
+    signature: String(row.signature), blockTime: row.blockTime == null ? null : Number(row.blockTime),
+    slot: row.slot == null ? null : String(row.slot),
+  }])).values()).sort((a, b) => Number(b.blockTime || 0) - Number(a.blockTime || 0) || a.signature.localeCompare(b.signature));
+}
+
 async function fetchTransactions(connection, rows, pacer, stats) {
-  const ordered = Array.from(rows.values()).sort((a, b) => Number(a.blockTime || 0) - Number(b.blockTime || 0));
+  const ordered = normalizePendingHydration(Array.from(rows.values()));
   const transactions = [];
-  for (const row of ordered) {
+  const unresolved = [];
+  for (let index = 0; index < ordered.length; index += 1) {
+    const row = ordered[index];
     if (pacer) await pacer();
     const signature = String(row.signature);
     let transaction;
@@ -214,6 +223,7 @@ async function fetchTransactions(connection, rows, pacer, stats) {
     } catch (error) {
       if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
       transactions.exhaustion = error;
+      unresolved.push(...ordered.slice(index));
       break;
     }
     if (stats) stats.transactionRequests += 1;
@@ -221,14 +231,17 @@ async function fetchTransactions(connection, rows, pacer, stats) {
     else {
       if (stats) stats.transactionMisses += 1;
       recordTelemetryCounter('transactionMisses');
+      unresolved.push(row);
     }
   }
+  transactions.pendingHydration = normalizePendingHydration(unresolved);
   return transactions;
 }
 
 async function scanLocalMarketTrades(connection, {
   trackedWallets = [], marketAssetsByMint = {}, knownOrders = [], startIso,
   walletCursors = {}, orderCursors = {}, activeOrderIds = [], archivedOrderIds = [], openOrderIds = [],
+  pendingHydration = [], pendingWalletCursors = {},
   addressFactory = (value) => value, maxPages = MAX_SIGNATURE_PAGES,
   requestsPerSecond = DEFAULT_REQUESTS_PER_SECOND,
   atlasPerSol, decodeAssetFlows,
@@ -244,7 +257,7 @@ async function scanLocalMarketTrades(connection, {
   const ordersById = new Map((knownOrders || []).filter((row) => row?.orderId).map((row) => [String(row.orderId), row]));
   const archived = new Set((archivedOrderIds || []).map(String));
   const open = new Set((openOrderIds || []).map(String));
-  const partialResult = (transactions, exhaustion) => {
+  const partialResult = (transactions, exhaustion, pending = transactions?.pendingHydration || []) => {
     const tradesById = new Map();
     const assetFlowsById = new Map();
     for (const transaction of transactions || []) {
@@ -266,7 +279,7 @@ async function scanLocalMarketTrades(connection, {
       activeOrderIds: Array.from(activeOrderIds || []), archivedOrderIds: Array.from(archivedOrderIds || []),
       stats: { ...stats, totalRpcRequests: stats.signatureRequests + stats.transactionRequests },
       immutableEvidence, coverage: buildCoverage(coverageState, stats, resolvedStartIso, walletCursors, walletCursors, exhaustion),
-      exhaustion,
+      exhaustion, pendingHydration: normalizePendingHydration(pending), pendingWalletCursors: { ...pendingWalletCursors },
     };
   };
   for (const orderId of open) archived.delete(orderId);
@@ -299,10 +312,23 @@ async function scanLocalMarketTrades(connection, {
     const enriched = decodeLocalMarketOrder({ ...transaction, signature: order.creationSignature }, { trackedWallets, marketAssetsByMint, atlasPerSol });
     if (enriched) ordersById.set(enriched.orderId, enriched);
   }
+  const durablePending = normalizePendingHydration(pendingHydration);
+  if (durablePending.length) {
+    const pendingTransactions = await fetchTransactions(connection, new Map(durablePending.map((row) => [row.signature, row])), pacer, stats);
+    const result = partialResult(pendingTransactions, pendingTransactions.exhaustion, pendingTransactions.pendingHydration);
+    if (!result.pendingHydration.length && !result.exhaustion) {
+      result.walletCursors = { ...pendingWalletCursors };
+      result.pendingWalletCursors = {};
+    }
+    return result;
+  }
   const walletScan = await collectSignatures(connection, trackedWallets, startMs, addressFactory, maxPages, pacer, stats, walletCursors);
   if (walletScan.exhaustion) return partialResult([], walletScan.exhaustion);
   const walletTransactions = await fetchTransactions(connection, walletScan.signatures, pacer, stats);
-  if (walletTransactions.exhaustion) return partialResult(walletTransactions, walletTransactions.exhaustion);
+  if (walletTransactions.exhaustion || walletTransactions.pendingHydration.length) {
+    pendingWalletCursors = walletScan.cursors;
+    return partialResult(walletTransactions, walletTransactions.exhaustion, walletTransactions.pendingHydration);
+  }
   const discoveredOrderIds = new Set();
   for (const transaction of walletTransactions) {
     const order = decodeLocalMarketOrder(transaction, { trackedWallets, marketAssetsByMint, atlasPerSol });
@@ -368,6 +394,7 @@ async function scanLocalMarketTrades(connection, {
     stats: { ...stats, totalRpcRequests: stats.signatureRequests + stats.transactionRequests },
     immutableEvidence,
     coverage: buildCoverage(coverageState, stats, resolvedStartIso, walletCursors, walletScan.cursors),
+    pendingHydration: [], pendingWalletCursors: {},
   };
 }
 
@@ -391,5 +418,5 @@ module.exports = {
   DEFAULT_START_ISO, MAX_LOOKBACK_MS, DEFAULT_REQUESTS_PER_SECOND,
   resolveLocalMarketStartIso, createLocalMarketPacer,
   scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, computeTxFeeAtlas, fetchTransactions,
-  preserveTransactionEvidence, buildCoverage,
+  preserveTransactionEvidence, buildCoverage, normalizePendingHydration,
 };

@@ -4329,6 +4329,8 @@ async function loadLocalMarketTradeCheckpoint(filePath) {
       orderCursors: document?.orderCursors && typeof document.orderCursors === 'object' ? document.orderCursors : {},
       activeOrderIds: Array.isArray(document?.activeOrderIds) ? document.activeOrderIds : [],
       archivedOrderIds: Array.isArray(document?.archivedOrderIds) ? document.archivedOrderIds : [],
+      pendingHydration: Array.isArray(document?.pendingHydration) ? document.pendingHydration : [],
+      pendingWalletCursors: document?.pendingWalletCursors && typeof document.pendingWalletCursors === 'object' ? document.pendingWalletCursors : {},
       marketplaceBackfilled: document?.marketplaceBackfilled === true,
       assetFlowBackfilled: document?.assetFlowBackfilled === true,
       tradeEnrichmentVersion: Number(document?.tradeEnrichmentVersion || 0),
@@ -4337,6 +4339,7 @@ async function loadLocalMarketTradeCheckpoint(filePath) {
     if (error?.code === 'ENOENT') return {
       orders: [], trades: [], assetFlows: [], publishedTradeIds: new Set(), publishedFlowIds: new Set(), walletCursors: {}, orderCursors: {},
       activeOrderIds: [], archivedOrderIds: [], marketplaceBackfilled: false,
+      pendingHydration: [], pendingWalletCursors: {},
       assetFlowBackfilled: false,
       tradeEnrichmentVersion: 0,
     };
@@ -5128,6 +5131,8 @@ async function fetchLocalMarketTrades(settings, connection) {
     trackedWallets,
     marketAssetsByMint,
     knownOrders: checkpoint.orders,
+    pendingHydration: checkpoint.pendingHydration,
+    pendingWalletCursors: checkpoint.pendingWalletCursors,
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
     startIso: needsTradeEnrichment ? startIso : overlapStart,
@@ -5160,6 +5165,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   const safeCheckpointDocument = {
     schemaVersion: 2, faction, profile, savedAt: new Date().toISOString(),
     orders: scanned.orders, trades, immutableEvidence: scanned.immutableEvidence, coverage: scanned.coverage, ...cursorOutputSnapshot,
+    pendingHydration: scanned.pendingHydration, pendingWalletCursors: scanned.pendingWalletCursors,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     marketplaceBackfilled: false, tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
   };
@@ -5254,6 +5260,8 @@ async function fetchGlobalMarketTrades(settings, connection) {
     trackedWallets,
     marketAssetsByMint: buildGlobalMarketAssetMap(),
     knownOrders: checkpoint.orders,
+    pendingHydration: checkpoint.pendingHydration,
+    pendingWalletCursors: checkpoint.pendingWalletCursors,
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
     startIso: overlapStart,
@@ -5281,6 +5289,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
   const safeCheckpointDocument = {
     schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets,
     orders: scanned.orders, trades, assetFlows, immutableEvidence: scanned.immutableEvidence, coverage: scanned.coverage, ...cursorOutputSnapshot,
+    pendingHydration: scanned.pendingHydration, pendingWalletCursors: scanned.pendingWalletCursors,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     publishedFlowIds: Array.from(checkpoint.publishedFlowIds).sort(),
     marketplaceBackfilled: false, assetFlowBackfilled: false,
