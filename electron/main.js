@@ -66,6 +66,7 @@ const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./ma
 const { projectMarketplaceEvidenceV2, buildMarketplaceLedgerEvents } = require('./marketplace-activity-v2');
 const {
   marketplacePublicationCandidateScopeStatus,
+  marketplacePublicationHoldScopeStatus,
   partitionMarketplaceRetryHolds,
 } = require('./marketplace-publication-scope');
 const {

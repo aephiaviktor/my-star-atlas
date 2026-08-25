@@ -1,6 +1,9 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 const {
   authoritativeMarketplaceProfile,
   marketplacePublicationScopeStatus,
@@ -48,4 +51,36 @@ test('retry partition excludes scope conflicts without editing or releasing audi
   assert.equal(conflict.state, 'held');
   assert.deepEqual(conflict.inputCursors, { wallet: 'stuck-aug-2' });
   assert.equal(conflict.failureCode, 'profile_scope_conflict');
+});
+
+test('production recovery loop has and executes held-scope validation wiring', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
+  const importBlock = source.match(/const \{[\s\S]*?\} = require\('\.\/marketplace-publication-scope'\);/)[0];
+  const importedNames = new Set(importBlock.match(/marketplacePublication[A-Za-z]+|partitionMarketplaceRetryHolds/g));
+  const start = source.indexOf('async function recoverMarketplacePublication(settings) {');
+  assert.ok(start >= 0);
+  let depth = 0;
+  let end = -1;
+  for (let index = source.indexOf('{', start); index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    if (source[index] === '}' && --depth === 0) { end = index + 1; break; }
+  }
+  assert.ok(end > start);
+
+  const conflict = { state: 'held', market: 'LM', candidateSnapshot: { faction: 'MUD', profileScope: 'USTUR' } };
+  const loadedHolds = { status: 'loaded', document: { holds: { conflict } } };
+  const context = {
+    resolveMarketplacePublicationOrganization: async () => null,
+    marketplacePublicationSettings: () => ({ baseUrl: '', bucket: '', storageRoot: '/tmp', installationId: 'installation', applicationProfile: 'USTUR' }),
+    createMarketplacePublicationCoordinator: () => ({ publishMarketplaceCandidates: async () => ({}) }),
+    loadMarketplacePublicationHolds: async () => loadedHolds,
+    loadMarketplaceOutboxV2: async () => ({ status: 'loaded', document: { events: {} } }),
+    getAppRoot: () => '/tmp',
+    partitionMarketplaceRetryHolds,
+    ...(importedNames.has('marketplacePublicationHoldScopeStatus') ? { marketplacePublicationHoldScopeStatus } : {}),
+  };
+  vm.createContext(context);
+  vm.runInContext(`${source.slice(start, end)}; this.recoverMarketplacePublication = recoverMarketplacePublication;`, context);
+  const result = await context.recoverMarketplacePublication(settings);
+  assert.deepEqual({ ...result }, { status: 'recovery_complete', recovered: 0, scopeConflictCount: 1 });
 });
