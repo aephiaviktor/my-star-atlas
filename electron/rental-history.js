@@ -13,7 +13,7 @@ function buildRentalHistoryFluxQuery(bucket, rangeStart = '-40d') {
   |> range(start: ${rangeStart})
   |> filter(fn: (r) => r._measurement == "fleet_rental_daily_v1")
   |> pivot(rowKey: ["_time", "fleetAccount", "contractId", "rentalId"], columnKey: ["_field"], valueColumn: "_value")
-  |> keep(columns: ["_time", "fleetAccount", "contractId", "rentalId", "rentalCostAtlas", "dailyRateAtlas", "fleetLabel", "faction", "programGeneration"])
+  |> keep(columns: ["_time", "fleetAccount", "contractId", "rentalId", "rentalCostAtlas", "dailyRateAtlas", "fleetLabel", "faction", "programGeneration", "requiredCrew", "crewCount", "crewSnapshotSource"])
   |> sort(columns: ["_time"])`;
 }
 
@@ -36,6 +36,9 @@ function projectRentalHistoryRows(rows) {
       fleetLabel: normalizeText(row?.fleetLabel),
       faction: normalizeFaction(row?.faction),
       programGeneration: normalizeText(row?.programGeneration),
+      requiredCrew: Number.isFinite(Number(row?.requiredCrew)) && Number(row.requiredCrew) > 0 ? Number(row.requiredCrew) : null,
+      crewCount: Number.isFinite(Number(row?.crewCount)) && Number(row.crewCount) >= 0 ? Number(row.crewCount) : null,
+      crewSnapshotSource: normalizeText(row?.crewSnapshotSource),
     }];
   });
 }
@@ -67,12 +70,22 @@ function createRentalHistoryIndex(records) {
 function summarizeRentalCandidate(candidate, fleetAccount = '') {
   if (!candidate) return null;
   const records = candidate.records || [];
+  const authoritativeCrewSources = new Set(['fleet_account_observed', 'fleet_composition_historical_verified']);
+  const observedCrewRecords = records.filter((record) => authoritativeCrewSources.has(record.crewSnapshotSource)
+    && Number.isFinite(record.requiredCrew) && record.requiredCrew > 0);
+  const requiredCrewValues = new Set(observedCrewRecords.map((record) => record.requiredCrew));
+  const crewCountValues = new Set(observedCrewRecords.map((record) => record.crewCount).filter(Number.isFinite));
+  const crewFactsConsistent = observedCrewRecords.length > 0 && requiredCrewValues.size === 1 && crewCountValues.size <= 1;
+  const crewSources = new Set(observedCrewRecords.map((record) => record.crewSnapshotSource));
   return {
     fleetAccount: fleetAccount || records[0]?.fleetAccount || '',
     rentalCostAtlas: candidate.rentalCostAtlas,
     rentalContract: records.length === 1 ? records[0].contractId : null,
     rentalIds: records.map((record) => record.rentalId),
     programGenerations: Array.from(new Set(records.map((record) => record.programGeneration).filter(Boolean))),
+    requiredCrew: crewFactsConsistent ? observedCrewRecords[0].requiredCrew : null,
+    crewCount: crewFactsConsistent && crewCountValues.size === 1 ? Array.from(crewCountValues)[0] : null,
+    crewSnapshotSource: crewFactsConsistent && crewSources.size === 1 ? Array.from(crewSources)[0] : '',
   };
 }
 

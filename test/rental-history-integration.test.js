@@ -24,6 +24,13 @@ test('Scanning, Mining, and Cargo use date-matched history instead of current fl
   assert.match(snapshot, /rentalForRow\(fleet, cargoRow\.fleet, cargoRow\.isoDate, authoritativeAccount\)/);
 });
 
+test('historical required crew overrides current composition for date-matched per-crew results', () => {
+  const matches = main.match(/const totalRequiredCrew = historicalRental\?\.requiredCrew \?\? fleet\?\.totalRequiredCrew \?\? null;/g) || [];
+  assert.equal(matches.length, 3);
+  assert.match(main, /netProfitPerCrew: Number\.isFinite\(netProfitAtlas\) && Number\.isFinite\(totalRequiredCrew\)/);
+  assert.match(main, /crewSnapshotSource: historicalRental\?\.crewSnapshotSource/);
+});
+
 test('historical rental unavailability is partial-result metadata and cannot erase category rows', () => {
   assert.match(main, /let rentalHistoryIndex = createRentalHistoryIndex\(\[\]\)/);
   assert.match(main, /else rentalHistoryError = String\(/);

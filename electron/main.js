@@ -7038,6 +7038,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const txsCostsAtlas = atlasPerSol != null ? scanRow.txCostSol * atlasPerSol : null;
     const historicalRental = rentalForRow(fleet, scanRow.fleet, scanRow.isoDate);
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
+    const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
     const costParts = [foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const revenueAtlasPerDay = sduPriceAtl != null ? scanRow.sduFound * sduPriceAtl : null;
@@ -7056,15 +7057,16 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       shipTypes: fleet?.shipTypes || 0,
       expectedSduPerScan: fleet?.expectedSduPerScan ?? null,
       expectedSduValueAtl: fleet?.expectedSduValueAtl ?? null,
-      totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
+      totalRequiredCrew,
+      crewSnapshotSource: historicalRental?.crewSnapshotSource || (fleet?.totalRequiredCrew ? 'current_fleet_composition' : ''),
       revenueAtlasPerDay,
       foodCostsAtlas,
       fuelCostsAtlas,
       txsCostsAtlas,
       totalCostsAtlas,
       netProfitAtlas,
-      netProfitPerCrew: Number.isFinite(netProfitAtlas) && Number.isFinite(fleet?.totalRequiredCrew) && fleet.totalRequiredCrew > 0
-        ? netProfitAtlas / fleet.totalRequiredCrew
+      netProfitPerCrew: Number.isFinite(netProfitAtlas) && Number.isFinite(totalRequiredCrew) && totalRequiredCrew > 0
+        ? netProfitAtlas / totalRequiredCrew
         : null,
       profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
         ? (netProfitAtlas / revenueAtlasPerDay) * 100
@@ -7099,6 +7101,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const txsCostsAtlas = atlasPerSol != null ? miningRow.txCostSol * atlasPerSol : null;
     const historicalRental = rentalForRow(fleet, miningRow.fleet, miningRow.isoDate);
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
+    const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
     const costParts = [ammoCostsAtlas, foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
@@ -7118,7 +7121,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       activity: fleet?.activity || '',
       ships: fleet?.ships || [],
       shipTypes: fleet?.shipTypes || 0,
-      totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
+      totalRequiredCrew,
+      crewSnapshotSource: historicalRental?.crewSnapshotSource || (fleet?.totalRequiredCrew ? 'current_fleet_composition' : ''),
       rawMaterialPriceAtl,
       revenueAtlasPerDay,
       ammoCostsAtlas,
@@ -7127,8 +7131,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       txsCostsAtlas,
       totalCostsAtlas,
       netProfitAtlas,
-      netProfitPerCrew: Number.isFinite(netProfitAtlas) && Number.isFinite(fleet?.totalRequiredCrew) && fleet.totalRequiredCrew > 0
-        ? netProfitAtlas / fleet.totalRequiredCrew
+      netProfitPerCrew: Number.isFinite(netProfitAtlas) && Number.isFinite(totalRequiredCrew) && totalRequiredCrew > 0
+        ? netProfitAtlas / totalRequiredCrew
         : null,
       profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
         ? (netProfitAtlas / revenueAtlasPerDay) * 100
@@ -7177,6 +7181,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       : (atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null);
     const historicalRental = rentalForRow(fleet, cargoRow.fleet, cargoRow.isoDate, authoritativeAccount);
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
+    const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
     const incompleteRawValuation = (fuelCanonical && Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (feeCanonical && BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas));
     const costParts = [fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = !incompleteRawValuation && costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
@@ -7193,7 +7198,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       activity: fleet?.activity || '',
       ships: fleet?.ships || [],
       shipTypes: fleet?.shipTypes || 0,
-      totalRequiredCrew: fleet?.totalRequiredCrew ?? null,
+      totalRequiredCrew,
+      crewSnapshotSource: historicalRental?.crewSnapshotSource || (fleet?.totalRequiredCrew ? 'current_fleet_composition' : ''),
       fleetCargoCapacity: fleet?.totalCargoCapacity ?? null,
       cargoCycles: cargoRow.cargoCycles == null ? null : Number(cargoRow.cargoCycles),
       cargoLegs: cargoRow.cargoLegs == null ? null : Number(cargoRow.cargoLegs),
