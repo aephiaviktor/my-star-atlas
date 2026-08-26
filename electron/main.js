@@ -43,6 +43,7 @@ const { buildCargoAllocationPivotFlux, createCargoAllocationSource } = require('
 const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
 const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, cargoVolumeRangeStart, buildCargoVolumeRows, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
+const { CURRENT_RENTAL_OFFSETS, decodeCurrentRental, matchActiveRental } = require('./rental-state');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
@@ -5816,6 +5817,61 @@ async function fetchProfileFleetsUncached(payload) {
     { settings, providerRole: resolveSolanaConnectionRoutes(settings).primaryProvider }
   );
 
+  // Current SRSLY rentals are authoritative for active rental metadata and can
+  // discover a rented fleet even when its SAGE subProfile index is absent or
+  // stale. Keep the SAGE managed-fleet query above as the legacy reader, then
+  // merge both sources by fleet account.
+  const currentRentalsByFleet = new Map();
+  let currentRentalFleetKeys = [];
+  let currentRentalFleetInfos = [];
+  try {
+    const currentRentalAccounts = await getFilteredProgramAccounts(
+      connection,
+      rpcUrl,
+      SRSLY_PROGRAM_ID,
+      {
+        commitment: 'confirmed',
+        filters: [{
+          memcmp: {
+            offset: CURRENT_RENTAL_OFFSETS.borrowerProfile,
+            bytes: ownerProfile.toBase58(),
+          },
+        }],
+      },
+      { settings, providerRole: resolveSolanaConnectionRoutes(settings).primaryProvider }
+    );
+    const currentRentalCandidates = currentRentalAccounts
+      .map((account) => ({ account, decoded: decodeCurrentRental(account.account.data) }))
+      .filter((entry) => entry.decoded);
+    const currentContractKeys = currentRentalCandidates.map((entry) => new PublicKey(entry.decoded.contract));
+    const currentContractInfos = currentContractKeys.length
+      ? await connection.getMultipleAccountsInfo(currentContractKeys, 'confirmed')
+      : [];
+    currentRentalCandidates.forEach((entry, index) => {
+      const matched = matchActiveRental({
+        rentalAddress: entry.account.pubkey.toBuffer(),
+        rentalData: entry.account.account.data,
+        contractData: currentContractInfos[index]?.data,
+      });
+      if (!matched) return;
+      const fleetKey = new PublicKey(matched.fleet).toBase58();
+      const endTimeSeconds = Number(matched.endTimeSeconds);
+      currentRentalsByFleet.set(fleetKey, {
+        rateAtlasPerDay: normalizeAtlasRate(Number(matched.rate)),
+        rentalEnd: Number.isFinite(endTimeSeconds) ? new Date(endTimeSeconds * 1000) : null,
+      });
+    });
+    currentRentalFleetKeys = Array.from(currentRentalsByFleet.keys());
+    currentRentalFleetInfos = currentRentalFleetKeys.length
+      ? await connection.getMultipleAccountsInfo(currentRentalFleetKeys.map((key) => new PublicKey(key)), 'confirmed')
+      : [];
+  } catch (error) {
+    console.warn('[fleet-rental] Current SRSLY discovery unavailable; preserving legacy fleet results:', error?.message || error);
+    currentRentalsByFleet.clear();
+    currentRentalFleetKeys = [];
+    currentRentalFleetInfos = [];
+  }
+
   const fleetMap = new Map();
   for (const account of ownedAccounts) {
     fleetMap.set(account.pubkey.toBase58(), decodeFleetAccount(account));
@@ -5832,17 +5888,33 @@ async function fetchProfileFleetsUncached(payload) {
       activity: inferFleetActivity(account.account.data, decoded.label, relationship),
     });
   }
+  currentRentalFleetKeys.forEach((fleetKey, index) => {
+    const info = currentRentalFleetInfos[index];
+    if (!info?.data) return;
+    const decoded = decodeFleetAccount({ pubkey: new PublicKey(fleetKey), account: info });
+    const existing = fleetMap.get(fleetKey);
+    const relationship = existing?.relationship === 'owned' ? 'owned-managed' : 'managed';
+    fleetMap.set(fleetKey, {
+      ...decoded,
+      ...existing,
+      relationship,
+      ownership: relationship === 'owned-managed' ? 'Owned + managed' : 'Rented',
+      activity: inferFleetActivity(info.data, decoded.label, relationship),
+    });
+  });
 
   const fleets = Array.from(fleetMap.values()).sort((a, b) => a.label.localeCompare(b.label));
   await Promise.all(
     fleets
       .filter((fleet) => fleet.relationship === 'managed' || fleet.relationship === 'owned-managed')
       .map(async (fleet) => {
-        const rentalEnd = await runWithTelemetryContext(
+        const currentRental = currentRentalsByFleet.get(fleet.key);
+        const rentalEnd = currentRental?.rentalEnd || await runWithTelemetryContext(
           { suboperation: 'rental-data' },
           () => readRentalEndDate(connection, fleet.key),
         );
         const rentalEndLabel = formatShortDate(rentalEnd);
+        fleet.rentalRateAtlasPerDay = currentRental?.rateAtlasPerDay ?? null;
         fleet.rentalEndsAt = rentalEnd ? rentalEnd.toISOString() : null;
         fleet.ownership = rentalEndLabel ? `Rented until ${rentalEndLabel}` : 'Rented';
       })
@@ -6765,12 +6837,16 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     : [];
   rentalContracts.forEach((entry, index) => {
     const info = rentalInfos[index];
-    const rawRate = info?.data?.length >= srslyFieldOffsets.contractRate + 8
+    const fleet = fleets.find((candidate) => candidate.key === entry.fleetKey);
+    const currentRate = Number(fleet?.rentalRateAtlasPerDay);
+    const legacyRawRate = info?.data?.length >= srslyFieldOffsets.contractRate + 8
       ? Number(info.data.readBigUInt64LE(srslyFieldOffsets.contractRate))
       : NaN;
     rentalRates.set(entry.fleetKey, {
       contract: entry.contractKey,
-      rateAtlasPerDay: Number.isFinite(rawRate) ? normalizeAtlasRate(rawRate) : null,
+      rateAtlasPerDay: Number.isFinite(currentRate) && currentRate > 0
+        ? currentRate
+        : (Number.isFinite(legacyRawRate) ? normalizeAtlasRate(legacyRawRate) : null),
     });
   });
 
