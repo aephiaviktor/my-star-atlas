@@ -56,6 +56,7 @@ const {
   projectRentalHistoryRows,
   createRentalHistoryIndex,
   resolveHistoricalRental,
+  applyVerifiedFleetCrew,
 } = require('./rental-history');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
@@ -6773,13 +6774,74 @@ async function fetchCanonicalRawCargoCosts(settings) {
   return { ...projected, query };
 }
 
-async function fetchRentalHistoryIndex(settings) {
+async function recoverMissingRentalCrew(records, connection, sot) {
+  const missingByAccount = new Map();
+  for (const record of records) {
+    if (Number.isFinite(record.requiredCrew) && record.requiredCrew > 0) continue;
+    const earliest = missingByAccount.get(record.fleetAccount);
+    if (!earliest || record.isoDate < earliest) missingByAccount.set(record.fleetAccount, record.isoDate);
+  }
+  const accounts = Array.from(missingByAccount.keys());
+  if (!accounts.length || !connection || !sot?.byName) return records;
+
+  const fleetInfos = await connection.getMultipleAccountsInfo(accounts.map((account) => new PublicKey(account)), 'confirmed');
+  const candidates = [];
+  for (let index = 0; index < accounts.length; index += 1) {
+    const data = fleetInfos[index]?.data;
+    if (!data || data.length < fleetFieldOffsets.fleetShips + 32) continue;
+    const fleetShips = readPublicKey(data, fleetFieldOffsets.fleetShips);
+    if (!fleetShips || fleetShips === DEFAULT_PUBLIC_KEY) continue;
+    candidates.push({ fleetAccount: accounts[index], fleetShips, earliest: missingByAccount.get(accounts[index]) });
+  }
+
+  const stableCandidates = [];
+  for (const candidate of candidates) {
+    const signatures = await connection.getSignaturesForAddress(new PublicKey(candidate.fleetShips), { limit: 1000 }, 'confirmed');
+    const earliestMs = Date.parse(`${candidate.earliest}T00:00:00.000Z`);
+    const hasChangeInRange = signatures.some((entry) => !entry.err && Number(entry.blockTime) * 1000 >= earliestMs);
+    const historyTruncated = signatures.length === 1000
+      && Number(signatures[signatures.length - 1]?.blockTime) * 1000 >= earliestMs;
+    if (!hasChangeInRange && !historyTruncated) stableCandidates.push(candidate);
+  }
+  if (!stableCandidates.length) return records;
+
+  const fleetShipsInfos = await connection.getMultipleAccountsInfo(
+    stableCandidates.map((candidate) => new PublicKey(candidate.fleetShips)),
+    'confirmed',
+  );
+  const compositions = fleetShipsInfos.map((info) => parseFleetShipsAccount(info?.data));
+  const shipAccounts = Array.from(new Set(compositions.flat().map((entry) => entry.shipAccount)));
+  const shipInfos = shipAccounts.length
+    ? await connection.getMultipleAccountsInfo(shipAccounts.map((account) => new PublicKey(account)), 'confirmed')
+    : [];
+  const shipNames = new Map(shipAccounts.map((account, index) => [account, parseShipAccount(shipInfos[index]?.data, account).name]));
+  const recovered = new Map();
+  stableCandidates.forEach((candidate, index) => {
+    const composition = compositions[index];
+    let total = 0;
+    let complete = composition.length > 0;
+    for (const entry of composition) {
+      const requiredCrew = Number(sot.byName.get(normalizeShipName(shipNames.get(entry.shipAccount)))?.requiredCrew);
+      if (!Number.isFinite(requiredCrew) || requiredCrew <= 0) {
+        complete = false;
+        break;
+      }
+      total += entry.amount * requiredCrew;
+    }
+    if (complete && total > 0) recovered.set(candidate.fleetAccount, total);
+  });
+  return applyVerifiedFleetCrew(records, recovered);
+}
+
+async function fetchRentalHistoryIndex(settings, connection, sot) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
     return createRentalHistoryIndex([]);
   }
   const flux = buildRentalHistoryFluxQuery(settings.influxBucket);
   const rows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
-  return createRentalHistoryIndex(projectRentalHistoryRows(rows));
+  const records = projectRentalHistoryRows(rows);
+  const recoveredRecords = await recoverMissingRentalCrew(records, connection, sot).catch(() => records);
+  return createRentalHistoryIndex(recoveredRecords);
 }
 
 async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
@@ -6943,7 +7005,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     () => fetchUpgradingEarningsRows(settings),
     () => fetchCanonicalRawCargoCosts(settings),
     () => fetchCargoVolumeEarningsRows(settings),
-    () => fetchRentalHistoryIndex(settings),
+    () => fetchRentalHistoryIndex(settings, connection, sot),
   ];
   const earningsCategoryNames = ['Scanning', 'Mining', 'Cargo', 'Crafting', 'Upgrading'];
   if (diagnosticContext) diagnosticContext.stage = 'category_collection';

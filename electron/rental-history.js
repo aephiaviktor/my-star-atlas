@@ -43,6 +43,19 @@ function projectRentalHistoryRows(rows) {
   });
 }
 
+function applyVerifiedFleetCrew(records, requiredCrewByFleetAccount) {
+  return (Array.isArray(records) ? records : []).map((record) => {
+    if (Number.isFinite(record?.requiredCrew) && record.requiredCrew > 0) return record;
+    const requiredCrew = Number(requiredCrewByFleetAccount?.get?.(record?.fleetAccount));
+    if (!Number.isFinite(requiredCrew) || requiredCrew <= 0) return record;
+    return {
+      ...record,
+      requiredCrew,
+      crewSnapshotSource: 'fleet_composition_chain_verified',
+    };
+  });
+}
+
 function createRentalHistoryIndex(records) {
   const byAccountDate = new Map();
   const fallbackCandidates = new Map();
@@ -70,7 +83,11 @@ function createRentalHistoryIndex(records) {
 function summarizeRentalCandidate(candidate, fleetAccount = '') {
   if (!candidate) return null;
   const records = candidate.records || [];
-  const authoritativeCrewSources = new Set(['fleet_account_observed', 'fleet_composition_historical_verified']);
+  const authoritativeCrewSources = new Set([
+    'fleet_account_observed',
+    'fleet_composition_historical_verified',
+    'fleet_composition_chain_verified',
+  ]);
   const observedCrewRecords = records.filter((record) => authoritativeCrewSources.has(record.crewSnapshotSource)
     && Number.isFinite(record.requiredCrew) && record.requiredCrew > 0);
   const requiredCrewValues = new Set(observedCrewRecords.map((record) => record.requiredCrew));
@@ -112,4 +129,5 @@ module.exports = {
   projectRentalHistoryRows,
   createRentalHistoryIndex,
   resolveHistoricalRental,
+  applyVerifiedFleetCrew,
 };

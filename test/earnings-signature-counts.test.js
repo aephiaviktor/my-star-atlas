@@ -18,11 +18,15 @@ function sourceBetween(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-test('earnings snapshot has no historical fleet-signature scan', () => {
+test('earnings performs only bounded, fail-closed FleetShips history checks for missing crew', () => {
   const snapshot = sourceBetween(main, 'async function fetchEarningsSnapshot', "handleTrustedIpc('app:get-profile-name'");
-  assert.doesNotMatch(snapshot, /fetchFleetSignatureDailyCounts|getSignaturesForAddress/);
+  assert.doesNotMatch(snapshot, /fetchFleetSignatureDailyCounts/);
   assert.doesNotMatch(main, /function fetchFleetSignatureDailyCounts/);
-  assert.doesNotMatch(main, /getSignaturesForAddress/);
+  assert.match(snapshot, /fetchRentalHistoryIndex\(settings, connection, sot\)/);
+  assert.match(main, /if \(Number\.isFinite\(record\.requiredCrew\) && record\.requiredCrew > 0\) continue/);
+  assert.match(main, /getSignaturesForAddress\(new PublicKey\(candidate\.fleetShips\), \{ limit: 1000 \}/);
+  assert.match(main, /hasChangeInRange/);
+  assert.match(main, /historyTruncated/);
   assert.doesNotMatch(snapshot, /for \([^)]*fleet[^)]*\)[\s\S]{0,500}(?:signature|transaction).*?(?:30|31)d/i);
 });
 

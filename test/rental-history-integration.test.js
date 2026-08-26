@@ -10,7 +10,10 @@ const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 
 test('Earnings fetches rental history as a bounded read-only category', () => {
   assert.match(main, /const flux = buildRentalHistoryFluxQuery\(settings\.influxBucket\)/);
   assert.match(main, /const rows = parseInfluxCsv\(await queryInfluxFlux\(settings, flux\)\)/);
-  assert.match(main, /\(\) => fetchRentalHistoryIndex\(settings\)/);
+  assert.match(main, /\(\) => fetchRentalHistoryIndex\(settings, connection, sot\)/);
+  assert.match(main, /recoverMissingRentalCrew\(records, connection, sot\)/);
+  assert.match(main, /getSignaturesForAddress/);
+  assert.match(main, /applyVerifiedFleetCrew\(records, recovered\)/);
   assert.doesNotMatch(main, /fetchRentalHistoryIndex[\s\S]{0,1200}api\/v2\/write/);
 });
 

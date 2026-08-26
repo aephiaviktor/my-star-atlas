@@ -7,6 +7,7 @@ const {
   projectRentalHistoryRows,
   createRentalHistoryIndex,
   resolveHistoricalRental,
+  applyVerifiedFleetCrew,
 } = require('../electron/rental-history');
 
 test('query reads only the canonical daily rental measurement without writing', () => {
@@ -89,6 +90,21 @@ test('authoritative observed crew facts are preserved only when consistent', () 
   assert.equal(result.requiredCrew, null);
   assert.equal(result.crewCount, null);
   assert.equal(result.crewSnapshotSource, '');
+});
+
+test('verified fleet composition fills missing crew facts for every record of that fleet only', () => {
+  const records = projectRentalHistoryRows([
+    { _time: '2026-08-24T00:00:00Z', fleetAccount: 'fleet-a', contractId: 'ca', rentalId: 'ra', rentalCostAtlas: 10, fleetLabel: 'A', faction: 'ONI' },
+    { _time: '2026-08-25T00:00:00Z', fleetAccount: 'fleet-a', contractId: 'ca', rentalId: 'ra', rentalCostAtlas: 5, fleetLabel: 'A', faction: 'ONI', requiredCrew: 43, crewSnapshotSource: 'fleet_account_observed' },
+    { _time: '2026-08-24T00:00:00Z', fleetAccount: 'fleet-b', contractId: 'cb', rentalId: 'rb', rentalCostAtlas: 8, fleetLabel: 'B', faction: 'ONI' },
+  ]);
+  const recovered = applyVerifiedFleetCrew(records, new Map([['fleet-a', 51]]));
+
+  assert.equal(recovered[0].requiredCrew, 51);
+  assert.equal(recovered[0].crewSnapshotSource, 'fleet_composition_chain_verified');
+  assert.equal(recovered[1].requiredCrew, 43);
+  assert.equal(recovered[1].crewSnapshotSource, 'fleet_account_observed');
+  assert.equal(recovered[2].requiredCrew, null);
 });
 
 test('invalid and non-finite rows fail closed', () => {
