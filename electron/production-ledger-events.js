@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { buildLocalMarketLedgerEvents } = require('./local-market-trades');
+const { createInventoryBasisSnapshot } = require('./inventory-basis-snapshot');
 
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
@@ -151,7 +152,7 @@ function buildUpgradingConsumptionEvents(rows) {
   return events;
 }
 
-function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [] } = {}) {
+function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [], inventoryBasisFaction = '' } = {}) {
   const ledger = initialLedger || new InventoryCostLedger();
   const previousCounts = { ...(eventFingerprintCounts || {}) };
   for (const fingerprint of seenEventFingerprints || []) previousCounts[fingerprint] = Math.max(1, Number(previousCounts[fingerprint] || 0));
@@ -175,6 +176,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
   const appliedEventResults = [];
   const rejectedEvents = [];
   const skippedDuplicateEvents = [];
+  const inventoryBasisSnapshots = [];
   const currentCounts = {};
   const currentResults = {};
   for (const event of events) {
@@ -193,12 +195,34 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
     }
     try {
       const result = ledger.applyEvent(event);
-      if (event.type === 'craft' || (event.type === 'consume' && event.purpose === 'upgrading')) {
+      if (event.type === 'craft' || (event.type === 'consume' && ['upgrading', 'gm-sell'].includes(event.purpose))) {
         if (!currentResults[fingerprint]) currentResults[fingerprint] = [];
         currentResults[fingerprint][occurrence - 1] = result;
       }
       appliedEvents.push(event);
       appliedEventResults.push({ event, result });
+      if (inventoryBasisFaction) {
+        const pools = [];
+        if (event.type === 'acquire' || event.type === 'consume') pools.push([event.location, event.asset]);
+        if (event.type === 'transfer') pools.push([event.origin, event.asset], [event.destination, event.asset]);
+        if (event.type === 'craft') {
+          pools.push([event.location, event.outputAsset]);
+          for (const ingredient of event.ingredients || []) pools.push([event.location, ingredient.asset]);
+        }
+        const uniquePools = new Map(pools.map(([location, asset]) => [`${location}\n${asset}`, [location, asset]]));
+        for (const [location, asset] of uniquePools.values()) {
+          if (!location || String(location).startsWith('wallet:')) continue;
+          const row = ledger.get(location, asset);
+          const snapshot = createInventoryBasisSnapshot({
+            ...row,
+            faction: inventoryBasisFaction,
+            starbase: location,
+            timestamp: event.timestamp,
+            eventId: `${fingerprint}:${occurrence}:${location}:${asset}`,
+          });
+          if (snapshot) inventoryBasisSnapshots.push(snapshot);
+        }
+      }
     } catch (error) {
       currentCounts[fingerprint] -= 1;
       if (currentCounts[fingerprint] === 0) delete currentCounts[fingerprint];
@@ -212,6 +236,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
     appliedEventResults,
     rejectedEvents,
     skippedDuplicateEvents,
+    inventoryBasisSnapshots,
     eventFingerprintCounts: currentCounts,
     eventResultsByFingerprint: currentResults,
     seenEventFingerprints: Object.keys(currentCounts).sort(),

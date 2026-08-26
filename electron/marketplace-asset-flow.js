@@ -58,7 +58,9 @@ function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsB
       const tokenAccount = accounts[isDeposit ? 10 : 12];
       const mint = isWithdraw ? accounts[13] : tokenMeta.get(tokenAccount)?.mint;
       const asset = assetsByMint[mint];
-      const starbase = starbasesByKey[starbaseKey];
+      const starbaseContext = starbasesByKey[starbaseKey];
+      const starbase = String(starbaseContext?.name || starbaseContext || '').trim();
+      const faction = String(starbaseContext?.faction || '').trim().toUpperCase();
       const quantity = amountFromData(data);
       if (!asset || !starbase || !tracked.has(wallet) || !(quantity > 0)) return;
       events.push({
@@ -66,7 +68,7 @@ function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsB
         type: 'transfer', asset: asset.name || asset.asset || String(asset), rawMint: mint, quantity,
         origin: isDeposit ? `wallet:${wallet}` : starbase,
         destination: isDeposit ? starbase : `wallet:${wallet}`,
-        txFeeAtlas, flow: isDeposit ? 'css-deposit' : 'css-withdraw',
+        txFeeAtlas, flow: isDeposit ? 'css-deposit' : 'css-withdraw', faction, starbase,
       });
       return;
     }
@@ -97,8 +99,12 @@ function escapeFieldString(value) { return `"${String(value ?? '').replace(/(["\
 function formatAssetFlowInfluxLine(event) {
   const timestamp = new Date(event?.timestamp);
   if (Number.isNaN(timestamp.getTime()) || !(Number(event?.quantity) > 0)) return '';
-  const tags = { flowId: event.id, flow: event.flow, asset: event.asset, origin: event.origin, destination: event.destination };
-  const tagText = Object.entries(tags).map(([key, value]) => `${key}=${escapeTag(value)}`).join(',');
+  const tags = {
+    flowId: event.id, flow: event.flow, asset: event.asset, origin: event.origin, destination: event.destination,
+    faction: event.faction, starbase: event.starbase,
+  };
+  const tagText = Object.entries(tags).filter(([, value]) => String(value || '').trim())
+    .map(([key, value]) => `${key}=${escapeTag(value)}`).join(',');
   return `asset_flow,${tagText} quantity=${Number(event.quantity)},txFeeAtlas=${Number(event.txFeeAtlas || 0)},signature=${escapeFieldString(event.signature)},rawMint=${escapeFieldString(event.rawMint)} ${BigInt(timestamp.getTime()) * 1000000n}`;
 }
 
@@ -109,4 +115,28 @@ function buildAssetFlowLedgerEvents(events) {
   }));
 }
 
-module.exports = { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, buildAssetFlowLedgerEvents };
+function projectAssetFlowInfluxRows(rows) {
+  return (rows || []).flatMap((row) => {
+    const timestamp = String(row?._time || '');
+    const quantity = Number(row?.quantity);
+    const origin = String(row?.origin || '');
+    const destination = String(row?.destination || '');
+    const asset = String(row?.asset || '');
+    if (!timestamp || !origin || !destination || !asset || !(quantity > 0)) return [];
+    const txFeeAtlas = Number(row?.txFeeAtlas || 0);
+    const flowId = String(row?.flowId || '');
+    return [{
+      id: flowId, flowId, type: 'transfer', timestamp,
+      flow: String(row?.flow || ''), faction: String(row?.faction || ''), starbase: String(row?.starbase || ''),
+      origin, destination, asset, rawMint: String(row?.rawMint || ''), signature: String(row?.signature || ''),
+      quantity, txFeeAtlas, cargoCost: txFeeAtlas,
+    }];
+  });
+}
+
+module.exports = {
+  decodeMarketplaceAssetFlows,
+  formatAssetFlowInfluxLine,
+  buildAssetFlowLedgerEvents,
+  projectAssetFlowInfluxRows,
+};

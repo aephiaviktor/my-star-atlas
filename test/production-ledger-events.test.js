@@ -217,6 +217,42 @@ test('an overdraft cargo event fails closed without corrupting earlier ledger st
   assert.equal(result.ledger.get('UST-2', 'Iron Ore').quantity, 0);
 });
 
+test('chronological ledger emits deterministic basis snapshots after starbase pool changes only', () => {
+  const result = buildCostLedgerResult({
+    inventoryBasisFaction: 'UST',
+    miningRows: [{ isoDate: '2026-07-24', starbase: 'UST-1', rawMaterial: 'Iron Ore', mined: 10, totalCostsAtlas: 5 }],
+    assetFlowEvents: [
+      { type: 'transfer', timestamp: '2026-07-24T01:00:00Z', origin: 'UST-1', destination: 'wallet:handler', asset: 'Iron Ore', quantity: 4, cargoCost: 1 },
+    ],
+  });
+  assert.equal(result.inventoryBasisSnapshots.length, 2);
+  assert.deepEqual(result.inventoryBasisSnapshots.map(({ faction, starbase, asset, quantity, knownInventoryValueAtlas }) => ({ faction, starbase, asset, quantity, knownInventoryValueAtlas })), [
+    { faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore', quantity: 10, knownInventoryValueAtlas: 5 },
+    { faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore', quantity: 6, knownInventoryValueAtlas: 3 },
+  ]);
+  assert.ok(result.inventoryBasisSnapshots.every(({ snapshotId }) => /^[a-f0-9]{64}$/.test(snapshotId)));
+});
+
+test('GM sell consumption basis survives checkpoint replay for Earnings projection', () => {
+  const input = {
+    localMarketTrades: [
+      { id: 'buy', marketplace: 'GM', timestamp: '2026-07-25T00:00:00Z', wallet: 'gm', asset: 'Food', side: 'buy', quantity: 10, settledAtlas: 50 },
+      { id: 'sell', marketplace: 'GM', timestamp: '2026-07-25T01:00:00Z', wallet: 'gm', asset: 'Food', side: 'sell', quantity: 4, settledAtlas: 32 },
+    ],
+  };
+  const first = buildCostLedgerResult(input);
+  const replay = buildCostLedgerResult({
+    ...input,
+    initialLedger: first.ledger,
+    eventFingerprintCounts: first.eventFingerprintCounts,
+    eventResultsByFingerprint: first.eventResultsByFingerprint,
+  });
+  const sale = replay.appliedEventResults.find(({ event }) => event.tradeId === 'sell');
+  assert.equal(sale.fromCheckpoint, true);
+  assert.equal(sale.result.quantity, 4);
+  assert.equal(sale.result.costs.gm, 20);
+});
+
 test('GM basis follows the buying wallet through handler custody into CSS', () => {
   const result = buildCostLedgerResult({
     localMarketTrades: [{

@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { InventoryCostLedger } = require('../electron/inventory-cost-ledger');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('../electron/ledger-checkpoint');
+const { createInventoryBasisSnapshot } = require('../electron/inventory-basis-snapshot');
 
 test('ledger checkpoint round-trips basis and event fingerprints atomically', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'msa-ledger-checkpoint-'));
@@ -12,9 +13,14 @@ test('ledger checkpoint round-trips basis and event fingerprints atomically', as
   try {
     const ledger = new InventoryCostLedger();
     ledger.acquire({ location: 'MUD-1', asset: 'Carbon', quantity: 5, source: 'mining', totalCost: 2 });
+    const pendingInventoryBasisSnapshots = [createInventoryBasisSnapshot({
+      faction: 'MUD', starbase: 'MUD-1', asset: 'Carbon', timestamp: '2026-08-01T00:00:00Z', eventId: 'abc:1',
+      quantity: 5, uncostedQuantity: 0, costs: { mining: 2 }, cargoCost: 0,
+    })];
     await saveLedgerCheckpoint(filePath, {
       faction: 'MUD', profile: 'MUD', ledger, seenEventFingerprints: ['abc', 'def'],
       eventResultByFingerprint: { abc: { quantity: 1, uncostedQuantity: 1, costs: {}, cargoCost: 0 } },
+      pendingInventoryBasisSnapshots,
     });
     const loaded = await loadLedgerCheckpoint(filePath, { faction: 'MUD', profile: 'MUD' });
     assert.equal(loaded.status, 'loaded');
@@ -23,6 +29,7 @@ test('ledger checkpoint round-trips basis and event fingerprints atomically', as
     assert.equal(loaded.eventResultByFingerprint.abc.quantity, 1);
     assert.equal(loaded.eventFingerprintCounts.abc, 1);
     assert.deepEqual(loaded.eventResultsByFingerprint.abc[0], { quantity: 1, uncostedQuantity: 1, costs: {}, cargoCost: 0 });
+    assert.deepEqual(loaded.pendingInventoryBasisSnapshots, pendingInventoryBasisSnapshots);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

@@ -3,6 +3,7 @@
 const fs = require('node:fs/promises');
 const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
+const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
 const LEDGER_CHECKPOINT_SCHEMA_VERSION = 1;
 
@@ -15,6 +16,7 @@ function emptyResult(status, error = '') {
     eventResultByFingerprint: {},
     eventFingerprintCounts: {},
     eventResultsByFingerprint: {},
+    pendingInventoryBasisSnapshots: [],
     savedAt: null,
   };
 }
@@ -49,6 +51,18 @@ async function loadLedgerCheckpoint(filePath, { faction, profile }) {
         InventoryCostLedger.fromSnapshot([{ location: 'checkpoint', asset: fingerprint, ...result }]);
       }
     }
+    const pendingInventoryBasisSnapshots = document.pendingInventoryBasisSnapshots ?? [];
+    if (!Array.isArray(pendingInventoryBasisSnapshots)) throw new Error('checkpoint pending inventory basis snapshots are invalid');
+    const validatedPending = pendingInventoryBasisSnapshots.map((snapshot) => {
+      const [projected] = projectInventoryBasisSnapshotRows([{ ...snapshot, _time: snapshot?.timestamp }]);
+      if (!projected || JSON.stringify(projected) !== JSON.stringify(snapshot)) {
+        throw new Error('checkpoint pending inventory basis snapshot is invalid');
+      }
+      return projected;
+    });
+    if (new Set(validatedPending.map((snapshot) => snapshot.snapshotId)).size !== validatedPending.length) {
+      throw new Error('checkpoint pending inventory basis snapshot IDs are duplicated');
+    }
     return {
       status: 'loaded',
       error: '',
@@ -58,6 +72,7 @@ async function loadLedgerCheckpoint(filePath, { faction, profile }) {
         && !Array.isArray(document.eventResultByFingerprint) ? document.eventResultByFingerprint : {},
       eventFingerprintCounts,
       eventResultsByFingerprint,
+      pendingInventoryBasisSnapshots: validatedPending,
       savedAt: typeof document.savedAt === 'string' ? document.savedAt : null,
     };
   } catch (error) {
@@ -65,7 +80,7 @@ async function loadLedgerCheckpoint(filePath, { faction, profile }) {
   }
 }
 
-async function saveLedgerCheckpoint(filePath, { faction, profile, ledger, seenEventFingerprints, eventResultByFingerprint = {}, eventFingerprintCounts = {}, eventResultsByFingerprint = {} }) {
+async function saveLedgerCheckpoint(filePath, { faction, profile, ledger, seenEventFingerprints, eventResultByFingerprint = {}, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, pendingInventoryBasisSnapshots = [] }) {
   if (!(ledger instanceof InventoryCostLedger)) throw new Error('ledger is required');
   const normalizedResults = eventResultsByFingerprint && Object.keys(eventResultsByFingerprint).length > 0
     ? eventResultsByFingerprint
@@ -73,6 +88,14 @@ async function saveLedgerCheckpoint(filePath, { faction, profile, ledger, seenEv
   const normalizedCounts = eventFingerprintCounts && Object.keys(eventFingerprintCounts).length > 0
     ? eventFingerprintCounts
     : Object.fromEntries(Object.entries(normalizedResults).map(([fingerprint, results]) => [fingerprint, results.length]));
+  const normalizedPending = (pendingInventoryBasisSnapshots || []).map((snapshot) => {
+    const [projected] = projectInventoryBasisSnapshotRows([{ ...snapshot, _time: snapshot?.timestamp }]);
+    if (!projected || JSON.stringify(projected) !== JSON.stringify(snapshot)) throw new Error('pending inventory basis snapshot is invalid');
+    return projected;
+  });
+  if (new Set(normalizedPending.map((snapshot) => snapshot.snapshotId)).size !== normalizedPending.length) {
+    throw new Error('pending inventory basis snapshot IDs are duplicated');
+  }
   await writeJsonAtomic(filePath, {
     schemaVersion: LEDGER_CHECKPOINT_SCHEMA_VERSION,
     faction,
@@ -83,6 +106,7 @@ async function saveLedgerCheckpoint(filePath, { faction, profile, ledger, seenEv
     eventResultByFingerprint: Object.fromEntries(Object.entries(normalizedResults).map(([fingerprint, results]) => [fingerprint, results[0]])),
     eventFingerprintCounts: normalizedCounts,
     eventResultsByFingerprint: normalizedResults,
+    pendingInventoryBasisSnapshots: normalizedPending,
   });
 }
 

@@ -61,6 +61,8 @@ const {
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
+const { publishInventoryBasisSnapshots } = require('./inventory-basis-publication');
+const { readInventoryBasisSnapshots } = require('./inventory-basis-read');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { createAtlasPriceResolver } = require('./atlas-price-resolver');
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
@@ -72,7 +74,8 @@ const {
 } = require('./cargo-cost-source');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
-const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
+const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows } = require('./marketplace-asset-flow');
+const { enrichGmTradesWithInventoryBasis } = require('./gm-marketplace-accounting');
 const {
   normalizeMarketplaceV1Row,
   normalizeMarketplaceV2Row,
@@ -652,18 +655,7 @@ async function fetchMarketplaceAssetFlowsFromInflux(settings) {
   |> filter(fn: (r) => r._measurement == "asset_flow")
   |> pivot(rowKey: ["_time", "flowId"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"])`;
-  return parseInfluxCsv(await queryInfluxFlux(settings, flux)).flatMap((row) => {
-    const timestamp = String(row._time || '');
-    const quantity = Number(row.quantity);
-    const origin = String(row.origin || '');
-    const destination = String(row.destination || '');
-    const asset = String(row.asset || '');
-    if (!timestamp || !origin || !destination || !asset || !(quantity > 0)) return [];
-    return [{
-      type: 'transfer', timestamp, origin, destination, asset, quantity,
-      cargoCost: Number(row.txFeeAtlas || 0), flowId: String(row.flowId || ''),
-    }];
-  });
+  return projectAssetFlowInfluxRows(parseInfluxCsv(await queryInfluxFlux(settings, flux)));
 }
 
 async function resolveInfluxOrgId(influxUrl, token, bucket) {
@@ -4412,6 +4404,21 @@ async function resolveMarketplacePublicationOrganization(settings) {
   catch (_error) { return null; }
 }
 
+async function writeInventoryBasisLinesToInflux(settings, lines) {
+  const token = String(settings.influxAuthToken || '').trim().replace(/^(?:Token|Bearer)\s+/i, '');
+  const bucket = String(settings.influxBucket || '').trim();
+  const organization = await resolveMarketplacePublicationOrganization(settings);
+  if (!settings.influxUrl || !bucket || !organization || !token) throw new Error('inventory_basis_influx_not_configured');
+  const url = `${getInfluxBaseUrl(settings.influxUrl)}/api/v2/write?org=${encodeURIComponent(organization)}&bucket=${encodeURIComponent(bucket)}&precision=ns`;
+  const response = await fetchWithInfluxRetry(({ signal }) => fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Token ${token}`, 'Content-Type': 'text/plain; charset=utf-8' },
+    body: lines,
+    signal,
+  }), { timeoutMs: 15_000, retries: 1, retryDelayMs: 250 });
+  if (!response.ok) throw new Error(`inventory_basis_influx_http_${response.status}`);
+}
+
 function marketplaceTradeRank(trade) {
   return String(trade.orderId || '').trim() || String(trade.creationSignature || '').trim() || Number(trade.txFeeAtlas || 0) !== 0
     ? 'enriched' : 'fallback';
@@ -5148,13 +5155,15 @@ async function fetchGlobalMarketTrades(settings, connection) {
   } catch (error) {
     return { trades: [], error: `gm_trading_wallet_invalid:${String(error?.message || error)}` };
   }
-  const trackedWallets = Array.from(new Set([...decodePlayerProfileHandlerWallets(accountInfo), ...extraWallets]));
-  if (!trackedWallets.length) return { trades: [], error: 'gm_profile_has_no_handler_wallet' };
+  const profileWallets = decodePlayerProfileWallets(accountInfo);
+  const executionWallets = extraWallets;
+  const trackedWallets = Array.from(new Set([...profileWallets, ...executionWallets]));
+  if (!executionWallets.length) return { trades: [], assetFlows: [], error: 'gm_trading_wallet_not_configured' };
   const filePath = globalMarketCheckpointPath();
   const checkpoint = await loadLocalMarketTradeCheckpoint(filePath);
   let openOrders;
   try {
-    openOrders = await fetchOpenLocalMarketOrderIds(connection, trackedWallets);
+    openOrders = await fetchOpenLocalMarketOrderIds(connection, executionWallets);
   } catch (error) {
     if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
     return { trades: [], assetFlows: [], error: '', rpc: null, exhaustion: error };
@@ -5165,7 +5174,9 @@ async function fetchGlobalMarketTrades(settings, connection) {
   const checkpointNewestMs = existing.reduce((max, trade) => Math.max(max, Date.parse(trade.timestamp) || 0), startMs);
   const overlapStart = new Date(Math.max(startMs, checkpointNewestMs - 60 * 60 * 1000)).toISOString();
   const assetsByMint = Object.fromEntries(ASSET_REGISTRY.map((asset) => [asset.mint, asset]));
-  const starbasesByKey = Object.fromEntries(STARBASE_REGISTRY.map((starbase) => [starbase.publicKey, starbase.name]));
+  const starbasesByKey = Object.fromEntries(STARBASE_REGISTRY.map((starbase) => [starbase.publicKey, {
+    name: starbase.name, faction: starbase.faction,
+  }]));
   const atlasPerSol = await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null);
   const cursorInputSnapshot = marketplaceCursorSnapshot(
     checkpoint.assetFlowBackfilled ? checkpoint.walletCursors : {},
@@ -5175,6 +5186,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
   );
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
+    executionWallets,
     marketAssetsByMint: buildGlobalMarketAssetMap(),
     knownOrders: checkpoint.orders,
     ...cursorInputSnapshot,
@@ -5202,7 +5214,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     archivedOrderIds: scanned.archivedOrderIds,
   };
   const safeCheckpointDocument = {
-    schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets,
+    schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets, executionWallets,
     orders: scanned.orders, trades, assetFlows, ...cursorOutputSnapshot,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     publishedFlowIds: Array.from(checkpoint.publishedFlowIds).sort(),
@@ -5376,8 +5388,17 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
 
 async function fetchMarketplaceSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
-  const result = await fetchMarketplaceTradesFromInflux(settings);
-  return { ok: !result.error, localMarketTrades: result.trades, localMarketTradeCount: result.trades.length, localMarketError: result.error, checkedAt: new Date().toISOString() };
+  const [result, assetFlowEvents, inventoryBasisObservations] = await Promise.all([
+    fetchMarketplaceTradesFromInflux(settings),
+    fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []),
+    readInventoryBasisSnapshots({
+      bucket: settings.influxBucket,
+      query: async (flux) => parseInfluxCsv(await queryInfluxFlux(settings, flux)),
+    }).catch(() => []),
+  ]);
+  const accounting = buildCostLedgerResult({ localMarketTrades: result.trades, assetFlowEvents });
+  const trades = enrichGmTradesWithInventoryBasis(result.trades, accounting.appliedEventResults, { inventoryBasisObservations });
+  return { ok: !result.error, localMarketTrades: trades, localMarketTradeCount: trades.length, localMarketError: result.error, checkedAt: new Date().toISOString() };
 }
 
 function getCurrentResourcePriceAtl(prices, resourceName) {
@@ -7388,7 +7409,9 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const snapshotScope = String(rawPayload.earningsScope || rawPayload.earningsSubtab || '').trim().toLowerCase();
   const needsInventoryLedger = ['breakeven', 'crafting', 'upgrading'].includes(snapshotScope);
   const ledgerFactionStarbases = needsInventoryLedger ? await fetchFactionStarbases(settings) : null;
-  const localMarketResult = { trades: [], error: '' };
+  const localMarketResult = needsInventoryLedger
+    ? await fetchMarketplaceTradesFromInflux(settings)
+    : { trades: [], error: '' };
   const marketplaceAssetFlowEvents = needsInventoryLedger ? await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []) : [];
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
   const checkpoint = needsInventoryLedger
@@ -7418,14 +7441,21 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     upgradingRows: upgradingRows.ledgerEvents || [],
     localMarketTrades: localMarketResult.trades,
     assetFlowEvents: marketplaceAssetFlowEvents,
-  }) : { events: [], appliedEventResults: [], ledger: { snapshot: () => [] }, rejectedEvents: [], seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {} };
+    inventoryBasisFaction: ledgerFaction,
+  }) : { events: [], appliedEventResults: [], ledger: { snapshot: () => [] }, rejectedEvents: [], seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {}, inventoryBasisSnapshots: [] };
   const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
   const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
   const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
   const inventoryCostLedgerRejectedEvents = inventoryCostLedgerResult.rejectedEvents;
+  let pendingInventoryBasisSnapshots = Array.from(new Map([
+    ...(checkpoint.pendingInventoryBasisSnapshots || []),
+    ...(inventoryCostLedgerResult.inventoryBasisSnapshots || []),
+  ].map((snapshot) => [snapshot.snapshotId, snapshot])).values());
   let ledgerCheckpointStatus = checkpoint.status === 'loaded' ? 'updated' : 'created';
   let ledgerCheckpointError = checkpoint.status === 'invalid' ? checkpoint.error : '';
   let ledgerCheckpointSavedAt = checkpoint.savedAt;
+  let inventoryBasisPublishedCount = 0;
+  let inventoryBasisPublicationError = '';
   if (!needsInventoryLedger) {
     ledgerCheckpointStatus = 'skipped';
   } else if (checkpoint.status !== 'loaded' && openingInventoryError) {
@@ -7440,8 +7470,28 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         eventResultByFingerprint: inventoryCostLedgerResult.eventResultByFingerprint,
         eventFingerprintCounts: inventoryCostLedgerResult.eventFingerprintCounts,
         eventResultsByFingerprint: inventoryCostLedgerResult.eventResultsByFingerprint,
+        pendingInventoryBasisSnapshots,
       });
       ledgerCheckpointSavedAt = new Date().toISOString();
+      const publication = await publishInventoryBasisSnapshots(pendingInventoryBasisSnapshots, {
+        writeLines: (lines) => writeInventoryBasisLinesToInflux(settings, lines),
+      });
+      inventoryBasisPublishedCount = publication.confirmedSnapshotIds.length;
+      inventoryBasisPublicationError = publication.error;
+      if (inventoryBasisPublishedCount > 0) {
+        pendingInventoryBasisSnapshots = publication.pendingSnapshots;
+        await saveLedgerCheckpoint(checkpointPath, {
+          faction: ledgerFaction,
+          profile: profileName,
+          ledger: inventoryCostLedgerResult.ledger,
+          seenEventFingerprints: inventoryCostLedgerResult.seenEventFingerprints,
+          eventResultByFingerprint: inventoryCostLedgerResult.eventResultByFingerprint,
+          eventFingerprintCounts: inventoryCostLedgerResult.eventFingerprintCounts,
+          eventResultsByFingerprint: inventoryCostLedgerResult.eventResultsByFingerprint,
+          pendingInventoryBasisSnapshots,
+        });
+        ledgerCheckpointSavedAt = new Date().toISOString();
+      }
     } catch (error) {
       ledgerCheckpointStatus = 'save-failed';
       ledgerCheckpointError = String(error?.message || error || 'checkpoint_save_failed');
@@ -7828,6 +7878,9 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     ledgerCheckpointStatus,
     ledgerCheckpointError,
     ledgerCheckpointSavedAt,
+    pendingInventoryBasisSnapshotCount: pendingInventoryBasisSnapshots.length,
+    inventoryBasisPublishedCount,
+    inventoryBasisPublicationError,
   };
 }
 

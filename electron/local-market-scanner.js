@@ -220,7 +220,7 @@ async function fetchTransactions(connection, rows, pacer, stats) {
 }
 
 async function scanLocalMarketTrades(connection, {
-  trackedWallets = [], marketAssetsByMint = {}, knownOrders = [], startIso,
+  trackedWallets = [], executionWallets = trackedWallets, marketAssetsByMint = {}, knownOrders = [], startIso,
   walletCursors = {}, orderCursors = {}, activeOrderIds = [], archivedOrderIds = [], openOrderIds = [],
   addressFactory = (value) => value, maxPages = MAX_SIGNATURE_PAGES,
   requestsPerSecond = DEFAULT_REQUESTS_PER_SECOND,
@@ -238,10 +238,10 @@ async function scanLocalMarketTrades(connection, {
     const tradesById = new Map();
     const assetFlowsById = new Map();
     for (const transaction of transactions || []) {
-      const order = decodeLocalMarketOrder(transaction, { trackedWallets, marketAssetsByMint, atlasPerSol });
+      const order = decodeLocalMarketOrder(transaction, { trackedWallets: executionWallets, marketAssetsByMint, atlasPerSol });
       if (order) ordersById.set(order.orderId, order);
-      const execution = decodeOrderExecution(transaction, ordersById, trackedWallets, { atlasPerSol })
-        || decodeLocalMarketTrade(transaction, { trackedWallets, marketAssetsByMint });
+      const execution = decodeOrderExecution(transaction, ordersById, executionWallets, { atlasPerSol })
+        || decodeLocalMarketTrade(transaction, { trackedWallets: executionWallets, marketAssetsByMint });
       if (execution) tradesById.set(execution.id, execution);
       if (decodeAssetFlows) {
         for (const flow of decodeAssetFlows(transaction) || []) if (flow?.id) assetFlowsById.set(flow.id, flow);
@@ -284,7 +284,7 @@ async function scanLocalMarketTrades(connection, {
     }
     stats.transactionRequests += 1;
     if (!transaction) { stats.transactionMisses += 1; recordTelemetryCounter('transactionMisses'); continue; }
-    const enriched = decodeLocalMarketOrder({ ...transaction, signature: order.creationSignature }, { trackedWallets, marketAssetsByMint, atlasPerSol });
+    const enriched = decodeLocalMarketOrder({ ...transaction, signature: order.creationSignature }, { trackedWallets: executionWallets, marketAssetsByMint, atlasPerSol });
     if (enriched) ordersById.set(enriched.orderId, enriched);
   }
   const walletScan = await collectSignatures(connection, trackedWallets, startMs, addressFactory, maxPages, pacer, stats, walletCursors);
@@ -293,7 +293,7 @@ async function scanLocalMarketTrades(connection, {
   if (walletTransactions.exhaustion) return partialResult(walletTransactions, walletTransactions.exhaustion);
   const discoveredOrderIds = new Set();
   for (const transaction of walletTransactions) {
-    const order = decodeLocalMarketOrder(transaction, { trackedWallets, marketAssetsByMint, atlasPerSol });
+    const order = decodeLocalMarketOrder(transaction, { trackedWallets: executionWallets, marketAssetsByMint, atlasPerSol });
     if (order) {
       ordersById.set(order.orderId, order);
       discoveredOrderIds.add(order.orderId);
@@ -315,14 +315,14 @@ async function scanLocalMarketTrades(connection, {
   const transactions = walletTransactions.concat(orderTransactions);
   if (orderTransactions.exhaustion) return partialResult(transactions, orderTransactions.exhaustion);
   for (const transaction of transactions) {
-    const order = decodeLocalMarketOrder(transaction, { trackedWallets, marketAssetsByMint, atlasPerSol });
+    const order = decodeLocalMarketOrder(transaction, { trackedWallets: executionWallets, marketAssetsByMint, atlasPerSol });
     if (order) ordersById.set(order.orderId, order);
   }
   const tradesById = new Map();
   const assetFlowsById = new Map();
   for (const transaction of transactions) {
-    const execution = decodeOrderExecution(transaction, ordersById, trackedWallets, { atlasPerSol })
-      || decodeLocalMarketTrade(transaction, { trackedWallets, marketAssetsByMint });
+    const execution = decodeOrderExecution(transaction, ordersById, executionWallets, { atlasPerSol })
+      || decodeLocalMarketTrade(transaction, { trackedWallets: executionWallets, marketAssetsByMint });
     if (execution) tradesById.set(execution.id, execution);
     if (decodeAssetFlows) {
       for (const flow of decodeAssetFlows(transaction) || []) if (flow?.id) assetFlowsById.set(flow.id, flow);

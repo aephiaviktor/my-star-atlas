@@ -57,12 +57,18 @@ test('Earnings snapshot stays on the fast path and leaves Marketplace to its own
   const snapshot = main.slice(snapshotStart, main.indexOf("handleTrustedIpc('app:get-profile-name'", snapshotStart));
   assert.doesNotMatch(snapshot, /fetchLocalMarketTrades\(/);
   assert.match(snapshot, /needsInventoryLedger/);
-  assert.match(snapshot, /const localMarketResult = \{ trades: \[\], error: '' \}/);
+  assert.match(snapshot, /needsInventoryLedger\s*\? await fetchMarketplaceTradesFromInflux\(settings\)/);
+  assert.match(snapshot, /inventoryBasisFaction: ledgerFaction/);
+  assert.match(snapshot, /pendingInventoryBasisSnapshots/);
+  assert.doesNotMatch(snapshot, /syncMarketplaceFromChain\(/);
   assert.match(renderer, /earningsSubtab: currentEarningsSubtab/);
   assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading Marketplace data\.\.\.'\)/);
 });
 
 test('Marketplace loader uses cached snapshots on tab activation while faction refresh still syncs', () => {
+  assert.match(main, /fetchMarketplaceAssetFlowsFromInflux\(settings\)/);
+  assert.match(main, /readInventoryBasisSnapshots\(\{[\s\S]*?bucket: settings\.influxBucket,[\s\S]*?query: async \(flux\) => parseInfluxCsv\(await queryInfluxFlux\(settings, flux\)\),[\s\S]*?\}\)/);
+  assert.match(main, /enrichGmTradesWithInventoryBasis\(result\.trades, accounting\.appliedEventResults, \{ inventoryBasisObservations \}\)/);
   assert.match(renderer, /function renderEarningsMarketplaceLoading/);
   assert.match(renderer, /renderEarningsMarketplaceLoading\(sync \? 'Syncing Marketplace data\.\.\.' : 'Loading Marketplace data\.\.\.'\)/);
   assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: false \}\);/);
@@ -102,11 +108,14 @@ test('legacy Marketplace rows are rescanned once and compatibility dedupe replac
   assert.match(main, /dedupeMarketplaceRows/);
 });
 
-test('GM sync includes handler and additional wallets while remaining global and ATLAS-only', () => {
+test('GM sync separates configured execution wallets from all profile custody wallets', () => {
   assert.match(html, /name="gmTradingWallets"/);
   assert.match(renderer, /gmTradingWallets: String\(data\.get\('gmTradingWallets'\)/);
-  assert.match(main, /decodePlayerProfileHandlerWallets/);
-  assert.match(main, /\.\.\.decodePlayerProfileHandlerWallets\(accountInfo\), \.\.\.extraWallets/);
+  assert.match(main, /const profileWallets = decodePlayerProfileWallets\(accountInfo\)/);
+  assert.match(main, /const executionWallets = extraWallets/);
+  assert.match(main, /const trackedWallets = Array\.from\(new Set\(\[\.\.\.profileWallets, \.\.\.executionWallets\]\)\)/);
+  assert.match(main, /fetchOpenLocalMarketOrderIds\(connection, executionWallets\)/);
+  assert.match(main, /executionWallets,/);
   assert.match(main, /faction: 'GLOBAL', profile: 'GLOBAL', market: 'GM'/);
   assert.match(main, /quoteMint: ATLAS_MINT/);
   assert.match(main, /fetchMarketplaceAssetFlowsFromInflux/);

@@ -331,6 +331,33 @@ test('allows overriding the market tag so future GM trades can share the measure
   assert.match(line, /market=GM/);
 });
 
+test('scanner discovers custody transactions across G plus P but decodes GM executions only for G', async () => {
+  const gmTx = tx({ signature: 'gm-fill', wallet: 'gm-wallet', assetMint: 'asset', assetBefore: 0, assetAfter: 10, atlasBefore: 100, atlasAfter: 90 });
+  const profileTx = tx({ signature: 'profile-fill', wallet: 'profile-wallet', assetMint: 'asset', assetBefore: 0, assetAfter: 20, atlasBefore: 100, atlasAfter: 80 });
+  const transactions = new Map([['gm-fill', gmTx], ['profile-fill', profileTx]]);
+  const connection = {
+    async getSignaturesForAddress(address) {
+      const signature = String(address) === 'gm-wallet' ? 'gm-fill' : 'profile-fill';
+      return [{ signature, blockTime: transactions.get(signature).blockTime, err: null }];
+    },
+    async getParsedTransaction(signature) { return transactions.get(signature); },
+  };
+  const result = await scanLocalMarketTrades(connection, {
+    trackedWallets: ['gm-wallet', 'profile-wallet'],
+    executionWallets: ['gm-wallet'],
+    marketAssetsByMint: { asset: { starbase: 'GLOBAL', asset: 'Electronics' } },
+    decodeAssetFlows: (transaction) => transaction.signature === 'profile-fill'
+      ? [{ id: 'profile-flow', timestamp: '2026-07-25T00:00:00Z' }] : [],
+    addressFactory: (value) => value,
+    startIso: '2026-07-15T00:00:00Z',
+    requestsPerSecond: 100000,
+  });
+
+  assert.deepEqual(result.trades.map((trade) => trade.wallet), ['gm-wallet']);
+  assert.deepEqual(result.assetFlows.map((flow) => flow.id), ['profile-flow']);
+  assert.deepEqual(Object.keys(result.walletCursors).sort(), ['gm-wallet', 'profile-wallet']);
+});
+
 test('signature exhaustion preserves incoming cursors and returns bounded partial state', async () => {
   const connection = {
     async getSignaturesForAddress(address) {
