@@ -12,7 +12,19 @@ const CURRENT_RENTAL_OFFSETS = Object.freeze({
   rate: 141,
   startTime: 165,
   endTime: 173,
+  serviceFee: 181,
   referrer: 191,
+});
+
+const LEGACY_CONTRACT_OFFSETS = Object.freeze({
+  activeRental: 99,
+});
+
+const LEGACY_RENTAL_OFFSETS = Object.freeze({
+  effectiveRate: 137,
+  startTime: 145,
+  endTime: 153,
+  cancelled: 161,
 });
 
 const PUBLIC_KEY_BYTES = 32;
@@ -39,6 +51,7 @@ function decodeCurrentRental(data) {
   const rate = data.readBigUInt64LE(CURRENT_RENTAL_OFFSETS.rate);
   const startTimeSeconds = data.readBigInt64LE(CURRENT_RENTAL_OFFSETS.startTime);
   const endTimeSeconds = data.readBigInt64LE(CURRENT_RENTAL_OFFSETS.endTime);
+  const serviceFee = data.readBigUInt64LE(CURRENT_RENTAL_OFFSETS.serviceFee);
   if (startTimeSeconds <= 0n || endTimeSeconds <= startTimeSeconds) return null;
 
   const referrerOption = data.readUInt8(CURRENT_RENTAL_OFFSETS.referrer);
@@ -47,7 +60,24 @@ function decodeCurrentRental(data) {
   const bidAtlasOffset = discountBpsOffset + 2 + 8;
   if (data.length < bidAtlasOffset + 8) return null;
   const bidAtlas = data.readBigUInt64LE(bidAtlasOffset);
-  return { borrowerProfile, contract, rate, startTimeSeconds, endTimeSeconds, bidAtlas };
+  return { borrowerProfile, contract, rate, startTimeSeconds, endTimeSeconds, serviceFee, bidAtlas };
+}
+
+function decodeLegacyContract(data) {
+  const activeRental = publicKeyBytes(data, LEGACY_CONTRACT_OFFSETS.activeRental);
+  if (!activeRental || activeRental.equals(SYSTEM_PROGRAM_BYTES)) return null;
+  return { activeRental };
+}
+
+function decodeLegacyRental(data) {
+  if (!Buffer.isBuffer(data) || data.length <= LEGACY_RENTAL_OFFSETS.cancelled
+    || data.readUInt8(LEGACY_RENTAL_OFFSETS.cancelled) !== 0) return null;
+  const effectiveRateAtlasPerDay = data.readDoubleLE(LEGACY_RENTAL_OFFSETS.effectiveRate);
+  const startTimeSeconds = data.readBigInt64LE(LEGACY_RENTAL_OFFSETS.startTime);
+  const endTimeSeconds = data.readBigInt64LE(LEGACY_RENTAL_OFFSETS.endTime);
+  if (!Number.isFinite(effectiveRateAtlasPerDay) || effectiveRateAtlasPerDay <= 0
+    || startTimeSeconds <= 0n || endTimeSeconds <= startTimeSeconds) return null;
+  return { effectiveRateAtlasPerDay, startTimeSeconds, endTimeSeconds };
 }
 
 function matchActiveRental({ rentalAddress, rentalData, contractData }) {
@@ -60,6 +90,7 @@ function matchActiveRental({ rentalAddress, rentalData, contractData }) {
     rate: rental.rate,
     startTimeSeconds: rental.startTimeSeconds,
     endTimeSeconds: rental.endTimeSeconds,
+    serviceFee: rental.serviceFee,
     bidAtlas: rental.bidAtlas,
   };
 }
@@ -67,7 +98,11 @@ function matchActiveRental({ rentalAddress, rentalData, contractData }) {
 module.exports = {
   CURRENT_CONTRACT_OFFSETS,
   CURRENT_RENTAL_OFFSETS,
+  LEGACY_CONTRACT_OFFSETS,
+  LEGACY_RENTAL_OFFSETS,
   decodeCurrentContract,
   decodeCurrentRental,
+  decodeLegacyContract,
+  decodeLegacyRental,
   matchActiveRental,
 };

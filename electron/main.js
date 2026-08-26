@@ -43,7 +43,14 @@ const { buildCargoAllocationPivotFlux, createCargoAllocationSource } = require('
 const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
 const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, cargoVolumeRangeStart, buildCargoVolumeRows, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
-const { CURRENT_RENTAL_OFFSETS, decodeCurrentRental, matchActiveRental } = require('./rental-state');
+const {
+  CURRENT_RENTAL_OFFSETS,
+  decodeCurrentContract,
+  decodeCurrentRental,
+  decodeLegacyContract,
+  decodeLegacyRental,
+  matchActiveRental,
+} = require('./rental-state');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
@@ -194,7 +201,8 @@ const SAGE_PROGRAM_ID = new PublicKey('SAGE2HAwep459SNq61LHvjxPk4pLPEJLoMETef7f7
 const GM_PROGRAM_ID = new PublicKey('traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg');
 const PLAYER_PROFILE_PROGRAM_ID = new PublicKey('pprofELXjL5Kck7Jn5hCpwAL82DpTkSYBENzahVtbc9');
 const SAGE_GAME_ID = new PublicKey('GAMEzqJehF8yAnKiTARUuhZMvLvkZVAsCVri5vSfemLr');
-const SRSLY_PROGRAM_ID = new PublicKey('SRSLY1fq9TJqCk1gNSE7VZL2bztvTn9wm4VR8u8jMKT');
+const SRSLY_PROGRAM_ID = new PublicKey('SRSLYxcFnjd5jG2DpJw4as6UEyjwJQK1U4J1TD1hvZH');
+const LEGACY_SRSLY_PROGRAM_ID = new PublicKey('SRSLY1fq9TJqCk1gNSE7VZL2bztvTn9wm4VR8u8jMKT');
 const DEFAULT_PUBLIC_KEY = PublicKey.default.toBase58();
 const FLEET_ACCOUNT_DISCRIMINATOR = bs58.encode(BorshAccountsCoder.accountDiscriminator('fleet'));
 const factionInfluxAliases = Object.freeze({
@@ -221,13 +229,6 @@ const fleetFieldOffsets = Object.freeze({
   fleetLabel: 170,
   shipCounts: 202,
   state: 439,
-});
-
-const srslyFieldOffsets = Object.freeze({
-  contractRate: 10,
-  contractCurrentRentalState: 99,
-  rentalEndTime: 153,
-  rentalCancelled: 161,
 });
 
 const fleetShipsOffsets = Object.freeze({
@@ -3974,10 +3975,10 @@ function readFixedString(data, offset, length) {
     .trim();
 }
 
-function deriveRentalContract(fleetAccount) {
+function deriveRentalContract(fleetAccount, programId = SRSLY_PROGRAM_ID) {
   return PublicKey.findProgramAddressSync(
     [Buffer.from('rental_contract'), fleetAccount.toBuffer()],
-    SRSLY_PROGRAM_ID
+    programId
   )[0];
 }
 
@@ -3986,6 +3987,13 @@ function normalizeAtlasRate(raw) {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) return null;
   return value > 1_000_000 ? value / 10 ** 8 : value;
+}
+
+function normalizeAtlasAmount(raw) {
+  if (raw == null) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return value / 10 ** 8;
 }
 
 function normalizeShipName(value) {
@@ -5462,18 +5470,6 @@ async function fetchShipStatsSot() {
   return data;
 }
 
-async function readRentalRate(connection, fleetKey) {
-  const contract = deriveRentalContract(new PublicKey(fleetKey));
-  const contractInfo = await connection.getAccountInfo(contract, 'confirmed');
-  if (!contractInfo || contractInfo.data.length < srslyFieldOffsets.contractRate + 8) {
-    return { contract: contract.toBase58(), rateAtlasPerDay: null };
-  }
-  return {
-    contract: contract.toBase58(),
-    rateAtlasPerDay: normalizeAtlasRate(Number(contractInfo.data.readBigUInt64LE(srslyFieldOffsets.contractRate))),
-  };
-}
-
 function formatShortDate(date) {
   if (!date) return null;
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -5481,20 +5477,21 @@ function formatShortDate(date) {
   return `${month}/${day}`;
 }
 
-async function readRentalEndDate(connection, fleetKey) {
-  const contract = deriveRentalContract(new PublicKey(fleetKey));
+async function readLegacyRentalDetails(connection, fleetKey) {
+  const contract = deriveRentalContract(new PublicKey(fleetKey), LEGACY_SRSLY_PROGRAM_ID);
   const contractInfo = await connection.getAccountInfo(contract, 'confirmed');
-  if (!contractInfo) return null;
+  const decodedContract = decodeLegacyContract(contractInfo?.data);
+  if (!decodedContract) return null;
 
-  const currentRentalState = readPublicKey(contractInfo.data, srslyFieldOffsets.contractCurrentRentalState);
-  if (currentRentalState === DEFAULT_PUBLIC_KEY) return null;
+  const rentalInfo = await connection.getAccountInfo(new PublicKey(decodedContract.activeRental), 'confirmed');
+  const decodedRental = decodeLegacyRental(rentalInfo?.data);
+  if (!decodedRental) return null;
 
-  const rentalInfo = await connection.getAccountInfo(new PublicKey(currentRentalState), 'confirmed');
-  if (!rentalInfo || rentalInfo.data[srslyFieldOffsets.rentalCancelled]) return null;
-
-  const endTimeSeconds = Number(rentalInfo.data.readBigInt64LE(srslyFieldOffsets.rentalEndTime));
-  if (!Number.isFinite(endTimeSeconds) || endTimeSeconds <= 0) return null;
-  return new Date(endTimeSeconds * 1000);
+  return {
+    contract: contract.toBase58(),
+    totalRentalCostAtlasPerDay: decodedRental.effectiveRateAtlasPerDay,
+    rentalEnd: new Date(Number(decodedRental.endTimeSeconds) * 1000),
+  };
 }
 
 function inferFleetActivity(data, label, relationship) {
@@ -5858,10 +5855,11 @@ async function fetchProfileFleetsUncached(payload) {
       const endTimeSeconds = Number(matched.endTimeSeconds);
       const rentalDurationSeconds = Number(matched.endTimeSeconds - matched.startTimeSeconds);
       const rentalDurationDays = rentalDurationSeconds / 86_400;
-      const baseRateAtlasPerDay = normalizeAtlasRate(Number(matched.rate));
-      const reservationPremiumAtlas = normalizeAtlasRate(Number(matched.bidAtlas));
+      const baseRateAtlasPerDay = normalizeAtlasAmount(matched.rate);
+      const serviceFeeAtlas = normalizeAtlasAmount(matched.serviceFee);
+      const reservationPremiumAtlas = normalizeAtlasAmount(matched.bidAtlas);
       const totalRentalCostAtlasPerDay = Number.isFinite(rentalDurationDays) && rentalDurationDays > 0
-        ? baseRateAtlasPerDay + reservationPremiumAtlas / rentalDurationDays
+        ? baseRateAtlasPerDay + (serviceFeeAtlas + reservationPremiumAtlas) / rentalDurationDays
         : null;
       currentRentalsByFleet.set(fleetKey, {
         totalRentalCostAtlasPerDay,
@@ -5916,12 +5914,13 @@ async function fetchProfileFleetsUncached(payload) {
       .filter((fleet) => fleet.relationship === 'managed' || fleet.relationship === 'owned-managed')
       .map(async (fleet) => {
         const currentRental = currentRentalsByFleet.get(fleet.key);
-        const rentalEnd = currentRental?.rentalEnd || await runWithTelemetryContext(
+        const rental = currentRental || await runWithTelemetryContext(
           { suboperation: 'rental-data' },
-          () => readRentalEndDate(connection, fleet.key),
+          () => readLegacyRentalDetails(connection, fleet.key),
         );
+        const rentalEnd = rental?.rentalEnd || null;
         const rentalEndLabel = formatShortDate(rentalEnd);
-        fleet.rentalRateAtlasPerDay = currentRental?.totalRentalCostAtlasPerDay ?? null;
+        fleet.rentalRateAtlasPerDay = rental?.totalRentalCostAtlasPerDay ?? null;
         fleet.rentalEndsAt = rentalEnd ? rentalEnd.toISOString() : null;
         fleet.ownership = rentalEndLabel ? `Rented until ${rentalEndLabel}` : 'Rented';
       })
@@ -6846,14 +6845,12 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const info = rentalInfos[index];
     const fleet = fleets.find((candidate) => candidate.key === entry.fleetKey);
     const currentRate = Number(fleet?.rentalRateAtlasPerDay);
-    const legacyRawRate = info?.data?.length >= srslyFieldOffsets.contractRate + 8
-      ? Number(info.data.readBigUInt64LE(srslyFieldOffsets.contractRate))
-      : NaN;
+    const decodedContract = decodeCurrentContract(info?.data);
     rentalRates.set(entry.fleetKey, {
       contract: entry.contractKey,
       rateAtlasPerDay: Number.isFinite(currentRate) && currentRate > 0
         ? currentRate
-        : (Number.isFinite(legacyRawRate) ? normalizeAtlasRate(legacyRawRate) : null),
+        : (decodedContract ? normalizeAtlasAmount(decodedContract.rate) : null),
     });
   });
 
