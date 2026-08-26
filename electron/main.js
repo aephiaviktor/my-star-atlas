@@ -51,6 +51,12 @@ const {
   decodeLegacyRental,
   matchActiveRental,
 } = require('./rental-state');
+const {
+  buildRentalHistoryFluxQuery,
+  projectRentalHistoryRows,
+  createRentalHistoryIndex,
+  resolveHistoricalRental,
+} = require('./rental-history');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
@@ -6767,6 +6773,15 @@ async function fetchCanonicalRawCargoCosts(settings) {
   return { ...projected, query };
 }
 
+async function fetchRentalHistoryIndex(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
+    return createRentalHistoryIndex([]);
+  }
+  const flux = buildRentalHistoryFluxQuery(settings.influxBucket);
+  const rows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
+  return createRentalHistoryIndex(projectRentalHistoryRows(rows));
+}
+
 async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const rawPayload = payload || (await readSettings());
   const settings = normalizeSettings(rawPayload);
@@ -6828,32 +6843,6 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     shipByAccount.set(key, parseShipAccount(shipInfos[index]?.data, key));
   });
 
-  const rentalFleetKeys = fleets
-    .filter((fleet) => fleet.relationship === 'managed' || fleet.relationship === 'owned-managed')
-    .map((fleet) => fleet.key);
-  const rentalRates = new Map();
-  // One batched RPC call is substantially faster and gentler on rate limits
-  // than one getAccountInfo request per managed fleet.
-  const rentalContracts = rentalFleetKeys.map((fleetKey) => {
-    const contract = deriveRentalContract(new PublicKey(fleetKey));
-    return { fleetKey, contract, contractKey: contract.toBase58() };
-  });
-  const rentalInfos = rentalContracts.length
-    ? await connection.getMultipleAccountsInfo(rentalContracts.map((entry) => entry.contract), 'confirmed')
-    : [];
-  rentalContracts.forEach((entry, index) => {
-    const info = rentalInfos[index];
-    const fleet = fleets.find((candidate) => candidate.key === entry.fleetKey);
-    const currentRate = Number(fleet?.rentalRateAtlasPerDay);
-    const decodedContract = decodeCurrentContract(info?.data);
-    rentalRates.set(entry.fleetKey, {
-      contract: entry.contractKey,
-      rateAtlasPerDay: Number.isFinite(currentRate) && currentRate > 0
-        ? currentRate
-        : (decodedContract ? normalizeAtlasAmount(decodedContract.rate) : null),
-    });
-  });
-
   let mappedShipTypeCount = 0;
   let unmappedShipTypeCount = 0;
   const fleetRows = fleets.map((fleet) => {
@@ -6890,12 +6879,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         mapped,
       };
     });
-    const rental = rentalRates.get(fleet.key) || { contract: null, rateAtlasPerDay: null };
-    const rentalRate = Number(rental.rateAtlasPerDay);
     return {
       ...fleet,
-      rentalContract: rental.contract,
-      rentalRateAtlasPerDay: Number.isFinite(rentalRate) ? rentalRate : null,
       expectedSduPerScan,
       expectedSduValueAtl: sduPriceAtl != null ? expectedSduPerScan * sduPriceAtl : null,
       totalRequiredCrew: totalRequiredCrew > 0 ? totalRequiredCrew : null,
@@ -6945,6 +6930,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   let upgradingError = '';
   let rawCargoCosts = { records: [], rejected: [], query: '' };
   let rawCargoCostError = '';
+  let rentalHistoryIndex = createRentalHistoryIndex([]);
+  let rentalHistoryError = '';
   // Each category already fans out into several Flux queries. Starting all
   // five categories at once overloads the Influx proxy (17+ concurrent
   // queries) and causes 504s, so use bounded category concurrency instead.
@@ -6956,6 +6943,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     () => fetchUpgradingEarningsRows(settings),
     () => fetchCanonicalRawCargoCosts(settings),
     () => fetchCargoVolumeEarningsRows(settings),
+    () => fetchRentalHistoryIndex(settings),
   ];
   const earningsCategoryNames = ['Scanning', 'Mining', 'Cargo', 'Crafting', 'Upgrading'];
   if (diagnosticContext) diagnosticContext.stage = 'category_collection';
@@ -6977,7 +6965,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       }
     }
   }));
-  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult] = earningsRowResults;
+  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult, rentalHistoryResult] = earningsRowResults;
   if (diagnosticContext) diagnosticContext.stage = 'projection';
   if (scanningResult.status === 'fulfilled') scanningRows = scanningResult.value;
   else scanningError = String(scanningResult.reason?.message || scanningResult.reason || 'scan_rows_unavailable');
@@ -6998,6 +6986,15 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const cargoVolumeError = cargoVolumeResult.status === 'fulfilled'
     ? ''
     : String(cargoVolumeResult.reason?.message || cargoVolumeResult.reason || 'cargo_volume_rows_unavailable').slice(0, 240);
+  if (rentalHistoryResult.status === 'fulfilled') rentalHistoryIndex = rentalHistoryResult.value;
+  else rentalHistoryError = String(rentalHistoryResult.reason?.message || rentalHistoryResult.reason || 'rental_history_unavailable').slice(0, 240);
+
+  const rentalForRow = (fleet, fleetLabel, isoDate, authoritativeFleetAccount = '') => resolveHistoricalRental(rentalHistoryIndex, {
+    fleetAccount: authoritativeFleetAccount || fleet?.key || '',
+    fleetLabel,
+    faction: settingsFaction,
+    isoDate,
+  });
 
   const compatibilityCargoRows = cargoRows;
   const rawExporter = exporterForFaction(settings.faction);
@@ -7039,7 +7036,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const foodCostsAtlas = foodPriceAtl != null ? scanRow.burnedFood * foodPriceAtl : null;
     const fuelCostsAtlas = fuelPriceAtl != null ? scanRow.burnedFuel * fuelPriceAtl : null;
     const txsCostsAtlas = atlasPerSol != null ? scanRow.txCostSol * atlasPerSol : null;
-    const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
+    const historicalRental = rentalForRow(fleet, scanRow.fleet, scanRow.isoDate);
+    const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
     const costParts = [foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const revenueAtlasPerDay = sduPriceAtl != null ? scanRow.sduFound * sduPriceAtl : null;
@@ -7049,8 +7047,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     return {
       ...scanRow,
       fleetName: scanRow.fleet,
-      fleetAccount: fleet?.key || '',
-      rented: fleet?.relationship === 'managed' || fleet?.relationship === 'owned-managed',
+      fleetAccount: fleet?.key || historicalRental?.fleetAccount || '',
+      rented: Boolean(historicalRental),
       ownership: fleet?.ownership || '',
       relationship: fleet?.relationship || '',
       activity: fleet?.activity || '',
@@ -7071,7 +7069,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
         ? (netProfitAtlas / revenueAtlasPerDay) * 100
         : null,
-      rentalContract: fleet?.rentalContract || null,
+      rentalContract: historicalRental?.rentalContract || null,
       rentalRateAtlasPerDay,
     };
   });
@@ -7099,7 +7097,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const foodCostsAtlas = foodPriceAtl != null ? miningRow.burnedFood * foodPriceAtl : null;
     const fuelCostsAtlas = fuelPriceAtl != null ? miningRow.burnedFuel * fuelPriceAtl : null;
     const txsCostsAtlas = atlasPerSol != null ? miningRow.txCostSol * atlasPerSol : null;
-    const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
+    const historicalRental = rentalForRow(fleet, miningRow.fleet, miningRow.isoDate);
+    const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
     const costParts = [ammoCostsAtlas, foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
@@ -7112,8 +7111,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     return {
       ...miningRow,
       fleetName: miningRow.fleet,
-      fleetAccount: fleet?.key || '',
-      rented: fleet?.relationship === 'managed' || fleet?.relationship === 'owned-managed',
+      fleetAccount: fleet?.key || historicalRental?.fleetAccount || '',
+      rented: Boolean(historicalRental),
       ownership: fleet?.ownership || '',
       relationship: fleet?.relationship || '',
       activity: fleet?.activity || '',
@@ -7134,7 +7133,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0
         ? (netProfitAtlas / revenueAtlasPerDay) * 100
         : null,
-      rentalContract: fleet?.rentalContract || null,
+      rentalContract: historicalRental?.rentalContract || null,
       rentalRateAtlasPerDay,
     };
   });
@@ -7176,7 +7175,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const txsCostsAtlas = feeCanonical
       ? (solValuation?.amountATL ?? null)
       : (atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null);
-    const rentalRateAtlasPerDay = fleet?.rentalRateAtlasPerDay ?? null;
+    const historicalRental = rentalForRow(fleet, cargoRow.fleet, cargoRow.isoDate, authoritativeAccount);
+    const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
     const incompleteRawValuation = (fuelCanonical && Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (feeCanonical && BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas));
     const costParts = [fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = !incompleteRawValuation && costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
@@ -7186,8 +7186,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       profile: profileName,
       faction: normalizeFaction(settings.faction),
       fleetName: fleet?.label || (cargoRow.allocationStatus === 'unallocated' ? 'Unallocated' : cargoRow.fleet),
-      fleetAccount: fleet?.key || cargoRow.fleetAccount || '',
-      rented: fleet?.relationship === 'managed' || fleet?.relationship === 'owned-managed',
+      fleetAccount: fleet?.key || historicalRental?.fleetAccount || cargoRow.fleetAccount || '',
+      rented: Boolean(historicalRental),
       ownership: fleet?.ownership || '',
       relationship: fleet?.relationship || '',
       activity: fleet?.activity || '',
@@ -7207,6 +7207,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       fuelValuationStatus: fuelPrice?.status,
       fuelValuation: canonicalRaw ? cargoRow.fuelValuation : null,
       solValuation,
+      rentalContract: historicalRental?.rentalContract || null,
       rentalRateAtlasPerDay,
       txsCostsAtlas,
       totalCostsAtlas,
@@ -7603,7 +7604,13 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
 
   const activeFleetRows = fleetRows.filter((fleet) => activeMappedFleetKeys.has(fleet.key));
   const totalExpectedSduPerScan = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.expectedSduPerScan) || 0), 0);
-  const rentalAtlasPerDay = activeFleetRows.reduce((sum, fleet) => sum + (Number(fleet.rentalRateAtlasPerDay) || 0), 0);
+  const todayRentalByFleet = new Map();
+  for (const row of [...rows, ...mining, ...cargo]) {
+    if (row.isoDate !== todayIsoDate || !Number.isFinite(Number(row.rentalRateAtlasPerDay))) continue;
+    const key = String(row.fleetAccount || row.fleetName || row.fleet || '').trim();
+    if (key && !todayRentalByFleet.has(key)) todayRentalByFleet.set(key, Number(row.rentalRateAtlasPerDay));
+  }
+  const rentalAtlasPerDay = Array.from(todayRentalByFleet.values()).reduce((sum, value) => sum + value, 0);
   const totalsByDay = new Map();
   for (const row of rows) {
     const day = row.isoDate;
@@ -7695,6 +7702,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     cargoError,
     cargoFetchDiagnostics,
     rawCargoCostError,
+    rentalHistoryError,
     rawCargoCostQuery: rawCargoCosts.query,
     rawCargoCostCutoverManifestVersion: RAW_COST_CUTOVER_MANIFEST_VERSION,
     rawCargoCostCutoverUtc: cutoverSelection.cutover,
