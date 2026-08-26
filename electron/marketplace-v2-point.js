@@ -17,7 +17,6 @@ const ENRICHED_FIELD_KEYS = Object.freeze([
   'enrichedUnitPriceAtlas', 'enrichedWallet', 'enrichedStarbase', 'enrichedAsset',
   'enrichedCertificateMint', 'enrichedOrderId', 'enrichedCreationSignature',
 ]);
-const LINEAGE_FIELD_SUFFIXES = Object.freeze(['LineageStatus', 'LineageFaction', 'LineageProfile', 'LineageLocation']);
 const FALLBACK_NUMERIC_KEYS = new Set(FALLBACK_FIELD_KEYS.slice(0, 6));
 const ENRICHED_NUMERIC_KEYS = new Set(ENRICHED_FIELD_KEYS.slice(0, 7));
 const CONTROL = /[\u0000-\u001f\u007f]/;
@@ -184,13 +183,9 @@ function validateProjection(identity, rank, fields) {
   const keys = rank === 'fallback' ? FALLBACK_FIELD_KEYS : rank === 'enriched' ? ENRICHED_FIELD_KEYS : null;
   const numeric = rank === 'fallback' ? FALLBACK_NUMERIC_KEYS : ENRICHED_NUMERIC_KEYS;
   if (!keys || !fields || typeof fields !== 'object' || Array.isArray(fields)) fail('invalid_projection_fields');
-  const optional = LINEAGE_FIELD_SUFFIXES.map((suffix) => `${rank}${suffix}`);
   const actual = Object.keys(fields).sort();
   const expected = Array.from(keys).sort();
-  const expectedWithLineage = [...keys, ...optional].sort();
-  const exact = actual.length === expected.length && actual.every((key, index) => key === expected[index]);
-  const withLineage = actual.length === expectedWithLineage.length && actual.every((key, index) => key === expectedWithLineage[index]);
-  if (!exact && !withLineage) fail('invalid_projection_fields');
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) fail('invalid_projection_fields');
   const rendered = [];
   for (const key of keys) {
     if (numeric.has(key)) {
@@ -202,10 +197,6 @@ function validateProjection(identity, rank, fields) {
       const value = boundedString(fields[key], 'invalid_projection_string', { allowEmpty });
       rendered.push(`${key}=${escapeFieldString(value)}`);
     }
-  }
-  if (withLineage) for (const key of optional) {
-    const value = boundedString(fields[key], 'invalid_projection_string', { allowEmpty: true });
-    rendered.push(`${key}=${escapeFieldString(value)}`);
   }
   const projectedQuantity = canonicalMarketplaceQuantity(fields[keys[0]]);
   if (projectedQuantity !== identity.canonicalQuantity) fail('quantity_mismatch');
@@ -243,7 +234,6 @@ module.exports = {
   MARKETPLACE_V2_TAG_KEYS,
   FALLBACK_FIELD_KEYS,
   ENRICHED_FIELD_KEYS,
-  LINEAGE_FIELD_SUFFIXES,
   sanitizeMarketplaceProfileScope,
   canonicalMarketplaceQuantity,
   canonicalInfluxNumber,

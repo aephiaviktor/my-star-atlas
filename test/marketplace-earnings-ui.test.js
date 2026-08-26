@@ -10,30 +10,28 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.ht
 const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 
-test('Marketplace V2 sits between Mining and Cargo with market/type controls and separate reconciliation tables', () => {
+test('Marketplace earnings tab sits between Mining and Cargo with a BUY/SELL switch and side-specific unit column', () => {
   assert.match(html, /data-earnings-subtab="mining"[\s\S]*data-earnings-subtab="marketplace"[\s\S]*data-earnings-subtab="cargo"/);
-  assert.match(html, /id="earnings-marketplace-side-switch"[\s\S]*data-marketplace-side="all"[^>]*>ALL<[\s\S]*data-marketplace-side="buy"[^>]*>BUY<[\s\S]*data-marketplace-side="sell"[^>]*>SELL</);
-  assert.match(html, /id="earnings-marketplace-market-filter"[\s\S]*LM \+ GM[\s\S]*id="earnings-marketplace-type-filter"[\s\S]*Inbound transfer[\s\S]*Outbound transfer/);
+  assert.match(html, /id="earnings-marketplace-side-switch"[\s\S]*data-marketplace-side="buy"[^>]*>BUY<[\s\S]*data-marketplace-side="sell"[^>]*>SELL</);
+  assert.doesNotMatch(html, /data-marketplace-side="(?:buy|sell)"[^>]*>\s*(?:BUY|SELL)\s*\(/);
   const panel = html.match(/data-earnings-panel="marketplace"[\s\S]*?<\/div>\s*<div class="earnings-panel" data-earnings-panel="cargo"/)?.[0] || '';
-  for (const label of ['Timestamp \\(UTC\\)', 'Market', 'Type', 'Asset', 'Exact quantity', 'Value ATLAS', 'Price / unit', 'Fees ATLAS', 'Wallet', 'Profile', 'Faction', 'Provenance', 'Confidence', 'Reconciliation', 'Signature']) {
+  for (const label of ['Timestamp \\(UTC\\)', 'Marketplace', 'Starbase', 'Asset', 'Amount', 'Gross ATLAS', 'Price', 'Marketplace Fee', 'Txs Fee', 'Net ATLAS', 'Cost / Unit', 'Order ID', 'Signature']) {
     assert.match(panel, new RegExp(label));
   }
-  assert.match(panel, /Attributed activity[\s\S]*Pending allocation \/ Unallocated[\s\S]*Quarantined activity[\s\S]*Global \/ Unallocated GM activity/);
-  assert.match(panel, /earnings-marketplace-attributed-total[\s\S]*earnings-marketplace-pending-total[\s\S]*earnings-marketplace-quarantined-total[\s\S]*earnings-marketplace-global-total/);
+  assert.doesNotMatch(panel, /<th>Side<\/th>/);
+  assert.match(panel, /id="earnings-marketplace-unit-header"/);
+  assert.ok(panel.indexOf('Net ATLAS') < panel.indexOf('Cost / Unit'));
+  assert.ok(panel.indexOf('Cost / Unit') < panel.indexOf('Order ID'));
+  assert.ok(panel.indexOf('Order ID') < panel.indexOf('Signature'));
 });
 
-test('Marketplace V2 renderer filters market/type, preserves exact quantity text, and bounds every reconciliation section', () => {
-  assert.match(renderer, /let earningsMarketplaceSide = 'all'/);
-  assert.match(renderer, /entry\.market !== earningsMarketplaceMarket/);
-  assert.match(renderer, /entry\.transactionType === selectedType/);
-  assert.match(renderer, /String\(entry\.exactQuantity \?\? ''\)/);
-  assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplaceTableBody[\s\S]*200\)/);
-  assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplacePendingBody[\s\S]*100\)/);
-  assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplaceQuarantinedBody[\s\S]*100\)/);
-  assert.match(renderer, /renderMarketplaceActivityRows\(earningsMarketplaceGlobalBody[\s\S]*100\)/);
-  assert.match(renderer, /filteredAttributed\.length/);
-  assert.match(renderer, /Partial\/stale: displayed through/);
-  assert.match(renderer, /opening and switching use zero Solana RPC/);
+test('Marketplace renderer filters rows by selected side and swaps the unit metric', () => {
+  assert.match(renderer, /let earningsMarketplaceSide = 'buy'/);
+  assert.match(renderer, /entry\.side === earningsMarketplaceSide/);
+  assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Cost \/ Unit' : 'Income \/ Unit'/);
+  assert.match(renderer, /earningsMarketplaceSide === 'buy'[\s\S]*\(gross \+ txFee\) \/ quantity[\s\S]*net \/ quantity/);
+  assert.match(renderer, /formatMarketplaceAtlas\(txFee, 2\)/);
+  assert.match(renderer, /formatMarketplaceAtlas\(net, 2\)/);
 });
 
 test('Update shares a row with Refresh data while the BUY SELL switch stays below', () => {
@@ -54,23 +52,21 @@ test('LM scanner resolves the configured profile through the existing settings h
   assert.match(main, /const profile = getSelectedPlayerProfile\(settings\);/);
 });
 
-test('Earnings snapshot stays on the fast path except bounded cached Marketplace evidence for complete Breakeven', () => {
+test('Earnings snapshot stays on the fast path and leaves Marketplace to its own loader', () => {
   const snapshotStart = main.indexOf('async function fetchEarningsSnapshot');
   const snapshot = main.slice(snapshotStart, main.indexOf("handleTrustedIpc('app:get-profile-name'", snapshotStart));
   assert.doesNotMatch(snapshot, /fetchLocalMarketTrades\(/);
   assert.match(snapshot, /needsInventoryLedger/);
-  assert.match(snapshot, /const needsCompleteAccounting = snapshotScope === 'breakeven'/);
-  assert.match(snapshot, /const localMarketResult = needsCompleteAccounting\s*\? await fetchMarketplaceTradesFromInflux\(settings\)\s*: \{ trades: \[\], error: '' \}/);
-  assert.doesNotMatch(snapshot, /needsCompleteAccounting[\s\S]{0,1000}(?:scanLocalMarketTrades|syncMarketplace|setInterval)/);
+  assert.match(snapshot, /const localMarketResult = \{ trades: \[\], error: '' \}/);
   assert.match(renderer, /earningsSubtab: currentEarningsSubtab/);
-  assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading cached Marketplace data\.\.\.'\)/);
+  assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading Marketplace data\.\.\.'\)/);
 });
 
-test('Marketplace loader uses cached snapshots on tab activation and faction refresh', () => {
+test('Marketplace loader uses cached snapshots on tab activation while faction refresh still syncs', () => {
   assert.match(renderer, /function renderEarningsMarketplaceLoading/);
-  assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading cached Marketplace data\.\.\.'\)/);
+  assert.match(renderer, /renderEarningsMarketplaceLoading\(sync \? 'Syncing Marketplace data\.\.\.' : 'Loading Marketplace data\.\.\.'\)/);
   assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: false \}\);/);
-  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: false \}\) : refreshEarnings\(\)/);
+  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: true \}\) : refreshEarnings\(\)/);
 });
 
 test('Marketplace chain synchronization is exposed separately and runs in the background', () => {
@@ -126,13 +122,13 @@ test('ONI and MUD earnings accept second-instance SDU tags', () => {
   assert.match(main, /instance: \['MUD', 'MUD2'\]/);
 });
 
-test('Marketplace activation, faction refresh, and manual refresh browse cache while background discovery uses its own global guard', async () => {
+test('Marketplace activation loads snapshots while background, faction refresh, and manual refresh sync through the guard', async () => {
   assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: false \}\);/);
-  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: false \}\) : refreshEarnings\(\)/);
-  assert.match(renderer, /function refreshCurrentVisibleData\([\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: false \}\)/);
+  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: true \}\) : refreshEarnings\(\)/);
+  assert.match(renderer, /function refreshCurrentVisibleData\([\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: true \}\)/);
   assert.match(renderer, /refreshDataButton\?\.addEventListener\('click'[\s\S]*await refreshCurrentVisibleData\(\)/);
 
-  const sourceStart = renderer.indexOf('let marketplaceSyncInFlight = null;');
+  const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
   const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
   const snapshotPayloads = [];
   let syncCalls = 0;
@@ -177,11 +173,11 @@ test('Marketplace activation, faction refresh, and manual refresh browse cache w
   releaseSync();
   await Promise.all([startupBackground, scheduledTick, manualRefresh, factionRefresh]);
   assert.equal(syncCalls, 1);
-  assert.equal(snapshotCalls, 4);
+  assert.equal(snapshotCalls, 3);
 });
 
 test('Marketplace skipped cross-faction sync still loads and uses the requested faction snapshot', async () => {
-  const sourceStart = renderer.indexOf('let marketplaceSyncInFlight = null;');
+  const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
   const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
   const rendered = [];
   const syncPayloads = [];
@@ -221,7 +217,8 @@ test('Marketplace skipped cross-faction sync still loads and uses the requested 
   vm.runInNewContext(`${renderer.slice(sourceStart, sourceEnd)}\nthis.refreshMarketplace = refreshMarketplace;`, context);
 
   const result = await context.refreshMarketplace({ sync: true });
-  assert.equal(syncPayloads.length, 0);
+  assert.equal(syncPayloads.length, 1);
+  assert.equal(syncPayloads[0].faction, 'ONI');
   assert.equal(snapshotPayloads.length, 1);
   assert.equal(snapshotPayloads[0].faction, 'ONI');
   assert.equal(result, oniSnapshot);
@@ -236,11 +233,11 @@ test('Marketplace scheduler uses hourly guarded background synchronization', () 
   assert.doesNotMatch(renderer, /const MARKETPLACE_SYNC_INTERVAL_MS = 5 \* 60 \* 1000;/);
   assert.match(renderer, /void runMarketplaceBackgroundSync\(\);/);
   assert.match(renderer, /setInterval\(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS\)/);
-  assert.match(renderer, /function runMarketplaceBackgroundSync\(\)[\s\S]*marketplaceSyncInFlight[\s\S]*api\.syncMarketplace\(/);
+  assert.match(renderer, /function runMarketplaceBackgroundSync\(\) \{\s*if \(!latestSettings \|\| !getActivePlayerProfile\(latestSettings\)\) return Promise\.resolve\(\);\s*return refreshMarketplace\(\{ sync: true \}\);\s*\}/);
 });
 
 test('Marketplace budget exhaustion still loads only the requested cached snapshot', async () => {
-  const sourceStart = renderer.indexOf('let marketplaceSyncInFlight = null;');
+  const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
   const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
   const rendered = [];
   let snapshotCalls = 0;
@@ -271,16 +268,4 @@ test('Marketplace budget exhaustion still loads only the requested cached snapsh
   assert.equal(rendered[0].localMarketTrades[0].id, 'oni-cached');
   assert.match(renderer, /const MARKETPLACE_SYNC_INTERVAL_MS = 60 \* 60 \* 1000/);
   assert.match(renderer, /refreshMarketplace\(\{ sync: false \}\)/);
-});
-
-test('Marketplace browsing and identity switches are cached zero-RPC while one application-wide background sync owns discovery', () => {
-  assert.match(renderer, /let marketplaceSyncInFlight = null;/);
-  assert.doesNotMatch(renderer, /marketplaceRefreshInFlight/);
-  assert.match(renderer, /function runMarketplaceBackgroundSync\(\)[\s\S]*api\.syncMarketplace\(/);
-  assert.match(renderer, /function setActiveEarningsSubtab[\s\S]*subtab === 'marketplace'[\s\S]*refreshMarketplace\(\{ sync: false \}\)/);
-  assert.match(renderer, /function refreshVisibleFactionViews[\s\S]*currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: false \}\)/);
-  assert.match(renderer, /function refreshVisibleIdentity[\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: false \}\)/);
-  assert.match(renderer, /function refreshCurrentVisibleData[\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: false \}\)/);
-  const refreshSource = renderer.slice(renderer.indexOf('async function refreshMarketplace'), renderer.indexOf('function runMarketplaceBackgroundSync'));
-  assert.doesNotMatch(refreshSource, /syncMarketplace/);
 });

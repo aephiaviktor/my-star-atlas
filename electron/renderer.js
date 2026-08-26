@@ -11,22 +11,6 @@ function getRefreshContext(filters = {}) {
   };
 }
 
-function createLatestEarningsResponseCoordinator() {
-  let generation = 0;
-  return {
-    async run({ load, onLoading, onResult }) {
-      const requestGeneration = ++generation;
-      onLoading?.();
-      const value = await load();
-      if (requestGeneration !== generation) return { accepted: false, value: null };
-      onResult?.(value);
-      return { accepted: true, value };
-    },
-  };
-}
-
-const earningsResponseCoordinator = createLatestEarningsResponseCoordinator();
-
 const form = document.querySelector('#settings-form');
 const appShell = document.querySelector('.app-shell');
 const saveStatus = document.querySelector('#save-status');
@@ -195,26 +179,14 @@ const earningsUpgradingAssetFilter = document.querySelector('#earnings-upgrading
 const earningsBreakevenTableHead = document.querySelector('#earnings-breakeven-table-head');
 const earningsBreakevenTableBody = document.querySelector('#earnings-breakeven-table-body');
 const earningsBreakevenSyncStatus = document.querySelector('#earnings-breakeven-sync-status');
+const earningsBreakevenStarbaseFilter = document.querySelector('#earnings-breakeven-starbase-filter');
 const earningsBreakevenAssetFilter = document.querySelector('#earnings-breakeven-asset-filter');
-const earningsBreakevenPeriodFilter = document.querySelector('#earnings-breakeven-period-filter');
-const earningsBreakevenSourceFilter = document.querySelector('#earnings-breakeven-source-filter');
 const earningsBreakevenHideLowInventory = document.querySelector('#earnings-breakeven-hide-low-inventory');
-const earningsCargoBreakevenBetaStatus = document.querySelector('#earnings-cargo-breakeven-beta-status');
-const earningsCargoBreakevenBetaBody = document.querySelector('#earnings-cargo-breakeven-beta-body');
 const earningsMarketplaceSyncStatus = document.querySelector('#earnings-marketplace-sync-status');
 const earningsMarketplaceTableBody = document.querySelector('#earnings-marketplace-table-body');
-const earningsMarketplacePendingBody = document.querySelector('#earnings-marketplace-pending-body');
-const earningsMarketplaceQuarantinedBody = document.querySelector('#earnings-marketplace-quarantined-body');
-const earningsMarketplaceGlobalBody = document.querySelector('#earnings-marketplace-global-body');
-const earningsMarketplaceMarketFilter = document.querySelector('#earnings-marketplace-market-filter');
-const earningsMarketplaceTypeFilter = document.querySelector('#earnings-marketplace-type-filter');
-const earningsMarketplaceAttributedTotal = document.querySelector('#earnings-marketplace-attributed-total');
-const earningsMarketplacePendingTotal = document.querySelector('#earnings-marketplace-pending-total');
-const earningsMarketplaceQuarantinedTotal = document.querySelector('#earnings-marketplace-quarantined-total');
-const earningsMarketplaceGlobalTotal = document.querySelector('#earnings-marketplace-global-total');
-const earningsMarketplaceTransferTotal = document.querySelector('#earnings-marketplace-transfer-total');
 const earningsMarketplaceSideSwitch = document.querySelector('#earnings-marketplace-side-switch');
 const earningsMarketplaceSideButtons = Array.from(document.querySelectorAll('[data-marketplace-side]'));
+const earningsMarketplaceUnitHeader = document.querySelector('#earnings-marketplace-unit-header');
 const earningsScanningDateFilter = document.querySelector('#earnings-scanning-date-filter');
 const earningsScanningFleetFilter = document.querySelector('#earnings-scanning-fleet-filter');
 const earningsMiningDateFilter = document.querySelector('#earnings-mining-date-filter');
@@ -387,9 +359,7 @@ const factionButtons = Array.from(document.querySelectorAll('.faction-button'));
 let currentSection = 'production';
 let currentSubtab = 'scanning';
 let currentEarningsSubtab = 'scanning';
-let earningsMarketplaceSide = 'all';
-let earningsMarketplaceMarket = '';
-let earningsMarketplaceType = '';
+let earningsMarketplaceSide = 'buy';
 let activeCargoTable = 'fleet';
 let latestSettings = null;
 let latestFleetResult = null;
@@ -750,7 +720,7 @@ const cargoAllocationEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'ships', label: 'Ships' }),
   Object.freeze({ id: 'requiredCrew', label: 'Required Crew' }),
   Object.freeze({ id: 'assignment', label: 'Assignment' }),
-  Object.freeze({ id: 'amount', label: 'Allocated Amount' }),
+  Object.freeze({ id: 'amount', label: 'Cargo Amount' }),
   Object.freeze({ id: 'cargoVolume', label: 'Cargo Volume' }),
   Object.freeze({ id: 'allocatedFuel', label: 'Allocated Fuel' }),
   Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs' }),
@@ -788,34 +758,22 @@ const upgradingEarningsOptionalColumns = Object.freeze([
 ]);
 
 const breakevenEarningsBaseColumns = Object.freeze([
+  Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
-  Object.freeze({ id: 'openingQuantity', label: 'Opening Qty' }),
-  Object.freeze({ id: 'openingBasis', label: 'Opening Basis' }),
-  Object.freeze({ id: 'lmIn', label: 'LM In' }),
-  Object.freeze({ id: 'gmIn', label: 'GM In' }),
-  Object.freeze({ id: 'scanningIn', label: 'Scanning In' }),
-  Object.freeze({ id: 'miningIn', label: 'Mining / Rental In' }),
-  Object.freeze({ id: 'craftingOut', label: 'Crafting Out' }),
-  Object.freeze({ id: 'upgradingOut', label: 'Upgrading Out' }),
-  Object.freeze({ id: 'transferIn', label: 'Cargo / Transfer In' }),
-  Object.freeze({ id: 'outflows', label: 'Consumption / Transfer Out' }),
-  Object.freeze({ id: 'salesQuantity', label: 'Sales Qty' }),
-  Object.freeze({ id: 'salesNetProceeds', label: 'Net Proceeds' }),
-  Object.freeze({ id: 'cogs', label: 'COGS' }),
-  Object.freeze({ id: 'realizedProfit', label: 'Realized Profit' }),
-  Object.freeze({ id: 'expectedClosing', label: 'Expected Closing' }),
-  Object.freeze({ id: 'remainingQuantity', label: 'Remaining Qty' }),
-  Object.freeze({ id: 'remainingCostBasis', label: 'Remaining Basis' }),
-  Object.freeze({ id: 'averageCostPerUnit', label: 'Avg Cost / Unit' }),
-  Object.freeze({ id: 'actualClosing', label: 'Actual Closing' }),
-  Object.freeze({ id: 'difference', label: 'Difference' }),
+  Object.freeze({ id: 'inventory', label: 'Inventory' }),
+  Object.freeze({ id: 'scanningCost', label: 'Scanning C/U' }),
+  Object.freeze({ id: 'miningCost', label: 'Mining C/U' }),
+  Object.freeze({ id: 'craftingCost', label: 'Crafting C/U' }),
+  Object.freeze({ id: 'lmCost', label: 'LM C/U' }),
+  Object.freeze({ id: 'gmCost', label: 'GM C/U' }),
+  Object.freeze({ id: 'baseCost', label: 'Base Cost / Unit' }),
+  Object.freeze({ id: 'cargoCost', label: 'Cargo Cost / Unit' }),
+  Object.freeze({ id: 'landedCost', label: 'Total Cost / Unit' }),
+  Object.freeze({ id: 'inventoryValue', label: 'Inventory Cost Basis' }),
   Object.freeze({ id: 'costCoverage', label: 'Cost Coverage' }),
-  Object.freeze({ id: 'pending', label: 'Pending' }),
-  Object.freeze({ id: 'unallocated', label: 'Unallocated' }),
-  Object.freeze({ id: 'uncosted', label: 'Uncosted' }),
-  Object.freeze({ id: 'rejected', label: 'Rejected' }),
-  Object.freeze({ id: 'quarantined', label: 'Quarantined' }),
-  Object.freeze({ id: 'ledgerStatus', label: 'Status' }),
+  Object.freeze({ id: 'gmPrice', label: 'GM Price / Unit' }),
+  Object.freeze({ id: 'inventoryExternalValue', label: 'Inventory External Value' }),
+  Object.freeze({ id: 'ledgerStatus', label: 'Ledger Status' }),
 ]);
 
 const breakevenEarningsOptionalColumns = Object.freeze([]);
@@ -922,13 +880,13 @@ const earningsMetricGuideBySubtab = Object.freeze({
   }),
   cargoAllocation: Object.freeze({
     assignment: ['Logistics assignment that delivered this asset.', 'Recorded assignment: Transport or Supply Chain.', 'Use it to separate direct transport from supply-chain activity for the same asset.'],
-    amount: ['Units assigned to this allocation split during the UTC day.', 'Σ Allocated Amount across preserved split rows.', 'This is allocation evidence, not the confirmed delivered quantity.'],
-    cargoVolume: ['Cargo-space volume represented by the allocated asset.', 'Σ allocated Cargo Volume.', 'Compare it with Allocated Amount to understand how much hold capacity the split consumed.'],
+    amount: ['Units of the asset delivered during the UTC day.', 'Σ delivered Cargo Amount.', 'This is the denominator used for Cargo Cost/Unit.'],
+    cargoVolume: ['Cargo-space volume represented by the delivered asset.', 'Σ delivered Cargo Volume.', 'Compare it with Cargo Amount to understand how much hold capacity the asset consumed.'],
     allocatedFuel: ['Fuel attributed to delivery of this asset, including its share of empty-leg overhead.', 'Loaded-leg fuel + allocated empty-leg fuel overhead.', 'This assigns the complete cycle fuel cost across the assets delivered by that cycle.'],
     fuelCosts: ['ATLAS value of the fuel allocated to this asset.', 'Allocated Fuel × applicable fuel price.', 'Unavailable source or price evidence is shown as --, never as a manufactured zero.'],
     txsCosts: ['ATLAS value of transaction fees allocated to this asset, including empty-leg overhead.', 'Allocated transaction cost in SOL × applicable ATLAS-per-SOL rate.', 'Unavailable source or valuation evidence is shown as --.'],
     totalCosts: ['Total represented cargo logistics cost allocated to this asset.', 'Fuel Costs + TXS Costs.', 'Cargo cost currently includes Fuel and TXS only; Rental and inventory basis are not included.'],
-    costsPerUnit: ['Allocated cargo logistics cost for one allocated asset unit.', 'Total Cargo Costs ÷ Allocated Amount.', 'Available only when Fuel and TXS costs are available and Allocated Amount is positive.'],
+    costsPerUnit: ['Allocated cargo logistics cost for one delivered asset unit.', 'Total Cargo Costs ÷ Cargo Amount.', 'Available only when Fuel and TXS costs are available and Cargo Amount is positive.'],
   }),
   crafting: Object.freeze({
     crafted: ['Total output units crafted during the UTC day.', 'Σ crafted output quantity.', 'Use with unit prices and costs to understand production scale.'],
@@ -966,7 +924,7 @@ const earningsFilters = {
   cargoAllocation: { date: '', fleet: '', asset: '' },
   crafting: { date: '', starbase: '', asset: '' },
   upgrading: { date: '', starbase: '', asset: '' },
-  breakeven: { asset: '', source: '', hideLowInventory: false },
+  breakeven: { starbase: '', asset: '', hideLowInventory: false },
 };
 
 const earningsSort = {
@@ -1078,7 +1036,7 @@ const earningsFilterBarBySubtab = Object.freeze({
   cargoAllocation: () => ({ date: earningsCargoAllocationDateFilter, fleet: earningsCargoAllocationFleetFilter, asset: earningsCargoAllocationAssetFilter }),
   crafting: () => ({ date: earningsCraftingDateFilter, starbase: earningsCraftingStarbaseFilter, asset: earningsCraftingAssetFilter }),
   upgrading: () => ({ date: earningsUpgradingDateFilter, starbase: earningsUpgradingStarbaseFilter, asset: earningsUpgradingAssetFilter }),
-  breakeven: () => ({ asset: earningsBreakevenAssetFilter }),
+  breakeven: () => ({ starbase: earningsBreakevenStarbaseFilter, asset: earningsBreakevenAssetFilter }),
 });
 
 const earningsTableHeadBySubtab = Object.freeze({
@@ -1870,15 +1828,6 @@ function formatDecimal(value, digits = 2) {
   if (!Number.isFinite(number)) return '--';
   return new Intl.NumberFormat(undefined, {
     minimumFractionDigits: 0,
-    maximumFractionDigits: digits,
-  }).format(number);
-}
-
-function formatFixedNumber(value, digits = 2) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '--';
-  return new Intl.NumberFormat(undefined, {
-    minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(number);
 }
@@ -5742,11 +5691,6 @@ function renderEarningsMetricGuide(subtab = currentEarningsSubtab) {
   const container = document.querySelector(`#earnings-${subtab}-metric-guide`);
   if (!container) return;
   container.textContent = '';
-  if (subtab === 'breakeven') {
-    const currencyNote = document.createElement('p');
-    currencyNote.textContent = 'Costs and C/U are shown in ATLAS unless another currency is displayed.';
-    container.appendChild(currencyNote);
-  }
   const guideColumns = subtab === 'breakeven'
     ? [...breakevenEarningsBaseColumns, ...getVisibleEarningsColumns(subtab)]
     : getVisibleEarningsColumns(subtab);
@@ -6130,12 +6074,8 @@ function setupEarningsFilterHandlers() {
   wire('upgrading', earningsUpgradingDateFilter, 'date');
   wire('upgrading', earningsUpgradingStarbaseFilter, 'starbase');
   wire('upgrading', earningsUpgradingAssetFilter, 'asset');
+  wire('breakeven', earningsBreakevenStarbaseFilter, 'starbase');
   wire('breakeven', earningsBreakevenAssetFilter, 'asset');
-  earningsBreakevenSourceFilter?.addEventListener('change', () => {
-    earningsFilters.breakeven.source = earningsBreakevenSourceFilter.value;
-    renderEarningsBreakeven(latestBreakevenResult);
-  });
-  earningsBreakevenPeriodFilter?.addEventListener('change', () => refreshBreakeven({ force: false }));
   earningsBreakevenHideLowInventory?.addEventListener('change', () => {
     earningsFilters.breakeven.hideLowInventory = earningsBreakevenHideLowInventory.checked;
     renderEarningsBreakeven(latestBreakevenResult);
@@ -6711,60 +6651,46 @@ function renderEarningsCrafting(result) {
   }
 }
 
-function marketplaceActivityMatchesFilters(entry) {
-  if (earningsMarketplaceMarket && entry.market !== earningsMarketplaceMarket) return false;
-  const selectedType = earningsMarketplaceType || (earningsMarketplaceSide === 'buy' ? 'purchase' : earningsMarketplaceSide === 'sell' ? 'sale' : '');
-  return !selectedType || entry.transactionType === selectedType;
-}
-
-function sumMarketplaceExactQuantities(rows) {
-  let scale = 0;
-  let atoms = 0n;
-  for (const row of rows) {
-    const value = String(row?.exactQuantity ?? '0');
-    if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return 'Unavailable';
-    const [whole, fraction = ''] = value.split('.');
-    if (fraction.length > scale) {
-      atoms *= 10n ** BigInt(fraction.length - scale);
-      scale = fraction.length;
-    }
-    atoms += BigInt(`${whole}${fraction.padEnd(scale, '0')}`);
-  }
-  const digits = atoms.toString().padStart(scale + 1, '0');
-  return scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}`.replace(/0+$/, '').replace(/\.$/, '') : digits;
-}
-
-function renderMarketplaceActivityRows(body, rows, emptyMessage, limit) {
-  if (!body) return;
-  body.textContent = '';
-  const visible = rows.filter(marketplaceActivityMatchesFilters).slice(0, limit);
-  if (!visible.length) {
+function renderEarningsMarketplace(result) {
+  const rows = Array.isArray(result?.localMarketTrades) ? result.localMarketTrades : [];
+  const visibleRows = rows.filter((entry) => entry.side === earningsMarketplaceSide);
+  const errorSuffix = result?.localMarketError ? ` · Influx read failed: ${result.localMarketError}` : '';
+  setText(earningsMarketplaceSyncStatus, `${formatMarketplaceWhole(visibleRows.length)} LM ${earningsMarketplaceSide} executions at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
+  setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
+  earningsMarketplaceSideButtons.forEach((button) => {
+    const active = button.dataset.marketplaceSide === earningsMarketplaceSide;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  if (!earningsMarketplaceTableBody) return;
+  earningsMarketplaceTableBody.textContent = '';
+  if (!visibleRows.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
-    const td = createTextCell(emptyMessage);
-    td.colSpan = 15;
+    const td = createTextCell(result?.localMarketError ? `Marketplace Influx read failed: ${result.localMarketError}` : `No Marketplace ${earningsMarketplaceSide} executions found`);
+    td.colSpan = 13;
     tr.appendChild(td);
-    body.appendChild(tr);
+    earningsMarketplaceTableBody.appendChild(tr);
     return;
   }
-  for (const entry of visible) {
+  for (const entry of [...visibleRows].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))) {
     const tr = document.createElement('tr');
-    tr.dataset.reconciliationState = entry.reconciliationState || 'unavailable';
-    const quantity = String(entry.exactQuantity ?? '');
-    const value = String(entry.transactionType === 'sale' ? entry.netAtlas ?? '' : entry.grossAtlas ?? '');
-    const quantityNumber = Number(quantity);
-    const valueNumber = Number(value);
-    const price = Number.isFinite(quantityNumber) && quantityNumber > 0 && Number.isFinite(valueNumber)
-      ? valueNumber / quantityNumber : null;
-    const fee = Number(entry.marketplaceFeeAtlas || 0) + Number(entry.transactionFeeAtlas || 0);
-    const state = `${String(entry.reconciliationState || 'unavailable').replaceAll('_', ' ')}${entry.reason ? ` · ${entry.reason}` : ''}`;
+    const quantity = Number(entry.quantity) || 0;
+    const gross = Number(entry.grossAtlas) || 0;
+    const txFee = Number(entry.txFeeAtlas) || 0;
+    const net = Number(entry.netAtlas ?? entry.settledAtlas ?? 0);
+    const unitMetric = quantity > 0
+      ? (earningsMarketplaceSide === 'buy' ? (gross + txFee) / quantity : net / quantity)
+      : null;
     const values = [
-      formatMarketplaceTimestamp(entry.timestamp), entry.market || '--', String(entry.transactionType || '--').replaceAll('_', ' '),
-      entry.asset || '--', quantity || '--', value || '--', price == null ? '--' : formatMarketplaceAtlas(price, 8),
-      Number.isFinite(fee) ? formatMarketplaceAtlas(fee, 8) : '--', entry.wallet || '--', entry.profile || 'Unallocated',
-      entry.faction || 'Unallocated', entry.provenance || 'Unavailable', entry.confidence || 'Unavailable', state,
+      formatMarketplaceTimestamp(entry.timestamp), entry.marketplace || 'LM',
+      entry.starbase || '--', entry.asset || '--', formatMarketplaceWhole(quantity),
+      formatMarketplaceAtlas(gross, 6), formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
+      formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6), formatMarketplaceAtlas(txFee, 2),
+      formatMarketplaceAtlas(net, 2), unitMetric == null ? '--' : formatMarketplaceAtlas(unitMetric, 8),
+      entry.orderId || '--', entry.signature || '--',
     ];
-    values.forEach((text) => tr.appendChild(createTextCell(text)));
+    for (const value of values.slice(0, -1)) tr.appendChild(createTextCell(value));
     const signatureCell = document.createElement('td');
     if (entry.signature) {
       const link = document.createElement('a');
@@ -6773,58 +6699,25 @@ function renderMarketplaceActivityRows(body, rows, emptyMessage, limit) {
       link.rel = 'noopener noreferrer';
       link.textContent = entry.signature;
       signatureCell.appendChild(link);
-    } else signatureCell.textContent = '--';
+    } else {
+      signatureCell.textContent = '--';
+    }
     tr.appendChild(signatureCell);
-    body.appendChild(tr);
+    earningsMarketplaceTableBody.appendChild(tr);
   }
 }
 
-function renderEarningsMarketplace(result) {
-  const activity = result?.marketplaceActivity;
-  const attributed = Array.isArray(activity?.attributed) ? activity.attributed : [];
-  const pending = Array.isArray(activity?.pendingAllocation) ? activity.pendingAllocation : [];
-  const quarantined = Array.isArray(activity?.quarantined) ? activity.quarantined : [];
-  const globalUnallocated = Array.isArray(activity?.globalUnallocated) ? activity.globalUnallocated : [];
-  const filteredAttributed = attributed.filter(marketplaceActivityMatchesFilters);
-  const filteredPending = pending.filter(marketplaceActivityMatchesFilters);
-  const filteredQuarantined = quarantined.filter(marketplaceActivityMatchesFilters);
-  const filteredGlobal = globalUnallocated.filter(marketplaceActivityMatchesFilters);
-  const errorSuffix = result?.localMarketError ? ` · Cached read failed: ${result.localMarketError}` : '';
-  const availability = activity ? `${formatMarketplaceWhole(attributed.length + pending.length + quarantined.length)} faction activities · ${formatMarketplaceWhole(globalUnallocated.length)} global` : 'Marketplace activity unavailable';
-  const freshness = activity?.sourceFreshness;
-  const newest = freshness?.displayedNewestTimestamp || activity?.newestSourceTimestamp;
-  const freshnessText = freshness?.status === 'partial'
-    ? ` · Partial/stale: displayed through ${formatMarketplaceTimestamp(newest)}, source through ${formatMarketplaceTimestamp(freshness.authoritativeNewestTimestamp)}`
-    : newest ? ` · newest source ${formatMarketplaceTimestamp(newest)}` : ' · newest source unavailable';
-  setText(earningsMarketplaceSyncStatus, `${availability} at ${formatCheckedAt(result?.checkedAt)}${freshnessText} · opening and switching use zero Solana RPC${errorSuffix}`);
-  setText(earningsMarketplaceAttributedTotal, activity ? formatMarketplaceWhole(filteredAttributed.length) : 'Unavailable');
-  setText(earningsMarketplacePendingTotal, activity ? formatMarketplaceWhole(filteredPending.length) : 'Unavailable');
-  setText(earningsMarketplaceQuarantinedTotal, activity ? formatMarketplaceWhole(filteredQuarantined.length) : 'Unavailable');
-  setText(earningsMarketplaceGlobalTotal, activity ? formatMarketplaceWhole(filteredGlobal.length) : 'Unavailable');
-  setText(earningsMarketplaceTransferTotal, activity ? sumMarketplaceExactQuantities(filteredAttributed.filter((entry) => entry.transactionType.endsWith('_transfer'))) : 'Unavailable');
-  earningsMarketplaceSideButtons.forEach((button) => {
-    const active = button.dataset.marketplaceSide === earningsMarketplaceSide;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
-  });
-  const ordered = (rows) => [...rows].sort((left, right) => String(right.timestamp || '').localeCompare(String(left.timestamp || '')) || String(left.eventId || '').localeCompare(String(right.eventId || '')));
-  renderMarketplaceActivityRows(earningsMarketplaceTableBody, ordered(attributed), activity ? 'No attributed activity matches the current filters' : 'Attributed Marketplace activity unavailable', 200);
-  renderMarketplaceActivityRows(earningsMarketplacePendingBody, ordered(pending), activity ? 'No pending allocation activity matches the current filters' : 'Pending allocation activity unavailable', 100);
-  renderMarketplaceActivityRows(earningsMarketplaceQuarantinedBody, ordered(quarantined), activity ? 'No quarantined activity matches the current filters' : 'Quarantined activity unavailable', 100);
-  renderMarketplaceActivityRows(earningsMarketplaceGlobalBody, ordered(globalUnallocated), activity ? 'No global unallocated activity matches the current filters' : 'Global Marketplace activity unavailable', 100);
-}
-
-function renderEarningsMarketplaceLoading(message = 'Loading cached Marketplace data...') {
+function renderEarningsMarketplaceLoading(message = 'Loading Marketplace data...') {
   setText(earningsMarketplaceSyncStatus, message);
-  setText(earningsMarketplaceAttributedTotal, '—');
-  setText(earningsMarketplacePendingTotal, '—');
-  setText(earningsMarketplaceQuarantinedTotal, '—');
-  setText(earningsMarketplaceGlobalTotal, '—');
-  setText(earningsMarketplaceTransferTotal, '—');
-  renderMarketplaceActivityRows(earningsMarketplaceTableBody, [], message, 200);
-  renderMarketplaceActivityRows(earningsMarketplacePendingBody, [], message, 100);
-  renderMarketplaceActivityRows(earningsMarketplaceQuarantinedBody, [], message, 100);
-  renderMarketplaceActivityRows(earningsMarketplaceGlobalBody, [], message, 100);
+  setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
+  if (!earningsMarketplaceTableBody) return;
+  earningsMarketplaceTableBody.textContent = '';
+  const tr = document.createElement('tr');
+  tr.className = 'empty-row';
+  const td = createTextCell(message);
+  td.colSpan = 13;
+  tr.appendChild(td);
+  earningsMarketplaceTableBody.appendChild(tr);
 }
 
 function renderEarningsBreakevenEmpty(message) {
@@ -6835,7 +6728,7 @@ function renderEarningsBreakevenEmpty(message) {
   const row = document.createElement('tr');
   row.className = 'empty-row';
   const cell = document.createElement('td');
-  cell.colSpan = breakevenEarningsBaseColumns.length;
+  cell.colSpan = breakevenEarningsBaseColumns.length + getVisibleEarningsColumns('breakeven').length;
   cell.textContent = message;
   row.appendChild(cell);
   earningsBreakevenTableBody.appendChild(row);
@@ -6845,162 +6738,62 @@ function renderEarningsBreakevenHeader() {
   if (!earningsBreakevenTableHead) return;
   earningsBreakevenTableHead.textContent = '';
   const headRow = document.createElement('tr');
-  for (const column of breakevenEarningsBaseColumns) {
-    const th = document.createElement('th');
-    th.scope = 'col';
-    th.textContent = column.label;
-    headRow.appendChild(th);
+  const sortState = earningsSort.breakeven;
+  for (const column of [...breakevenEarningsBaseColumns, ...getVisibleEarningsColumns('breakeven')]) {
+    appendEarningsHeaderCell(headRow, column.id, column.label, sortState);
   }
   earningsBreakevenTableHead.appendChild(headRow);
 }
 
-function exactAccountingText(value, unavailable = 'Unavailable') {
-  if (value == null) return unavailable;
-  const text = typeof value === 'object' ? value.decimal : value;
-  return text == null || text === '' ? unavailable : String(text);
-}
-
-function nonzeroExact(value) {
-  const text = exactAccountingText(value, '0').replace(/^-/, '').replace('.', '').replace(/^0+/, '');
-  return text.length > 0;
-}
-
-function completeAccountingRowMatchesSource(row, source) {
-  if (!source) return true;
-  if (source === 'crafting') return nonzeroExact(row.acquisitions?.crafting) || nonzeroExact(row.craftingOut) || nonzeroExact(row.craftingIn) || nonzeroExact(row.costsBySource?.crafting);
-  if (source === 'cargo') return nonzeroExact(row.acquisitions?.cargo) || nonzeroExact(row.transferIn) || nonzeroExact(row.transferOut) || nonzeroExact(row.costsBySource?.cargo);
-  if (source === 'upgrading') return nonzeroExact(row.acquisitions?.upgrading) || nonzeroExact(row.costsBySource?.upgrading) || row.details?.some((detail) => detail.source === source);
-  return nonzeroExact(row.acquisitions?.[source]) || nonzeroExact(row.costsBySource?.[source]) || row.details?.some((detail) => detail.source === source);
-}
-
 function renderEarningsBreakeven(result) {
-  renderCargoBreakevenBeta(result);
-  const accounting = result?.completeAccounting;
-  const rows = Array.isArray(accounting?.rows) ? accounting.rows : [];
-  const period = accounting?.period;
-  const scope = accounting?.scope;
-  const freshness = accounting?.sourceFreshness || {};
-  const unavailable = result?.completeAccountingError || result?.breakevenError;
-  const syncMessage = unavailable
-    ? `Complete accounting unavailable at ${formatCheckedAt(result?.checkedAt)} · ${unavailable}`
-    : `${formatWholeNumber(rows.length)} assets · ${scope?.faction || '--'} · ${scope?.profile || '--'} · ${period?.days || 30} days · ${result?.completeAccountingStatus || 'unknown'} at ${formatCheckedAt(result?.completeAccountingSavedAt || result?.checkedAt)} · Scanning ${freshness.scanning || 'unavailable'} · Mining ${freshness.mining || 'unavailable'} · Crafting ${freshness.crafting || 'unavailable'} · Upgrading ${freshness.upgrading || 'unavailable'} · Marketplace ${freshness.marketplace || 'unavailable'} · Cargo ${freshness.cargo || 'unavailable'} · Closing inventory ${freshness.closingInventory || 'unavailable'}`;
+  const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
+  const baselineStatus = result?.openingInventoryError
+    ? ` · opening baseline unavailable: ${result.openingInventoryError}`
+    : Number(result?.openingInventoryCount || 0) > 0
+      ? ` · ${formatWholeNumber(result.openingInventoryCount)} opening lots`
+      : '';
+  const checkpointStatus = result?.ledgerCheckpointStatus
+    ? ` · checkpoint ${result.ledgerCheckpointStatus}${result?.ledgerCheckpointError ? ': ' + result.ledgerCheckpointError : ''}`
+    : '';
+  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${baselineStatus}${checkpointStatus}${result?.breakevenError ? ' · ' + result.breakevenError : ''}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
   populateEarningsFilterOptions('breakeven', rows);
-  if (earningsBreakevenSourceFilter) earningsBreakevenSourceFilter.value = earningsFilters.breakeven.source;
   if (earningsBreakevenHideLowInventory) earningsBreakevenHideLowInventory.checked = earningsFilters.breakeven.hideLowInventory;
   renderEarningsBreakevenHeader();
 
   if (!earningsBreakevenTableBody) return;
   earningsBreakevenTableBody.textContent = '';
-  const filteredRows = rows.filter((row) => {
-    if (earningsFilters.breakeven.asset && row.asset !== earningsFilters.breakeven.asset) return false;
-    if (!completeAccountingRowMatchesSource(row, earningsFilters.breakeven.source)) return false;
-    if (earningsFilters.breakeven.hideLowInventory && Number(exactAccountingText(row.remainingQuantity, '0')) <= 2) return false;
-    return true;
-  }).sort((left, right) => String(left.asset).localeCompare(String(right.asset)));
-  if (!filteredRows.length) return renderEarningsBreakevenEmpty(rows.length ? 'No complete accounting rows match the current filters' : 'Complete accounting data unavailable — missing evidence is never treated as zero');
-
-  for (const entry of filteredRows) {
+  const filteredRows = getFilteredEarningsRows('breakeven', rows);
+  const sortedRows = sortEarningsRows('breakeven', filteredRows);
+  if (!sortedRows.length) {
+    return renderEarningsBreakevenEmpty(rows.length ? 'No breakeven rows match the current filters' : 'No breakeven data available — check mining, cargo, and inventory telemetry');
+  }
+  const optionalColumns = getVisibleEarningsColumns('breakeven');
+  for (const entry of sortedRows) {
     const tr = document.createElement('tr');
-    const sourceQuantity = (source) => {
-      const freshnessKey = source === 'lm' || source === 'gm' ? 'marketplace' : source;
-      return freshness[freshnessKey] === 'unavailable' ? 'Unavailable' : exactAccountingText(entry.acquisitions?.[source], '0');
-    };
-    const outflows = `Consume ${exactAccountingText(entry.consumptionQuantity, '0')} · Craft ${exactAccountingText(entry.craftingIn, '0')} · Upgrade ${exactAccountingText(entry.acquisitions?.upgrading, '0')} · Transfer ${exactAccountingText(entry.transferOut, '0')}`;
-    const transferIn = `${exactAccountingText(entry.transferIn, '0')} · Cargo basis ${exactAccountingText(entry.costsBySource?.cargo, '0')} ATLAS`;
-    const difference = entry.reconciliationDifference
-      ? `${entry.reconciliationDifference.direction} ${exactAccountingText(entry.reconciliationDifference.value, '0')}`
-      : 'Unavailable';
-    const coverage = `${String(entry.costCoverage?.status || 'unavailable').replaceAll('_', ' ')} · ${exactAccountingText(entry.costCoverage?.knownQuantity, '0')} / ${exactAccountingText(entry.costCoverage?.totalQuantity, '0')}`;
-    const statusParts = [String(entry.reconciliationStatus || 'unavailable').replaceAll('_', ' '), String(entry.salesCoverage?.status || 'unavailable').replaceAll('_', ' ') + ' sales'];
-    const cells = [
-      entry.asset || 'Unavailable', exactAccountingText(entry.openingQuantity), exactAccountingText(entry.openingBasis),
-      sourceQuantity('lm'), sourceQuantity('gm'), sourceQuantity('scanning'), sourceQuantity('mining'),
-      exactAccountingText(entry.craftingOut, '0'), exactAccountingText(entry.acquisitions?.upgrading, '0'), transferIn, outflows,
-      exactAccountingText(entry.salesQuantity, '0'), exactAccountingText(entry.salesNetProceeds), entry.cogs == null ? `Unavailable · known ${exactAccountingText(entry.knownCogs, '0')}` : exactAccountingText(entry.cogs), exactAccountingText(entry.realizedProfit),
-      exactAccountingText(entry.expectedClosing), exactAccountingText(entry.remainingQuantity), entry.remainingCostBasis == null ? `Unavailable · known ${exactAccountingText(entry.knownRemainingCostBasis, '0')}` : exactAccountingText(entry.remainingCostBasis), exactAccountingText(entry.averageCostPerUnit), exactAccountingText(entry.actualClosing), difference, coverage,
-      exactAccountingText(entry.pendingQuantity, '0'), exactAccountingText(entry.unallocatedQuantity, '0'), exactAccountingText(entry.uncostedQuantity, '0'), exactAccountingText(entry.rejectedQuantity, '0'), exactAccountingText(entry.quarantinedQuantity, '0'), statusParts.join(' · '),
-    ];
-    for (const text of cells) tr.appendChild(createTextCell(text));
-    const detailText = (entry.details || []).map((detail) => `${detail.timestamp} · ${detail.type} · ${detail.status} · ${detail.eventId}${detail.reason ? ` · ${detail.reason}` : ''}`).join('\n');
-    if (detailText) { tr.title = detailText; tr.dataset.accountingDetails = 'available'; }
-    earningsBreakevenTableBody.appendChild(tr);
-  }
-}
-
-function renderCargoBreakevenBetaLoading(message = 'Loading Cargo allocations…') {
-  setText(earningsCargoBreakevenBetaStatus, message);
-  if (!earningsCargoBreakevenBetaBody) return;
-  earningsCargoBreakevenBetaBody.textContent = '';
-  const tr = document.createElement('tr');
-  tr.className = 'empty-row';
-  const td = createTextCell(message);
-  td.colSpan = 11;
-  tr.appendChild(td);
-  earningsCargoBreakevenBetaBody.appendChild(tr);
-}
-
-function renderCargoBreakevenBeta(result) {
-  const rows = Array.isArray(result?.cargoBreakevenBetaRows) ? result.cargoBreakevenBetaRows : [];
-  if (result?.cargoBreakevenBetaUnavailable) {
-    setText(earningsCargoBreakevenBetaStatus, 'Cargo allocation data unavailable');
-    if (!earningsCargoBreakevenBetaBody) return;
-    earningsCargoBreakevenBetaBody.textContent = '';
-    const tr = document.createElement('tr'); tr.className = 'empty-row';
-    const td = createTextCell('Cargo allocation data unavailable'); td.colSpan = 11; tr.appendChild(td); earningsCargoBreakevenBetaBody.appendChild(tr); return;
-  }
-  const presentation = globalThis.CargoEvidencePresentation;
-  const sortedRows = presentation?.prepareCargoEvidenceRows
-    ? presentation.prepareCargoEvidenceRows(rows)
-    : [...rows].sort((left, right) => {
-      const timeDifference = Date.parse(right.timestamp || '') - Date.parse(left.timestamp || '');
-      if (Number.isFinite(timeDifference) && timeDifference !== 0) return timeDifference;
-      const leftIdentity = String(left.betaId || '');
-      const rightIdentity = String(right.betaId || '');
-      return leftIdentity < rightIdentity ? -1 : leftIdentity > rightIdentity ? 1 : 0;
-    });
-  const visibleRows = sortedRows.slice(0, 50);
-  const countLabel = rows.length > visibleRows.length
-    ? `Showing ${formatWholeNumber(visibleRows.length)} of ${formatWholeNumber(rows.length)}`
-    : `${formatWholeNumber(rows.length)} completed Cargo allocations`;
-  const confirmedCount = sortedRows.filter((row) => row.isConfirmed).length;
-  const legacyCount = sortedRows.filter((row) => row.evidenceAuthority === 'legacy_unverified').length;
-  const evidenceSummary = presentation?.prepareCargoEvidenceRows
-    ? `Confirmed ${formatWholeNumber(confirmedCount)} · Legacy unverified ${formatWholeNumber(legacyCount)}`
-    : 'Beta uses legacy evidence and never changes exact-ledger readiness';
-  setText(earningsCargoBreakevenBetaStatus, `${countLabel} · ${evidenceSummary}`);
-  if (!earningsCargoBreakevenBetaBody) return;
-  earningsCargoBreakevenBetaBody.textContent = '';
-  if (!rows.length) {
-    const tr = document.createElement('tr'); tr.className = 'empty-row';
-    const td = createTextCell('No completed Cargo allocations available for this faction/profile'); td.colSpan = 11; tr.appendChild(td); earningsCargoBreakevenBetaBody.appendChild(tr); return;
-  }
-  const cost = (value, currency, digits) => {
-    const number = Number(value);
-    const currencyLabel = String(currency || '').trim();
-    if (value == null || value === '' || !Number.isFinite(number) || !currencyLabel) return '--';
-    const threshold = 10 ** -digits;
-    const display = number > 0 && number < threshold
-      ? `<${formatFixedNumber(threshold, digits)}`
-      : formatFixedNumber(number, digits);
-    return currencyLabel.toUpperCase() === 'ATLAS' ? display : `${display} ${currencyLabel}`;
-  };
-  for (const entry of visibleRows) {
-    const tr = document.createElement('tr');
-    tr.appendChild(createTextCell(entry.isoDate || '--'));
-    tr.appendChild(createTextCell(`${entry.origin || '--'} → ${entry.destination || '--'}`));
+    tr.appendChild(createTextCell(entry.starbase || '--'));
     tr.appendChild(createTextCell(entry.asset || '--'));
-    tr.appendChild(createTextCell(entry.displayQuantity ?? (entry.deliveredQuantity == null ? '--' : formatWholeNumber(entry.deliveredQuantity))));
-    tr.appendChild(createTextCell(cost(entry.fuelCostDisplay ?? entry.fuelCost, entry.fuelCostCurrency, 2)));
-    tr.appendChild(createTextCell(cost(entry.rentalCost, entry.rentalCostCurrency, 2)));
-    tr.appendChild(createTextCell(cost(entry.transactionCostDisplay ?? entry.transactionCost, entry.transactionCostCurrency, 2)));
-    tr.appendChild(createTextCell(cost(entry.cargoCostPerUnit, entry.cargoCostPerUnitCurrency, 6)));
-    tr.appendChild(createTextCell(cost(entry.baseCostPerUnit, entry.baseCostPerUnitCurrency, 6)));
-    tr.appendChild(createTextCell(cost(entry.totalCostPerUnit, entry.totalCostPerUnitCurrency, 6)));
-    const statusCell = createTextCell(entry.displayStatus || entry.evidenceStatus || 'Incomplete — status unavailable');
-    if (entry.statusTitle) statusCell.title = entry.statusTitle;
-    tr.appendChild(statusCell);
-    earningsCargoBreakevenBetaBody.appendChild(tr);
+    tr.appendChild(createTextCell(formatWholeNumber(entry.inventory || 0)));
+    tr.appendChild(createTextCell(entry.scanningCostPerUnit == null ? '--' : formatAtlasNumber(entry.scanningCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.miningCostPerUnit == null ? '--' : formatAtlasNumber(entry.miningCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.craftingCostPerUnit == null ? '--' : formatAtlasNumber(entry.craftingCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.lmCostPerUnit == null ? '--' : formatAtlasNumber(entry.lmCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.gmCostPerUnit == null ? '--' : formatAtlasNumber(entry.gmCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.baseCostPerUnit == null ? '--' : formatAtlasNumber(entry.baseCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.cargoCostPerUnit == null ? '--' : formatAtlasNumber(entry.cargoCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.landedCostPerUnit == null ? '--' : formatAtlasNumber(entry.landedCostPerUnit, 6)));
+    tr.appendChild(createTextCell(entry.inventoryValue == null ? '--' : formatAtlasWhole(entry.inventoryValue)));
+    tr.appendChild(createTextCell(entry.fullyTracked ? '100% tracked' : `${formatWholeNumber(entry.estimatedPercent ?? 100)}% estimated`));
+    tr.appendChild(createTextCell(entry.gmPricePerUnit == null ? '--' : formatAtlasNumber(entry.gmPricePerUnit, 6)));
+    tr.appendChild(createTextCell(entry.inventoryExternalValue == null ? '--' : formatAtlasWhole(entry.inventoryExternalValue)));
+    const status = entry.reconciliationStatus === 'reconciled'
+      ? (Number(entry.uncostedQuantity || 0) > 1e-9 ? `Reconciled · ${formatWholeNumber(entry.uncostedQuantity)} uncosted` : 'Reconciled')
+      : entry.reconciliationStatus === 'surplus'
+        ? `Surplus +${formatWholeNumber(entry.quantityVariance)}`
+        : `Shortfall ${formatWholeNumber(Math.abs(Number(entry.quantityVariance || 0)))}`;
+    tr.appendChild(createTextCell(status));
+    for (const column of optionalColumns) tr.appendChild(createTextCell(entry[column.id] ?? '--'));
+    earningsBreakevenTableBody.appendChild(tr);
   }
 }
 
@@ -7187,37 +6980,42 @@ function renderEarningsCargoAllocations(result) {
 // refresh) used to fan out into a parallel RPC storm and surface HTTP 429
 // to the UI on first app start.
 let earningsRefreshInFlight = null;
-let marketplaceSyncInFlight = null;
+const marketplaceRefreshInFlight = new Map();
 const MARKETPLACE_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 
-async function refreshMarketplace() {
-  const settings = { ...(latestSettings || getFormPayload()), trigger: 'browse' };
-  const identity = `${normalizeFaction(settings.faction)}\n${getActivePlayerProfile(settings)}`;
-  return (async () => {
-    renderEarningsMarketplaceLoading('Loading cached Marketplace data...');
+async function refreshMarketplace({ sync = false } = {}) {
+  const pendingTelemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
+    ? rendererTelemetryTrigger
+    : 'unknown';
+  const telemetryTrigger = pendingTelemetryTrigger === 'unknown' && sync ? 'background' : pendingTelemetryTrigger;
+  if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
+  const settings = { ...(latestSettings || getFormPayload()), trigger: telemetryTrigger };
+  const faction = normalizeFaction(settings.faction);
+  if (marketplaceRefreshInFlight.has(faction)) return marketplaceRefreshInFlight.get(faction);
+  const promise = (async () => {
+    renderEarningsMarketplaceLoading(sync ? 'Syncing Marketplace data...' : 'Loading Marketplace data...');
+    if (sync) {
+      setText(earningsMarketplaceSyncStatus, 'Marketplace sync running in background...');
+      await api.syncMarketplace(settings);
+    }
     const result = await api.getMarketplaceSnapshot(settings);
-    const current = latestSettings || getFormPayload();
-    if (identity !== `${normalizeFaction(current.faction)}\n${getActivePlayerProfile(current)}`) return result;
+    if (faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return result;
     latestEarningsResult = { ...(latestEarningsResult || {}), ...result, ok: latestEarningsResult?.ok ?? result.ok };
     renderEarningsMarketplace(latestEarningsResult);
     return result;
   })().catch((error) => {
     console.error(error);
-    setText(earningsMarketplaceSyncStatus, 'Marketplace cache unavailable');
+    setText(earningsMarketplaceSyncStatus, 'Marketplace sync unavailable');
+  }).finally(() => {
+    if (marketplaceRefreshInFlight.get(faction) === promise) marketplaceRefreshInFlight.delete(faction);
   });
+  marketplaceRefreshInFlight.set(faction, promise);
+  return promise;
 }
 
 function runMarketplaceBackgroundSync() {
   if (!latestSettings || !getActivePlayerProfile(latestSettings)) return Promise.resolve();
-  if (marketplaceSyncInFlight) return marketplaceSyncInFlight;
-  const promise = api.syncMarketplace({ ...latestSettings, trigger: 'background' }).catch((error) => {
-    console.error(error);
-    return null;
-  }).finally(() => {
-    if (marketplaceSyncInFlight === promise) marketplaceSyncInFlight = null;
-  });
-  marketplaceSyncInFlight = promise;
-  return promise;
+  return refreshMarketplace({ sync: true });
 }
 
 function getUpgradingCacheInput(settings = latestSettings || getFormPayload(), force = false) {
@@ -7276,11 +7074,10 @@ async function refreshEarningsUpgrading({ force = false } = {}) {
 }
 
 function getBreakevenCacheInput(settings = latestSettings || getFormPayload(), force = false) {
-  const periodDays = Number(earningsBreakevenPeriodFilter?.value || settings?.breakevenPeriodDays || 30) === 7 ? 7 : 30;
   return {
     faction: normalizeFaction(settings?.faction),
     playerProfile: getActivePlayerProfile(settings),
-    filters: { periodDays },
+    filters: {},
     force,
   };
 }
@@ -7299,7 +7096,6 @@ async function refreshBreakeven({ force = false } = {}) {
     : 'unknown';
   if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: 'breakeven' };
-  settings.breakevenPeriodDays = Number(earningsBreakevenPeriodFilter?.value || 30) === 7 ? 7 : 30;
   settings.trigger = telemetryTrigger;
   const input = getBreakevenCacheInput(settings, force);
   if (!input.playerProfile) {
@@ -7315,11 +7111,9 @@ async function refreshBreakeven({ force = false } = {}) {
   } else {
     renderEarningsBreakevenEmpty('Loading complete Breakeven data...');
   }
-  if (force || initial?.entry?.status !== 'ready') renderCargoBreakevenBetaLoading();
   const settled = await api.breakevenCache.ensure(input, async () => {
     const result = await api.getEarningsSnapshot(settings);
     if (result?.ok === false) throw new Error(result.error || 'Breakeven snapshot failed');
-    if (result?.completeAccountingStatus === 'partial' && displayable) throw new Error(result.completeAccountingError || 'Complete accounting source temporarily unavailable');
     return result;
   });
   if (!isActiveBreakevenContext(settled.key, settled.entry.generation)) return settled;
@@ -7359,12 +7153,11 @@ async function refreshCargoAllocation({ retry = false } = {}) {
 }
 
 async function refreshEarnings() {
-  const force = arguments[0]?.force === true;
   const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
     ? rendererTelemetryTrigger
     : 'unknown';
   if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
-  if (earningsRefreshInFlight && !force) return earningsRefreshInFlight;
+  if (earningsRefreshInFlight) return earningsRefreshInFlight;
   const refreshPromise = (async () => {
     const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: currentEarningsSubtab };
   settings.trigger = telemetryTrigger;
@@ -7399,17 +7192,7 @@ async function refreshEarnings() {
 
     let diagnosticStage = 'ipc_invoke';
     try {
-      const responseCoordinator = typeof earningsResponseCoordinator !== 'undefined'
-        ? earningsResponseCoordinator
-        : { run: async ({ load }) => ({ accepted: true, value: await load() }) };
-      const coordinated = await responseCoordinator.run({
-        load: () => api.getEarningsSnapshot(settings),
-        onLoading: () => {
-          if (typeof renderCargoBreakevenBetaLoading === 'function') renderCargoBreakevenBetaLoading();
-        },
-      });
-      if (!coordinated.accepted) return;
-      const result = coordinated.value;
+      const result = await api.getEarningsSnapshot(settings);
       if (result && result.ok === false) {
         // IPC handler returns {ok: false, error} on failure. Throw so the
         // catch block can apply the same rate-limit / generic handling.
@@ -7427,7 +7210,6 @@ async function refreshEarnings() {
         })).catch(() => {});
       }
       renderEarnings(result);
-      if (typeof renderCargoBreakevenBeta === 'function') renderCargoBreakevenBeta(result);
     } catch (error) {
       console.error(error);
       Promise.resolve(api.recordEarningsRendererError?.({
@@ -9065,7 +8847,7 @@ function refreshVisibleFactionViews() {
   if (currentSection === 'earnings') {
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven();
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading();
-    return currentEarningsSubtab === 'marketplace' ? refreshMarketplace({ sync: false }) : refreshEarnings();
+    return currentEarningsSubtab === 'marketplace' ? refreshMarketplace({ sync: true }) : refreshEarnings();
   }
   if (currentSection === 'optimization') {
     if(currentOptimizationSubtab === 'upgrading') return refreshUpgradingOptimization();
@@ -9089,7 +8871,7 @@ function refreshVisibleConsumptionIdentity({ force = false } = {}) {
 function refreshVisibleIdentity({ force = false } = {}) {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') {
-    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: false });
+    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: true });
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven({ force });
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading({ force });
     return refreshEarnings();
@@ -9112,10 +8894,10 @@ function refreshVisibleIdentity({ force = false } = {}) {
 function refreshCurrentVisibleData() {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') {
-    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: false });
+    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: true });
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven({ force: true });
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading({ force: true });
-    return refreshEarnings({ force: true });
+    return refreshEarnings();
   }
   if (currentSection === 'optimization') {
     if(currentOptimizationSubtab === 'upgrading') return refreshUpgradingOptimization({ force: true });
@@ -9264,23 +9046,9 @@ document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
 
 earningsMarketplaceSideButtons.forEach((button) => {
   button.addEventListener('click', () => {
-    earningsMarketplaceSide = ['buy', 'sell'].includes(button.dataset.marketplaceSide) ? button.dataset.marketplaceSide : 'all';
-    earningsMarketplaceType = earningsMarketplaceSide === 'buy' ? 'purchase' : earningsMarketplaceSide === 'sell' ? 'sale' : '';
-    if (earningsMarketplaceTypeFilter) earningsMarketplaceTypeFilter.value = earningsMarketplaceType;
+    earningsMarketplaceSide = button.dataset.marketplaceSide === 'sell' ? 'sell' : 'buy';
     if (latestEarningsResult) renderEarningsMarketplace(latestEarningsResult);
   });
-});
-
-earningsMarketplaceMarketFilter?.addEventListener('change', () => {
-  earningsMarketplaceMarket = ['LM', 'GM'].includes(earningsMarketplaceMarketFilter.value) ? earningsMarketplaceMarketFilter.value : '';
-  if (latestEarningsResult) renderEarningsMarketplace(latestEarningsResult);
-});
-
-earningsMarketplaceTypeFilter?.addEventListener('change', () => {
-  earningsMarketplaceType = ['purchase', 'sale', 'inbound_transfer', 'outbound_transfer'].includes(earningsMarketplaceTypeFilter.value)
-    ? earningsMarketplaceTypeFilter.value : '';
-  earningsMarketplaceSide = earningsMarketplaceType === 'purchase' ? 'buy' : earningsMarketplaceType === 'sale' ? 'sell' : 'all';
-  if (latestEarningsResult) renderEarningsMarketplace(latestEarningsResult);
 });
 
 document.querySelectorAll('.optimization-subtab-button').forEach((button) => {

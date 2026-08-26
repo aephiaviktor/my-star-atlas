@@ -1,5 +1,3 @@
-const { DELIVERY_EVIDENCE_FIELDS } = require('./cargo-delivery-evidence');
-
 function parseCsvLine(line) {
   const columns = [];
   let value = '';
@@ -242,7 +240,6 @@ function buildCargoAllocationRecordsFromPivotRows(pivotRows = [], includedDays =
       fleet,
       fleetAccount,
       asset: String(row?.rss || 'Unknown asset').trim() || 'Unknown asset',
-      assetMint: String(row?.assetMint || '').trim(),
       origin: String(row?.originStarbase || '').trim() || '--',
       destination: String(row?.deliveryStarbase || '').trim() || '--',
       assignment: String(row?.assignment || 'Unknown').trim() || 'Unknown',
@@ -252,9 +249,6 @@ function buildCargoAllocationRecordsFromPivotRows(pivotRows = [], includedDays =
       cargoVolume,
       allocatedFuel,
       allocatedTxCostSol,
-      ...Object.fromEntries(DELIVERY_EVIDENCE_FIELDS
-        .filter((field) => row?.[field] != null && String(row[field]).trim() !== '')
-        .map((field) => [field, String(row[field]).trim()])),
     });
   }
   return Array.from(records.values()).sort((a, b) => b.isoDate.localeCompare(a.isoDate) || a.fleet.localeCompare(b.fleet) || a.asset.localeCompare(b.asset) || a.origin.localeCompare(b.origin) || a.destination.localeCompare(b.destination) || a.assignment.localeCompare(b.assignment) || a.cycleId.localeCompare(b.cycleId) || a.allocationIndex.localeCompare(b.allocationIndex));

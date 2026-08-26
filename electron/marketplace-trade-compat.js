@@ -13,7 +13,6 @@ const OUTPUT_KEYS = Object.freeze([
   'side', 'wallet', 'quantity', 'settledAtlas', 'grossAtlas', 'marketplaceFeeAtlas',
   'txFeeAtlas', 'netAtlas', 'unitPriceAtlas', 'signature', 'creationSignature', 'rawMint',
   'certificateMint', 'orderId', 'representationRank', 'schemaGeneration',
-  'lineageStatus', 'lineageFaction', 'lineageProfile', 'lineageLocation',
 ]);
 const VECTOR_KEYS = Object.freeze([
   'hasOrderId', 'hasCreationSignature', 'hasNonzeroTxFeeAtlas', 'hasSettledAtlas',
@@ -63,13 +62,10 @@ function resolveMarketplaceProfileScope(input = {}) {
   const selectedProfile = clean(input.selectedProfile || input.selectedPlayerProfile);
   const rowProfile = clean(input.rowProfile ?? input.profile);
   if (!applicationProfile) return { profileScope: rowProfile, certain: false, historicalProfile: rowProfile };
-  if (selectedProfile && rowProfile === selectedProfile) {
-    return { profileScope: selectedProfile, certain: true, historicalProfile: rowProfile };
-  }
-  if (rowProfile === applicationProfile) {
+  if (rowProfile === applicationProfile || (selectedProfile && rowProfile === selectedProfile)) {
     return { profileScope: applicationProfile, certain: true, historicalProfile: rowProfile };
   }
-  if (!rowProfile && input.scopeProven === true) return { profileScope: selectedProfile || applicationProfile, certain: true, historicalProfile: '' };
+  if (!rowProfile && input.scopeProven === true) return { profileScope: applicationProfile, certain: true, historicalProfile: '' };
   return { profileScope: rowProfile || applicationProfile, certain: false, historicalProfile: rowProfile };
 }
 
@@ -175,8 +171,6 @@ function normalizeMarketplaceV2Row(row = {}, context = {}) {
     signature: identity.signature, creationSignature: rank === 'enriched' ? clean(row.enrichedCreationSignature) : '', rawMint: identity.rawMint,
     certificateMint: clean(row[cap('certificateMint')]), orderId: rank === 'enriched' ? clean(row.enrichedOrderId) : '',
     representationRank: rank, schemaGeneration: 'v2',
-    lineageStatus: clean(row[`${rank}LineageStatus`]), lineageFaction: clean(row[`${rank}LineageFaction`]),
-    lineageProfile: clean(row[`${rank}LineageProfile`]), lineageLocation: clean(row[`${rank}LineageLocation`]),
   });
 }
 

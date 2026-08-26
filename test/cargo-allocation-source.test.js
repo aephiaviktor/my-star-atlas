@@ -11,8 +11,7 @@ function pivotRow(overrides = {}) {
 function csv(rows) {
   if (!rows.length) return '';
   const keys = Object.keys(rows[0]);
-  const cell = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
-  return [`,result,table,${keys.join(',')}`, ...rows.map((row) => `,,0,${keys.map((key) => cell(row[key])).join(',')}`)].join('\n');
+  return [`,result,table,${keys.join(',')}`, ...rows.map((row) => `,,0,${keys.map((key) => row[key]).join(',')}`)].join('\n');
 }
 function source(overrides = {}) {
   let calls = 0;
@@ -26,30 +25,11 @@ function source(overrides = {}) {
   return { instance, calls: () => calls };
 }
 
-test('optimized Allocation query pivots complete records and additive delivery evidence inside a bounded UTC batch', () => {
+test('optimized Allocation query pivots complete records inside a bounded UTC batch', () => {
   const query = buildCargoAllocationPivotFlux('slya', '  |> filter(fn: (r) => r.faction == "MUD")', { start: '2026-08-06T00:00:00.000Z', stop: '2026-08-11T00:00:00.000Z' });
   assert.match(query, /range\(start: time\(v: "2026-08-06/);
   assert.match(query, /pivot\(rowKey: \["_time", "cycleId", "allocationIndex"\]/);
   assert.match(query, /exists r\.amount and exists r\.cargoVolume and exists r\.allocatedFuel and exists r\.allocatedTxCostSol/);
-  for (const field of ['deliveryEventId', 'deliveryEvidencePayloadHash', 'deliveryRawAmount', 'deliveryMintDecimals', 'deliveryDecimalAmount']) {
-    assert.match(query, new RegExp(`r\\._field == "${field}"`));
-    assert.match(query, new RegExp(`keep\\(columns: \\[.*"${field}"`));
-  }
-});
-
-test('allocation source preserves additive evidence strings without changing legacy numeric fields', async () => {
-  const evidence = pivotRow({
-    deliveryEventId: 'cargo-delivery:v1:program:signature:3:unload',
-    deliveryEvidencePayloadHash: 'a'.repeat(64), deliveryRawAmount: '9007199254740993123456789',
-    deliveryMintDecimals: '18', deliveryDecimalAmount: '9007199.254740993123456789',
-  });
-  const { instance } = source({ queryBatch: async (_settings, batch) => batch.stop === '2026-08-11T00:00:00.000Z' ? csv([evidence]) : '' });
-  const result = await instance.load(SETTINGS);
-  assert.equal(result.rows.length, 1);
-  assert.equal(result.rows[0].amount, 2);
-  assert.equal(result.rows[0].allocatedFuel, 1);
-  assert.equal(result.rows[0].deliveryRawAmount, evidence.deliveryRawAmount);
-  assert.equal(result.rows[0].deliveryDecimalAmount, evidence.deliveryDecimalAmount);
 });
 
 test('six sequential batches produce a complete nonzero on-demand result', async () => {

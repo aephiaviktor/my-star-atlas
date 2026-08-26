@@ -249,31 +249,31 @@ test('buildBreakevenRows sorts output by starbase then asset for a stable table 
   assert.deepEqual(keys, ['MRZ-17/ARCO', 'MRZ-17/Iron', 'MRZ-21/ARCO']);
 });
 
-test('renderer wires the complete Break-even accounting subtab, panel, filters, and evidence columns', () => {
+test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
   const html = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
   const js = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
   assert.match(html, /data-earnings-subtab="breakeven"/);
   assert.match(html, /id="earnings-breakeven-table-head"/);
   assert.match(html, /id="earnings-breakeven-table-body"/);
-  assert.match(html, /id="earnings-breakeven-period-filter"/);
+  assert.match(html, /id="earnings-breakeven-starbase-filter"/);
   assert.match(html, /id="earnings-breakeven-asset-filter"/);
-  assert.match(html, /id="earnings-breakeven-source-filter"/);
-  assert.match(html, /id="earnings-breakeven-hide-low-inventory"[^>]*> Hide remaining ≤ 2/);
+  assert.doesNotMatch(html, /id="earnings-breakeven-source-filter"/);
+  assert.match(html, /id="earnings-breakeven-hide-low-inventory"[^>]*> Hide Inventory ≤ 2/);
   assert.match(html, /class="breakeven-inventory-toggle"/);
   assert.doesNotMatch(html, /activity-filter-note">Landed cost =/);
-  assert.match(html, /<th>LM In<\/th>.*<th>GM In<\/th>.*<th>Scanning In<\/th>.*<th>Mining \/ Rental In<\/th>.*<th>Crafting Out<\/th>.*<th>Cargo \/ Transfer In<\/th>/s);
-  assert.match(html, /<th>Remaining Basis<\/th>/);
+  assert.match(html, /<th>Scanning C\/U<\/th>.*<th>Mining C\/U<\/th>.*<th>Crafting C\/U<\/th>.*<th>LM C\/U<\/th>.*<th>GM C\/U<\/th>/s);
+  assert.match(html, /<th>Inventory Cost Basis<\/th>/);
   assert.match(html, /<th>Cost Coverage<\/th>/);
-  assert.match(html, /<th>Quarantined<\/th>/);
-  assert.match(html, /<th>Status<\/th>/);
+  assert.match(html, /<th>Ledger Status<\/th>/);
+  assert.doesNotMatch(html, /<th>Source<\/th>/);
+  assert.match(html, /<th>GM Price \/ Unit<\/th>/);
   assert.match(js, /function renderEarningsBreakeven\(/);
   for (const name of [
     'earningsBreakevenTableHead',
     'earningsBreakevenTableBody',
     'earningsBreakevenSyncStatus',
+    'earningsBreakevenStarbaseFilter',
     'earningsBreakevenAssetFilter',
-    'earningsBreakevenPeriodFilter',
-    'earningsBreakevenSourceFilter',
   ]) {
     assert.match(js, new RegExp(`const ${name} = document\\.querySelector`), `${name} must be declared before use`);
   }
@@ -282,13 +282,14 @@ test('renderer wires the complete Break-even accounting subtab, panel, filters, 
   assert.match(js, /const breakevenEarningsOptionalColumns/);
   assert.match(js, /breakeven: breakevenEarningsOptionalColumns/);
   assert.match(js, /breakeven: new Set\(\)/);
-  assert.match(js, /breakeven: \{ asset: '', source: '', hideLowInventory: false \}/);
+  assert.match(js, /breakeven: \{ starbase: '', asset: '', hideLowInventory: false \}/);
   const css = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.css'), 'utf8');
   assert.match(css, /\.breakeven-inventory-toggle\s*\{[^}]*font-size:\s*0\.72rem/s);
+  assert.match(js, /handle\(earningsBreakevenTableHead, 'breakeven'\)/);
   assert.match(js, /else if \(subtab === 'breakeven'\) renderEarningsBreakeven\(latestEarningsResult\);/);
   assert.match(js, /renderEarningsUpgrading\(result\);\s+renderEarningsMarketplace\(result\);\s+renderEarningsBreakeven\(result\);/);
-  assert.match(js, /const accounting = result\?\.completeAccounting/);
-  assert.match(js, /missing evidence is never treated as zero/);
+  assert.match(js, /result\?\.openingInventoryError/);
+  assert.match(js, /result\?\.ledgerCheckpointStatus/);
 });
 
 test('production ledger loads and atomically saves a per-faction checkpoint', () => {
@@ -351,7 +352,7 @@ test('production Breakeven rows are restricted to starbases in the selected fact
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   assert.match(
     main,
-    /currentInventoryRows = \(await fetchCurrentPerStarbaseInventory\(settings\)\)\s*\.filter\(\(row\) => isStarbaseIncluded\(row\.starbase, ledgerFactionStarbases, ledgerFaction\)\);/,
+    /const factionStarbases = await fetchFactionStarbases\(settings\);[\s\S]*?breakevenRows = buildLedgerBreakevenRows\([\s\S]*?\)\s*\.filter\(\(row\) => isStarbaseIncluded\(row\.starbase, factionStarbases, faction\)\);/,
   );
 });
 
@@ -373,10 +374,8 @@ test('earnings column selections persist per subtab in local storage', () => {
   assert.match(renderer, /persistEarningsColumnState\(\);/);
 });
 
-test('complete Cost Coverage renders explicit status and known-over-total quantities', () => {
+test('fully tracked Cost Coverage never renders as zero percent estimated', () => {
   const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
-  assert.match(renderer, /entry\.costCoverage\?\.status/);
-  assert.match(renderer, /entry\.costCoverage\?\.knownQuantity/);
-  assert.match(renderer, /entry\.costCoverage\?\.totalQuantity/);
+  assert.match(renderer, /entry\.fullyTracked \? '100% tracked' : `\$\{formatWholeNumber\(entry\.estimatedPercent \?\? 100\)\}% estimated`/);
   assert.doesNotMatch(renderer, /`0% estimated`/);
 });

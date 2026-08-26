@@ -5,7 +5,6 @@ const bs58Module = require('bs58');
 const { decodeLocalMarketTrade } = require('./local-market-trades');
 const { isMarketplaceRpcBudgetExhaustedError } = require('./marketplace-rpc-telemetry');
 const { recordTelemetryCounter } = require('./telemetry-context');
-const { preserveTransactionEvidence } = require('./market-scanner-evidence');
 
 const bs58 = bs58Module.default || bs58Module;
 const DEFAULT_START_ISO = '2026-07-24T00:00:00.000Z';
@@ -164,7 +163,6 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
     if (until) recordTelemetryCounter('cursorResumes');
     let newestSignature = '';
     for (let page = 0; page < maxPages; page += 1) {
-      if (stats?.coverage) stats.coverage.pagesRequested += 1;
       if (pacer) await pacer();
       let rows;
       try {
@@ -174,12 +172,10 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
           ...(until ? { until } : {}),
         }, 'confirmed');
       } catch (error) {
-        if (stats?.coverage) stats.coverage.failedPages.push({ address, page, error: String(error?.message || error) });
         if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
         return { signatures, cursors: { ...cursors }, exhaustion: error };
       }
       if (stats) stats.signatureRequests += 1;
-      if (stats?.coverage) stats.coverage.pagesCompleted += 1;
       if (!newestSignature && rows?.[0]?.signature) newestSignature = String(rows[0].signature);
       let reachedStart = false;
       for (const row of rows || []) {
@@ -188,12 +184,9 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
         if (!row.err && row.signature) {
           if (signatures.has(row.signature)) recordTelemetryCounter('preventedDuplicates');
           signatures.set(row.signature, row);
-          if (stats?.coverage) stats.coverage.identities.push({ signature: String(row.signature), slot: row.slot == null ? null : String(row.slot), blockTime: row.blockTime == null ? null : String(row.blockTime) });
         }
       }
-      if (reachedStart) { if (stats?.coverage) stats.coverage.boundaryReached = true; break; }
-      if (!rows?.length || rows.length < 1000) { if (stats?.coverage) stats.coverage.authoritativeExhaustion = true; break; }
-      if (page === maxPages - 1 && stats?.coverage) stats.coverage.capReached = true;
+      if (reachedStart || !rows?.length || rows.length < 1000) break;
       before = rows[rows.length - 1]?.signature;
       if (!before) break;
     }
@@ -202,29 +195,10 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
   return { signatures, cursors: nextCursors };
 }
 
-function normalizePendingHydration(rows) {
-  return Array.from(new Map(Array.from(rows || []).filter((row) => row?.signature).map((row) => [String(row.signature), {
-    signature: String(row.signature), blockTime: row.blockTime == null ? null : Number(row.blockTime),
-    slot: row.slot == null ? null : String(row.slot), priority: row.priority === true,
-  }])).values()).sort((a, b) => Number(b.priority) - Number(a.priority)
-    || Number(b.blockTime || 0) - Number(a.blockTime || 0) || a.signature.localeCompare(b.signature));
-}
-
-function mergePendingHydration(rows, priorityRows) {
-  const merged = new Map(normalizePendingHydration(rows).map((row) => [row.signature, row]));
-  for (const candidate of normalizePendingHydration(priorityRows)) {
-    const prior = merged.get(candidate.signature);
-    merged.set(candidate.signature, { ...candidate, ...prior, priority: true });
-  }
-  return normalizePendingHydration(merged.values());
-}
-
 async function fetchTransactions(connection, rows, pacer, stats) {
-  const ordered = normalizePendingHydration(Array.from(rows.values()));
+  const ordered = Array.from(rows.values()).sort((a, b) => Number(a.blockTime || 0) - Number(b.blockTime || 0));
   const transactions = [];
-  const unresolved = [];
-  for (let index = 0; index < ordered.length; index += 1) {
-    const row = ordered[index];
+  for (const row of ordered) {
     if (pacer) await pacer();
     const signature = String(row.signature);
     let transaction;
@@ -233,7 +207,6 @@ async function fetchTransactions(connection, rows, pacer, stats) {
     } catch (error) {
       if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
       transactions.exhaustion = error;
-      unresolved.push(...ordered.slice(index));
       break;
     }
     if (stats) stats.transactionRequests += 1;
@@ -241,17 +214,14 @@ async function fetchTransactions(connection, rows, pacer, stats) {
     else {
       if (stats) stats.transactionMisses += 1;
       recordTelemetryCounter('transactionMisses');
-      unresolved.push(row);
     }
   }
-  transactions.pendingHydration = normalizePendingHydration(unresolved);
   return transactions;
 }
 
 async function scanLocalMarketTrades(connection, {
   trackedWallets = [], marketAssetsByMint = {}, knownOrders = [], startIso,
   walletCursors = {}, orderCursors = {}, activeOrderIds = [], archivedOrderIds = [], openOrderIds = [],
-  pendingHydration = [], priorityHydration = [], pendingWalletCursors = {},
   addressFactory = (value) => value, maxPages = MAX_SIGNATURE_PAGES,
   requestsPerSecond = DEFAULT_REQUESTS_PER_SECOND,
   atlasPerSol, decodeAssetFlows,
@@ -260,14 +230,11 @@ async function scanLocalMarketTrades(connection, {
   const startMs = Date.parse(resolvedStartIso);
   if (!Number.isFinite(startMs)) throw new Error('local market startIso is invalid');
   const pacer = createLocalMarketPacer(requestsPerSecond);
-  const coverageState = { pagesRequested: 0, pagesCompleted: 0, failedPages: [], identities: [], boundaryReached: false, authoritativeExhaustion: false, capReached: false };
   const stats = { signatureRequests: 0, transactionRequests: 0, transactionMisses: 0 };
-  Object.defineProperty(stats, 'coverage', { value: coverageState, enumerable: false });
-  const evidenceMarket = Object.values(marketAssetsByMint || {}).some((asset) => asset?.marketplace === 'GM') ? 'GM' : 'LM';
   const ordersById = new Map((knownOrders || []).filter((row) => row?.orderId).map((row) => [String(row.orderId), row]));
   const archived = new Set((archivedOrderIds || []).map(String));
   const open = new Set((openOrderIds || []).map(String));
-  const partialResult = (transactions, exhaustion, pending = transactions?.pendingHydration || []) => {
+  const partialResult = (transactions, exhaustion) => {
     const tradesById = new Map();
     const assetFlowsById = new Map();
     for (const transaction of transactions || []) {
@@ -280,7 +247,6 @@ async function scanLocalMarketTrades(connection, {
         for (const flow of decodeAssetFlows(transaction) || []) if (flow?.id) assetFlowsById.set(flow.id, flow);
       }
     }
-    const immutableEvidence = (transactions || []).map((transaction) => preserveTransactionEvidence(transaction, { market: evidenceMarket, trackedWallets }));
     return {
       orders: Array.from(ordersById.values()).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.orderId.localeCompare(b.orderId)),
       trades: Array.from(tradesById.values()).sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id)),
@@ -288,8 +254,7 @@ async function scanLocalMarketTrades(connection, {
       walletCursors: { ...walletCursors }, orderCursors: { ...orderCursors },
       activeOrderIds: Array.from(activeOrderIds || []), archivedOrderIds: Array.from(archivedOrderIds || []),
       stats: { ...stats, totalRpcRequests: stats.signatureRequests + stats.transactionRequests },
-      immutableEvidence, coverage: buildCoverage(coverageState, stats, resolvedStartIso, walletCursors, walletCursors, exhaustion),
-      exhaustion, pendingHydration: normalizePendingHydration(pending), pendingWalletCursors: { ...pendingWalletCursors },
+      exhaustion,
     };
   };
   for (const orderId of open) archived.delete(orderId);
@@ -322,23 +287,10 @@ async function scanLocalMarketTrades(connection, {
     const enriched = decodeLocalMarketOrder({ ...transaction, signature: order.creationSignature }, { trackedWallets, marketAssetsByMint, atlasPerSol });
     if (enriched) ordersById.set(enriched.orderId, enriched);
   }
-  const durablePending = mergePendingHydration(pendingHydration, priorityHydration);
-  if (durablePending.length) {
-    const pendingTransactions = await fetchTransactions(connection, new Map(durablePending.map((row) => [row.signature, row])), pacer, stats);
-    const result = partialResult(pendingTransactions, pendingTransactions.exhaustion, pendingTransactions.pendingHydration);
-    if (!result.pendingHydration.length && !result.exhaustion) {
-      result.walletCursors = { ...pendingWalletCursors };
-      result.pendingWalletCursors = {};
-    }
-    return result;
-  }
   const walletScan = await collectSignatures(connection, trackedWallets, startMs, addressFactory, maxPages, pacer, stats, walletCursors);
   if (walletScan.exhaustion) return partialResult([], walletScan.exhaustion);
   const walletTransactions = await fetchTransactions(connection, walletScan.signatures, pacer, stats);
-  if (walletTransactions.exhaustion || walletTransactions.pendingHydration.length) {
-    pendingWalletCursors = walletScan.cursors;
-    return partialResult(walletTransactions, walletTransactions.exhaustion, walletTransactions.pendingHydration);
-  }
+  if (walletTransactions.exhaustion) return partialResult(walletTransactions, walletTransactions.exhaustion);
   const discoveredOrderIds = new Set();
   for (const transaction of walletTransactions) {
     const order = decodeLocalMarketOrder(transaction, { trackedWallets, marketAssetsByMint, atlasPerSol });
@@ -391,7 +343,6 @@ async function scanLocalMarketTrades(connection, {
       : (orderScan.cursors[orderId] || orderCursors[orderId] || ordersById.get(orderId)?.creationSignature);
     if (cursor) nextOrderCursors[orderId] = cursor;
   }
-  const immutableEvidence = transactions.map((transaction) => preserveTransactionEvidence(transaction, { market: evidenceMarket, trackedWallets }));
   return {
     orders: Array.from(ordersById.values()).filter((order) => !archived.has(String(order.orderId)))
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.orderId.localeCompare(b.orderId)),
@@ -402,25 +353,6 @@ async function scanLocalMarketTrades(connection, {
     activeOrderIds: active,
     archivedOrderIds: Array.from(archived).sort(),
     stats: { ...stats, totalRpcRequests: stats.signatureRequests + stats.transactionRequests },
-    immutableEvidence,
-    coverage: buildCoverage(coverageState, stats, resolvedStartIso, walletCursors, walletScan.cursors),
-    pendingHydration: [], pendingWalletCursors: {},
-  };
-}
-
-function buildCoverage(state, stats, requestedStartIso, startingCursor, endingCursor, exhaustion) {
-  const identities = Array.from(new Map(state.identities.map((item) => [item.signature, item])).values())
-    .sort((a, b) => Number(a.blockTime || 0) - Number(b.blockTime || 0) || a.signature.localeCompare(b.signature));
-  const complete = !exhaustion && !state.capReached && state.failedPages.length === 0 && stats.transactionMisses === 0
-    && (state.boundaryReached || state.authoritativeExhaustion);
-  return {
-    schemaVersion: 1, status: complete ? 'Complete' : 'Incomplete', requestedBoundary: { startTime: requestedStartIso },
-    startingCursor: { ...startingCursor }, endingCursor: { ...endingCursor }, pagesRequested: state.pagesRequested,
-    pagesCompleted: state.pagesCompleted, signaturesDiscovered: identities.length,
-    transactionsParsed: stats.transactionRequests - stats.transactionMisses, missingTransactions: stats.transactionMisses,
-    failedPages: state.failedPages.slice(), capReached: state.capReached, truncated: state.capReached,
-    terminationReason: exhaustion ? 'rpc_exhaustion' : state.capReached ? 'cap_reached' : state.boundaryReached ? 'requested_boundary_reached' : state.authoritativeExhaustion ? 'authoritative_exhaustion' : 'incomplete',
-    oldestRetainedIdentity: identities[0] || null, newestRetainedIdentity: identities[identities.length - 1] || null,
   };
 }
 
@@ -428,5 +360,4 @@ module.exports = {
   DEFAULT_START_ISO, MAX_LOOKBACK_MS, DEFAULT_REQUESTS_PER_SECOND,
   resolveLocalMarketStartIso, createLocalMarketPacer,
   scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, computeTxFeeAtlas, fetchTransactions,
-  preserveTransactionEvidence, buildCoverage, normalizePendingHydration, mergePendingHydration,
 };

@@ -33,31 +33,6 @@ function calculateCargoEfficiency({ cargoVolume, fleetCargoCapacity, cargoLegs }
   };
 }
 
-function cargoVolumeRangeStart(includedUtcDays = []) {
-  const oldest = includedUtcDays[0];
-  if (!(oldest instanceof Date) || Number.isNaN(oldest.getTime())) return '';
-  return `${oldest.toISOString().slice(0, 10)}T00:00:00.000Z`;
-}
-
-function buildCargoVolumeRows(rows = [], includedDays = null) {
-  const records = new Map();
-  for (const row of rows) {
-    const date = new Date(row?._time);
-    const isoDate = Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
-    const cycleId = String(row?.cycleId || '').trim();
-    const fleetAccount = cycleId.split(':', 1)[0];
-    const fleet = String(row?.fleet || '').trim();
-    const assignment = String(row?.assignment || '').trim();
-    const cargoVolume = Number(row?._value);
-    if (!isoDate || (includedDays && !includedDays.has(isoDate))
-      || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(fleetAccount)
-      || !cycleId || !fleet || !assignment || !Number.isFinite(cargoVolume) || cargoVolume < 0) continue;
-    const key = `${isoDate}\n${cycleId}`;
-    if (!records.has(key)) records.set(key, { isoDate, fleet, fleetAccount, assignment, cycleId, cargoVolume });
-  }
-  return Array.from(records.values()).sort((a, b) => a.isoDate.localeCompare(b.isoDate) || a.cycleId.localeCompare(b.cycleId));
-}
-
 function buildCargoVolumeByFleetDayAssignment(rows = []) {
   const totals = new Map();
   for (const row of rows) {
@@ -114,8 +89,6 @@ function calculateTravelModeTime(durations = {}) {
 module.exports = {
   calculateFleetCargoCapacity,
   calculateCargoEfficiency,
-  cargoVolumeRangeStart,
-  buildCargoVolumeRows,
   buildCargoVolumeByFleetDayAssignment,
   buildCargoVolumeByFleetDay,
   filterCargoAllocationsToCompletedCycles,

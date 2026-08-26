@@ -1,10 +1,6 @@
 'use strict';
 
 const { cargoAllocationUtcBatches, cargoAllocationProcessingFailure, buildCargoAllocationRecordsFromPivotRows } = require('./influx-data');
-const { DELIVERY_EVIDENCE_FIELDS } = require('./cargo-delivery-evidence');
-
-const ALLOCATION_VALUE_FIELDS = Object.freeze(['amount', 'cargoVolume', 'allocatedFuel', 'allocatedTxCostSol']);
-const ALLOCATION_QUERY_FIELDS = Object.freeze([...ALLOCATION_VALUE_FIELDS, ...DELIVERY_EVIDENCE_FIELDS]);
 
 const DEFAULT_BATCH_TIMEOUT_MS = 20_000;
 const DEFAULT_WORKER_TIMEOUT_MS = 135_000;
@@ -16,20 +12,15 @@ function allocationScopeKey(settings = {}) {
 }
 
 function buildCargoAllocationPivotFlux(bucket, scopeFilterFlux, { start, stop }) {
-  const fieldFilter = ALLOCATION_QUERY_FIELDS.map((field) => `r._field == "${field}"`).join(' or ');
-  const keptColumns = [
-    '_time', 'fleet', 'rss', 'assignment', 'originStarbase', 'deliveryStarbase', 'cycleId',
-    'allocationIndex', 'faction', 'instance', 'assetMint', ...ALLOCATION_QUERY_FIELDS,
-  ].map((field) => `"${field}"`).join(', ');
   return `from(bucket: "${bucket}")
   |> range(start: time(v: "${start}"), stop: time(v: "${stop}"))
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
-  |> filter(fn: (r) => ${fieldFilter})
+  |> filter(fn: (r) => r._field == "amount" or r._field == "cargoVolume" or r._field == "allocatedFuel" or r._field == "allocatedTxCostSol")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet and exists r.rss and exists r.assignment and exists r.originStarbase and exists r.deliveryStarbase and exists r.cycleId and exists r.allocationIndex)
   |> pivot(rowKey: ["_time", "cycleId", "allocationIndex"], columnKey: ["_field"], valueColumn: "_value")
   |> filter(fn: (r) => exists r.amount and exists r.cargoVolume and exists r.allocatedFuel and exists r.allocatedTxCostSol)
-  |> keep(columns: [${keptColumns}])`;
+  |> keep(columns: ["_time", "fleet", "rss", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex", "faction", "instance", "amount", "cargoVolume", "allocatedFuel", "allocatedTxCostSol"])`;
 }
 
 function boundedError(error) {

@@ -40,18 +40,13 @@ const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./
 const { dependencyInstallRequired } = require('./update-dependencies');
 const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
 const { buildCargoAllocationPivotFlux, createCargoAllocationSource } = require('./cargo-allocation-source');
-const { DELIVERY_EVIDENCE_FIELDS, projectCargoDeliveryEvidence, joinCargoDeliveryAllocations } = require('./cargo-delivery-evidence');
 const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
 const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
-const { calculateFleetCargoCapacity, calculateCargoEfficiency, cargoVolumeRangeStart, buildCargoVolumeRows, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
+const { calculateFleetCargoCapacity, calculateCargoEfficiency, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const { buildCostLedgerResult } = require('./production-ledger-events');
-const { buildProductionEvents, buildProductionCompleteAccounting } = require('./complete-accounting-production-adapter');
-const { loadCompleteAccountingCheckpoint, mergeCompleteAccountingEvents, saveCompleteAccountingCheckpoint } = require('./complete-accounting-checkpoint');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
-const { pathsFor: exactLedgerCheckpointPaths, validateDocument: validateExactLedgerCheckpointDocument } = require('./exact-ledger-checkpoint');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
-const { buildCargoBetaInputs, buildAuthoritativeCargoBetaInputs, buildCargoBreakevenBetaRows } = require('./cargo-breakeven-beta');
 const { createAtlasPriceResolver } = require('./atlas-price-resolver');
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
 const {
@@ -63,12 +58,6 @@ const {
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine } = require('./marketplace-asset-flow');
-const { projectMarketplaceEvidenceV2, buildMarketplaceLedgerEvents } = require('./marketplace-activity-v2');
-const {
-  marketplacePublicationCandidateScopeStatus,
-  marketplacePublicationHoldScopeStatus,
-  partitionMarketplaceRetryHolds,
-} = require('./marketplace-publication-scope');
 const {
   normalizeMarketplaceV1Row,
   normalizeMarketplaceV2Row,
@@ -269,21 +258,6 @@ function settingsPath() {
 
 function ledgerCheckpointPath(faction) {
   return path.join(app.getPath('userData'), 'inventory-cost-ledger', `${sanitizeProfileName(faction)}.json`);
-}
-
-async function loadVerifiedOpeningCheckpoint(faction, profile) {
-  try {
-    const paths = exactLedgerCheckpointPaths(app.getPath('userData'), faction, profile);
-    const document = validateExactLedgerCheckpointDocument(JSON.parse(await fs.readFile(paths.document, 'utf8')));
-    if (document.coverage !== 'Complete') return null;
-    return { status: 'verified', coverage: document.coverage, checkpointId: document.openingCheckpointId, checkpointHash: document.openingCheckpointHash, boundaryAt: document.forwardBoundary, faction: document.faction, profile: document.playerProfile };
-  } catch (_error) {
-    return null;
-  }
-}
-
-function completeAccountingCheckpointPath(faction) {
-  return path.join(app.getPath('userData'), 'complete-break-even-accounting', `${sanitizeProfileName(faction)}.json`);
 }
 
 function localMarketCheckpointPath(faction) {
@@ -599,17 +573,12 @@ function marketplaceScopeFlux(faction, profile) {
   return `(r.faction == "${escapeFluxString(faction)}" and (not exists r.profile or r.profile == "${escapeFluxString(profileName)}" or r.profile == "${escapeFluxString(profile)}")) or (r.market == "GM" and r.faction == "GLOBAL" and r.profile == "GLOBAL")`;
 }
 
-function marketplaceV2ScopeFlux(faction, profile) {
-  return `(r.faction == "${escapeFluxString(faction)}" and r.profile == "${escapeFluxString(profile)}") or (r.market == "GM" and r.faction == "GLOBAL" and r.profile == "GLOBAL")`;
-}
-
 async function fetchNewestMarketplaceTradeMs(settings) {
   const bucket = String(settings.influxBucket || '').trim();
   const profile = getSelectedPlayerProfile(settings);
   if (!bucket || !profile) return null;
   const faction = normalizeFaction(settings.faction);
   const scope = marketplaceScopeFlux(faction, profile);
-  const v2Scope = marketplaceV2ScopeFlux(faction, profile);
   const flux = `v1 = from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -40d)
   |> filter(fn: (r) => r._measurement == "marketplace" and r._field == "quantity")
@@ -617,7 +586,7 @@ async function fetchNewestMarketplaceTradeMs(settings) {
 v2 = from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -40d)
   |> filter(fn: (r) => r._measurement == "marketplace_v2" and (r._field == "fallbackQuantity" or r._field == "enrichedQuantity"))
-  |> filter(fn: (r) => ${v2Scope})
+  |> filter(fn: (r) => ${scope})
 union(tables: [v1, v2])
   |> group()
   |> sort(columns: ["_time"], desc: false)
@@ -638,7 +607,6 @@ async function fetchMarketplaceTradesFromInflux(settings) {
   if (!bucket || !profile) return { trades: [], error: profile ? 'influx_not_configured' : 'local_market_profile_not_configured' };
   const faction = normalizeFaction(settings.faction);
   const scope = marketplaceScopeFlux(faction, profile);
-  const v2Scope = marketplaceV2ScopeFlux(faction, profile);
   const v1Flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -40d)
   |> filter(fn: (r) => r._measurement == "marketplace")
@@ -648,7 +616,7 @@ async function fetchMarketplaceTradesFromInflux(settings) {
   const v2Flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -40d)
   |> filter(fn: (r) => r._measurement == "marketplace_v2")
-  |> filter(fn: (r) => ${v2Scope})
+  |> filter(fn: (r) => ${scope})
   |> pivot(rowKey: ["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
   try {
@@ -677,35 +645,16 @@ async function fetchMarketplaceAssetFlowsFromInflux(settings) {
   |> sort(columns: ["_time"])`;
   return parseInfluxCsv(await queryInfluxFlux(settings, flux)).flatMap((row) => {
     const timestamp = String(row._time || '');
-    const quantity = String(row.quantity ?? '').trim();
+    const quantity = Number(row.quantity);
     const origin = String(row.origin || '');
     const destination = String(row.destination || '');
     const asset = String(row.asset || '');
-    if (!timestamp || !origin || !destination || !asset || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(quantity) || !/[1-9]/.test(quantity)) return [];
+    if (!timestamp || !origin || !destination || !asset || !(quantity > 0)) return [];
     return [{
-      schemaVersion: Number(row.schemaVersion || 1), type: 'transfer', timestamp, origin, destination, asset,
-      exactQuantity: quantity, quantity, txFeeAtlas: String(row.txFeeAtlas ?? '0'), cargoCost: String(row.txFeeAtlas ?? '0'),
-      flowId: String(row.flowId || ''), id: String(row.flowId || ''), signature: String(row.signature || ''),
-      rawMint: String(row.rawMint || ''), wallet: String(row.wallet || ''), faction: String(row.faction || ''),
-      profile: String(row.profile || ''), lineageStatus: String(row.lineageStatus || ''), provenance: String(row.provenance || row.flow || ''),
+      type: 'transfer', timestamp, origin, destination, asset, quantity,
+      cargoCost: Number(row.txFeeAtlas || 0), flowId: String(row.flowId || ''),
     }];
   });
-}
-
-async function fetchSlyaAccountingEvidenceFromInflux(settings) {
-  const bucket = String(settings.influxBucket || '').trim();
-  const profile = getSelectedPlayerProfile(settings);
-  if (!bucket || !profile) return { rows: [], error: 'influx_not_configured' };
-  const faction = normalizeFaction(settings.faction) === 'USTUR' ? 'UST' : normalizeFaction(settings.faction);
-  const flux = `from(bucket: "${escapeFluxString(bucket)}")
-  |> range(start: -40d)
-  |> filter(fn: (r) => r._measurement == "slya_accounting_evidence_v1")
-  |> filter(fn: (r) => contains(value: r._field, set: ["payloadHash", "signature", "programId", "operationId", "outerInstructionIndex", "slot", "blockTime", "faction", "profile", "fleetAccount", "fleetLabel", "inputs", "outputs", "directFees", "transactionCosts", "lineage", "sourceProvenance"]))
-  |> pivot(rowKey: ["_time", "eventId", "evidenceType", "schemaVersion"], columnKey: ["_field"], valueColumn: "_value")
-  |> filter(fn: (r) => r.faction == "${escapeFluxString(faction)}" and r.profile == "${escapeFluxString(profile)}")
-  |> sort(columns: ["_time"], desc: false)`;
-  try { return { rows: parseInfluxCsv(await queryInfluxFlux(settings, flux)), error: '' }; }
-  catch (error) { return { rows: [], error: String(error?.message || error || 'slya_accounting_evidence_unavailable') }; }
 }
 
 async function resolveInfluxOrgId(influxUrl, token, bucket) {
@@ -4329,9 +4278,6 @@ async function loadLocalMarketTradeCheckpoint(filePath) {
       orderCursors: document?.orderCursors && typeof document.orderCursors === 'object' ? document.orderCursors : {},
       activeOrderIds: Array.isArray(document?.activeOrderIds) ? document.activeOrderIds : [],
       archivedOrderIds: Array.isArray(document?.archivedOrderIds) ? document.archivedOrderIds : [],
-      immutableEvidence: Array.isArray(document?.immutableEvidence) ? document.immutableEvidence : [],
-      pendingHydration: Array.isArray(document?.pendingHydration) ? document.pendingHydration : [],
-      pendingWalletCursors: document?.pendingWalletCursors && typeof document.pendingWalletCursors === 'object' ? document.pendingWalletCursors : {},
       marketplaceBackfilled: document?.marketplaceBackfilled === true,
       assetFlowBackfilled: document?.assetFlowBackfilled === true,
       tradeEnrichmentVersion: Number(document?.tradeEnrichmentVersion || 0),
@@ -4340,47 +4286,11 @@ async function loadLocalMarketTradeCheckpoint(filePath) {
     if (error?.code === 'ENOENT') return {
       orders: [], trades: [], assetFlows: [], publishedTradeIds: new Set(), publishedFlowIds: new Set(), walletCursors: {}, orderCursors: {},
       activeOrderIds: [], archivedOrderIds: [], marketplaceBackfilled: false,
-      immutableEvidence: [],
-      pendingHydration: [], pendingWalletCursors: {},
       assetFlowBackfilled: false,
       tradeEnrichmentVersion: 0,
     };
     throw error;
   }
-}
-
-function marketplacePriorityHydrationRows(checkpoint, holds, market) {
-  const rows = new Map();
-  const pendingSignatures = new Set((checkpoint.pendingHydration || []).map((row) => String(row?.signature || '').trim()).filter(Boolean));
-  const add = (signature, time) => {
-    const value = String(signature || '').trim();
-    if (!value || !pendingSignatures.has(value)) return;
-    const parsed = typeof time === 'number' ? time : Date.parse(time || '');
-    rows.set(value, { signature: value, blockTime: Number.isFinite(parsed) ? (parsed > 1e12 ? Math.floor(parsed / 1000) : parsed) : null, priority: true });
-  };
-  for (const trade of checkpoint.trades || []) add(trade.signature || trade.executionSignature, trade.timestamp || trade.blockTime);
-  for (const flow of checkpoint.assetFlows || []) add(flow.signature || flow.executionSignature || flow.transactionSignature, flow.timestamp || flow.blockTime);
-  for (const order of checkpoint.orders || []) add(order.creationSignature || order.signature, order.createdAt || order.timestamp);
-  for (const evidence of checkpoint.immutableEvidence || []) {
-    if (!(evidence?.executions?.length || evidence?.flows?.length)) continue;
-    add(evidence.transaction?.signature, evidence.transaction?.blockTime);
-  }
-  const holdValues = Array.isArray(holds) ? holds : Object.values(holds || {});
-  for (const hold of holdValues) {
-    if (hold?.market !== market || ['released', 'abandoned'].includes(hold?.state)) continue;
-    const snapshot = hold.candidateSnapshot || {};
-    add(snapshot.signature || snapshot.executionSignature, snapshot.timestamp || hold.candidateTimestamp);
-    add(snapshot.creationSignature, snapshot.timestamp || hold.candidateTimestamp);
-    for (const input of snapshot.publicationInputs || []) {
-      add(input?.identity?.executionSignature || input?.executionSignature || input?.signature, input?.timestamp || snapshot.timestamp || hold.candidateTimestamp);
-    }
-  }
-  return Array.from(rows.values());
-}
-
-async function loadMarketplacePriorityHolds() {
-  const loaded = await loadMarketplacePublicationHolds({ installationRoot: getAppRoot() });
-  return loaded.status === 'loaded' ? loaded.document?.holds || {} : {};
 }
 
 async function fetchOpenLocalMarketOrderIds(connection, trackedWallets) {
@@ -4491,23 +4401,6 @@ function marketplaceTradeRank(trade) {
     ? 'enriched' : 'fallback';
 }
 
-function marketplaceWalletLineageMap(faction, profile, wallets) {
-  return new Map(Array.from(new Set((wallets || []).map(String).filter(Boolean))).map((wallet) => [wallet, {
-    faction: normalizeFaction(faction), profile: String(profile || ''), location: `wallet:${wallet}`,
-  }]));
-}
-
-function withMarketplaceWalletLineage(row, lineageByWallet, { location } = {}) {
-  const wallet = String(row?.wallet || '').trim();
-  const authoritative = lineageByWallet.get(wallet);
-  if (!authoritative) return row;
-  return {
-    ...row,
-    lineageStatus: 'proven', lineageFaction: authoritative.faction,
-    lineageProfile: authoritative.profile, lineageLocation: String(location || row.starbase || authoritative.location),
-  };
-}
-
 function marketplaceTradePublicationCandidate(trade, { market, faction, profileScope }) {
   const rank = marketplaceTradeRank(trade);
   const identity = {
@@ -4525,10 +4418,6 @@ function marketplaceTradePublicationCandidate(trade, { market, faction, profileS
     [`${rank}Starbase`]: String(trade.starbase || ''),
     [`${rank}Asset`]: String(trade.asset || ''),
     [`${rank}CertificateMint`]: String(trade.certificateMint || ''),
-    [`${rank}LineageStatus`]: String(trade.lineageStatus || ''),
-    [`${rank}LineageFaction`]: String(trade.lineageFaction || ''),
-    [`${rank}LineageProfile`]: String(trade.lineageProfile || ''),
-    [`${rank}LineageLocation`]: String(trade.lineageLocation || ''),
   };
   if (rank === 'enriched') {
     common.enrichedTxFeeAtlas = trade.txFeeAtlas ?? 0;
@@ -4543,7 +4432,7 @@ function marketplaceTradePublicationCandidate(trade, { market, faction, profileS
     record: {
       eventType: 'trade', identity,
       pointTimestampNs: String(BigInt(new Date(trade.timestamp).getTime()) * 1000000n),
-      sourceVersion: `${rank}_v2`, fields: common,
+      sourceVersion: `${rank}_v1`, fields: common,
     },
   };
 }
@@ -4720,15 +4609,6 @@ async function resolveMarketplaceExactPoint(settings, exact) {
 }
 
 async function publishMarketplaceCandidateSet(settings, candidates, holdContext, { commitSafeCursor } = {}) {
-  const invalidScope = candidates.find((candidate) => candidate?.record?.eventType === 'trade'
-    && !marketplacePublicationCandidateScopeStatus(settings, candidate).authoritative);
-  if (invalidScope) {
-    return {
-      publishedTradeIds: new Set(), publishedFlowIds: new Set(), holdIdsToComplete: [], tradeHoldIdsToComplete: [], flowHoldIdsToComplete: [],
-      allCurrentComplete: false, allTradeCurrentComplete: false, allFlowCurrentComplete: false, allEnrichableComplete: false,
-      error: 'publication_scope_conflict', safeCursorCommitted: false,
-    };
-  }
   const groups = groupMarketplacePublicationCandidates(candidates);
   const stagedCandidates = [];
   const representativeByGroupRank = new Map();
@@ -5009,18 +4889,14 @@ async function recoverMarketplacePublication(settings) {
     resolveExactPoint: (exact) => resolveMarketplaceExactPoint(settings, exact),
   });
   const retryHolds = await loadMarketplacePublicationHolds({ installationRoot: getAppRoot() });
-  const activeRetryHolds = retryHolds.status === 'loaded' ? Object.values(retryHolds.document.holds)
-    .filter((hold) => hold.state !== 'released' && hold.state !== 'abandoned') : [];
-  const partitionedRetryHolds = partitionMarketplaceRetryHolds(settings, activeRetryHolds);
-  const scopeConflictCount = partitionedRetryHolds.conflicts.length;
-  const retryCandidates = partitionedRetryHolds.retryable
-    .filter((hold) => Array.isArray(hold.candidateSnapshot?.publicationInputs))
+  const retryCandidates = retryHolds.status === 'loaded' ? Object.values(retryHolds.document.holds)
+    .filter((hold) => hold.state !== 'released' && hold.state !== 'abandoned' && Array.isArray(hold.candidateSnapshot?.publicationInputs))
     .flatMap((hold) => hold.candidateSnapshot.publicationInputs.map((input) => ({
       logicalKey: hold.logicalKeyOrSourceId,
       currentId: input.currentId,
       representationRank: hold.kind === 'asset_flow' ? undefined : input.representationRank,
       record: input.record,
-    })));
+    }))) : [];
   // Empty-candidate publication drains durable pending work and reconciles
   // posting work; it does not depend on scanner rows surviving a restart.
   try { await coordinator.publishMarketplaceCandidates({ settings: coordinatorSettings, candidates: retryCandidates }); }
@@ -5033,11 +4909,10 @@ async function recoverMarketplacePublication(settings) {
       applicationProfile: publicationSettings.applicationProfile,
     }),
   ]);
-  if (holds.status !== 'loaded' || outbox.status !== 'loaded') return { status: 'recovery_idle', scopeConflictCount };
+  if (holds.status !== 'loaded' || outbox.status !== 'loaded') return { status: 'recovery_idle' };
   let recovered = 0;
   for (let hold of Object.values(holds.document.holds)) {
     if (hold.state === 'released' || hold.state === 'abandoned') continue;
-    if (!marketplacePublicationHoldScopeStatus(settings, hold).authoritative) continue;
     if (!hold.eventId || !hold.currentRevisionId) {
       const currentInput = (hold.candidateSnapshot?.publicationInputs || []).find((input) => hold.kind === 'asset_flow'
         || input.representationRank === hold.candidateSnapshot.currentRank);
@@ -5113,7 +4988,7 @@ async function recoverMarketplacePublication(settings) {
       });
     }
   }
-  return { status: 'recovery_complete', recovered, scopeConflictCount };
+  return { status: 'recovery_complete', recovered };
 }
 
 async function fetchLocalMarketTrades(settings, connection) {
@@ -5163,14 +5038,10 @@ async function fetchLocalMarketTrades(settings, connection) {
     checkpoint.activeOrderIds,
     checkpoint.archivedOrderIds,
   );
-  const priorityHydration = marketplacePriorityHydrationRows(checkpoint, await loadMarketplacePriorityHolds(), 'LM');
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
     marketAssetsByMint,
     knownOrders: checkpoint.orders,
-    pendingHydration: checkpoint.pendingHydration,
-    priorityHydration,
-    pendingWalletCursors: checkpoint.pendingWalletCursors,
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
     startIso: needsTradeEnrichment ? startIso : overlapStart,
@@ -5202,19 +5073,14 @@ async function fetchLocalMarketTrades(settings, connection) {
   };
   const safeCheckpointDocument = {
     schemaVersion: 2, faction, profile, savedAt: new Date().toISOString(),
-    orders: scanned.orders, trades, immutableEvidence: scanned.immutableEvidence, coverage: scanned.coverage, ...cursorOutputSnapshot,
-    pendingHydration: scanned.pendingHydration, pendingWalletCursors: scanned.pendingWalletCursors,
+    orders: scanned.orders, trades, ...cursorOutputSnapshot,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     marketplaceBackfilled: false, tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
   };
-  const lineageByWallet = marketplaceWalletLineageMap(faction, profile, trackedWallets);
-  const scopedPublicationTrades = publicationRepresentations
-    .map((trade) => withMarketplaceWalletLineage(trade, lineageByWallet, { location: trade.starbase }))
-    .filter((trade) => trade.lineageStatus === 'proven');
   const publication = await publishMarketplaceCandidateSet(
     settings,
-    scopedPublicationTrades.map((trade) => marketplaceTradePublicationCandidate(trade, { market: 'LM', faction, profileScope: profile })),
-    { market: 'LM', faction, profileScope: profile, cursorInputSnapshot, cursorOutputSnapshot },
+    publicationRepresentations.map((trade) => marketplaceTradePublicationCandidate(trade, { market: 'LM', faction, profileScope: profileName })),
+    { market: 'LM', faction, profileScope: profileName, cursorInputSnapshot, cursorOutputSnapshot },
     { commitSafeCursor: () => writeJsonAtomic(filePath, safeCheckpointDocument) },
   );
   if (!publication.safeCursorCommitted) return {
@@ -5244,7 +5110,6 @@ async function fetchLocalMarketTrades(settings, connection) {
   });
   return {
     trades,
-    immutableEvidence: scanned.immutableEvidence, coverage: scanned.coverage,
     error: publishError,
     rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
     exhaustion: scanned.exhaustion || null,
@@ -5286,33 +5151,27 @@ async function fetchGlobalMarketTrades(settings, connection) {
   const assetsByMint = Object.fromEntries(ASSET_REGISTRY.map((asset) => [asset.mint, asset]));
   const starbasesByKey = Object.fromEntries(STARBASE_REGISTRY.map((starbase) => [starbase.publicKey, starbase.name]));
   const atlasPerSol = await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null);
-  const walletLineageByWallet = marketplaceWalletLineageMap(settings.faction, profile, trackedWallets);
-  const decoderWalletLineage = Object.fromEntries(Array.from(walletLineageByWallet, ([wallet, lineage]) => [wallet, lineage]));
   const cursorInputSnapshot = marketplaceCursorSnapshot(
     checkpoint.assetFlowBackfilled ? checkpoint.walletCursors : {},
     checkpoint.orderCursors,
     checkpoint.activeOrderIds,
     checkpoint.archivedOrderIds,
   );
-  const priorityHydration = marketplacePriorityHydrationRows(checkpoint, await loadMarketplacePriorityHolds(), 'GM');
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
     marketAssetsByMint: buildGlobalMarketAssetMap(),
     knownOrders: checkpoint.orders,
-    pendingHydration: checkpoint.pendingHydration,
-    priorityHydration,
-    pendingWalletCursors: checkpoint.pendingWalletCursors,
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
     startIso: overlapStart,
     addressFactory: (value) => new PublicKey(value),
     atlasPerSol,
     decodeAssetFlows: (transaction) => decodeMarketplaceAssetFlows(transaction, {
-      trackedWallets, walletLineage: decoderWalletLineage, assetsByMint, starbasesByKey, atlasPerSol,
+      trackedWallets, assetsByMint, starbasesByKey, atlasPerSol,
     }),
   });
-  const byId = new Map(existing.map((trade) => [trade.id, withMarketplaceWalletLineage(trade, walletLineageByWallet)]));
-  for (const trade of scanned.trades) byId.set(trade.id, withMarketplaceWalletLineage(trade, walletLineageByWallet));
+  const byId = new Map(existing.map((trade) => [trade.id, trade]));
+  for (const trade of scanned.trades) byId.set(trade.id, trade);
   const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
   const flowById = new Map(checkpoint.assetFlows.map((event) => [event.id, event]));
@@ -5328,8 +5187,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
   };
   const safeCheckpointDocument = {
     schemaVersion: 2, market: 'GM', savedAt: new Date().toISOString(), trackedWallets,
-    orders: scanned.orders, trades, assetFlows, immutableEvidence: scanned.immutableEvidence, coverage: scanned.coverage, ...cursorOutputSnapshot,
-    pendingHydration: scanned.pendingHydration, pendingWalletCursors: scanned.pendingWalletCursors,
+    orders: scanned.orders, trades, assetFlows, ...cursorOutputSnapshot,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
     publishedFlowIds: Array.from(checkpoint.publishedFlowIds).sort(),
     marketplaceBackfilled: false, assetFlowBackfilled: false,
@@ -5379,7 +5237,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     assetFlowBackfilled: assetFlowBackfilledNext,
   });
   return {
-    trades, assetFlows, immutableEvidence: scanned.immutableEvidence, coverage: scanned.coverage, error: publishError,
+    trades, assetFlows, error: publishError,
     rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
     exhaustion: scanned.exhaustion || null,
   };
@@ -5500,58 +5358,10 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
   }
 }
 
-function newestMarketplaceRowTimestamp(rows = []) {
-  let newest = '';
-  for (const row of rows || []) {
-    const timestamp = String(row?.timestamp || '');
-    if (Number.isFinite(Date.parse(timestamp)) && timestamp > newest) newest = timestamp;
-  }
-  return newest;
-}
-
-async function readMarketplaceDurableFreshness(settings) {
-  const faction = normalizeFaction(settings.faction);
-  const paths = [localMarketCheckpointPath(faction), globalMarketCheckpointPath()];
-  const rows = [];
-  for (const filePath of paths) {
-    try {
-      const document = JSON.parse(await fs.readFile(filePath, 'utf8'));
-      rows.push(...(Array.isArray(document.trades) ? document.trades : []), ...(Array.isArray(document.assetFlows) ? document.assetFlows : []));
-    } catch (error) {
-      if (error?.code !== 'ENOENT') return { newestTimestamp: '', status: 'unavailable', reason: 'durable_checkpoint_unavailable' };
-    }
-  }
-  return { newestTimestamp: newestMarketplaceRowTimestamp(rows), status: 'available', reason: '' };
-}
-
 async function fetchMarketplaceSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
-  const [result, flowResult, durableResult] = await Promise.allSettled([
-    fetchMarketplaceTradesFromInflux(settings), fetchMarketplaceAssetFlowsFromInflux(settings), readMarketplaceDurableFreshness(settings),
-  ]);
-  const trades = result.status === 'fulfilled' ? result.value.trades : [];
-  const tradeError = result.status === 'fulfilled' ? result.value.error : String(result.reason?.message || result.reason || 'marketplace_influx_unavailable');
-  const transfers = flowResult.status === 'fulfilled' ? flowResult.value : [];
-  const flowError = flowResult.status === 'rejected' ? String(flowResult.reason?.message || flowResult.reason || 'asset_flow_influx_unavailable') : '';
-  const hasAvailableSource = (result.status === 'fulfilled' && !result.value.error) || flowResult.status === 'fulfilled';
-  const marketplaceActivity = hasAvailableSource ? projectMarketplaceEvidenceV2({
-    trades, transfers,
-    scope: { faction: normalizeFaction(settings.faction), profile: getSelectedPlayerProfile(settings) },
-  }) : null;
-  const durable = durableResult.status === 'fulfilled' ? durableResult.value : { newestTimestamp: '', status: 'unavailable', reason: 'durable_checkpoint_unavailable' };
-  const displayedNewestTimestamp = marketplaceActivity?.newestSourceTimestamp || '';
-  const behindDurable = Boolean(durable.newestTimestamp && (!displayedNewestTimestamp || Date.parse(durable.newestTimestamp) > Date.parse(displayedNewestTimestamp)));
-  if (marketplaceActivity) marketplaceActivity.sourceFreshness = {
-    displayedNewestTimestamp,
-    authoritativeNewestTimestamp: durable.newestTimestamp || '',
-    status: behindDurable || tradeError || flowError ? 'partial' : durable.status === 'unavailable' ? 'unavailable' : 'current',
-    reason: behindDurable ? 'influx_behind_durable_discovery' : tradeError || flowError || durable.reason || '',
-  };
-  const error = [tradeError, flowError].filter(Boolean).join('; ');
-  return {
-    ok: !error, localMarketTrades: trades, localMarketTradeCount: trades.length, localMarketError: error,
-    marketplaceActivity, checkedAt: new Date().toISOString(),
-  };
+  const result = await fetchMarketplaceTradesFromInflux(settings);
+  return { ok: !result.error, localMarketTrades: result.trades, localMarketTradeCount: result.trades.length, localMarketError: result.error, checkedAt: new Date().toISOString() };
 }
 
 function getCurrentResourcePriceAtl(prices, resourceName) {
@@ -5576,7 +5386,7 @@ async function fetchCurrentPerStarbaseInventory(settings) {
   |> filter(fn: (r) => r._value > 0)
   |> keep(columns: ["rss", "starbase", "_value", "_time"])
   |> sort(columns: ["starbase", "rss"])`;
-  const csv = await queryInfluxFlux(settings, flux);
+  const csv = await queryInfluxFlux(settings, flux).catch(() => '');
   const rows = parseInfluxCsv(csv);
   const result = [];
   for (const row of rows) {
@@ -6511,7 +6321,7 @@ ${scopeFilterFlux}
     const eventDate = new Date(raw._time);
     const timestamp = Number.isNaN(eventDate.getTime()) ? '' : eventDate.toISOString();
     if (!craftingId || !starbase || !output || !timestamp) continue;
-    if (!ledgerByCraftingId.has(craftingId)) ledgerByCraftingId.set(craftingId, { craftingId, timestamp, starbase, output, crafted: 0, feeAmount: null, txCostSol: null, ingredients: [] });
+    if (!ledgerByCraftingId.has(craftingId)) ledgerByCraftingId.set(craftingId, { timestamp, starbase, output, crafted: 0, feeAmount: null, txCostSol: null, ingredients: [] });
     const event = ledgerByCraftingId.get(craftingId);
     const value = Number(raw._value);
     if (!Number.isFinite(value)) continue;
@@ -6797,48 +6607,6 @@ ${scopeFilterFlux}
 }
 
 
-function buildBoundedCargoAllocationRecords(fieldRows, includedDays, limit = Infinity) {
-  const requiredFields = ['amount', 'cargoVolume', 'allocatedFuel', 'allocatedTxCostSol'];
-  const acceptedFields = new Set([...requiredFields, ...DELIVERY_EVIDENCE_FIELDS]);
-  const grouped = new Map();
-  for (const row of fieldRows) {
-    const cycleId = String(row?.cycleId || '').trim();
-    const allocationIndex = String(row?.allocationIndex ?? '').trim();
-    const field = String(row?._field || '').trim();
-    const fleet = String(row?.fleet || '').trim();
-    const fleetAccount = cargoFleetAccountFromCycleId(cycleId) || '';
-    const timestamp = new Date(row?._time);
-    const isoDate = Number.isNaN(timestamp.getTime()) ? '' : timestamp.toISOString().slice(0, 10);
-    const rawValue = String(row?._value ?? '').trim();
-    const numericValue = Number(rawValue);
-    if (!cycleId || !allocationIndex || !acceptedFields.has(field) || !fleet || !fleetAccount
-      || !isoDate || (includedDays && !includedDays.has(isoDate)) || !rawValue
-      || (requiredFields.includes(field) && !Number.isFinite(numericValue))) continue;
-    const key = `${cycleId}\n${allocationIndex}`;
-    if (!grouped.has(key)) grouped.set(key, {
-      isoDate, timestamp: timestamp.toISOString(), label: isoDate,
-      faction: String(row?.faction || '').trim(), instance: String(row?.instance || '').trim(),
-      fleet, fleetAccount, asset: String(row?.rss || 'Unknown asset').trim() || 'Unknown asset',
-      assetMint: String(row?.assetMint || '').trim(),
-      origin: String(row?.originStarbase || '').trim() || '--',
-      destination: String(row?.deliveryStarbase || '').trim() || '--',
-      assignment: String(row?.assignment || 'Unknown').trim() || 'Unknown',
-      cycleId, allocationIndex, fields: new Set(),
-    });
-    const record = grouped.get(key);
-    record[field] = requiredFields.includes(field) ? numericValue : rawValue;
-    record.fields.add(field);
-    if (timestamp.toISOString() > record.timestamp) record.timestamp = timestamp.toISOString();
-  }
-  return Array.from(grouped.values())
-    .filter((record) => requiredFields.every((field) => record.fields.has(field)))
-    .sort((left, right) => right.timestamp.localeCompare(left.timestamp)
-      || left.cycleId.localeCompare(right.cycleId)
-      || left.allocationIndex.localeCompare(right.allocationIndex))
-    .slice(0, Number.isInteger(limit) && limit >= 0 ? limit : undefined)
-    .map(({ fields, ...record }) => record);
-}
-
 async function fetchCargoVolumeEarningsRows(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
     return { rows: [], durationMs: 0, returnedRecordCount: 0 };
@@ -6846,99 +6614,19 @@ async function fetchCargoVolumeEarningsRows(settings) {
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const includedUtcDays = getLastUtcDays(30);
-  const rangeStart = cargoVolumeRangeStart(includedUtcDays);
-  const newestDay = includedUtcDays[includedUtcDays.length - 1];
-  const rangeStop = new Date(Date.UTC(newestDay.getUTCFullYear(), newestDay.getUTCMonth(), newestDay.getUTCDate() + 1)).toISOString();
+  const rangeStart = `${getUtcDateKey(includedUtcDays[includedUtcDays.length - 1])}T00:00:00.000Z`;
   const flux = `from(bucket: "${bucket}")
-  |> range(start: time(v: "${rangeStart}"), stop: time(v: "${rangeStop}"))
+  |> range(start: time(v: "${rangeStart}"))
   |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
-${scopeFilterFlux}
   |> filter(fn: (r) => r._field == "cargoVolume")
-  |> filter(fn: (r) => exists r.cycleId and exists r.allocationIndex and exists r.fleet and exists r.assignment)
-  |> group(columns: ["cycleId", "fleet", "assignment"])
-  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group()
-  |> keep(columns: ["_time", "_value", "fleet", "assignment", "cycleId"])`;
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.cycleId and exists r.allocationIndex)
+  |> keep(columns: ["_time", "_field", "_value", "fleet", "assignment", "cycleId", "allocationIndex"])`;
   const includedDays = new Set(includedUtcDays.map((date) => getUtcDateKey(date)));
   const startedAt = Date.now();
-  const queryRows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
-  const rows = buildCargoVolumeRows(queryRows, includedDays);
-  return { rows, durationMs: Date.now() - startedAt, returnedRecordCount: queryRows.length };
-}
-
-function buildCargoBetaScopeFilter(settings) {
-  const faction = normalizeFaction(settings.faction);
-  const aliases = factionInfluxAliases[faction] || factionInfluxAliases.USTUR;
-  const instancePredicates = aliases.instance.map((value) => `r.instance == "${escapeFluxString(value)}"`);
-  const factionPredicates = aliases.faction.map((value) => `r.faction == "${escapeFluxString(value)}"`);
-  return `  |> filter(fn: (r) =>
-    ((exists r.instance and (${instancePredicates.join(' or ')})) or
-     (exists r.faction and (${factionPredicates.join(' or ')})))
-  )`;
-}
-
-async function fetchCargoBetaAllocationRows(settings, configuredFleetAccounts = []) {
-  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) {
-    throw new Error('influx_not_configured');
-  }
-  const fleetAccounts = Array.from(new Set(configuredFleetAccounts.map((value) => String(value || '').trim()).filter(Boolean)));
-  if (!fleetAccounts.length) throw new Error('cargo_beta_configured_fleets_unavailable');
-  const bucket = escapeFluxString(settings.influxBucket);
-  const scopeFilterFlux = buildCargoBetaScopeFilter(settings);
-  const fleetFilterFlux = `  |> filter(fn: (r) => exists r.cycleId and (${fleetAccounts
-    .map((account) => `strings.hasPrefix(v: r.cycleId, prefix: "${escapeFluxString(account)}:")`).join(' or ')}))`;
-  const includedUtcDays = getLastUtcDays(30);
-  const rangeStart = cargoVolumeRangeStart(includedUtcDays);
-  const newestDay = includedUtcDays[includedUtcDays.length - 1];
-  const rangeStop = new Date(Date.UTC(newestDay.getUTCFullYear(), newestDay.getUTCMonth(), newestDay.getUTCDate() + 1)).toISOString();
-  const completionFlux = `import "strings"
-
-from(bucket: "${bucket}")
-  |> range(start: time(v: "${rangeStart}"), stop: time(v: "${rangeStop}"))
-  |> filter(fn: (r) => r._measurement == "cargo_cycle_completed" and r._field == "legCount")
-${scopeFilterFlux}
-${fleetFilterFlux}
-  |> filter(fn: (r) => exists r.cycleId and exists r.fleet and exists r.assignment)
-  |> keep(columns: ["_time", "cycleId", "fleet", "assignment", "_value"])`;
-  const completionStartedAt = Date.now();
-  const completionRows = parseInfluxCsv(await queryInfluxFlux(settings, completionFlux));
-  const completionDurationMs = Date.now() - completionStartedAt;
-  const newestCompletedCycleIds = Array.from(completionRows
-    .sort((left, right) => String(right?._time || '').localeCompare(String(left?._time || ''))
-      || String(left?.cycleId || '').localeCompare(String(right?.cycleId || '')))
-    .reduce((ids, row) => {
-      const cycleId = String(row?.cycleId || '').trim();
-      if (cycleId && !ids.has(cycleId)) ids.set(cycleId, true);
-      return ids;
-    }, new Map()).keys());
-  if (!newestCompletedCycleIds.length) {
-    return { allocations: [], joinedDeliveries: [], legacyAllocations: [], evidenceConflicts: [], ambiguousEvidenceJoins: [], logicalDeliveryCount: 0, selectedCycleIds: [], completionDurationMs, allocationDurationMs: 0, allocationFieldRowCount: 0 };
-  }
-  const cycleFilterFlux = newestCompletedCycleIds
-    .map((cycleId) => `r.cycleId == "${escapeFluxString(cycleId)}"`).join(' or ');
-  const allocationFieldFilter = [...['amount', 'cargoVolume', 'allocatedFuel', 'allocatedTxCostSol'], ...DELIVERY_EVIDENCE_FIELDS]
-    .map((field) => `r._field == "${field}"`).join(' or ');
-  const allocationFlux = `from(bucket: "${bucket}")
-  |> range(start: time(v: "${rangeStart}"), stop: time(v: "${rangeStop}"))
-  |> filter(fn: (r) => r._measurement == "cargo_cost_allocation")
-${scopeFilterFlux}
-  |> filter(fn: (r) => ${cycleFilterFlux})
-  |> filter(fn: (r) => ${allocationFieldFilter})
-  |> filter(fn: (r) => exists r.fleet and exists r.rss and exists r.assignment and exists r.originStarbase and exists r.deliveryStarbase and exists r.cycleId and exists r.allocationIndex)
-  |> keep(columns: ["_time", "_value", "_field", "fleet", "rss", "assetMint", "assignment", "originStarbase", "deliveryStarbase", "cycleId", "allocationIndex", "faction", "instance"])`;
-  const allocationStartedAt = Date.now();
-  const allocationFieldRows = parseInfluxCsv(await queryInfluxFlux(settings, allocationFlux));
-  const allocationDurationMs = Date.now() - allocationStartedAt;
-  const includedDays = new Set(includedUtcDays.map((date) => getUtcDateKey(date)));
-  const allocations = buildBoundedCargoAllocationRecords(allocationFieldRows, includedDays);
-  const evidenceProjection = projectCargoDeliveryEvidence(allocations);
-  const joinedEvidence = joinCargoDeliveryAllocations(evidenceProjection, { limit: 50 });
-  return {
-    allocations, joinedDeliveries: joinedEvidence.joinedDeliveries, legacyAllocations: joinedEvidence.legacyAllocations,
-    evidenceConflicts: evidenceProjection.conflicts, ambiguousEvidenceJoins: joinedEvidence.ambiguous,
-    logicalDeliveryCount: joinedEvidence.logicalDeliveryCount, selectedCycleIds: newestCompletedCycleIds,
-    completionDurationMs, allocationDurationMs, allocationFieldRowCount: allocationFieldRows.length,
-  };
+  const fieldRows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
+  const rows = buildCargoAllocationRecords(fieldRows, includedDays);
+  return { rows, durationMs: Date.now() - startedAt, returnedRecordCount: fieldRows.length };
 }
 
 async function fetchCargoCompletionEvidenceRows(settings) {
@@ -7177,7 +6865,6 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   // Each category already fans out into several Flux queries. Starting all
   // five categories at once overloads the Influx proxy (17+ concurrent
   // queries) and causes 504s, so use bounded category concurrency instead.
-  const configuredCargoFleetAccounts = Array.from(fleetByAccount.keys());
   const earningsTasks = [
     () => fetchScanningEarningsRows(settings),
     () => fetchMiningEarningsRows(settings),
@@ -7186,7 +6873,6 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     () => fetchUpgradingEarningsRows(settings),
     () => fetchCanonicalRawCargoCosts(settings),
     () => fetchCargoVolumeEarningsRows(settings),
-    () => fetchCargoBetaAllocationRows(settings, configuredCargoFleetAccounts),
   ];
   const earningsCategoryNames = ['Scanning', 'Mining', 'Cargo', 'Crafting', 'Upgrading'];
   if (diagnosticContext) diagnosticContext.stage = 'category_collection';
@@ -7208,7 +6894,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       }
     }
   }));
-  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult, cargoBetaAllocationResult] = earningsRowResults;
+  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult] = earningsRowResults;
   if (diagnosticContext) diagnosticContext.stage = 'projection';
   if (scanningResult.status === 'fulfilled') scanningRows = scanningResult.value;
   else scanningError = String(scanningResult.reason?.message || scanningResult.reason || 'scan_rows_unavailable');
@@ -7229,10 +6915,6 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const cargoVolumeError = cargoVolumeResult.status === 'fulfilled'
     ? ''
     : String(cargoVolumeResult.reason?.message || cargoVolumeResult.reason || 'cargo_volume_rows_unavailable').slice(0, 240);
-  const cargoBetaAllocationFetch = cargoBetaAllocationResult.status === 'fulfilled'
-    ? cargoBetaAllocationResult.value
-    : { allocations: [], joinedDeliveries: [], legacyAllocations: [], evidenceConflicts: [], ambiguousEvidenceJoins: [], logicalDeliveryCount: 0, selectedCycleIds: [], completionDurationMs: null, allocationDurationMs: null, allocationFieldRowCount: 0 };
-  const cargoBreakevenBetaUnavailable = cargoBetaAllocationResult.status !== 'fulfilled';
 
   const compatibilityCargoRows = cargoRows;
   const rawExporter = exporterForFaction(settings.faction);
@@ -7490,20 +7172,6 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
       && completedCargoCycleIds.has(String(row.cycleId || '').trim())
   );
-  const fleetScopedCargoAllocationRows = (cargoBetaAllocationFetch.allocations || []).filter((row) =>
-    scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
-  );
-  const scopedCargoAllocationRows = filterCargoAllocationsToCompletedCycles(fleetScopedCargoAllocationRows, compatibilityCargoRows);
-  const scopedAuthoritativeDeliveries = (cargoBetaAllocationFetch.joinedDeliveries || []).filter((row) =>
-    scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
-  );
-  const scopedLegacyAllocations = (cargoBetaAllocationFetch.legacyAllocations || []).filter((row) =>
-    scopedCargoFleetAccounts.has(String(row.fleetAccount || '').trim())
-  );
-  const authoritativeCargoBreakevenBetaInputs = buildAuthoritativeCargoBetaInputs({ joinedDeliveries: scopedAuthoritativeDeliveries, cargoRows: cargo });
-  const legacyCargoBreakevenBetaInputs = buildCargoBetaInputs({ allocations: scopedLegacyAllocations, cargoRows: cargo });
-  const cargoBreakevenBetaInputs = [...authoritativeCargoBreakevenBetaInputs, ...legacyCargoBreakevenBetaInputs];
-  const ledgerCargoRows = authoritativeCargoBreakevenBetaInputs.map((row) => row.ledgerRow).filter(Boolean);
   const cargoVolumeByFleetDayMap = buildCargoVolumeByFleetDay(scopedCargoVolumeRows);
   const cargoVolumeAvailable = cargoVolumeResult.status === 'fulfilled';
   for (const row of cargo) {
@@ -7567,30 +7235,13 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const ledgerFaction = normalizeFaction(settings.faction);
   const snapshotScope = String(rawPayload.earningsScope || rawPayload.earningsSubtab || '').trim().toLowerCase();
   const needsInventoryLedger = ['breakeven', 'crafting', 'upgrading'].includes(snapshotScope);
-  const needsCompleteAccounting = snapshotScope === 'breakeven';
   const ledgerFactionStarbases = needsInventoryLedger ? await fetchFactionStarbases(settings) : null;
-  const localMarketResult = needsCompleteAccounting
-    ? await fetchMarketplaceTradesFromInflux(settings)
-    : { trades: [], error: '' };
-  const slyaAccountingEvidenceResult = needsCompleteAccounting
-    ? await fetchSlyaAccountingEvidenceFromInflux(settings)
-    : { rows: [], error: '' };
+  const localMarketResult = { trades: [], error: '' };
   const marketplaceAssetFlowEvents = needsInventoryLedger ? await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []) : [];
-  const marketplaceActivity = needsCompleteAccounting ? projectMarketplaceEvidenceV2({
-    trades: localMarketResult.trades,
-    transfers: marketplaceAssetFlowEvents,
-    scope: { faction: ledgerFaction, profile: getSelectedPlayerProfile(settings) },
-  }) : { activities: [], attributed: [], pendingAllocation: [], quarantined: [], reconciliation: null };
-  const marketplaceActivityEvents = needsCompleteAccounting
-    ? buildMarketplaceLedgerEvents(marketplaceActivity, { faction: ledgerFaction, profile: getSelectedPlayerProfile(settings) })
-    : [];
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
   const checkpoint = needsInventoryLedger
     ? await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName })
     : { status: 'skipped', ledger: null, seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {}, savedAt: null };
-  const verifiedOpeningCheckpoint = needsInventoryLedger
-    ? await loadVerifiedOpeningCheckpoint(ledgerFaction, profileName)
-    : null;
   let openingInventoryRows = [];
   let openingInventoryError = '';
   if (needsInventoryLedger && checkpoint.status !== 'loaded') {
@@ -7610,22 +7261,16 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     openingInventoryRows,
     scanningRows: rows,
     miningRows: mining,
-    cargoRows: ledgerCargoRows,
+    cargoRows: [],
     craftingRows: ledgerCraftingRows,
     upgradingRows: upgradingRows.ledgerEvents || [],
-    // Compatibility rows remain visible, but only strict Marketplace V2
-    // activity events may enter the authoritative complete ledger below.
-    localMarketTrades: [],
-    assetFlowEvents: [],
+    localMarketTrades: localMarketResult.trades,
+    assetFlowEvents: marketplaceAssetFlowEvents,
   }) : { events: [], appliedEventResults: [], ledger: { snapshot: () => [] }, rejectedEvents: [], seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {} };
   const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
   const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
   const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
   const inventoryCostLedgerRejectedEvents = inventoryCostLedgerResult.rejectedEvents;
-  const cargoBreakevenBetaRows = buildCargoBreakevenBetaRows({
-    betaInputs: cargoBreakevenBetaInputs,
-    appliedEventResults: inventoryCostLedgerAppliedEventResults,
-  });
   let ledgerCheckpointStatus = checkpoint.status === 'loaded' ? 'updated' : 'created';
   let ledgerCheckpointError = checkpoint.status === 'invalid' ? checkpoint.error : '';
   let ledgerCheckpointSavedAt = checkpoint.savedAt;
@@ -7643,7 +7288,6 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         eventResultByFingerprint: inventoryCostLedgerResult.eventResultByFingerprint,
         eventFingerprintCounts: inventoryCostLedgerResult.eventFingerprintCounts,
         eventResultsByFingerprint: inventoryCostLedgerResult.eventResultsByFingerprint,
-        verifiedOpeningCheckpoint,
       });
       ledgerCheckpointSavedAt = new Date().toISOString();
     } catch (error) {
@@ -7675,89 +7319,14 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   // can warn instead of crashing the rest of the snapshot.
   let breakevenRows = [];
   let breakevenError = '';
-  let currentInventoryRows = [];
   try {
-    currentInventoryRows = (await fetchCurrentPerStarbaseInventory(settings))
-      .filter((row) => isStarbaseIncluded(row.starbase, ledgerFactionStarbases, ledgerFaction));
-    breakevenRows = buildLedgerBreakevenRows({ ledgerRows: inventoryCostLedgerRows, inventoryRows: currentInventoryRows, prices });
+    const inventoryRows = await fetchCurrentPerStarbaseInventory(settings);
+    const factionStarbases = ledgerFactionStarbases || await fetchFactionStarbases(settings);
+    const faction = ledgerFaction;
+    breakevenRows = buildLedgerBreakevenRows({ ledgerRows: inventoryCostLedgerRows, inventoryRows, prices })
+      .filter((row) => isStarbaseIncluded(row.starbase, factionStarbases, faction));
   } catch (error) {
     breakevenError = String(error?.message || error || 'breakeven_unavailable');
-  }
-
-  let completeAccounting = null;
-  let completeAccountingStatus = 'skipped';
-  let completeAccountingError = '';
-  let completeAccountingSavedAt = null;
-  if (needsCompleteAccounting && !verifiedOpeningCheckpoint) {
-    completeAccountingStatus = 'blocked';
-    completeAccountingError = 'verified_opening_checkpoint_required';
-  } else if (needsCompleteAccounting) {
-    const accountingScope = { faction: ledgerFaction, profile: getSelectedPlayerProfile(settings) };
-    const accountingPath = completeAccountingCheckpointPath(ledgerFaction);
-    const durable = await loadCompleteAccountingCheckpoint(accountingPath, accountingScope);
-    try {
-      const seedTimestamp = checkpoint.savedAt || new Date(Date.now() - 30 * 86_400_000).toISOString();
-      const seedEvents = durable.status === 'missing' && checkpoint.status === 'loaded'
-        ? inventoryCostLedgerRows.flatMap((row) => {
-          const quantity = Number(row.quantity || 0);
-          if (!(quantity > 0)) return [];
-          return [{
-            type: 'acquire',
-            eventId: `checkpoint:${seedTimestamp}:${row.location}:${row.asset}:uncosted`,
-            timestamp: seedTimestamp,
-            location: row.location,
-            asset: row.asset,
-            quantity: String(quantity),
-            totalCost: null,
-          }];
-        })
-        : [];
-      const ledgerSourceEvents = durable.status === 'missing' && checkpoint.status === 'loaded'
-        ? [...seedEvents, ...inventoryCostLedgerResult.appliedEvents]
-        : inventoryCostLedgerResult.events;
-      const sourceCutoff = durable.status === 'missing' && checkpoint.status === 'loaded' ? Date.parse(seedTimestamp) : Number.NEGATIVE_INFINITY;
-      const currentEvents = buildProductionEvents({
-        scope: accountingScope,
-        ledgerEvents: ledgerSourceEvents,
-        authoritativeCargo: (inventoryCostLedgerResult.authoritativeCargoEvents || []).filter((event) => Date.parse(event.timestamp) > sourceCutoff),
-        authoritativeSlyaEvidence: slyaAccountingEvidenceResult.rows.filter((event) => Date.parse(event._time || event.timestamp) > sourceCutoff),
-        marketplaceActivityEvents: marketplaceActivityEvents.filter((event) => Date.parse(event.timestamp) > sourceCutoff),
-      });
-      const mergedEvents = mergeCompleteAccountingEvents(durable.events, currentEvents);
-      const now = new Date();
-      const periodDays = Number(rawPayload.breakevenPeriodDays) === 7 ? 7 : 30;
-      const period = { start: new Date(now.getTime() - periodDays * 86_400_000).toISOString(), end: now.toISOString(), days: periodDays };
-      completeAccounting = buildProductionCompleteAccounting({
-        scope: accountingScope,
-        period,
-        normalizedEvents: mergedEvents,
-        marketplaceActivityEvents,
-        authoritativeCargo: inventoryCostLedgerResult.authoritativeCargoEvents || [],
-        authoritativeSlyaEvidence: slyaAccountingEvidenceResult.rows,
-        actualClosing: currentInventoryRows,
-        sourceAvailability: {
-          scanning: scanningError ? 'unavailable' : 'available',
-          mining: miningError ? 'unavailable' : 'available',
-          crafting: craftingError ? 'unavailable' : 'available',
-          upgrading: slyaAccountingEvidenceResult.error ? 'unavailable' : 'available',
-          marketplace: localMarketResult.error ? 'unavailable' : 'available',
-          cargo: cargoError ? 'unavailable' : 'available',
-          closingInventory: breakevenError ? 'unavailable' : 'available',
-        },
-      });
-      completeAccountingSavedAt = await saveCompleteAccountingCheckpoint(accountingPath, {
-        scope: accountingScope,
-        events: mergedEvents,
-        createdAt: durable.createdAt,
-      });
-      completeAccountingStatus = completeAccounting.unavailableSources.length
-        ? 'partial'
-        : durable.status === 'loaded' ? 'updated' : 'created';
-      completeAccounting.checkpointBaseline = checkpoint.status === 'loaded' && durable.status === 'missing' ? 'legacy-checkpoint-migration' : 'exact-event-journal';
-    } catch (error) {
-      completeAccountingStatus = 'unavailable';
-      completeAccountingError = String(error?.message || error || 'complete_accounting_unavailable');
-    }
   }
 
   // Crafting per-row enrichment: each row is per (starbase, output, date).
@@ -8084,20 +7653,13 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     rows,
     miningRows: mining,
     cargoRows: cargo,
-    cargoBreakevenBetaRows,
-    cargoBreakevenBetaUnavailable,
     craftingRows: crafting,
     upgradingRows: upgrading,
     breakevenRows,
     breakevenError,
-    completeAccounting,
-    completeAccountingStatus,
-    completeAccountingError,
-    completeAccountingSavedAt,
     localMarketTrades: localMarketResult.trades,
     localMarketTradeCount: localMarketResult.trades.length,
     localMarketError: localMarketResult.error,
-    marketplaceActivity,
     inventoryCostLedgerEvents,
     inventoryCostLedgerAppliedEventResults,
     inventoryCostLedgerRows,

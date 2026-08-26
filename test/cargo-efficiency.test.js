@@ -7,8 +7,6 @@ const {
   calculateFleetCargoCapacity,
   calculateCargoEfficiency,
   buildCargoVolumeByFleetDayAssignment,
-  buildCargoVolumeRows,
-  cargoVolumeRangeStart,
   filterCargoAllocationsToCompletedCycles,
   calculateTravelModeTime,
 } = require('../electron/earnings-math');
@@ -93,44 +91,6 @@ test('cargo volume is summed by UTC date, fleet, and assignment', () => {
   assert.equal(totals.get('2026-07-25\nfreight one\nTransport'), 300);
 });
 
-test('Cargo volume query starts at the oldest included UTC day, not today', () => {
-  const includedUtcDays = [
-    new Date('2026-07-24T00:00:00.000Z'),
-    new Date('2026-08-21T00:00:00.000Z'),
-    new Date('2026-08-22T00:00:00.000Z'),
-  ];
-  assert.equal(cargoVolumeRangeStart(includedUtcDays), '2026-07-24T00:00:00.000Z');
-  assert.equal(cargoVolumeRangeStart([]), '');
-});
-
-test('cycle-aggregated Cargo volume rows preserve every historical UTC day', () => {
-  const account = 'A'.repeat(44);
-  const rows = buildCargoVolumeRows([
-    { _time: '2026-08-20T00:00:00.000Z', cycleId: `${account}:1,2:old`, fleet: 'Hauler', assignment: 'Transport', _value: '120' },
-    { _time: '2026-08-21T00:00:00.000Z', cycleId: `${account}:1,2:new`, fleet: 'Hauler', assignment: 'Transport', _value: '180' },
-  ], new Set(['2026-08-20', '2026-08-21']));
-
-  assert.deepEqual(rows.map((row) => [row.isoDate, row.fleetAccount, row.cycleId, row.cargoVolume]), [
-    ['2026-08-20', account, `${account}:1,2:old`, 120],
-    ['2026-08-21', account, `${account}:1,2:new`, 180],
-  ]);
-});
-
-test('cycle-aggregated Cargo volume rows reject malformed, out-of-window, and duplicate evidence', () => {
-  const account = 'B'.repeat(44);
-  const valid = { _time: '2026-08-20T00:00:00.000Z', cycleId: `${account}:1,2:cycle`, fleet: 'Hauler', assignment: 'Transport', _value: '120' };
-  assert.deepEqual(buildCargoVolumeRows([
-    valid,
-    { ...valid },
-    { ...valid, _time: '2026-08-19T00:00:00.000Z', cycleId: `${account}:1,2:outside` },
-    { ...valid, cycleId: 'malformed' },
-    { ...valid, cycleId: `${account}:1,2:nan`, _value: 'not-a-number' },
-  ], new Set(['2026-08-20'])), [{
-    isoDate: '2026-08-20', fleet: 'Hauler', fleetAccount: account, assignment: 'Transport',
-    cycleId: `${account}:1,2:cycle`, cargoVolume: 120,
-  }]);
-});
-
 test('representative completed CF-22|01b volume restores existing efficiency calculation', () => {
   const cargoVolume = 17609616;
   const result = calculateCargoEfficiency({ cargoVolume, fleetCargoCapacity: 100000, cargoLegs: 108 });
@@ -171,8 +131,6 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(allocationProjector, /filterCompleted\(fleetScopedCargoAllocationRows, compatibilityCargoRows\)/);
   assert.match(main, /cargoLegs: completedCycleEvidenceAvailable[\s\S]*Array\.from\(row\.completedCycleLegs\.values\(\)\)/);
   assert.match(main, /buildCargoVolumeByFleetDay\(scopedCargoVolumeRows\)/);
-  assert.match(main, /const rangeStart = cargoVolumeRangeStart\(includedUtcDays\)/);
-  assert.match(main, /group\(columns: \["cycleId", "fleet", "assignment"\]\)[\s\S]*aggregateWindow\(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start"\)/);
   assert.match(main, /row\.cargoEfficiencyPercent = efficiency\.cargoEfficiencyPercent/);
   assert.match(main, /const moveTimeFlux =/);
   assert.match(main, /travelModeByMovement\.get/);
@@ -186,9 +144,12 @@ test('Cargo Earnings exposes volume, leg capacity, and efficiency columns', () =
   assert.match(html, /<th scope="col">Cargo Volume<\/th>\s*<th scope="col">Cargo Capacity<\/th>\s*<th scope="col">Cargo Efficiency<\/th>/);
 });
 
-test('Breakeven presents represented landed cost as Total Cost per unit', () => {
+test('Breakeven labels represented landed cost as Total Cost per unit', () => {
+  const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
   const html = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
 
-  assert.match(html, /<th>Total Costs<\/th>/);
-  assert.doesNotMatch(html, />Landed Cost \/ Unit</);
+  assert.match(renderer, /id: 'landedCost', label: 'Total Cost \/ Unit'/);
+  assert.match(html, /<th>Total Cost \/ Unit<\/th>/);
+  assert.doesNotMatch(renderer, /Landed Cost/);
+  assert.doesNotMatch(html, /Landed Cost/);
 });

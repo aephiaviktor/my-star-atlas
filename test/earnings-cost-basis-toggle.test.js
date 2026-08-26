@@ -33,9 +33,8 @@ test('External basis values consumed crafting ingredients and upgrading componen
   assert.match(renderer, /externalTotalCostsAtlas/);
 });
 
-test('complete Breakeven replaces mark-to-market estimates with exact remaining basis and explicit coverage', () => {
-  assert.match(renderer, /id: 'remainingCostBasis'/);
-  assert.match(renderer, /entry\.knownRemainingCostBasis/);
-  assert.match(renderer, /entry\.costCoverage\?\.status/);
-  assert.match(breakeven, /inventoryExternalValue/); // Legacy projection remains available to adjacent consumers.
+test('Breakeven includes inventory external value after GM Price per Unit', () => {
+  assert.match(renderer, /id: 'gmPrice'[\s\S]*id: 'inventoryExternalValue'/);
+  assert.match(renderer, /entry\.inventoryExternalValue/);
+  assert.match(breakeven, /inventoryExternalValue/);
 });

@@ -15,19 +15,8 @@ function emptyResult(status, error = '') {
     eventResultByFingerprint: {},
     eventFingerprintCounts: {},
     eventResultsByFingerprint: {},
-    verifiedOpeningCheckpoint: null,
     savedAt: null,
   };
-}
-
-function validateVerifiedOpeningCheckpoint(value, { faction, profile } = {}) {
-  if (!value || typeof value !== 'object' || value.status !== 'verified' || value.coverage !== 'Complete') return null;
-  const checkpointId = String(value.checkpointId || '').trim();
-  const checkpointHash = String(value.checkpointHash || '').trim();
-  const boundaryAt = String(value.boundaryAt || '').trim();
-  if (!checkpointId || !/^[0-9a-f]{64}$/.test(checkpointHash) || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(boundaryAt)) return null;
-  if (String(value.faction || '') !== String(faction || '') || String(value.profile || '') !== String(profile || '')) return null;
-  return { status: 'verified', coverage: 'Complete', checkpointId, checkpointHash, boundaryAt, faction: String(faction), profile: String(profile) };
 }
 
 async function loadLedgerCheckpoint(filePath, { faction, profile }) {
@@ -69,7 +58,6 @@ async function loadLedgerCheckpoint(filePath, { faction, profile }) {
         && !Array.isArray(document.eventResultByFingerprint) ? document.eventResultByFingerprint : {},
       eventFingerprintCounts,
       eventResultsByFingerprint,
-      verifiedOpeningCheckpoint: validateVerifiedOpeningCheckpoint(document.verifiedOpeningCheckpoint, { faction, profile }),
       savedAt: typeof document.savedAt === 'string' ? document.savedAt : null,
     };
   } catch (error) {
@@ -77,7 +65,7 @@ async function loadLedgerCheckpoint(filePath, { faction, profile }) {
   }
 }
 
-async function saveLedgerCheckpoint(filePath, { faction, profile, ledger, seenEventFingerprints, eventResultByFingerprint = {}, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, verifiedOpeningCheckpoint = null }) {
+async function saveLedgerCheckpoint(filePath, { faction, profile, ledger, seenEventFingerprints, eventResultByFingerprint = {}, eventFingerprintCounts = {}, eventResultsByFingerprint = {} }) {
   if (!(ledger instanceof InventoryCostLedger)) throw new Error('ledger is required');
   const normalizedResults = eventResultsByFingerprint && Object.keys(eventResultsByFingerprint).length > 0
     ? eventResultsByFingerprint
@@ -85,7 +73,6 @@ async function saveLedgerCheckpoint(filePath, { faction, profile, ledger, seenEv
   const normalizedCounts = eventFingerprintCounts && Object.keys(eventFingerprintCounts).length > 0
     ? eventFingerprintCounts
     : Object.fromEntries(Object.entries(normalizedResults).map(([fingerprint, results]) => [fingerprint, results.length]));
-  const verified = validateVerifiedOpeningCheckpoint(verifiedOpeningCheckpoint, { faction, profile });
   await writeJsonAtomic(filePath, {
     schemaVersion: LEDGER_CHECKPOINT_SCHEMA_VERSION,
     faction,
@@ -96,13 +83,11 @@ async function saveLedgerCheckpoint(filePath, { faction, profile, ledger, seenEv
     eventResultByFingerprint: Object.fromEntries(Object.entries(normalizedResults).map(([fingerprint, results]) => [fingerprint, results[0]])),
     eventFingerprintCounts: normalizedCounts,
     eventResultsByFingerprint: normalizedResults,
-    ...(verified ? { verifiedOpeningCheckpoint: verified } : {}),
   });
 }
 
 module.exports = {
   LEDGER_CHECKPOINT_SCHEMA_VERSION,
-  validateVerifiedOpeningCheckpoint,
   loadLedgerCheckpoint,
   saveLedgerCheckpoint,
 };

@@ -91,113 +91,6 @@ test('scanner deduplicates signatures found through multiple profile wallets', a
   assert.deepEqual(result.stats, { signatureRequests: 2, transactionRequests: 1, transactionMisses: 0, totalRpcRequests: 3 });
 });
 
-test('production-shaped backlog hydrates newest evidence first and resumes a durable pending queue', async () => {
-  const wallet = 'wallet-1';
-  const assetMint = 'certificate-1';
-  const validSignature = 'newest-valid-post-august-2';
-  const valid = { ...tx({ signature: validSignature, wallet, assetMint, assetBefore: 0, assetAfter: 12, atlasBefore: 10, atlasAfter: 10 }), blockTime: 1787443201 };
-  const signatures = [
-    { signature: validSignature, blockTime: valid.blockTime, err: null },
-    ...Array.from({ length: 20000 }, (_, index) => ({ signature: `historical-${String(index).padStart(5, '0')}`, blockTime: 1787443200 - index, err: null })),
-  ];
-  function boundedConnection(startAttempt = 0) {
-    let attempts = startAttempt;
-    return {
-      get attempts() { return attempts; },
-      async getSignaturesForAddress(_address, options) {
-        if (attempts >= 300) throw new MarketplaceRpcBudgetExhaustedError('LM', 'getSignaturesForAddress');
-        attempts += 1;
-        const start = options.before ? signatures.findIndex((row) => row.signature === options.before) + 1 : 0;
-        return signatures.slice(start, start + 1000);
-      },
-      async getParsedTransaction(signature) {
-        if (attempts >= 300) throw new MarketplaceRpcBudgetExhaustedError('LM', 'getParsedTransaction');
-        attempts += 1;
-        return signature === validSignature ? valid : { signature, blockTime: 1787443200, meta: { err: null, logMessages: [] }, transaction: { message: { accountKeys: [] } } };
-      },
-    };
-  }
-
-  const firstConnection = boundedConnection();
-  const first = await scanLocalMarketTrades(firstConnection, {
-    trackedWallets: [wallet], marketAssetsByMint: { [assetMint]: { starbase: 'UST-1', asset: 'Food' } },
-    startIso: '2026-08-01T00:00:00.000Z', maxPages: 21, requestsPerSecond: 100000,
-  });
-  assert.ok(firstConnection.attempts <= 300);
-  assert.equal(first.trades.some((trade) => trade.signature === validSignature), true);
-  assert.ok(first.pendingHydration.length > 19000);
-  assert.equal(first.pendingHydration.some((row) => row.signature === validSignature), false);
-
-  const completedBefore = new Set(signatures.map((row) => row.signature).filter((signature) => !first.pendingHydration.some((pending) => pending.signature === signature)));
-  const restartCalls = [];
-  const restartConnection = {
-    attempts: 0,
-    async getSignaturesForAddress() { throw new Error('restart repeated signature discovery'); },
-    async getParsedTransaction(signature) {
-      if (this.attempts >= 300) throw new MarketplaceRpcBudgetExhaustedError('LM', 'getParsedTransaction');
-      this.attempts += 1;
-      restartCalls.push(signature);
-      return { signature, blockTime: 1787443200, meta: { err: null, logMessages: [] }, transaction: { message: { accountKeys: [] } } };
-    },
-  };
-  const second = await scanLocalMarketTrades(restartConnection, {
-    trackedWallets: [wallet], pendingHydration: first.pendingHydration, pendingWalletCursors: first.pendingWalletCursors,
-    startIso: '2026-08-01T00:00:00.000Z', requestsPerSecond: 100000,
-  });
-  assert.equal(restartCalls.some((signature) => completedBefore.has(signature)), false);
-  assert.ok(second.pendingHydration.length < first.pendingHydration.length);
-  assert.equal(new Set(second.pendingHydration.map((row) => row.signature)).size, second.pendingHydration.length);
-  assert.ok(restartConnection.attempts <= 300);
-});
-
-test('durable Marketplace candidates outrank 20,000 newer wallet signatures and remain scope-safe across restart', async () => {
-  const wallet = 'wallet-1';
-  const assetMint = 'certificate-1';
-  const candidateSignature = 'older-known-lm-candidate';
-  const wrongScopeSignature = 'wrong-wallet-candidate';
-  const valid = { ...tx({ signature: candidateSignature, wallet, assetMint, assetBefore: 0, assetAfter: 12, atlasBefore: 10, atlasAfter: 10 }), blockTime: 1787000000 };
-  const wrongScope = { ...tx({ signature: wrongScopeSignature, wallet: 'other-wallet', assetMint, assetBefore: 0, assetAfter: 12, atlasBefore: 10, atlasAfter: 10 }), blockTime: 1787000001 };
-  const pendingHydration = Array.from({ length: 20001 }, (_, index) => ({
-    signature: index === 20000 ? candidateSignature : `newer-unrelated-${String(index).padStart(5, '0')}`,
-    blockTime: 1788000000 - index,
-  }));
-  const calls = [];
-  const connection = {
-    async getSignaturesForAddress() { throw new Error('durable queue must bypass discovery'); },
-    async getParsedTransaction(signature) {
-      if (calls.length >= 300) throw new MarketplaceRpcBudgetExhaustedError('LM', 'getParsedTransaction');
-      calls.push(signature);
-      if (signature === candidateSignature) return valid;
-      if (signature === wrongScopeSignature) return wrongScope;
-      return { signature, blockTime: 1788000000, meta: { err: null, logMessages: [] }, transaction: { message: { accountKeys: [] } } };
-    },
-  };
-  const first = await scanLocalMarketTrades(connection, {
-    trackedWallets: [wallet], marketAssetsByMint: { [assetMint]: { starbase: 'UST-1', asset: 'Food' } },
-    pendingHydration, priorityHydration: [
-      { signature: candidateSignature, blockTime: valid.blockTime },
-      { signature: candidateSignature, blockTime: valid.blockTime },
-      { signature: wrongScopeSignature, blockTime: wrongScope.blockTime },
-    ],
-    pendingWalletCursors: { [wallet]: 'staged-cursor' }, startIso: '2026-08-01T00:00:00.000Z', requestsPerSecond: 100000,
-  });
-  assert.deepEqual(new Set(calls.slice(0, 2)), new Set([wrongScopeSignature, candidateSignature]));
-  assert.equal(first.trades.length, 1);
-  assert.equal(first.trades[0].signature, candidateSignature);
-  assert.equal(first.trades[0].wallet, wallet);
-  assert.equal(first.pendingHydration.some((row) => row.signature === candidateSignature), false);
-  assert.equal(new Set(first.pendingHydration.map((row) => row.signature)).size, first.pendingHydration.length);
-
-  const completed = new Set(calls);
-  const restartCalls = [];
-  const second = await scanLocalMarketTrades({
-    async getSignaturesForAddress() { throw new Error('restart repeated discovery'); },
-    async getParsedTransaction(signature) { restartCalls.push(signature); return { signature, blockTime: 1788000000, meta: { err: null, logMessages: [] }, transaction: { message: { accountKeys: [] } } }; },
-  }, { trackedWallets: [wallet], pendingHydration: first.pendingHydration, pendingWalletCursors: first.pendingWalletCursors, startIso: '2026-08-01T00:00:00.000Z', requestsPerSecond: 100000 });
-  assert.equal(restartCalls.some((signature) => completed.has(signature)), false);
-  assert.ok(second.pendingHydration.length < first.pendingHydration.length);
-});
-
 test('incremental scanner uses durable wallet and active-order cursors', async () => {
   const calls = [];
   const connection = {
@@ -279,8 +172,7 @@ test('missing parsed transactions preserve cursors and defer closed-order archiv
     activeOrderIds: ['closing-order'], orderCursors: { 'closing-order': 'old-order-sig' }, openOrderIds: [],
     startIso: '2026-07-24T00:00:00Z',
   });
-  assert.equal(result.stats.transactionMisses, 1);
-  assert.equal(result.pendingHydration.length, 1);
+  assert.equal(result.stats.transactionMisses, 2);
   assert.deepEqual(result.walletCursors, { 'wallet-1': 'old-wallet-sig' });
   assert.deepEqual(result.orderCursors, { 'closing-order': 'old-order-sig' });
   assert.deepEqual(result.activeOrderIds, ['closing-order']);
@@ -319,9 +211,8 @@ test('transaction fetches use one RPC call per signature so batch-disabled plans
 
   const transactions = await fetchTransactions(connection, rows);
   assert.equal(transactions.length, 5);
-  const newestFirst = Array.from(rows.keys()).reverse();
-  assert.deepEqual(calledSignatures, newestFirst);
-  assert.deepEqual(transactions.map((transaction) => transaction.signature), newestFirst);
+  assert.deepEqual(calledSignatures, Array.from(rows.keys()));
+  assert.deepEqual(transactions.map((transaction) => transaction.signature), Array.from(rows.keys()));
 });
 
 test('tracks LM order creation separately and matches fills by order ID', () => {
@@ -471,8 +362,8 @@ test('transaction exhaustion retains decoded trades but preserves incoming curso
   const connection = {
     async getSignaturesForAddress() {
       return [
-        { signature: 'decoded-before-budget', blockTime: first.blockTime + 1, err: null },
-        { signature: 'blocked-by-budget', blockTime: first.blockTime, err: null },
+        { signature: 'decoded-before-budget', blockTime: first.blockTime, err: null },
+        { signature: 'blocked-by-budget', blockTime: first.blockTime + 1, err: null },
       ];
     },
     async getParsedTransaction() {
