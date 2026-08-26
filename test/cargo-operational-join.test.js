@@ -184,7 +184,7 @@ test('CF-05|01 preserves the B3.9-2D reference operational values', () => {
 test('Cargo UI keeps all 15 columns, shows zero, cycle legs, and no valuation badges or placeholders', () => {
   const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
   const html = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
-  const columns = ['Date', 'Fleet', 'Txs Daily', 'Cycles Daily', 'Assignment', 'Travel Mode (time)', 'Starbase', 'Fuel Costs', 'Rental Costs', 'Txs Costs', 'Total Costs', 'Txs Costs Pct', 'Cargo Volume', 'Cargo Capacity', 'Cargo Efficiency'];
+  const columns = ['Date', 'Fleet', 'Txs Daily', 'Cycles Daily', 'Assignment', 'Travel Mode (time)', 'Starbase', 'Fuel Cost', 'Total Rental Cost', 'Txs Cost', 'Total Costs', 'Txs Cost Pct', 'Cargo Volume', 'Cargo Capacity', 'Cargo Efficiency'];
   for (const column of columns) assert.match(html, new RegExp(`<th scope="col">${column.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<\\/th>`));
   assert.match(renderer, /entry\.cargoCycles[\s\S]*entry\.cargoLegs[\s\S]*cycles \/[\s\S]*legs/);
   assert.doesNotMatch(renderer, /incomplete-valuation-indicator|provisional-valuation-indicator|Incomplete valuation|fallback price day/);

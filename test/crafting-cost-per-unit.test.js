@@ -8,7 +8,7 @@ const craftingBasis = readFileSync(path.join(__dirname, '..', 'electron', 'craft
 const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
 const html = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
 
-test('Crafting calculates Costs per Unit as Total Costs divided by Crafted output', () => {
+test('Crafting calculates Cost per Unit as Total Costs divided by Crafted output', () => {
   assert.match(
     craftingBasis,
     /const costsPerUnitAtlas = totalCostsAtlas != null && crafted > 0 \? totalCostsAtlas \/ crafted : null;/,
@@ -16,7 +16,7 @@ test('Crafting calculates Costs per Unit as Total Costs divided by Crafted outpu
   assert.match(craftingBasis, /feeCostsAtlas, txsCostsAtlas, totalCostsAtlas, costsPerUnitAtlas, netProfitAtlas/);
 });
 
-test('Crafting shows Costs per Unit after Profit Margin and enables it by default', () => {
+test('Crafting shows Cost per Unit after Profit Margin and enables it by default', () => {
   const columns = renderer.slice(
     renderer.indexOf('const craftingEarningsOptionalColumns'),
     renderer.indexOf('const upgradingEarningsOptionalColumns'),
@@ -27,7 +27,7 @@ test('Crafting shows Costs per Unit after Profit Margin and enables it by defaul
   assert.match(renderer, /crafting: Object\.freeze\(\{[\s\S]*costsPerUnit: \[[^\]]*Total Costs ÷ Crafted/);
 });
 
-test('Crafting fallback table header includes Costs per Unit after Profit Margin', () => {
-  assert.match(html, /<th scope="col">Profit Margin<\/th>\s*<th scope="col">Costs per Unit<\/th>/);
+test('Crafting fallback table header includes Cost per Unit after Profit Margin', () => {
+  assert.match(html, /<th scope="col">Profit Margin<\/th>\s*<th scope="col">Cost per Unit<\/th>/);
   assert.match(html, /<td colspan="15">No crafting data loaded<\/td>/);
 });

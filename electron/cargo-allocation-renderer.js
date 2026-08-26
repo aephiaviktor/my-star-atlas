@@ -41,8 +41,8 @@
     Object.freeze({ id: 'amount', label: 'Cargo Amount', field: 'amount' }),
     Object.freeze({ id: 'cargoVolume', label: 'Cargo Volume', field: 'cargoVolume' }),
     Object.freeze({ id: 'allocatedFuel', label: 'Allocated Fuel', field: 'allocatedFuel' }),
-    Object.freeze({ id: 'fuelCosts', label: 'Fuel Costs', field: 'fuelCostsAtlas' }),
-    Object.freeze({ id: 'txsCosts', label: 'TXS Costs', field: 'txsCostsAtlas' }),
+    Object.freeze({ id: 'fuelCosts', label: 'Fuel Cost', field: 'fuelCostsAtlas' }),
+    Object.freeze({ id: 'txsCosts', label: 'TXS Cost', field: 'txsCostsAtlas' }),
     Object.freeze({ id: 'totalCosts', label: 'Total Cargo Costs', field: 'totalCostsAtlas' }),
     Object.freeze({ id: 'costsPerUnit', label: 'Cargo Cost/Unit', field: 'costsPerUnitAtlas' }),
   ]);

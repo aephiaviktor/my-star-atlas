@@ -22,7 +22,7 @@
         <nav class="primary-tabs" aria-label="Sections">
           <button class="nav-button nav-orange" type="button" data-section="fleet" aria-pressed="false">
             <span class="nav-icon">FL</span>
-            <span>My Fleet</span>
+            <span>My Fleets</span>
           </button>
           <button class="nav-button nav-blue active" type="button" data-section="production" aria-pressed="true">
             <span class="nav-icon">PC</span>
@@ -50,10 +50,10 @@
             <label><input type="checkbox" data-earnings-column="averageChance" /> Avg Chance</label>
             <label><input type="checkbox" data-earnings-column="sduFound" checked /> SDU Found</label>
             <label><input type="checkbox" data-earnings-column="revenue" checked /> Revenue</label>
-            <label><input type="checkbox" data-earnings-column="foodCosts" checked /> Food Costs</label>
-            <label><input type="checkbox" data-earnings-column="fuelCosts" checked /> Fuel Costs</label>
-            <label><input type="checkbox" data-earnings-column="rental" checked /> Rental Costs</label>
-            <label><input type="checkbox" data-earnings-column="txsCosts" checked /> Txs Costs</label>
+            <label><input type="checkbox" data-earnings-column="foodCosts" checked /> Food Cost</label>
+            <label><input type="checkbox" data-earnings-column="fuelCosts" checked /> Fuel Cost</label>
+            <label><input type="checkbox" data-earnings-column="rental" checked /> Total Rental Cost</label>
+            <label><input type="checkbox" data-earnings-column="txsCosts" checked /> Txs Cost</label>
             <label><input type="checkbox" data-earnings-column="totalCosts" checked /> Total Costs</label>
             <label><input type="checkbox" data-earnings-column="netProfit" checked /> Net Profit</label>
             <label><input type="checkbox" data-earnings-column="npPerCrew" /> NP per crew</label>
@@ -94,7 +94,7 @@
               <button class="subtab-button" type="button" data-subtab="inventory" aria-selected="false">Inventory</button>
             </div>
             <div class="subtab-bar toolbar-tab-group" data-toolbar-section="fleet" role="tablist" aria-label="Fleet views" hidden>
-              <button class="subtab-button active" type="button" aria-selected="true">My Fleet</button>
+              <button class="subtab-button active" type="button" aria-selected="true">My Fleets</button>
             </div>
             <div class="optimization-toolbar-tabs toolbar-tab-group" data-toolbar-section="optimization" aria-label="Optimization views" hidden>
               <div class="optimization-tab-row optimization-primary-tabs" role="tablist" aria-label="Optimization categories">
@@ -1093,10 +1093,10 @@
                       <th scope="col">SDU Max</th>
                       <th scope="col">SDU Found</th>
                       <th scope="col">Revenue</th>
-                      <th scope="col">Food Costs</th>
-                      <th scope="col">Fuel Costs</th>
-                      <th scope="col">Rental Costs</th>
-                      <th scope="col">Txs Costs</th>
+                      <th scope="col">Food Cost</th>
+                      <th scope="col">Fuel Cost</th>
+                      <th scope="col">Total Rental Cost</th>
+                      <th scope="col">Txs Cost</th>
                       <th scope="col">Total Costs</th>
                       <th scope="col">Net Profit</th>
                       <th scope="col">Profit Margin</th>
@@ -1222,11 +1222,11 @@
                       <th scope="col">Raw Material</th>
                       <th scope="col">Mined</th>
                       <th scope="col">Revenue</th>
-                      <th scope="col">Ammo Costs</th>
-                      <th scope="col">Food Costs</th>
-                      <th scope="col">Fuel Costs</th>
-                      <th scope="col">Rental Costs</th>
-                      <th scope="col">Txs Costs</th>
+                      <th scope="col">Ammo Cost</th>
+                      <th scope="col">Food Cost</th>
+                      <th scope="col">Fuel Cost</th>
+                      <th scope="col">Total Rental Cost</th>
+                      <th scope="col">Txs Cost</th>
                       <th scope="col">Total Costs</th>
                       <th scope="col">Net Profit</th>
                       <th scope="col">Profit Margin</th>
@@ -1312,11 +1312,11 @@
                       <th scope="col">Assignment</th>
                       <th scope="col">Travel Mode (time)</th>
                       <th scope="col">Starbase</th>
-                      <th scope="col">Fuel Costs</th>
-                      <th scope="col">Rental Costs</th>
-                      <th scope="col">Txs Costs</th>
+                      <th scope="col">Fuel Cost</th>
+                      <th scope="col">Total Rental Cost</th>
+                      <th scope="col">Txs Cost</th>
                       <th scope="col">Total Costs</th>
-                      <th scope="col">Txs Costs Pct</th>
+                      <th scope="col">Txs Cost Pct</th>
                       <th scope="col">Cargo Volume</th>
                       <th scope="col">Cargo Capacity</th>
                       <th scope="col">Cargo Efficiency</th>
@@ -1364,8 +1364,8 @@
                       <th scope="col">Cargo Amount</th>
                       <th scope="col">Cargo Volume</th>
                       <th scope="col">Allocated Fuel</th>
-                      <th scope="col">Fuel Costs</th>
-                      <th scope="col">TXS Costs</th>
+                      <th scope="col">Fuel Cost</th>
+                      <th scope="col">TXS Cost</th>
                       <th scope="col">Total Cargo Costs</th>
                       <th scope="col">Cargo Cost/Unit</th>
                     </tr>
@@ -1477,13 +1477,13 @@
                       <th scope="col">Avg Crew</th>
                       <th scope="col">Revenue</th>
                       <th scope="col">Ingredient Cost Basis</th>
-                      <th scope="col">Crafting Fee Costs</th>
-                      <th scope="col">Txs Costs</th>
+                      <th scope="col">Crafting Fee Cost</th>
+                      <th scope="col">Txs Cost</th>
                       <th scope="col">Total Costs</th>
                       <th scope="col">Net Profit</th>
                       <th scope="col">NP per crew</th>
                       <th scope="col">Profit Margin</th>
-                      <th scope="col">Costs per Unit</th>
+                      <th scope="col">Cost per Unit</th>
                     </tr>
                   </thead>
                   <tbody id="earnings-crafting-table-body">
@@ -1516,7 +1516,7 @@
                 <div class="earnings-cost-basis-switch" role="group" aria-label="Upgrading valuation basis" title="Internal cost basis values components using your actual internal acquisition costs. External cost basis values components using current Galactic Marketplace prices."><button class="earnings-chart-mode-btn active" type="button" data-earnings-cost-basis="upgrading" data-cost-basis-mode="internal" aria-pressed="true">Internal Cost Basis</button><button class="earnings-chart-mode-btn" type="button" data-earnings-cost-basis="upgrading" data-cost-basis-mode="external" aria-pressed="false">External Cost Basis</button></div>
               </div>
               <div id="earnings-upgrading-sync-status" class="fleet-sync-status" role="status">Awaiting upgrading data</div>
-              <div class="fleet-table-wrap"><table class="fleet-table earnings-table"><thead id="earnings-upgrading-table-head"><tr><th>Date</th><th>Starbase</th><th>Asset</th><th>Installed</th><th>Avg Crew</th><th>Revenue</th><th>Component Cost Basis</th><th>Txs Costs</th><th>Total Costs</th><th>Net Profit</th><th>Net Profit per Crew</th><th>Profit Margin</th></tr></thead><tbody id="earnings-upgrading-table-body"><tr class="empty-row"><td colspan="12">No upgrading data loaded</td></tr></tbody></table></div>
+              <div class="fleet-table-wrap"><table class="fleet-table earnings-table"><thead id="earnings-upgrading-table-head"><tr><th>Date</th><th>Starbase</th><th>Asset</th><th>Installed</th><th>Avg Crew</th><th>Revenue</th><th>Component Cost Basis</th><th>Txs Cost</th><th>Total Costs</th><th>Net Profit</th><th>Net Profit per Crew</th><th>Profit Margin</th></tr></thead><tbody id="earnings-upgrading-table-body"><tr class="empty-row"><td colspan="12">No upgrading data loaded</td></tr></tbody></table></div>
               <details class="earnings-metric-guide" open><summary>How to read this page</summary><div id="earnings-upgrading-metric-guide" class="earnings-metric-guide-list"></div></details>
             </section>
           </div>

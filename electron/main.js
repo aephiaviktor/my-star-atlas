@@ -5856,8 +5856,15 @@ async function fetchProfileFleetsUncached(payload) {
       if (!matched) return;
       const fleetKey = new PublicKey(matched.fleet).toBase58();
       const endTimeSeconds = Number(matched.endTimeSeconds);
+      const rentalDurationSeconds = Number(matched.endTimeSeconds - matched.startTimeSeconds);
+      const rentalDurationDays = rentalDurationSeconds / 86_400;
+      const baseRateAtlasPerDay = normalizeAtlasRate(Number(matched.rate));
+      const reservationPremiumAtlas = normalizeAtlasRate(Number(matched.bidAtlas));
+      const totalRentalCostAtlasPerDay = Number.isFinite(rentalDurationDays) && rentalDurationDays > 0
+        ? baseRateAtlasPerDay + reservationPremiumAtlas / rentalDurationDays
+        : null;
       currentRentalsByFleet.set(fleetKey, {
-        rateAtlasPerDay: normalizeAtlasRate(Number(matched.rate)),
+        totalRentalCostAtlasPerDay,
         rentalEnd: Number.isFinite(endTimeSeconds) ? new Date(endTimeSeconds * 1000) : null,
       });
     });
@@ -5914,7 +5921,7 @@ async function fetchProfileFleetsUncached(payload) {
           () => readRentalEndDate(connection, fleet.key),
         );
         const rentalEndLabel = formatShortDate(rentalEnd);
-        fleet.rentalRateAtlasPerDay = currentRental?.rateAtlasPerDay ?? null;
+        fleet.rentalRateAtlasPerDay = currentRental?.totalRentalCostAtlasPerDay ?? null;
         fleet.rentalEndsAt = rentalEnd ? rentalEnd.toISOString() : null;
         fleet.ownership = rentalEndLabel ? `Rented until ${rentalEndLabel}` : 'Rented';
       })

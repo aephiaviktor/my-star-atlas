@@ -27,7 +27,7 @@ test('section tabs share a wrapping toolbar with the global actions', () => {
   const css = fs.readFileSync(cssPath, 'utf8');
 
   assert.doesNotMatch(html, /id="section-(?:eyebrow|title)"/);
-  assert.match(html, /data-toolbar-section="fleet"[\s\S]*?>My Fleet<\/button>/);
+  assert.match(html, /data-toolbar-section="fleet"[\s\S]*?>My Fleets<\/button>/);
   assert.match(html, /data-toolbar-section="production"/);
   assert.match(html, /data-toolbar-section="earnings"/);
   assert.match(css, /\.top-bar\s*\{[\s\S]*?flex-wrap:\s*wrap;/);

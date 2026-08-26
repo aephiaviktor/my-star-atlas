@@ -10,6 +10,10 @@ const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 
 
 test('Cargo tables use a two-option switch instead of collapsible panel headers', () => {
   assert.match(html, /class="cargo-table-switch"[^>]*role="tablist"/);
+  assert.match(html, /data-earnings-column="rental" checked \/> Total Rental Cost<\/label>/);
+  assert.match(js, /id: 'rental', label: 'Total Rental Cost'/);
+  assert.doesNotMatch(html, />Rental Costs</);
+  assert.doesNotMatch(js, /label: 'Rental Costs'/);
   assert.match(html, /data-cargo-table-select="fleet"[^>]*aria-selected="true"[^>]*>Cargo Costs by Fleet</);
   assert.match(html, /data-cargo-table-select="allocation"[^>]*aria-selected="false"[^>]*>Cargo Cost Allocation by Fleet &amp; Asset</);
   assert.doesNotMatch(html, /data-cargo-table-toggle/);

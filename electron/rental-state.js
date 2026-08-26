@@ -9,7 +9,10 @@ const CURRENT_CONTRACT_OFFSETS = Object.freeze({
 const CURRENT_RENTAL_OFFSETS = Object.freeze({
   borrowerProfile: 77,
   contract: 109,
+  rate: 141,
+  startTime: 165,
   endTime: 173,
+  referrer: 191,
 });
 
 const PUBLIC_KEY_BYTES = 32;
@@ -32,10 +35,19 @@ function decodeCurrentContract(data) {
 function decodeCurrentRental(data) {
   const borrowerProfile = publicKeyBytes(data, CURRENT_RENTAL_OFFSETS.borrowerProfile);
   const contract = publicKeyBytes(data, CURRENT_RENTAL_OFFSETS.contract);
-  if (!borrowerProfile || !contract || data.length < CURRENT_RENTAL_OFFSETS.endTime + 8) return null;
+  if (!borrowerProfile || !contract || data.length < CURRENT_RENTAL_OFFSETS.referrer + 1) return null;
+  const rate = data.readBigUInt64LE(CURRENT_RENTAL_OFFSETS.rate);
+  const startTimeSeconds = data.readBigInt64LE(CURRENT_RENTAL_OFFSETS.startTime);
   const endTimeSeconds = data.readBigInt64LE(CURRENT_RENTAL_OFFSETS.endTime);
-  if (endTimeSeconds <= 0n) return null;
-  return { borrowerProfile, contract, endTimeSeconds };
+  if (startTimeSeconds <= 0n || endTimeSeconds <= startTimeSeconds) return null;
+
+  const referrerOption = data.readUInt8(CURRENT_RENTAL_OFFSETS.referrer);
+  if (referrerOption !== 0 && referrerOption !== 1) return null;
+  const discountBpsOffset = CURRENT_RENTAL_OFFSETS.referrer + 1 + (referrerOption === 1 ? PUBLIC_KEY_BYTES : 0);
+  const bidAtlasOffset = discountBpsOffset + 2 + 8;
+  if (data.length < bidAtlasOffset + 8) return null;
+  const bidAtlas = data.readBigUInt64LE(bidAtlasOffset);
+  return { borrowerProfile, contract, rate, startTimeSeconds, endTimeSeconds, bidAtlas };
 }
 
 function matchActiveRental({ rentalAddress, rentalData, contractData }) {
@@ -45,8 +57,10 @@ function matchActiveRental({ rentalAddress, rentalData, contractData }) {
   if (!contract.activeRental.equals(rentalAddress)) return null;
   return {
     fleet: contract.fleet,
-    rate: contract.rate,
+    rate: rental.rate,
+    startTimeSeconds: rental.startTimeSeconds,
     endTimeSeconds: rental.endTimeSeconds,
+    bidAtlas: rental.bidAtlas,
   };
 }
 
