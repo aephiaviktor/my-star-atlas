@@ -115,8 +115,9 @@ test('Marketplace reads use only the supported v2 Flux query instead of legacy M
 
 test('Marketplace rescans order history for sell recovery without replaying high-volume wallet history', () => {
   assert.match(main, /checkpoint\.tradeEnrichmentVersion < 2/);
-  assert.match(main, /seedCurrentWalletCursors\(connection, trackedWallets, checkpoint\.walletCursors\)/);
-  assert.match(main, /limit: 1/);
+  assert.match(main, /loadLocalMarketHistoricalOrderIds\(faction, startIso\)/);
+  assert.match(main, /event\.event === 'FILLED'/);
+  assert.match(main, /historicalOrderIds,/);
   assert.match(main, /marketplaceCursorSnapshot\(\s*migrationWalletCursors,\s*needsTradeEnrichment \? \{\} : checkpoint\.orderCursors/);
   assert.match(main, /needsTradeEnrichment \? checkpoint\.orders\.map\(\(order\) => String\(order\.orderId\)\)/);
   assert.match(main, /pendingWalletCursors/);

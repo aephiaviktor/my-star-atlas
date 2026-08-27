@@ -195,9 +195,38 @@ async function collectSignatures(connection, addresses, startMs, addressFactory,
   return { signatures, cursors: nextCursors };
 }
 
-async function fetchTransactions(connection, rows, pacer, stats) {
+async function fetchTransactions(connection, rows, pacer, stats, batchSize = 1) {
   const ordered = Array.from(rows.values()).sort((a, b) => Number(a.blockTime || 0) - Number(b.blockTime || 0));
   const transactions = [];
+  const resolvedBatchSize = Math.max(1, Math.min(10, Math.floor(Number(batchSize) || 1)));
+  if (resolvedBatchSize > 1 && typeof connection.getParsedTransactions === 'function') {
+    for (let offset = 0; offset < ordered.length; offset += resolvedBatchSize) {
+      const chunk = ordered.slice(offset, offset + resolvedBatchSize);
+      if (pacer) await pacer();
+      let decoded;
+      try {
+        decoded = await connection.getParsedTransactions(chunk.map((row) => String(row.signature)), {
+          commitment: 'confirmed', maxSupportedTransactionVersion: 0,
+        });
+      } catch (error) {
+        if (isMarketplaceRpcBudgetExhaustedError(error)) { transactions.exhaustion = error; break; }
+        decoded = null; // Provider rejected the micro-batch; retry this chunk safely as singles.
+      }
+      if (decoded) {
+        if (stats) stats.transactionRequests += 1;
+        for (let index = 0; index < chunk.length; index += 1) {
+          const transaction = decoded[index];
+          if (transaction) transactions.push({ ...transaction, signature: String(chunk[index].signature), blockTime: transaction.blockTime ?? chunk[index].blockTime });
+          else { if (stats) stats.transactionMisses += 1; recordTelemetryCounter('transactionMisses'); }
+        }
+        continue;
+      }
+      const fallback = await fetchTransactions(connection, new Map(chunk.map((row) => [row.signature, row])), pacer, stats, 1);
+      transactions.push(...fallback);
+      if (fallback.exhaustion) { transactions.exhaustion = fallback.exhaustion; break; }
+    }
+    return transactions;
+  }
   for (const row of ordered) {
     if (pacer) await pacer();
     const signature = String(row.signature);
@@ -222,8 +251,10 @@ async function fetchTransactions(connection, rows, pacer, stats) {
 async function scanLocalMarketTrades(connection, {
   trackedWallets = [], executionWallets = trackedWallets, marketAssetsByMint = {}, knownOrders = [], startIso,
   walletCursors = {}, orderCursors = {}, activeOrderIds = [], archivedOrderIds = [], openOrderIds = [],
+  historicalOrderIds = [],
   addressFactory = (value) => value, maxPages = MAX_SIGNATURE_PAGES,
   requestsPerSecond = DEFAULT_REQUESTS_PER_SECOND,
+  transactionBatchSize = 1,
   atlasPerSol, decodeAssetFlows,
 } = {}) {
   const resolvedStartIso = startIso ?? resolveLocalMarketStartIso();
@@ -289,7 +320,7 @@ async function scanLocalMarketTrades(connection, {
   }
   const walletScan = await collectSignatures(connection, trackedWallets, startMs, addressFactory, maxPages, pacer, stats, walletCursors);
   if (walletScan.exhaustion) return partialResult([], walletScan.exhaustion);
-  const walletTransactions = await fetchTransactions(connection, walletScan.signatures, pacer, stats);
+  const walletTransactions = await fetchTransactions(connection, walletScan.signatures, pacer, stats, transactionBatchSize);
   if (walletTransactions.exhaustion) return partialResult(walletTransactions, walletTransactions.exhaustion);
   const discoveredOrderIds = new Set();
   for (const transaction of walletTransactions) {
@@ -304,6 +335,7 @@ async function scanLocalMarketTrades(connection, {
     ...(activeOrderIds || []).map(String),
     ...open,
     ...discoveredOrderIds,
+    ...(historicalOrderIds || []).map(String),
   ]);
   for (const orderId of archived) candidateOrderIds.delete(orderId);
   const orderScan = await collectSignatures(
@@ -311,7 +343,7 @@ async function scanLocalMarketTrades(connection, {
   );
   if (orderScan.exhaustion) return partialResult(walletTransactions, orderScan.exhaustion);
   const newOrderSignatures = new Map(Array.from(orderScan.signatures).filter(([signature]) => !walletScan.signatures.has(signature)));
-  const orderTransactions = await fetchTransactions(connection, newOrderSignatures, pacer, stats);
+  const orderTransactions = await fetchTransactions(connection, newOrderSignatures, pacer, stats, transactionBatchSize);
   const transactions = walletTransactions.concat(orderTransactions);
   if (orderTransactions.exhaustion) return partialResult(transactions, orderTransactions.exhaustion);
   for (const transaction of transactions) {

@@ -215,6 +215,29 @@ test('transaction fetches use one RPC call per signature so batch-disabled plans
   assert.deepEqual(transactions.map((transaction) => transaction.signature), Array.from(rows.keys()));
 });
 
+test('transaction fetches use bounded micro-batches and fall back to singles when rejected', async () => {
+  const rows = new Map(Array.from({ length: 7 }, (_, index) => [`sig-${index}`, { signature: `sig-${index}`, blockTime: index + 1 }]));
+  const batches = [];
+  const singles = [];
+  const connection = {
+    async getParsedTransactions(signatures) {
+      batches.push(signatures);
+      if (batches.length === 2) throw new Error('429');
+      return signatures.map((signature) => ({ blockTime: 1, transaction: { signatures: [signature] }, meta: { err: null } }));
+    },
+    async getParsedTransaction(signature) {
+      singles.push(signature);
+      return { blockTime: 1, transaction: { signatures: [signature] }, meta: { err: null } };
+    },
+  };
+  const stats = { transactionRequests: 0, transactionMisses: 0 };
+  const transactions = await fetchTransactions(connection, rows, null, stats, 5);
+  assert.deepEqual(batches.map((batch) => batch.length), [5, 2]);
+  assert.deepEqual(singles, ['sig-5', 'sig-6']);
+  assert.equal(transactions.length, 7);
+  assert.equal(stats.transactionRequests, 3);
+});
+
 test('tracks LM order creation separately and matches fills by order ID', () => {
   const orderTx = lifecycleTx({
     signature: 'create', name: 'process_initialize_sell', values: [34900, 30000000],

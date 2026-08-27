@@ -222,8 +222,8 @@ test('Marketplace attempt budget retains the exact first refused sentinel', () =
   assert.deepEqual(attemptBudget.snapshot(), { limit: 0, used: 0 });
 });
 
-test('Marketplace attempt budget defaults to 300 and refuses without telemetry or cache cost', async () => {
-  assert.equal(DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT, 300);
+test('Marketplace attempt budget defaults to a one-time-backfill-safe ceiling and refuses without telemetry or cache cost', async () => {
+  assert.equal(DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT, 20000);
   const telemetry = createMarketplaceRpcTelemetry({ runId: 'budget-limit' });
   const attemptBudget = createMarketplaceRpcAttemptBudget({ limit: 2 });
   const instrumentation = createMarketplaceRpcInstrumentation(telemetry, { attemptBudget });

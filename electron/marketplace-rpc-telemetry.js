@@ -6,7 +6,7 @@ const { runWithTelemetryContext } = require('./telemetry-context');
 
 const DEFAULT_SAMPLE_LIMIT = 50;
 const MAX_SAMPLE_LIMIT = 100;
-const DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT = 300;
+const DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT = 20000;
 const COUNTER_KEYS = Object.freeze([
   'logicalOperations', 'rpcAttempts', 'retries', 'fallbackCalls', 'cacheHits', 'cacheMisses',
 ]);
@@ -42,23 +42,30 @@ function isMarketplaceRpcBudgetExhaustedError(error) {
     || error?.name === 'MarketplaceRpcBudgetExhaustedError';
 }
 
-function createMarketplaceRpcAttemptBudget({ limit = DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT } = {}) {
+function createMarketplaceRpcAttemptBudget({ limit = DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT, scope = 'shared' } = {}) {
   const numericLimit = Number(limit);
   const resolvedLimit = Number.isFinite(numericLimit)
     ? Math.max(0, Math.floor(numericLimit))
     : DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT;
-  let used = 0;
+  const usedByOperation = Object.create(null);
   let exhaustion = null;
   return {
     admit(operation, method) {
+      const key = scope === 'operation' ? normalizeOperation(operation) : 'SHARED';
+      const used = Number(usedByOperation[key] || 0);
       if (used >= resolvedLimit) {
         exhaustion ||= new MarketplaceRpcBudgetExhaustedError(operation, method);
         throw exhaustion;
       }
-      used += 1;
+      usedByOperation[key] = used + 1;
     },
     getExhaustion() { return exhaustion; },
-    snapshot() { return { limit: resolvedLimit, used }; },
+    snapshot() {
+      const used = Object.values(usedByOperation).reduce((sum, value) => sum + Number(value || 0), 0);
+      return scope === 'operation'
+        ? { limit: resolvedLimit, used, scope, usedByOperation: { ...usedByOperation } }
+        : { limit: resolvedLimit, used };
+    },
   };
 }
 

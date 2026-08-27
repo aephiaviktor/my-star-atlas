@@ -281,7 +281,7 @@ test('Marketplace sync preserves telemetry for primitive and frozen errors', asy
   }
 });
 
-test('Marketplace sync returns bounded resumable exhaustion with partial LM data and no GM start', async () => {
+test('Marketplace sync returns bounded resumable LM exhaustion while still running GM', async () => {
   const start = main.indexOf('function marketplaceSyncAttempt');
   const end = main.indexOf('async function fetchMarketplaceSnapshot', start);
   const functionSource = main.slice(start, end);
@@ -316,7 +316,7 @@ test('Marketplace sync returns bounded resumable exhaustion with partial LM data
       }
       throw new Error('budget did not stop');
     },
-    fetchGlobalMarketTrades: async () => { gmCalls += 1; throw new Error('GM must not start'); },
+    fetchGlobalMarketTrades: async () => { gmCalls += 1; return { trades: [{ id: 'decoded-gm' }], error: '', rpc: { totalRpcRequests: 0 } }; },
   };
 
   const result = await vm.runInNewContext(
@@ -324,22 +324,22 @@ test('Marketplace sync returns bounded resumable exhaustion with partial LM data
   );
   const plain = JSON.parse(JSON.stringify(result));
   assert.equal(transportAttempts, 2);
-  assert.equal(gmCalls, 0);
+  assert.equal(gmCalls, 1);
   assert.equal(plain.ok, true);
   assert.equal(plain.status, 'budget_exhausted');
   assert.equal(plain.resumable, true);
   assert.equal(plain.partial, true);
   assert.deepEqual(plain.localMarketTrades, [{ id: 'decoded-lm' }]);
-  assert.deepEqual(plain.globalMarketTrades, []);
+  assert.deepEqual(plain.globalMarketTrades, [{ id: 'decoded-gm' }]);
   assert.deepEqual(plain.marketplaceRpcBudget, {
-    status: 'exhausted', limit: 2, used: 2, operation: 'LM', method: 'getAccountInfo',
+    status: 'exhausted', limit: 2, used: 2, operations: ['LM'], operation: 'LM', method: 'getAccountInfo',
   });
   assert.equal(plain.marketplaceRpcTelemetry.totals.rpcAttempts, 2);
   assert.equal(plain.marketplaceSyncAttempt.disposition, 'started');
   assert.equal(JSON.stringify(plain).includes('secret.invalid'), false);
 });
 
-test('Marketplace stops before GM when completed LM consumes the shared budget', async () => {
+test('Marketplace gives GM an independent budget after LM reaches its operation allowance', async () => {
   const start = main.indexOf('function marketplaceSyncAttempt');
   const end = main.indexOf('async function fetchMarketplaceSnapshot', start);
   const functionSource = main.slice(start, end);
@@ -362,9 +362,7 @@ test('Marketplace stops before GM when completed LM consumes the shared budget',
   const result = await vm.runInNewContext(
     `${functionSource}\nsyncMarketplaceTrades(input, { rpcAttemptLimit: 1 });`, context,
   );
-  assert.equal(gmCalls, 0);
-  assert.deepEqual(JSON.parse(JSON.stringify(result.marketplaceRpcBudget)), {
-    status: 'exhausted', limit: 1, used: 1, operation: 'GM', method: null,
-  });
+  assert.equal(gmCalls, 1);
+  assert.equal(result.marketplaceRpcBudget, undefined);
   assert.equal(result.localMarketTrades[0].id, 'complete-lm');
 });

@@ -4314,16 +4314,21 @@ function marketplaceCursorSnapshot(walletCursors, orderCursors, activeOrderIds, 
   return { walletCursors, orderCursors, activeOrderIds, archivedOrderIds };
 }
 
-async function seedCurrentWalletCursors(connection, trackedWallets, walletCursors) {
-  if (Object.keys(walletCursors || {}).length) return walletCursors;
-  const seeded = {};
-  for (const wallet of trackedWallets) {
-    const rows = await connection.getSignaturesForAddress(new PublicKey(wallet), {
-      commitment: 'confirmed', limit: 1,
-    });
-    if (rows?.[0]?.signature) seeded[String(wallet)] = String(rows[0].signature);
+function loadLocalMarketHistoricalOrderIds(faction, startIso) {
+  const profile = faction === 'UST' ? 'USTUR' : faction;
+  const filePath = path.join(path.dirname(app.getAppPath()), `lm-market-bot-${profile}`, 'analysis', 'orders-log.jsonl');
+  let text;
+  try { text = fsSync.readFileSync(filePath, 'utf8'); } catch (_error) { return []; }
+  const startMs = Date.parse(startIso);
+  const ids = new Set();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line) continue;
+    try {
+      const event = JSON.parse(line);
+      if (event.event === 'FILLED' && Date.parse(event.timestamp) >= startMs && event.orderId) ids.add(String(event.orderId));
+    } catch (_error) { /* Ignore a partially-written final JSONL record. */ }
   }
-  return seeded;
+  return Array.from(ids).sort();
 }
 
 function marketplaceTradeHoldCandidate(trade, { market, faction, profileScope, cursorInputSnapshot, cursorOutputSnapshot }, publicationInputs = []) {
@@ -5053,9 +5058,8 @@ async function fetchLocalMarketTrades(settings, connection) {
   const anchorMs = Math.max(checkpointNewestMs, Number.isFinite(influxNewestMs) ? influxNewestMs : 0, startMs);
   const overlapStart = new Date(Math.max(startMs, anchorMs - 60 * 60 * 1000)).toISOString();
   const needsTradeEnrichment = checkpoint.tradeEnrichmentVersion < 2;
-  const migrationWalletCursors = needsTradeEnrichment
-    ? await seedCurrentWalletCursors(connection, trackedWallets, checkpoint.walletCursors)
-    : checkpoint.walletCursors;
+  const migrationWalletCursors = checkpoint.walletCursors;
+  const historicalOrderIds = needsTradeEnrichment ? loadLocalMarketHistoricalOrderIds(faction, startIso) : [];
   const cursorInputSnapshot = marketplaceCursorSnapshot(
     migrationWalletCursors,
     needsTradeEnrichment ? {} : checkpoint.orderCursors,
@@ -5068,6 +5072,8 @@ async function fetchLocalMarketTrades(settings, connection) {
     knownOrders: checkpoint.orders,
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
+    historicalOrderIds,
+    transactionBatchSize: 5,
     startIso: needsTradeEnrichment ? startIso : overlapStart,
     addressFactory: (value) => new PublicKey(value),
     atlasPerSol: await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null),
@@ -5313,7 +5319,7 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
   }
   const startedAt = Date.now();
   const telemetry = createMarketplaceRpcTelemetry();
-  const attemptBudget = createMarketplaceRpcAttemptBudget({ limit: rpcAttemptLimit });
+  const attemptBudget = createMarketplaceRpcAttemptBudget({ limit: rpcAttemptLimit, scope: 'operation' });
   const instrumentation = createMarketplaceRpcInstrumentation(telemetry, { attemptBudget });
   const runId = telemetry.snapshot().runId;
   const underlyingPromise = (async () => {
@@ -5323,17 +5329,8 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
       const localConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
       const globalConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'GM' });
       const local = await fetchLocalMarketTrades(settings, localConnection);
-      let exhaustion = local.exhaustion || null;
-      let global = { trades: [], assetFlows: [], error: '', rpc: null };
-      if (!exhaustion) {
-        const budgetBeforeGm = attemptBudget.snapshot();
-        if (budgetBeforeGm.used >= budgetBeforeGm.limit) {
-          exhaustion = { operation: 'GM', method: null };
-        } else {
-          global = await fetchGlobalMarketTrades(settings, globalConnection);
-          exhaustion = global.exhaustion || null;
-        }
-      }
+      const global = await fetchGlobalMarketTrades(settings, globalConnection);
+      const exhaustions = [local.exhaustion, global.exhaustion].filter(Boolean);
       const errors = [local.error, global.error].filter(Boolean);
       const marketplaceRpcTelemetry = telemetry.finish();
       const result = {
@@ -5344,14 +5341,16 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
         marketplaceRpcTelemetry,
         faction, durationMs: Date.now() - startedAt, checkedAt: new Date().toISOString(),
       };
-      if (exhaustion) {
+      if (exhaustions.length) {
         const budget = attemptBudget.snapshot();
+        const exhaustion = exhaustions[0];
         result.ok = true;
         result.status = 'budget_exhausted';
         result.resumable = true;
         result.partial = true;
         result.marketplaceRpcBudget = {
           status: 'exhausted', limit: budget.limit, used: budget.used,
+          operations: exhaustions.map((entry) => entry.operation === 'GM' ? 'GM' : 'LM'),
           operation: exhaustion.operation === 'GM' ? 'GM' : 'LM',
           method: exhaustion.method == null ? null : String(exhaustion.method).slice(0, 64),
         };
