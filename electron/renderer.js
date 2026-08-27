@@ -778,6 +778,22 @@ const breakevenEarningsBaseColumns = Object.freeze([
 
 const breakevenEarningsOptionalColumns = Object.freeze([]);
 
+const marketplaceEarningsOptionalColumns = Object.freeze([
+  Object.freeze({ id: 'timestamp', label: 'Timestamp (UTC)' }),
+  Object.freeze({ id: 'marketplace', label: 'Marketplace' }),
+  Object.freeze({ id: 'starbase', label: 'Starbase' }),
+  Object.freeze({ id: 'asset', label: 'Asset' }),
+  Object.freeze({ id: 'amount', label: 'Amount' }),
+  Object.freeze({ id: 'grossAtlas', label: 'Gross ATLAS' }),
+  Object.freeze({ id: 'price', label: 'Price' }),
+  Object.freeze({ id: 'marketplaceFee', label: 'Marketplace Fee' }),
+  Object.freeze({ id: 'txsFee', label: 'Txs Fee' }),
+  Object.freeze({ id: 'netAtlas', label: 'Net ATLAS' }),
+  Object.freeze({ id: 'unitMetric', label: 'Cost / Unit' }),
+  Object.freeze({ id: 'orderId', label: 'Order ID' }),
+  Object.freeze({ id: 'signature', label: 'Signature' }),
+]);
+
 const earningsColumnsBySubtab = Object.freeze({
   scanning: scanningEarningsOptionalColumns,
   mining: miningEarningsOptionalColumns,
@@ -786,6 +802,7 @@ const earningsColumnsBySubtab = Object.freeze({
   crafting: craftingEarningsOptionalColumns,
   upgrading: upgradingEarningsOptionalColumns,
   breakeven: breakevenEarningsOptionalColumns,
+  marketplace: marketplaceEarningsOptionalColumns,
 });
 
 const earningsColumnState = {
@@ -796,6 +813,7 @@ const earningsColumnState = {
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin', 'costsPerUnit']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   breakeven: new Set(),
+  marketplace: new Set(marketplaceEarningsOptionalColumns.map((column) => column.id)),
 };
 
 const EARNINGS_COLUMN_STORAGE_KEY = 'my-star-atlas:earnings-columns:v1';
@@ -5760,6 +5778,8 @@ function renderEarningsColumnControls() {
         renderEarningsCrafting(latestEarningsResult);
       } else if (subtab === 'breakeven') {
         renderEarningsBreakeven(latestBreakevenResult);
+      } else if (subtab === 'marketplace') {
+        renderEarningsMarketplace(latestEarningsResult);
       } else if (latestEarningsResult) {
         renderEarnings(latestEarningsResult);
       } else {
@@ -6663,12 +6683,14 @@ function renderEarningsMarketplace(result) {
     button.setAttribute('aria-pressed', String(active));
   });
   if (!earningsMarketplaceTableBody) return;
+  const visibleColumns = getVisibleEarningsColumns('marketplace');
+  renderMarketplaceHeader(visibleColumns);
   earningsMarketplaceTableBody.textContent = '';
   if (!visibleRows.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     const td = createTextCell(result?.localMarketError ? `Marketplace Influx read failed: ${result.localMarketError}` : `No Marketplace ${earningsMarketplaceSide} executions found`);
-    td.colSpan = 13;
+    td.colSpan = Math.max(1, visibleColumns.length);
     tr.appendChild(td);
     earningsMarketplaceTableBody.appendChild(tr);
     return;
@@ -6682,40 +6704,54 @@ function renderEarningsMarketplace(result) {
     const unitMetric = quantity > 0
       ? (earningsMarketplaceSide === 'buy' ? (gross + txFee) / quantity : net / quantity)
       : null;
-    const values = [
-      formatMarketplaceTimestamp(entry.timestamp), entry.marketplace || 'LM',
-      entry.starbase || '--', entry.asset || '--', formatMarketplaceWhole(quantity),
-      formatMarketplaceAtlas(gross, 6), formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
-      formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6), formatMarketplaceAtlas(txFee, 2),
-      formatMarketplaceAtlas(net, 2), unitMetric == null ? '--' : formatMarketplaceAtlas(unitMetric, 8),
-      entry.orderId || '--', entry.signature || '--',
-    ];
-    for (const value of values.slice(0, -1)) tr.appendChild(createTextCell(value));
-    const signatureCell = document.createElement('td');
-    if (entry.signature) {
-      const link = document.createElement('a');
-      link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.textContent = entry.signature;
-      signatureCell.appendChild(link);
-    } else {
-      signatureCell.textContent = '--';
-    }
-    tr.appendChild(signatureCell);
+    for (const column of visibleColumns) tr.appendChild(createMarketplaceEarningsCell(entry, column.id, { quantity, gross, txFee, net, unitMetric }));
     earningsMarketplaceTableBody.appendChild(tr);
   }
+}
+
+function renderMarketplaceHeader(visibleColumns) {
+  const row = earningsMarketplaceTableBody?.closest('table')?.querySelector('thead tr');
+  if (!row) return;
+  row.textContent = '';
+  for (const column of visibleColumns) {
+    const th = document.createElement('th');
+    th.textContent = column.id === 'unitMetric'
+      ? (earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit')
+      : column.label;
+    row.appendChild(th);
+  }
+}
+
+function createMarketplaceEarningsCell(entry, columnId, calculated) {
+  const values = {
+    timestamp: formatMarketplaceTimestamp(entry.timestamp), marketplace: entry.marketplace || 'LM',
+    starbase: entry.starbase || '--', asset: entry.asset || '--', amount: formatMarketplaceWhole(calculated.quantity),
+    grossAtlas: formatMarketplaceAtlas(calculated.gross, 6), price: formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
+    marketplaceFee: formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6), txsFee: formatMarketplaceAtlas(calculated.txFee, 2),
+    netAtlas: formatMarketplaceAtlas(calculated.net, 2), unitMetric: calculated.unitMetric == null ? '--' : formatMarketplaceAtlas(calculated.unitMetric, 8),
+    orderId: entry.orderId || '--', signature: entry.signature || '--',
+  };
+  if (columnId !== 'signature') return createTextCell(values[columnId] ?? '--');
+  const cell = document.createElement('td');
+  if (!entry.signature) { cell.textContent = '--'; return cell; }
+  const link = document.createElement('a');
+  link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
+  link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = entry.signature;
+  cell.appendChild(link);
+  return cell;
 }
 
 function renderEarningsMarketplaceLoading(message = 'Loading Marketplace data...') {
   setText(earningsMarketplaceSyncStatus, message);
   setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
   if (!earningsMarketplaceTableBody) return;
+  const visibleColumns = getVisibleEarningsColumns('marketplace');
+  renderMarketplaceHeader(visibleColumns);
   earningsMarketplaceTableBody.textContent = '';
   const tr = document.createElement('tr');
   tr.className = 'empty-row';
   const td = createTextCell(message);
-  td.colSpan = 13;
+  td.colSpan = Math.max(1, visibleColumns.length);
   tr.appendChild(td);
   earningsMarketplaceTableBody.appendChild(tr);
 }

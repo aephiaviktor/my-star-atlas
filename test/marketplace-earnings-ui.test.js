@@ -25,13 +25,23 @@ test('Marketplace earnings tab sits between Mining and Cargo with a BUY/SELL swi
   assert.ok(panel.indexOf('Order ID') < panel.indexOf('Signature'));
 });
 
+test('Marketplace exposes every table column in the persistent Earnings sidebar selector', () => {
+  assert.match(renderer, /const marketplaceEarningsOptionalColumns = Object\.freeze/);
+  assert.match(renderer, /marketplace: marketplaceEarningsOptionalColumns/);
+  assert.match(renderer, /marketplace: new Set\(marketplaceEarningsOptionalColumns\.map\(\(column\) => column\.id\)\)/);
+  assert.match(renderer, /getVisibleEarningsColumns\('marketplace'\)/);
+  assert.match(renderer, /renderMarketplaceHeader\(visibleColumns\)/);
+  assert.match(renderer, /createMarketplaceEarningsCell\(entry, column\.id/);
+  assert.match(renderer, /subtab === 'marketplace'[\s\S]*renderEarningsMarketplace\(latestEarningsResult\)/);
+});
+
 test('Marketplace renderer filters rows by selected side and swaps the unit metric', () => {
   assert.match(renderer, /let earningsMarketplaceSide = 'buy'/);
   assert.match(renderer, /entry\.side === earningsMarketplaceSide/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Cost \/ Unit' : 'Income \/ Unit'/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy'[\s\S]*\(gross \+ txFee\) \/ quantity[\s\S]*net \/ quantity/);
-  assert.match(renderer, /formatMarketplaceAtlas\(txFee, 2\)/);
-  assert.match(renderer, /formatMarketplaceAtlas\(net, 2\)/);
+  assert.match(renderer, /formatMarketplaceAtlas\(calculated\.txFee, 2\)/);
+  assert.match(renderer, /formatMarketplaceAtlas\(calculated\.net, 2\)/);
 });
 
 test('Update shares a row with Refresh data while the BUY SELL switch stays below', () => {
