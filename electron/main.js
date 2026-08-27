@@ -4264,7 +4264,11 @@ async function loadLocalMarketTradeCheckpoint(filePath) {
       assetFlows: Array.isArray(document?.assetFlows) ? document.assetFlows : [],
       publishedTradeIds: new Set(Array.isArray(document?.publishedTradeIds) ? document.publishedTradeIds : []),
       publishedFlowIds: new Set(Array.isArray(document?.publishedFlowIds) ? document.publishedFlowIds : []),
-      walletCursors: document?.walletCursors && typeof document.walletCursors === 'object' ? document.walletCursors : {},
+      walletCursors: document?.walletCursors && typeof document.walletCursors === 'object'
+        && Object.keys(document.walletCursors).length
+        ? document.walletCursors
+        : (document?.pendingWalletCursors && typeof document.pendingWalletCursors === 'object'
+          ? document.pendingWalletCursors : {}),
       orderCursors: document?.orderCursors && typeof document.orderCursors === 'object' ? document.orderCursors : {},
       activeOrderIds: Array.isArray(document?.activeOrderIds) ? document.activeOrderIds : [],
       archivedOrderIds: Array.isArray(document?.archivedOrderIds) ? document.archivedOrderIds : [],
@@ -5038,7 +5042,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   const overlapStart = new Date(Math.max(startMs, anchorMs - 60 * 60 * 1000)).toISOString();
   const needsTradeEnrichment = checkpoint.tradeEnrichmentVersion < 2;
   const cursorInputSnapshot = marketplaceCursorSnapshot(
-    needsTradeEnrichment ? {} : checkpoint.walletCursors,
+    checkpoint.walletCursors,
     needsTradeEnrichment ? {} : checkpoint.orderCursors,
     checkpoint.activeOrderIds,
     checkpoint.archivedOrderIds,

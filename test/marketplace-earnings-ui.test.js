@@ -75,14 +75,14 @@ test('Earnings snapshot stays on the fast path and leaves Marketplace to its own
   assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading Marketplace data\.\.\.'\)/);
 });
 
-test('Marketplace loader uses cached snapshots on tab activation while faction refresh still syncs', () => {
+test('Marketplace loader uses profile-scoped cached snapshots on tab and faction activation', () => {
   assert.match(main, /fetchMarketplaceAssetFlowsFromInflux\(settings\)/);
   assert.match(main, /readInventoryBasisSnapshots\(\{[\s\S]*?bucket: settings\.influxBucket,[\s\S]*?query: async \(flux\) => parseInfluxCsv\(await queryInfluxFlux\(settings, flux\)\),[\s\S]*?\}\)/);
   assert.match(main, /enrichGmTradesWithInventoryBasis\(result\.trades, accounting\.appliedEventResults, \{ inventoryBasisObservations \}\)/);
   assert.match(renderer, /function renderEarningsMarketplaceLoading/);
   assert.match(renderer, /renderEarningsMarketplaceLoading\(sync \? 'Syncing Marketplace data\.\.\.' : 'Loading Marketplace data\.\.\.'\)/);
   assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: false \}\);/);
-  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: true \}\) : refreshEarnings\(\)/);
+  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: false \}\) : refreshEarnings\(\)/);
 });
 
 test('Marketplace chain synchronization is exposed separately and runs in the background', () => {
@@ -113,9 +113,10 @@ test('Marketplace reads use only the supported v2 Flux query instead of legacy M
   assert.doesNotMatch(main, /queryInfluxSql|type:\s*['"]sql['"]/);
 });
 
-test('Marketplace rescans local checkpoints for buy/sell recovery without legacy Influx compatibility dedupe', () => {
+test('Marketplace rescans order history for sell recovery without replaying high-volume wallet history', () => {
   assert.match(main, /checkpoint\.tradeEnrichmentVersion < 2/);
-  assert.match(main, /needsTradeEnrichment \? \{\} : checkpoint\.walletCursors/);
+  assert.match(main, /marketplaceCursorSnapshot\(\s*checkpoint\.walletCursors,\s*needsTradeEnrichment \? \{\} : checkpoint\.orderCursors/);
+  assert.match(main, /pendingWalletCursors/);
   assert.match(main, /tradeEnrichmentVersionNext[\s\S]*\? 2 : checkpoint\.tradeEnrichmentVersion/);
   assert.match(main, /prior\.signature === trade\.signature/);
   assert.doesNotMatch(main, /dedupeMarketplaceRows/);
@@ -145,9 +146,9 @@ test('ONI and MUD earnings accept second-instance SDU tags', () => {
   assert.match(main, /instance: \['MUD', 'MUD2'\]/);
 });
 
-test('Marketplace activation loads snapshots while background, faction refresh, and manual refresh sync through the guard', async () => {
+test('Marketplace activation uses cache while background and manual refresh sync through the guard', async () => {
   assert.match(renderer, /if \(subtab === 'marketplace'\) \{\s*refreshMarketplace\(\{ sync: false \}\);/);
-  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: true \}\) : refreshEarnings\(\)/);
+  assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: false \}\) : refreshEarnings\(\)/);
   assert.match(renderer, /function refreshCurrentVisibleData\([\s\S]*currentEarningsSubtab === 'marketplace'\) return refreshMarketplace\(\{ sync: true \}\)/);
   assert.match(renderer, /refreshDataButton\?\.addEventListener\('click'[\s\S]*await refreshCurrentVisibleData\(\)/);
 

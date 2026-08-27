@@ -7044,7 +7044,9 @@ async function refreshMarketplace({ sync = false } = {}) {
       await api.syncMarketplace(settings);
     }
     const result = await api.getMarketplaceSnapshot(settings);
-    if (faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return result;
+    const currentSettings = latestSettings || getFormPayload();
+    if (faction !== normalizeFaction(currentSettings.faction)
+      || profile !== getActivePlayerProfile(currentSettings)) return result;
     marketplaceSnapshotCache.set(cacheKey, result);
     latestEarningsResult = { ...(latestEarningsResult || {}), ...result, ok: latestEarningsResult?.ok ?? result.ok };
     renderEarningsMarketplace(latestEarningsResult);
@@ -8893,7 +8895,7 @@ function refreshVisibleFactionViews() {
   if (currentSection === 'earnings') {
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven();
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading();
-    return currentEarningsSubtab === 'marketplace' ? refreshMarketplace({ sync: true }) : refreshEarnings();
+    return currentEarningsSubtab === 'marketplace' ? refreshMarketplace({ sync: false }) : refreshEarnings();
   }
   if (currentSection === 'optimization') {
     if(currentOptimizationSubtab === 'upgrading') return refreshUpgradingOptimization();
@@ -8917,7 +8919,7 @@ function refreshVisibleConsumptionIdentity({ force = false } = {}) {
 function refreshVisibleIdentity({ force = false } = {}) {
   if (currentSection === 'fleet') return refreshFleets();
   if (currentSection === 'earnings') {
-    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: true });
+    if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: false });
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven({ force });
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading({ force });
     return refreshEarnings();
