@@ -4238,6 +4238,21 @@ function decodePlayerProfileHandlerWallets(accountInfo) {
   return Array.from(new Set(wallets));
 }
 
+function decodePlayerProfileMarketplaceWallets(accountInfo) {
+  if (!accountInfo?.owner?.equals(PLAYER_PROFILE_PROGRAM_ID) || !Buffer.isBuffer(accountInfo.data) || accountInfo.data.length < 30) return [];
+  const keyCount = accountInfo.data.readUInt16LE(28);
+  const wallets = [];
+  for (let index = 0; index < keyCount; index += 1) {
+    const offset = 30 + index * 80;
+    if (offset + 80 > accountInfo.data.length) break;
+    const permissions = accountInfo.data.readBigUInt64LE(offset + 72);
+    // Profile authority (bit 0) and operational signer (bit 3) are the
+    // bounded transaction anchors shared by Marketplace activity.
+    if ((permissions & 9n) !== 0n) wallets.push(new PublicKey(accountInfo.data.subarray(offset, offset + 32)).toBase58());
+  }
+  return Array.from(new Set(wallets));
+}
+
 function parseGmTradingWallets(value) {
   const wallets = [];
   for (const candidate of String(value || '').split(/[\s,]+/).map((item) => item.trim()).filter(Boolean)) {
@@ -5085,7 +5100,8 @@ async function fetchLocalMarketTrades(settings, connection) {
     if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
     return { trades: [], error: '', rpc: null, exhaustion: error };
   }
-  const trackedWallets = decodePlayerProfileWallets(accountInfo);
+  const executionWallets = decodePlayerProfileWallets(accountInfo);
+  const trackedWallets = decodePlayerProfileMarketplaceWallets(accountInfo);
   if (!trackedWallets.length) return { trades: [], error: 'local_market_profile_has_no_active_wallets' };
   let marketAssetsByMint;
   try {
@@ -5125,12 +5141,14 @@ async function fetchLocalMarketTrades(settings, connection) {
   );
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
+    executionWallets,
     marketAssetsByMint,
     knownOrders: checkpoint.orders,
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
     historicalOrderIds,
     transactionBatchSize: 5,
+    maxPages: 1,
     startIso: needsTradeEnrichment ? startIso : overlapStart,
     addressFactory: (value) => new PublicKey(value),
     atlasPerSol: await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null),
@@ -5215,20 +5233,28 @@ async function fetchGlobalMarketTrades(settings, connection) {
     return { trades: [], error: `gm_trading_wallet_invalid:${String(error?.message || error)}` };
   }
   const profileWalletsByFaction = { MUD: [], ONI: [], USTUR: [] };
+  const marketplaceWalletsByFaction = { MUD: [], ONI: [], USTUR: [] };
   try {
-    for (const { faction, profile } of configuredProfiles) {
-      const accountInfo = await connection.getAccountInfo(new PublicKey(profile), 'confirmed');
+    const profileKeys = configuredProfiles.map(({ profile }) => new PublicKey(profile));
+    const accountInfos = typeof connection.getMultipleAccountsInfo === 'function'
+      ? await connection.getMultipleAccountsInfo(profileKeys, 'confirmed')
+      : await Promise.all(profileKeys.map((key) => connection.getAccountInfo(key, 'confirmed')));
+    for (let index = 0; index < configuredProfiles.length; index += 1) {
+      const { faction } = configuredProfiles[index];
+      const accountInfo = accountInfos[index];
       profileWalletsByFaction[faction] = decodePlayerProfileWallets(accountInfo);
+      marketplaceWalletsByFaction[faction] = decodePlayerProfileMarketplaceWallets(accountInfo);
     }
   } catch (error) {
     if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
     return { trades: [], assetFlows: [], error: '', rpc: null, exhaustion: error };
   }
   const profileWallets = Object.values(profileWalletsByFaction).flat();
+  const marketplaceWallets = Object.values(marketplaceWalletsByFaction).flat();
   // Profile wallets can execute GM orders directly. Configured extra wallets
   // extend that universe; they are not a prerequisite for GM ingestion.
   const executionWallets = Array.from(new Set([...profileWallets, ...extraWallets]));
-  const trackedWallets = executionWallets;
+  const trackedWallets = Array.from(new Set([...marketplaceWallets, ...extraWallets]));
   const filePath = globalMarketCheckpointPath();
   const checkpoint = await loadLocalMarketTradeCheckpoint(filePath);
   let openOrders;
@@ -5261,6 +5287,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     knownOrders: checkpoint.orders,
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
+    maxPages: 1,
     startIso: overlapStart,
     addressFactory: (value) => new PublicKey(value),
     atlasPerSol,
