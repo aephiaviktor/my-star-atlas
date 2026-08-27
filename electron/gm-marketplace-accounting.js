@@ -274,7 +274,7 @@ function enrichGmTradesWithInventoryBasis(trades, appliedEventResults, { fallbac
   });
 }
 
-function projectGmFactionMarketplaceRows({ trades = [], flows = [], walletUniverse } = {}) {
+function projectGmFactionMarketplaceRows({ trades = [], flows = [], walletUniverse, inventoryBasisObservations = [] } = {}) {
   const gmWallets = new Set(walletUniverse?.gmWallets || []);
   const inventoryEvents = [];
   for (const trade of trades) {
@@ -301,7 +301,16 @@ function projectGmFactionMarketplaceRows({ trades = [], flows = [], walletUniver
   for (const deposit of custody.buys) {
     const allocation = basis.outgoingBasis.get(String(deposit.sourceFlowId || ''));
     if (!allocation || deposit.provenance !== 'exact' || !(allocation.unitCostAtlas >= 0)) continue;
-    const unitPriceAtlas = allocation.unitCostAtlas;
+    let unitPriceAtlas = allocation.unitCostAtlas;
+    if (allocation.imputedQuantity > 0) {
+      const poolKey = createStarbasePoolKey({ faction: deposit.faction, starbase: deposit.starbase, asset: deposit.asset });
+      const estimate = calculateForwardStockpileAverage(
+        inventoryBasisObservations.filter((observation) => createStarbasePoolKey(observation) === poolKey),
+        { from: deposit.depositTimestamp },
+      );
+      if (!estimate || !(estimate.unitCostAtlas > 0)) continue;
+      unitPriceAtlas = (allocation.totalCostAtlas + allocation.imputedQuantity * estimate.unitCostAtlas) / allocation.quantity;
+    }
     rows.push({
       id: `gm-buy:${deposit.depositFlowId}:${deposit.sourceFlowId}`, market: 'GM', side: 'buy',
       faction: deposit.faction, profile: deposit.faction, timestamp: deposit.depositTimestamp,

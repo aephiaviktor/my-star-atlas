@@ -129,7 +129,8 @@ test('Marketplace rescans order history for sell recovery without replaying high
 test('GM sync separates configured execution wallets from all profile custody wallets', () => {
   assert.match(html, /name="gmTradingWallets"/);
   assert.match(renderer, /gmTradingWallets: String\(data\.get\('gmTradingWallets'\)/);
-  assert.match(main, /const profileWallets = decodePlayerProfileWallets\(accountInfo\)/);
+  assert.match(main, /profileWalletsByFaction\[faction\] = decodePlayerProfileWallets\(accountInfo\)/);
+  assert.match(main, /const profileWallets = Object\.values\(profileWalletsByFaction\)\.flat\(\)/);
   assert.match(main, /const executionWallets = Array\.from\(new Set\(\[\.\.\.profileWallets, \.\.\.extraWallets\]\)\)/);
   assert.match(main, /const trackedWallets = executionWallets/);
   assert.doesNotMatch(main, /gm_trading_wallet_not_configured/);
@@ -140,9 +141,11 @@ test('GM sync separates configured execution wallets from all profile custody wa
   assert.match(main, /fetchMarketplaceAssetFlowsFromInflux/);
 });
 
-test('Marketplace Influx read includes selected profile pubkey rows and global GM rows', () => {
+test('Marketplace Influx read includes selected profile rows and faction-attributed GM deposits but excludes GLOBAL GM rows', () => {
   assert.match(main, /r\.profile == "\$\{escapeFluxString\(profileName\)\}" or r\.profile == "\$\{escapeFluxString\(profile\)\}"/);
-  assert.match(main, /r\.market == "GM" and r\.faction == "GLOBAL" and r\.profile == "GLOBAL"/);
+  assert.match(main, /marketplace_reconciliation_test_v1/);
+  const reader = main.slice(main.indexOf('function marketplaceScopeFlux'), main.indexOf('async function fetchMarketplaceAssetFlowsFromInflux'));
+  assert.doesNotMatch(reader, /r\.faction == "GLOBAL"|r\.profile == "GLOBAL"/);
 });
 
 test('ONI and MUD earnings accept second-instance SDU tags', () => {

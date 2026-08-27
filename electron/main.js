@@ -585,7 +585,24 @@ async function queryInfluxFlux(settings, flux) {
 }
 
 function marketplaceScopeFlux(faction, profile) {
-  return `(r.faction == "${escapeFluxString(faction)}" and (not exists r.profile or r.profile == "${escapeFluxString(profileName)}" or r.profile == "${escapeFluxString(profile)}")) or (r.market == "GM" and r.faction == "GLOBAL" and r.profile == "GLOBAL")`;
+  return `r.faction == "${escapeFluxString(faction)}" and (not exists r.profile or r.profile == "${escapeFluxString(profileName)}" or r.profile == "${escapeFluxString(profile)}")`;
+}
+
+function normalizeFactionGmMarketplaceRow(row) {
+  const quantity = Number(row?.quantity);
+  const timestamp = String(row?._time || '');
+  const id = String(row?.eventId || '');
+  if (!id || !Number.isFinite(Date.parse(timestamp)) || !(quantity > 0)) return null;
+  return {
+    id, timestamp, marketplace: 'GM', market: 'GM', side: String(row.side || '').toLowerCase(),
+    faction: String(row.faction || ''), profile: String(row.profile || ''),
+    asset: String(row.asset || ''), rawMint: String(row.rawMint || ''), starbase: String(row.starbase || ''),
+    wallet: String(row.wallet || ''), quantity,
+    unitPriceAtlas: Number(row.unitPriceAtlas || 0), grossAtlas: Number(row.grossAtlas || 0),
+    marketplaceFeeAtlas: Number(row.marketplaceFeeAtlas || 0), txFeeAtlas: 0,
+    netAtlas: Number(row.netAtlas || 0), settledAtlas: Number(row.settledAtlas || 0),
+    signature: String(row.custodySignature || ''), orderId: String(row.orderId || ''),
+  };
 }
 
 async function fetchNewestMarketplaceTradeMs(settings) {
@@ -623,10 +640,22 @@ async function fetchMarketplaceTradesFromInflux(settings) {
   |> filter(fn: (r) => ${scope})
   |> pivot(rowKey: ["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
+  const factionGmFlux = `from(bucket: "${escapeFluxString(bucket)}")
+  |> range(start: -40d)
+  |> filter(fn: (r) => r._measurement == "marketplace_reconciliation_test_v1")
+  |> filter(fn: (r) => r.faction == "${escapeFluxString(faction)}")
+  |> pivot(rowKey: ["_time", "eventId", "market", "faction", "profile", "side", "asset", "rawMint", "starbase"], columnKey: ["_field"], valueColumn: "_value")
+  |> sort(columns: ["_time"], desc: true)`;
   try {
-    const v2Result = await queryInfluxFlux(settings, v2Flux);
+    const [v2Result, factionGmResult] = await Promise.all([
+      queryInfluxFlux(settings, v2Flux),
+      queryInfluxFlux(settings, factionGmFlux),
+    ]);
     const context = { applicationProfile: profileName, selectedProfile: profile, faction, scopeProven: true };
-    const trades = parseInfluxCsv(v2Result).map((row) => normalizeMarketplaceV2Row(row, context)).filter(Boolean);
+    const trades = [
+      ...parseInfluxCsv(v2Result).map((row) => normalizeMarketplaceV2Row(row, context)).filter(Boolean),
+      ...parseInfluxCsv(factionGmResult).map(normalizeFactionGmMarketplaceRow).filter(Boolean),
+    ];
     trades.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp) || deriveMarketplaceUnionKey(a).localeCompare(deriveMarketplaceUnionKey(b)));
     return { trades, error: '' };
   } catch (error) {
@@ -5175,22 +5204,27 @@ async function fetchLocalMarketTrades(settings, connection) {
 }
 
 async function fetchGlobalMarketTrades(settings, connection) {
-  const profile = getSelectedPlayerProfile(settings);
-  if (!profile) return { trades: [], error: 'gm_profile_not_configured' };
-  let accountInfo;
-  try {
-    accountInfo = await connection.getAccountInfo(new PublicKey(profile), 'confirmed');
-  } catch (error) {
-    if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
-    return { trades: [], assetFlows: [], error: '', rpc: null, exhaustion: error };
-  }
+  const configuredProfiles = ['MUD', 'ONI', 'USTUR'].map((faction) => ({
+    faction, profile: String(settings.playerProfiles?.[faction] || '').trim(),
+  })).filter((entry) => entry.profile);
+  if (!configuredProfiles.length) return { trades: [], error: 'gm_profile_not_configured' };
   let extraWallets;
   try {
     extraWallets = parseGmTradingWallets(settings.gmTradingWallets);
   } catch (error) {
     return { trades: [], error: `gm_trading_wallet_invalid:${String(error?.message || error)}` };
   }
-  const profileWallets = decodePlayerProfileWallets(accountInfo);
+  const profileWalletsByFaction = { MUD: [], ONI: [], USTUR: [] };
+  try {
+    for (const { faction, profile } of configuredProfiles) {
+      const accountInfo = await connection.getAccountInfo(new PublicKey(profile), 'confirmed');
+      profileWalletsByFaction[faction] = decodePlayerProfileWallets(accountInfo);
+    }
+  } catch (error) {
+    if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
+    return { trades: [], assetFlows: [], error: '', rpc: null, exhaustion: error };
+  }
+  const profileWallets = Object.values(profileWalletsByFaction).flat();
   // Profile wallets can execute GM orders directly. Configured extra wallets
   // extend that universe; they are not a prerequisite for GM ingestion.
   const executionWallets = Array.from(new Set([...profileWallets, ...extraWallets]));
@@ -5242,8 +5276,14 @@ async function fetchGlobalMarketTrades(settings, connection) {
   for (const event of scanned.assetFlows) flowById.set(event.id, event);
   const assetFlows = Array.from(flowById.values()).filter((event) => Date.parse(event.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
-  const shadowWalletUniverse = buildGmShadowWalletUniverse(extraWallets, assetFlows);
-  const shadowRows = projectGmFactionMarketplaceRows({ trades, flows: assetFlows, walletUniverse: shadowWalletUniverse });
+  const shadowWalletUniverse = buildGmWalletUniverse({ gmTradingWallets: extraWallets, profileWalletsByFaction });
+  const inventoryBasisObservations = await readInventoryBasisSnapshots({
+    bucket: settings.influxBucket,
+    query: async (flux) => parseInfluxCsv(await queryInfluxFlux(settings, flux)),
+  }).catch(() => []);
+  const shadowRows = projectGmFactionMarketplaceRows({
+    trades, flows: assetFlows, walletUniverse: shadowWalletUniverse, inventoryBasisObservations,
+  });
   const shadowWrite = await writeMarketplaceReconciliationTestLines(settings, shadowRows);
   const checkpointCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
   const cursorOutputSnapshot = {

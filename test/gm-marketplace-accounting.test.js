@@ -170,6 +170,42 @@ test('GM buys become faction rows only when DepositCargoToGame consumes global w
   ]);
 });
 
+test('GM deposits with unknown wallet basis use faction starbase observations instead of zero', () => {
+  const universe = buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { USTUR: ['ust'] } });
+  const input = {
+    walletUniverse: universe,
+    trades: [],
+    flows: [
+      { id: 'move', timestamp: '2026-08-25T00:00:00Z', flow: 'wallet-transfer', asset: 'Ammo', rawMint: 'ammo', quantity: 50, origin: 'wallet:gm', destination: 'wallet:ust' },
+      { id: 'deposit', timestamp: '2026-08-26T00:00:00Z', flow: 'css-deposit', asset: 'Ammo', rawMint: 'ammo', quantity: 50, origin: 'wallet:ust', destination: 'UST-1', faction: 'USTUR' },
+    ],
+  };
+  assert.deepEqual(projectGmFactionMarketplaceRows(input), []);
+  const rows = projectGmFactionMarketplaceRows({ ...input, inventoryBasisObservations: [
+    { timestamp: '2026-08-26T12:00:00Z', faction: 'USTUR', starbase: 'UST-1', asset: 'Ammo', knownQuantity: 100, knownInventoryValueAtlas: 20 },
+  ] });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].unitPriceAtlas, 0.2);
+  assert.equal(rows[0].grossAtlas, 10);
+});
+
+test('GM deposits blend known wallet basis with observed starbase basis for an inventory shortfall', () => {
+  const rows = projectGmFactionMarketplaceRows({
+    walletUniverse: buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { MUD: ['mud'] } }),
+    trades: [{ id: 'buy', timestamp: '2026-08-24T00:00:00Z', marketplace: 'GM', side: 'buy', wallet: 'gm', asset: 'Fuel', quantity: 25, settledAtlas: 5 }],
+    flows: [
+      { id: 'move', timestamp: '2026-08-25T00:00:00Z', flow: 'wallet-transfer', asset: 'Fuel', quantity: 50, origin: 'wallet:gm', destination: 'wallet:mud' },
+      { id: 'deposit', timestamp: '2026-08-26T00:00:00Z', flow: 'css-deposit', asset: 'Fuel', quantity: 50, origin: 'wallet:mud', destination: 'MUD-1', faction: 'MUD' },
+    ],
+    inventoryBasisObservations: [
+      { timestamp: '2026-08-26T12:00:00Z', faction: 'MUD', starbase: 'MUD-1', asset: 'Fuel', knownQuantity: 100, knownInventoryValueAtlas: 40 },
+    ],
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].unitPriceAtlas, 0.3);
+  assert.equal(rows[0].grossAtlas, 15);
+});
+
 test('GM sells consume faction withdrawal lots on fill but retain the withdrawal timestamp', () => {
   const universe = buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { MUD: ['mud'] } });
   const rows = projectGmFactionMarketplaceRows({
