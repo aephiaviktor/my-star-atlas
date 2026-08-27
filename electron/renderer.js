@@ -6698,11 +6698,12 @@ function renderEarningsMarketplace(result) {
   for (const entry of [...visibleRows].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))) {
     const tr = document.createElement('tr');
     const quantity = Number(entry.quantity) || 0;
-    const gross = Number(entry.grossAtlas) || 0;
+    const basisAvailable = entry.basisAvailable !== false;
+    const gross = basisAvailable ? (Number(entry.grossAtlas) || 0) : null;
     const txFee = Number(entry.txFeeAtlas) || 0;
     const net = Number(entry.netAtlas ?? entry.settledAtlas ?? 0);
     const unitMetric = quantity > 0
-      ? (earningsMarketplaceSide === 'buy' ? (gross + txFee) / quantity : net / quantity)
+      ? (earningsMarketplaceSide === 'buy' ? (basisAvailable ? (gross + txFee) / quantity : null) : net / quantity)
       : null;
     for (const column of visibleColumns) tr.appendChild(createMarketplaceEarningsCell(entry, column.id, { quantity, gross, txFee, net, unitMetric }));
     earningsMarketplaceTableBody.appendChild(tr);
@@ -6726,7 +6727,8 @@ function createMarketplaceEarningsCell(entry, columnId, calculated) {
   const values = {
     timestamp: formatMarketplaceTimestamp(entry.timestamp), marketplace: entry.marketplace || 'LM',
     starbase: entry.starbase || '--', asset: entry.asset || '--', amount: formatMarketplaceWhole(calculated.quantity),
-    grossAtlas: formatMarketplaceAtlas(calculated.gross, 6), price: formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
+    grossAtlas: calculated.gross == null ? '--' : formatMarketplaceAtlas(calculated.gross, 6),
+    price: entry.basisAvailable === false ? '--' : formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
     marketplaceFee: formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6), txsFee: formatMarketplaceAtlas(calculated.txFee, 2),
     netAtlas: formatMarketplaceAtlas(calculated.net, 2), unitMetric: calculated.unitMetric == null ? '--' : formatMarketplaceAtlas(calculated.unitMetric, 8),
     orderId: entry.orderId || '--', signature: entry.signature || '--',

@@ -593,14 +593,17 @@ function normalizeFactionGmMarketplaceRow(row) {
   const timestamp = String(row?._time || '');
   const id = String(row?.eventId || '');
   if (!id || !Number.isFinite(Date.parse(timestamp)) || !(quantity > 0)) return null;
+  const basisAvailable = String(row?.basisAvailable ?? 'true').toLowerCase() !== 'false';
   return {
     id, timestamp, marketplace: 'GM', market: 'GM', side: String(row.side || '').toLowerCase(),
     faction: String(row.faction || ''), profile: String(row.profile || ''),
     asset: String(row.asset || ''), rawMint: String(row.rawMint || ''), starbase: String(row.starbase || ''),
     wallet: String(row.wallet || ''), quantity,
-    unitPriceAtlas: Number(row.unitPriceAtlas || 0), grossAtlas: Number(row.grossAtlas || 0),
+    basisAvailable, unitPriceAtlas: basisAvailable ? Number(row.unitPriceAtlas || 0) : null,
+    grossAtlas: basisAvailable ? Number(row.grossAtlas || 0) : null,
     marketplaceFeeAtlas: Number(row.marketplaceFeeAtlas || 0), txFeeAtlas: 0,
-    netAtlas: Number(row.netAtlas || 0), settledAtlas: Number(row.settledAtlas || 0),
+    netAtlas: basisAvailable ? Number(row.netAtlas || 0) : null,
+    settledAtlas: basisAvailable ? Number(row.settledAtlas || 0) : null,
     signature: String(row.custodySignature || ''), orderId: String(row.orderId || ''),
   };
 }
@@ -5275,7 +5278,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
   }]));
   const atlasPerSol = await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null);
   const cursorInputSnapshot = marketplaceCursorSnapshot(
-    checkpoint.assetFlowBackfilled ? checkpoint.walletCursors : {},
+    {},
     checkpoint.orderCursors,
     checkpoint.activeOrderIds,
     checkpoint.archivedOrderIds,

@@ -27,7 +27,7 @@ function loadCheckpointCursorResolver() {
 
 test('Marketplace cursor inputs preserve durable migration and asset-flow behavior without persisting exhaustion markers', () => {
   assert.match(main, /marketplaceCursorSnapshot\(\s*migrationWalletCursors,\s*needsTradeEnrichment \? \{\} : checkpoint\.orderCursors/);
-  assert.match(main, /checkpoint\.assetFlowBackfilled \? checkpoint\.walletCursors : \{\}/);
+  assert.match(main, /marketplaceCursorSnapshot\(\s*\{\},\s*checkpoint\.orderCursors/);
   assert.equal((main.match(/const checkpointCursors = resolveMarketplaceCheckpointCursors\(checkpoint, scanned\)/g) || []).length, 2);
   const resolve = loadCheckpointCursorResolver();
   const checkpoint = {

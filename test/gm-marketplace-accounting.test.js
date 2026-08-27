@@ -180,11 +180,14 @@ test('GM deposits with unknown wallet basis use faction starbase observations in
       { id: 'deposit', timestamp: '2026-08-26T00:00:00Z', flow: 'css-deposit', asset: 'Ammo', rawMint: 'ammo', quantity: 50, origin: 'wallet:ust', destination: 'UST-1', faction: 'USTUR' },
     ],
   };
-  assert.deepEqual(projectGmFactionMarketplaceRows(input), []);
+  const unresolved = projectGmFactionMarketplaceRows(input);
+  assert.equal(unresolved.length, 1);
+  assert.equal(unresolved[0].basisAvailable, false);
   const rows = projectGmFactionMarketplaceRows({ ...input, inventoryBasisObservations: [
     { timestamp: '2026-08-26T12:00:00Z', faction: 'USTUR', starbase: 'UST-1', asset: 'Ammo', knownQuantity: 100, knownInventoryValueAtlas: 20 },
   ] });
   assert.equal(rows.length, 1);
+  assert.equal(rows[0].basisAvailable, true);
   assert.equal(rows[0].unitPriceAtlas, 0.2);
   assert.equal(rows[0].grossAtlas, 10);
 });

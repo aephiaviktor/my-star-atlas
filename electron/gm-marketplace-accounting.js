@@ -302,14 +302,17 @@ function projectGmFactionMarketplaceRows({ trades = [], flows = [], walletUniver
     const allocation = basis.outgoingBasis.get(String(deposit.sourceFlowId || ''));
     if (!allocation || deposit.provenance !== 'exact' || !(allocation.unitCostAtlas >= 0)) continue;
     let unitPriceAtlas = allocation.unitCostAtlas;
-    if (allocation.imputedQuantity > 0) {
+    let basisAvailable = allocation.imputedQuantity === 0;
+    if (!basisAvailable) {
       const poolKey = createStarbasePoolKey({ faction: deposit.faction, starbase: deposit.starbase, asset: deposit.asset });
       const estimate = calculateForwardStockpileAverage(
         inventoryBasisObservations.filter((observation) => createStarbasePoolKey(observation) === poolKey),
         { from: deposit.depositTimestamp },
       );
-      if (!estimate || !(estimate.unitCostAtlas > 0)) continue;
-      unitPriceAtlas = (allocation.totalCostAtlas + allocation.imputedQuantity * estimate.unitCostAtlas) / allocation.quantity;
+      if (estimate?.unitCostAtlas > 0) {
+        unitPriceAtlas = (allocation.totalCostAtlas + allocation.imputedQuantity * estimate.unitCostAtlas) / allocation.quantity;
+        basisAvailable = true;
+      }
     }
     rows.push({
       id: `gm-buy:${deposit.depositFlowId}:${deposit.sourceFlowId}`, market: 'GM', side: 'buy',
@@ -318,6 +321,7 @@ function projectGmFactionMarketplaceRows({ trades = [], flows = [], walletUniver
       wallet: deposit.sourceWallet, quantity: deposit.quantity, unitPriceAtlas,
       grossAtlas: deposit.quantity * unitPriceAtlas, marketplaceFeeAtlas: 0,
       netAtlas: deposit.quantity * unitPriceAtlas, settledAtlas: deposit.quantity * unitPriceAtlas,
+      basisAvailable,
       custodySignature: deposit.depositFlowId, sourceFlowId: deposit.sourceFlowId,
     });
   }
@@ -369,7 +373,7 @@ function formatGmFactionMarketplaceTestLine(row) {
   const tagText = Object.entries(tags).filter(([, value]) => String(value || '').trim())
     .map(([key, value]) => `${key}=${escapeInfluxTag(value)}`).join(',');
   const fields = [
-    `quantity=${Number(row.quantity)}`, `unitPriceAtlas=${Number(row.unitPriceAtlas)}`,
+    `quantity=${Number(row.quantity)}`, `basisAvailable=${row.basisAvailable !== false}`, `unitPriceAtlas=${Number(row.unitPriceAtlas)}`,
     `grossAtlas=${Number(row.grossAtlas || 0)}`, `marketplaceFeeAtlas=${Number(row.marketplaceFeeAtlas || 0)}`,
     `netAtlas=${Number(row.netAtlas || 0)}`, `settledAtlas=${Number(row.settledAtlas || 0)}`,
     `wallet=${escapeInfluxString(row.wallet)}`, `custodySignature=${escapeInfluxString(row.custodySignature)}`,
