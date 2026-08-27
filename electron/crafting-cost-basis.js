@@ -32,6 +32,40 @@ function buildCraftingBasisByDay(appliedEventResults = []) {
   return basisByDay;
 }
 
+// Temporary valuation policy until dated inventory prices are available:
+// value every historical ingredient quantity with the current weighted basis
+// of the same asset at the same starbase. This is projection-only; it does not
+// consume or mutate the chronological inventory ledger.
+function buildCurrentInventoryCraftingBasisByDay({ craftingRows = [], inventoryRows = [] } = {}) {
+  const inventoryByPool = new Map((inventoryRows || []).map((row) => [
+    `${String(row?.location || '').trim()}\n${String(row?.asset || '').trim()}`,
+    row,
+  ]));
+  const basisByDay = new Map();
+  for (const row of craftingRows || []) {
+    const isoDate = String(row?.isoDate || '').trim();
+    const starbase = String(row?.starbase || '').trim();
+    const output = String(row?.output || '').trim();
+    if (!isoDate || !starbase || !output) continue;
+    let basis = 0;
+    let uncosted = !Array.isArray(row.ingredients) || row.ingredients.length === 0;
+    for (const ingredient of row.ingredients || []) {
+      const asset = String(ingredient?.input || '').trim();
+      const quantity = finiteOrNull(ingredient?.amount);
+      const inventory = inventoryByPool.get(`${starbase}\n${asset}`);
+      const unitBasis = finiteOrNull(inventory?.totalCostPerUnit);
+      if (!asset || !(quantity > 0) || !inventory || !(Number(inventory.quantity) > 0)
+        || Number(inventory.uncostedQuantity || 0) > 0 || unitBasis == null || unitBasis < 0) {
+        uncosted = true;
+        continue;
+      }
+      basis += quantity * unitBasis;
+    }
+    basisByDay.set(`${isoDate}\n${starbase}\n${output}`, { basis, uncosted, provenance: 'current_inventory_fallback' });
+  }
+  return basisByDay;
+}
+
 function enrichCraftingEarningsRows({ craftingRows = [], craftingBasisByDay = new Map(), resolvePrice = () => null, atlasPerSol = null } = {}) {
   return craftingRows.map((craftingRow) => {
     const outputPriceAtl = finiteOrNull(resolvePrice(craftingRow.output));
@@ -69,4 +103,4 @@ function enrichCraftingEarningsRows({ craftingRows = [], craftingBasisByDay = ne
   });
 }
 
-module.exports = { buildCraftingBasisByDay, enrichCraftingEarningsRows };
+module.exports = { buildCraftingBasisByDay, buildCurrentInventoryCraftingBasisByDay, enrichCraftingEarningsRows };

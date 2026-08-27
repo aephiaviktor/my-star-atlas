@@ -59,7 +59,7 @@ const {
   applyVerifiedFleetCrew,
 } = require('./rental-history');
 const { buildCostLedgerResult } = require('./production-ledger-events');
-const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
+const { buildCurrentInventoryCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { publishInventoryBasisSnapshots } = require('./inventory-basis-publication');
 const { readInventoryBasisSnapshots } = require('./inventory-basis-read');
@@ -7530,7 +7530,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     }
   }
 
-  const craftingBasisByDay = buildCraftingBasisByDay(inventoryCostLedgerAppliedEventResults);
+  const craftingBasisByDay = buildCurrentInventoryCraftingBasisByDay({ craftingRows, inventoryRows: inventoryCostLedgerRows });
   const upgradingBasisByDay = new Map();
   const totalLotBasis = (lot) => Object.values(lot?.costs || {}).reduce((sum, value) => sum + Number(value || 0), 0) + Number(lot?.cargoCost || 0);
   for (const applied of inventoryCostLedgerAppliedEventResults) {

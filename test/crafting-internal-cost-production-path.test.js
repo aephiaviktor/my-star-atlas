@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { buildCostLedgerResult } = require('../electron/production-ledger-events');
-const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('../electron/crafting-cost-basis');
+const { buildCraftingBasisByDay, buildCurrentInventoryCraftingBasisByDay, enrichCraftingEarningsRows } = require('../electron/crafting-cost-basis');
 
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
@@ -68,8 +68,33 @@ test('faction-isolated inputs and replayed crafting events cannot duplicate basi
   assert.equal(once.has('2026-08-08\nMUD-1\nFramework'), false);
 });
 
+test('temporary 30-day internal basis values historical ingredients from current same-starbase inventory basis', () => {
+  const basis = buildCurrentInventoryCraftingBasisByDay({
+    craftingRows: [
+      craftRow({ isoDate: '2026-08-07', starbase: 'MRZ-18', output: 'Food', ingredients: [{ input: 'Biomass', amount: 1000 }] }),
+      craftRow({ isoDate: '2026-08-08', starbase: 'MRZ-18', output: 'Food', ingredients: [{ input: 'Biomass', amount: 2000 }] }),
+    ],
+    inventoryRows: [{ location: 'MRZ-18', asset: 'Biomass', quantity: 258569622, uncostedQuantity: 0, totalCostPerUnit: 0.00017987791641945792 }],
+  });
+  assert.equal(basis.get('2026-08-07\nMRZ-18\nFood').basis, 0.17987791641945792);
+  assert.equal(basis.get('2026-08-08\nMRZ-18\nFood').basis, 0.35975583283891584);
+});
+
+test('current inventory basis remains unavailable across starbases or with uncosted inventory', () => {
+  const rows = [craftRow({ starbase: 'MRZ-20', ingredients: [{ input: 'Biomass', amount: 1000 }] })];
+  assert.equal(buildCurrentInventoryCraftingBasisByDay({
+    craftingRows: rows,
+    inventoryRows: [{ location: 'MRZ-18', asset: 'Biomass', quantity: 1000, uncostedQuantity: 0, totalCostPerUnit: 1 }],
+  }).get('2026-08-08\nMRZ-20\nFramework').uncosted, true);
+  assert.equal(buildCurrentInventoryCraftingBasisByDay({
+    craftingRows: rows,
+    inventoryRows: [{ location: 'MRZ-20', asset: 'Biomass', quantity: 1000, uncostedQuantity: 1, totalCostPerUnit: 1 }],
+  }).get('2026-08-08\nMRZ-20\nFramework').uncosted, true);
+});
+
 test('automatic prefetch requests ledger-backed Crafting snapshot through IPC and renderer fails margin closed', () => {
   assert.match(renderer, /api\.getEarningsSnapshot\(\{ \.\.\.settings, earningsSubtab: 'crafting' \}\)/);
   assert.match(main, /needsInventoryLedger = \['breakeven', 'crafting', 'upgrading'\]\.includes\(snapshotScope\)/);
+  assert.match(main, /buildCurrentInventoryCraftingBasisByDay\(\{ craftingRows, inventoryRows: inventoryCostLedgerRows \}\)/);
   assert.match(renderer, /columnId === 'profitMargin'\) return createTextCell\(entry\.profitMarginPercent == null \? '--'/);
 });

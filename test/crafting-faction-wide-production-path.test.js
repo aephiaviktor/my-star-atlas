@@ -120,7 +120,7 @@ test('automatic prefetch, profile-scoped checkpoint, IPC, renderer, and other Ea
   assert.match(main, /app\.setPath\('userData', path\.join\(baseUserData, 'profiles', profileName\)\)/);
   assert.match(main, /ledgerCheckpointPath\(ledgerFaction\)/);
   assert.match(main, /loadLedgerCheckpoint\(checkpointPath, \{ faction: ledgerFaction, profile: profileName \}\)/);
-  assert.match(main, /buildCraftingBasisByDay\(inventoryCostLedgerAppliedEventResults\)/);
+  assert.match(main, /buildCurrentInventoryCraftingBasisByDay\(\{ craftingRows, inventoryRows: inventoryCostLedgerRows \}\)/);
   assert.match(main, /enrichCraftingEarningsRows\(\{/);
   assert.match(renderer, /renderEarningsCrafting\(result\)/);
   assert.match(renderer, /profitMarginPercent == null \? '--'/);
