@@ -88,9 +88,10 @@ test('Marketplace and non-Earnings production regions are unchanged by this pack
   assert.doesNotMatch(renderer, /renderer-triggered diagnostic|historical signature scan/i);
 });
 
-test('dedicated Allocation entry point is invoked only on demand', async () => {
+test('Allocation UI remains on demand while ledger-backed snapshots reuse its canonical cached source', async () => {
  const snapshot=sourceBetween(main,'async function fetchEarningsSnapshot',"handleTrustedIpc('app:get-profile-name'");
- assert.doesNotMatch(snapshot,/fetchCargoAllocationSnapshot|cargoAllocationSource/);
+ assert.doesNotMatch(snapshot,/fetchCargoAllocationSnapshot/);
+ assert.match(snapshot,/needsInventoryLedger \? cargoAllocationSource\.load\(settings\)/);
  let registered;
  const loadAllocation = async (payload) => ({ payload });
  registerCargoAllocationIpc((channel, handler) => { registered = { channel, handler }; }, {

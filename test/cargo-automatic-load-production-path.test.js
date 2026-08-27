@@ -29,9 +29,10 @@ test('healthy movement does not duplicate real costs, cycles, legs, volume, or a
  assert.equal(result.cargoRows.length,1); assert.equal(result.cargoAllocationRows.length,5);
  assert.equal(row.burnedFuel,17835.494841372823); assert.equal(row.txCostSol,0.000003750409485994295); assert.equal(row.cargoVolume,93888); assert.equal(row.cargoCycles,1); assert.equal(row.cargoLegs,3);
 });
-test('shared Earnings never starts, awaits, or returns Allocation',()=>{
+test('shared Earnings reuses Allocation only for ledger-backed views and does not return Allocation UI rows',()=>{
  const shared=main.slice(main.indexOf('async function fetchEarningsSnapshot'),main.indexOf('function createWindow'));
- assert.doesNotMatch(shared,/fetchCargoAllocation|cargoAllocationSource|cargoAllocationResult|cargoAllocationRows|cargoAllocationError/);
+ assert.match(shared,/needsInventoryLedger \? cargoAllocationSource\.load\(settings\)/);
+ assert.doesNotMatch(shared,/fetchCargoAllocationSnapshot|cargoAllocationResult|cargoAllocationRows|cargoAllocationError/);
  let registered;
  registerCargoAllocationIpc((channel,handler)=>{registered={channel,handler};},{runTelemetry:async(p,n,fn)=>fn(),loadAllocation:async()=>({ok:true})});
  assert.equal(registered.channel,CARGO_ALLOCATION_CHANNEL);

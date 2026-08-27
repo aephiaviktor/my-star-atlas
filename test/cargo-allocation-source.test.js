@@ -74,6 +74,32 @@ test('repeated tab openings share one flight then use successful cache', async (
   assert.equal(calls, 6);
 });
 
+test('expired last-good allocation remains available when background refresh fails', async () => {
+  let clock = 0;
+  let fail = false;
+  let calls = 0;
+  const { instance } = source({
+    cacheTtlMs: 10,
+    clock: () => clock,
+    queryBatch: async () => {
+      calls += 1;
+      if (fail) throw new Error('influx-temporary-failure');
+      return calls === 6 ? csv([pivotRow()]) : '';
+    },
+  });
+  const initial = await instance.load(SETTINGS);
+  assert.equal(initial.rows.length, 1);
+
+  clock = 11;
+  fail = true;
+  const stale = await instance.load(SETTINGS);
+  assert.equal(stale.ok, true);
+  assert.equal(stale.availability, 'stale');
+  assert.equal(stale.rows.length, 1);
+  assert.equal(stale.stale, true);
+  assert.match(stale.refreshError, /influx-temporary-failure/);
+});
+
 test('faction switch cancels stale flight and never reuses its cache key', async () => {
   const { instance } = source({ queryBatch: () => new Promise(() => {}) });
   const mud = instance.load(SETTINGS);

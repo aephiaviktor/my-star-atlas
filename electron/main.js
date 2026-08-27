@@ -6900,6 +6900,8 @@ async function fetchRentalHistoryIndex(settings, connection, sot) {
 async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const rawPayload = payload || (await readSettings());
   const settings = normalizeSettings(rawPayload);
+  const snapshotScope = String(rawPayload.earningsScope || rawPayload.earningsSubtab || '').trim().toLowerCase();
+  const needsInventoryLedger = ['breakeven', 'crafting', 'upgrading'].includes(snapshotScope);
   const fleetResult = await fetchProfileFleets(settings);
   const fleets = Array.isArray(fleetResult.fleets) ? fleetResult.fleets : [];
   const connection = createSolanaConnection(settings);
@@ -7047,6 +7049,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   let rawCargoCostError = '';
   let rentalHistoryIndex = createRentalHistoryIndex([]);
   let rentalHistoryError = '';
+  let cargoAllocationLedgerRows = [];
+  let cargoAllocationLedgerError = '';
   // Each category already fans out into several Flux queries. Starting all
   // five categories at once overloads the Influx proxy (17+ concurrent
   // queries) and causes 504s, so use bounded category concurrency instead.
@@ -7059,6 +7063,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     () => fetchCanonicalRawCargoCosts(settings),
     () => fetchCargoVolumeEarningsRows(settings),
     () => fetchRentalHistoryIndex(settings, connection, sot),
+    () => needsInventoryLedger ? cargoAllocationSource.load(settings) : Promise.resolve({ ok: true, rows: [] }),
   ];
   const earningsCategoryNames = ['Scanning', 'Mining', 'Cargo', 'Crafting', 'Upgrading'];
   if (diagnosticContext) diagnosticContext.stage = 'category_collection';
@@ -7080,7 +7085,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       }
     }
   }));
-  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult, rentalHistoryResult] = earningsRowResults;
+  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult, rentalHistoryResult, cargoAllocationLedgerResult] = earningsRowResults;
   if (diagnosticContext) diagnosticContext.stage = 'projection';
   if (scanningResult.status === 'fulfilled') scanningRows = scanningResult.value;
   else scanningError = String(scanningResult.reason?.message || scanningResult.reason || 'scan_rows_unavailable');
@@ -7103,6 +7108,12 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     : String(cargoVolumeResult.reason?.message || cargoVolumeResult.reason || 'cargo_volume_rows_unavailable').slice(0, 240);
   if (rentalHistoryResult.status === 'fulfilled') rentalHistoryIndex = rentalHistoryResult.value;
   else rentalHistoryError = String(rentalHistoryResult.reason?.message || rentalHistoryResult.reason || 'rental_history_unavailable').slice(0, 240);
+  if (cargoAllocationLedgerResult.status === 'fulfilled' && cargoAllocationLedgerResult.value?.ok) {
+    cargoAllocationLedgerRows = cargoAllocationLedgerResult.value.rows || [];
+    cargoAllocationLedgerError = cargoAllocationLedgerResult.value.refreshError || '';
+  } else {
+    cargoAllocationLedgerError = String(cargoAllocationLedgerResult.reason?.message || cargoAllocationLedgerResult.reason || cargoAllocationLedgerResult.value?.error || 'cargo_allocation_ledger_unavailable').slice(0, 240);
+  }
 
   const rentalForRow = (fleet, fleetLabel, isoDate, authoritativeFleetAccount = '') => resolveHistoricalRental(rentalHistoryIndex, {
     fleetAccount: authoritativeFleetAccount || fleet?.key || '',
@@ -7438,8 +7449,6 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     txsCostsAtlas: atlasPerSol != null && Number.isFinite(Number(row.txCostSol)) ? Number(row.txCostSol) * atlasPerSol : null,
   }));
   const ledgerFaction = normalizeFaction(settings.faction);
-  const snapshotScope = String(rawPayload.earningsScope || rawPayload.earningsSubtab || '').trim().toLowerCase();
-  const needsInventoryLedger = ['breakeven', 'crafting', 'upgrading'].includes(snapshotScope);
   const ledgerFactionStarbases = needsInventoryLedger ? await fetchFactionStarbases(settings) : null;
   const localMarketResult = needsInventoryLedger
     ? await fetchMarketplaceTradesFromInflux(settings)
@@ -7468,7 +7477,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     openingInventoryRows,
     scanningRows: rows,
     miningRows: mining,
-    cargoRows: [],
+    cargoRows: cargoAllocationLedgerRows,
     craftingRows: ledgerCraftingRows,
     upgradingRows: upgradingRows.ledgerEvents || [],
     localMarketTrades: localMarketResult.trades,
@@ -7853,6 +7862,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     cargoFetchDiagnostics,
     rawCargoCostError,
     rentalHistoryError,
+    cargoAllocationLedgerError,
     rawCargoCostQuery: rawCargoCosts.query,
     rawCargoCostCutoverManifestVersion: RAW_COST_CUTOVER_MANIFEST_VERSION,
     rawCargoCostCutoverUtc: cutoverSelection.cutover,

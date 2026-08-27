@@ -4,7 +4,7 @@ const { cargoAllocationUtcBatches, cargoAllocationProcessingFailure, buildCargoA
 
 const DEFAULT_BATCH_TIMEOUT_MS = 20_000;
 const DEFAULT_WORKER_TIMEOUT_MS = 135_000;
-const DEFAULT_CACHE_TTL_MS = 5 * 60_000;
+const DEFAULT_CACHE_TTL_MS = 15 * 60_000;
 
 function allocationScopeKey(settings = {}) {
   return [settings.faction, settings.profile || settings.profileName, settings.playerProfile, settings.influxBucket, '30d']
@@ -44,7 +44,7 @@ function withTimeout(promise, timeoutMs, timeoutError, signal) {
   });
 }
 
-function createCargoAllocationSource({ queryBatch, parseCsv, projectRows, now = () => new Date(), batchTimeoutMs = DEFAULT_BATCH_TIMEOUT_MS, workerTimeoutMs = DEFAULT_WORKER_TIMEOUT_MS, cacheTtlMs = DEFAULT_CACHE_TTL_MS } = {}) {
+function createCargoAllocationSource({ queryBatch, parseCsv, projectRows, now = () => new Date(), clock = Date.now, batchTimeoutMs = DEFAULT_BATCH_TIMEOUT_MS, workerTimeoutMs = DEFAULT_WORKER_TIMEOUT_MS, cacheTtlMs = DEFAULT_CACHE_TTL_MS } = {}) {
   if (typeof queryBatch !== 'function' || typeof parseCsv !== 'function' || typeof projectRows !== 'function') throw new TypeError('cargo_allocation_source_dependencies_required');
   const cache = new Map();
   const flights = new Map();
@@ -81,12 +81,18 @@ function createCargoAllocationSource({ queryBatch, parseCsv, projectRows, now = 
   function load(settings = {}, { retry = false } = {}) {
     const key = allocationScopeKey(settings);
     const cached = cache.get(key);
-    if (!retry && cached && Date.now() - cached.savedAt < cacheTtlMs) return Promise.resolve({ ...cached.value, cacheHit: true });
+    if (!retry && cached && clock() - cached.savedAt < cacheTtlMs) return Promise.resolve({ ...cached.value, cacheHit: true });
     if (flights.has(key)) return flights.get(key).promise;
     const controller = new AbortController();
     const promise = withTimeout(execute(settings, controller.signal), workerTimeoutMs, `cargo_allocation_worker_timeout_${workerTimeoutMs}ms`, controller.signal)
-      .then((value) => { cache.set(key, { savedAt: Date.now(), value }); return value; })
-      .catch((error) => ({ ok: false, availability: boundedError(error).includes('cancelled') ? 'cancelled' : 'unavailable', rows: [], error: boundedError(error), diagnostics: { scopeKey: key }, checkedAt: new Date().toISOString() }))
+      .then((value) => { cache.set(key, { savedAt: clock(), value }); return value; })
+      .catch((error) => {
+        const refreshError = boundedError(error);
+        if (cached && !refreshError.includes('cancelled')) {
+          return { ...cached.value, ok: true, availability: 'stale', stale: true, refreshError, cacheHit: true };
+        }
+        return { ok: false, availability: refreshError.includes('cancelled') ? 'cancelled' : 'unavailable', rows: [], error: refreshError, diagnostics: { scopeKey: key }, checkedAt: new Date().toISOString() };
+      })
       .finally(() => { if (flights.get(key)?.controller === controller) flights.delete(key); });
     flights.set(key, { controller, promise });
     return promise;

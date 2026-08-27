@@ -134,7 +134,8 @@ test('automatic prefetch excludes Allocation and dedicated renderer owns availab
   const shared = main.slice(main.indexOf('async function fetchEarningsSnapshot'), main.indexOf('function createWindow'));
   assert.match(renderer, /async function runFactionBackgroundPrefetch[^]*refreshEarnings/);
   assert.match(renderer, /api\.getEarningsSnapshot\(settings\)/);
-  assert.doesNotMatch(shared, /fetchCargoAllocationSnapshot|cargoAllocationSource|cargoAllocationRows|cargoAllocationError/);
+  assert.doesNotMatch(shared, /fetchCargoAllocationSnapshot|cargoAllocationRows|cargoAllocationError/);
+  assert.match(shared, /needsInventoryLedger \? cargoAllocationSource\.load\(settings\)/);
   assert.match(renderer, /async function refreshCargoAllocation/);
   assert.match(renderer, /api\.getCargoAllocation\(settings\)/);
   assert.match(renderer, /cargoAllocationAvailability === 'unavailable'/);

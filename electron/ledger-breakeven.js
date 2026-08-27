@@ -39,7 +39,7 @@ function buildLedgerBreakevenRows({ ledgerRows = [], inventoryRows = [], prices 
     const knownCoverageRatio = coverageDenominator > 0
       ? Math.min(1, knownCostQuantity / coverageDenominator)
       : 0;
-    const estimatedPercent = inventory > 0 ? Math.round((1 - knownCoverageRatio) * 100) : 0;
+    const estimatedPercent = coverageDenominator > 0 ? Math.round((1 - knownCoverageRatio) * 100) : null;
     const fullyTracked = inventory > 0 && reconciliationStatus === 'reconciled' && uncostedQuantity <= 1e-9;
     const perUnit = (value) => knownCostQuantity > 0 ? Number(value || 0) / knownCostQuantity : null;
     const scanningCostPerUnit = perUnit(ledger?.costs?.scanning);

@@ -154,9 +154,10 @@ test('zero or non-positive Cargo Amount makes Cargo Cost/Unit unavailable', asyn
   }
 });
 
-test('Allocation remains dedicated and constructs no Solana RPC path', () => {
+test('Allocation UI remains dedicated while ledger consumers reuse the same non-RPC source', () => {
   const shared = main.slice(main.indexOf('async function fetchEarningsSnapshot'), main.indexOf('function createWindow'));
-  assert.doesNotMatch(shared, /cargoAllocation|fetchCargoAllocation|earnings:cargo-allocation/);
+  assert.match(shared, /needsInventoryLedger \? cargoAllocationSource\.load\(settings\)/);
+  assert.doesNotMatch(shared, /fetchCargoAllocationSnapshot|earnings:cargo-allocation/);
   for (const file of ['cargo-allocation-source.js', 'cargo-allocation-projector.js', 'cargo-allocation-ipc.js']) {
     const source = fs.readFileSync(path.join(__dirname, '..', 'electron', file), 'utf8');
     assert.doesNotMatch(source, /new Connection|getAccountInfo|getMultipleAccountsInfo|getSignaturesForAddress|@solana\/web3\.js/);

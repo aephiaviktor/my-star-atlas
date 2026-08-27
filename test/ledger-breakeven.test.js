@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildLedgerBreakevenRows } = require('../electron/ledger-breakeven');
+const { buildCostLedgerResult } = require('../electron/production-ledger-events');
 
 test('known weighted unit cost is extrapolated across uncosted inventory', () => {
   const [row] = buildLedgerBreakevenRows({
@@ -23,6 +24,22 @@ test('known weighted unit cost is extrapolated across uncosted inventory', () =>
   assert.equal(row.scanningCostPerUnit, 0.0267);
   assert.equal(row.landedCostPerUnit, 0.0267);
   assert.equal(row.inventoryValue, 2.67);
+});
+
+test('completed cargo delivery carries source mining basis plus allocated transport cost into destination Breakeven', () => {
+  const ledger = buildCostLedgerResult({
+    miningRows: [{ isoDate: '2026-08-01', starbase: 'MRZ-19', rawMaterial: 'Copper Ore', mined: 100, totalCostsAtlas: 0.0231 }],
+    cargoRows: [{ timestamp: '2026-08-01T02:00:00Z', origin: 'MRZ-19', destination: 'MRZ-20', asset: 'Copper Ore', amount: 40, totalCostsAtlas: 0.00564 }],
+  });
+  const destination = buildLedgerBreakevenRows({
+    ledgerRows: ledger.ledger.snapshot(),
+    inventoryRows: [{ starbase: 'MRZ-20', asset: 'Copper Ore', quantity: 40 }],
+  }).find((row) => row.starbase === 'MRZ-20');
+
+  assert.equal(destination.miningCostPerUnit, 0.000231);
+  assert.equal(destination.cargoCostPerUnit, 0.000141);
+  assert.ok(Math.abs(destination.landedCostPerUnit - 0.000372) < 1e-12);
+  assert.equal(destination.fullyTracked, true);
 });
 
 test('fully reconciled and costed inventory is marked 100% tracked', () => {
@@ -57,4 +74,14 @@ test('zero known-cost quantity remains unpriced instead of inventing a basis', (
   assert.equal(row.baseCostPerUnit, null);
   assert.equal(row.landedCostPerUnit, null);
   assert.equal(row.inventoryValue, null);
+});
+
+test('empty inventory reports unavailable coverage instead of a misleading zero-percent estimate', () => {
+  const [row] = buildLedgerBreakevenRows({
+    ledgerRows: [{ location: 'ONI-2', asset: 'Copper Ore', quantity: 0, uncostedQuantity: 0, costs: {}, cargoCost: 0 }],
+    inventoryRows: [{ starbase: 'ONI-2', asset: 'Copper Ore', quantity: 0 }],
+  });
+  assert.equal(row.estimatedPercent, null);
+  assert.equal(row.fullyTracked, false);
+  assert.equal(row.landedCostPerUnit, null);
 });

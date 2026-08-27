@@ -314,6 +314,10 @@ test('production Breakeven reconciles current inventory against ledger quantity'
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   const ledgerBreakeven = readFileSync(path.join(__dirname, '..', 'electron', 'ledger-breakeven.js'), 'utf8');
   assert.match(main, /const \{ buildLedgerBreakevenRows \} = require\('\.\/ledger-breakeven'\)/);
+  assert.match(main, /needsInventoryLedger \? cargoAllocationSource\.load\(settings\)/);
+  assert.match(main, /cargoAllocationLedgerRows = cargoAllocationLedgerResult\.value\.rows \|\| \[\]/);
+  assert.match(main, /cargoRows: cargoAllocationLedgerRows/);
+  assert.doesNotMatch(main, /cargoRows: \[\]/);
   assert.match(ledgerBreakeven, /const quantityVariance = inventory - ledgerQuantity;/);
   assert.match(ledgerBreakeven, /const reconciliationStatus = Math\.abs\(quantityVariance\) <= 1e-9/);
   assert.match(ledgerBreakeven, /quantityVariance > 0 \? 'surplus' : 'shortfall'/);
@@ -374,8 +378,8 @@ test('earnings column selections persist per subtab in local storage', () => {
   assert.match(renderer, /persistEarningsColumnState\(\);/);
 });
 
-test('fully tracked Cost Coverage never renders as zero percent estimated', () => {
+test('Cost Coverage distinguishes fully tracked, estimated, and unavailable pools', () => {
   const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
-  assert.match(renderer, /entry\.fullyTracked \? '100% tracked' : `\$\{formatWholeNumber\(entry\.estimatedPercent \?\? 100\)\}% estimated`/);
+  assert.match(renderer, /entry\.fullyTracked \? '100% tracked' : entry\.estimatedPercent == null \? '--' : `\$\{formatWholeNumber\(entry\.estimatedPercent\)\}% estimated`/);
   assert.doesNotMatch(renderer, /`0% estimated`/);
 });
