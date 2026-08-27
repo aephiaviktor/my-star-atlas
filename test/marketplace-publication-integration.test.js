@@ -383,6 +383,14 @@ test('backfill, enrichment, and GM trade-flow cursor interlock formulas remain e
   assert.match(global, /tradeEnrichmentVersion: checkpoint\.tradeEnrichmentVersion/);
 });
 
+test('marketplace publication normalizes a configured Influx write URL to its base host', () => {
+  const start = main.indexOf('function marketplacePublicationSettings');
+  const end = main.indexOf('async function resolveMarketplacePublicationOrganization', start);
+  const body = main.slice(start, end);
+  assert.match(body, /baseUrl: getInfluxBaseUrl\(settings\.influxUrl\)/);
+  assert.doesNotMatch(body, /baseUrl: String\(settings\.influxUrl/);
+});
+
 test('configuration and persisted diagnostics are bounded and secret-free', () => {
   assert.match(main, /token: realToken \|\| 'staging-only'/);
   assert.match(main, /canPost: Boolean\(realToken && organization\)/);

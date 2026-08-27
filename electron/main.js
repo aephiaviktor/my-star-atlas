@@ -4386,7 +4386,7 @@ function marketplacePublicationSettings(settings, organization) {
     storageRoot: getAppRoot(),
     installationId: crypto.createHash('sha256').update(`msa-marketplace-installation:v1\n${getAppRoot()}`, 'utf8').digest('hex'),
     applicationProfile: profileName,
-    baseUrl: String(settings.influxUrl || '').trim(),
+    baseUrl: getInfluxBaseUrl(settings.influxUrl),
     bucket: String(settings.influxBucket || '').trim(),
     organization: organization || undefined,
     // The accepted coordinator requires a non-empty value to create a provisional
