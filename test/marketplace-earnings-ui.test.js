@@ -93,19 +93,21 @@ test('Marketplace sync discovers current player orders and persists incremental 
   assert.match(main, /schemaVersion: 2/);
 });
 
-test('Marketplace reads use separate supported v1 and v2 Flux queries instead of Influx SQL', () => {
-  assert.match(main, /_measurement == "marketplace"/);
-  assert.match(main, /_measurement == "marketplace_v2"/);
-  assert.match(main, /pivot\(rowKey: \["_time", "tradeId"\]/);
-  assert.match(main, /pivot\(rowKey: \["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"\]/);
+test('Marketplace reads use only the supported v2 Flux query instead of legacy Marketplace or Influx SQL', () => {
+  const start = main.indexOf('async function fetchMarketplaceTradesFromInflux');
+  const end = main.indexOf('async function fetchMarketplaceAssetFlowsFromInflux', start);
+  const reader = main.slice(start, end);
+  assert.match(reader, /_measurement == "marketplace_v2"/);
+  assert.doesNotMatch(reader, /_measurement == "marketplace"(?:\s|and|\))/);
+  assert.match(reader, /pivot\(rowKey: \["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"\]/);
   assert.doesNotMatch(main, /queryInfluxSql|type:\s*['"]sql['"]/);
 });
 
-test('legacy Marketplace rows are rescanned once and compatibility dedupe replaces fallback duplicates', () => {
+test('Marketplace rescans local checkpoints for enrichment without legacy Influx compatibility dedupe', () => {
   assert.match(main, /tradeEnrichmentVersion/);
   assert.match(main, /needsTradeEnrichment \? \{\} : checkpoint\.walletCursors/);
   assert.match(main, /prior\.signature === trade\.signature/);
-  assert.match(main, /dedupeMarketplaceRows/);
+  assert.doesNotMatch(main, /dedupeMarketplaceRows/);
 });
 
 test('GM sync separates configured execution wallets from all profile custody wallets', () => {

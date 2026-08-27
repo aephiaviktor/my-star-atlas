@@ -77,9 +77,7 @@ const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-m
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows } = require('./marketplace-asset-flow');
 const { enrichGmTradesWithInventoryBasis } = require('./gm-marketplace-accounting');
 const {
-  normalizeMarketplaceV1Row,
   normalizeMarketplaceV2Row,
-  dedupeMarketplaceRows,
   deriveMarketplaceUnionKey,
 } = require('./marketplace-trade-compat');
 const { deriveMarketplaceTradeId } = require('./marketplace-v2-point');
@@ -591,15 +589,10 @@ async function fetchNewestMarketplaceTradeMs(settings) {
   if (!bucket || !profile) return null;
   const faction = normalizeFaction(settings.faction);
   const scope = marketplaceScopeFlux(faction, profile);
-  const flux = `v1 = from(bucket: "${escapeFluxString(bucket)}")
-  |> range(start: -40d)
-  |> filter(fn: (r) => r._measurement == "marketplace" and r._field == "quantity")
-  |> filter(fn: (r) => ${scope})
-v2 = from(bucket: "${escapeFluxString(bucket)}")
+  const flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -40d)
   |> filter(fn: (r) => r._measurement == "marketplace_v2" and (r._field == "fallbackQuantity" or r._field == "enrichedQuantity"))
   |> filter(fn: (r) => ${scope})
-union(tables: [v1, v2])
   |> group()
   |> sort(columns: ["_time"], desc: false)
   |> last(column: "_time")
@@ -619,12 +612,6 @@ async function fetchMarketplaceTradesFromInflux(settings) {
   if (!bucket || !profile) return { trades: [], error: profile ? 'influx_not_configured' : 'local_market_profile_not_configured' };
   const faction = normalizeFaction(settings.faction);
   const scope = marketplaceScopeFlux(faction, profile);
-  const v1Flux = `from(bucket: "${escapeFluxString(bucket)}")
-  |> range(start: -40d)
-  |> filter(fn: (r) => r._measurement == "marketplace")
-  |> filter(fn: (r) => ${scope})
-  |> pivot(rowKey: ["_time", "tradeId"], columnKey: ["_field"], valueColumn: "_value")
-  |> sort(columns: ["_time"], desc: true)`;
   const v2Flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -40d)
   |> filter(fn: (r) => r._measurement == "marketplace_v2")
@@ -632,14 +619,9 @@ async function fetchMarketplaceTradesFromInflux(settings) {
   |> pivot(rowKey: ["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
   try {
-    const [v1Result, v2Result] = await Promise.allSettled([
-      queryInfluxFlux(settings, v1Flux), queryInfluxFlux(settings, v2Flux),
-    ]);
-    if (v1Result.status === 'rejected' && v2Result.status === 'rejected') throw v1Result.reason;
+    const v2Result = await queryInfluxFlux(settings, v2Flux);
     const context = { applicationProfile: profileName, selectedProfile: profile, faction, scopeProven: true };
-    const v1Rows = v1Result.status === 'fulfilled' ? parseInfluxCsv(v1Result.value).map((row) => normalizeMarketplaceV1Row(row, context)) : [];
-    const v2Rows = v2Result.status === 'fulfilled' ? parseInfluxCsv(v2Result.value).map((row) => normalizeMarketplaceV2Row(row, context)).filter(Boolean) : [];
-    const trades = dedupeMarketplaceRows([...v1Rows, ...v2Rows]);
+    const trades = parseInfluxCsv(v2Result).map((row) => normalizeMarketplaceV2Row(row, context)).filter(Boolean);
     trades.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp) || deriveMarketplaceUnionKey(a).localeCompare(deriveMarketplaceUnionKey(b)));
     return { trades, error: '' };
   } catch (error) {
