@@ -8,7 +8,7 @@ const { recordTelemetryCounter } = require('./telemetry-context');
 
 const bs58 = bs58Module.default || bs58Module;
 const DEFAULT_START_ISO = '2026-07-24T00:00:00.000Z';
-const MAX_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+const MAX_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
 const DEFAULT_REQUESTS_PER_SECOND = 8;
 const MAX_SIGNATURE_PAGES = 20;
 const GM_PROGRAM_ID = 'traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg';

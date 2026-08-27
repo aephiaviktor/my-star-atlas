@@ -10,6 +10,8 @@ const {
   matchGmCustodyFlows,
   calculateGmWalletInventoryBasis,
   enrichGmTradesWithInventoryBasis,
+  projectGmFactionMarketplaceRows,
+  formatGmFactionMarketplaceTestLine,
 } = require('../electron/gm-marketplace-accounting');
 
 test('wallet universe keeps GM wallets separate from faction profile custody wallets', () => {
@@ -148,4 +150,51 @@ test('newest unknown basis uses available forward observations provisionally and
   assert.equal(imputed[0].imputedTotalCostAtlas, 60);
   assert.equal(imputed[0].provisional, true);
   assert.equal(imputed[0].provenance, 'imputed_forward_7d_stockpile_average');
+});
+
+test('GM buys become faction rows only when DepositCargoToGame consumes global weighted-average inventory', () => {
+  const universe = buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { USTUR: ['hhd'] } });
+  const rows = projectGmFactionMarketplaceRows({
+    walletUniverse: universe,
+    trades: [
+      { id: 'b1', timestamp: '2026-08-24T00:00:00Z', marketplace: 'GM', side: 'buy', wallet: 'gm', asset: 'Fuel', rawMint: 'fuel', quantity: 100, settledAtlas: 200 },
+      { id: 'b2', timestamp: '2026-08-24T01:00:00Z', marketplace: 'GM', side: 'buy', wallet: 'gm', asset: 'Fuel', rawMint: 'fuel', quantity: 50, settledAtlas: 200 },
+    ],
+    flows: [
+      { id: 'move', signature: 'move-sig', timestamp: '2026-08-25T00:00:00Z', flow: 'wallet-transfer', asset: 'Fuel', rawMint: 'fuel', quantity: 60, origin: 'wallet:gm', destination: 'wallet:hhd' },
+      { id: 'deposit', signature: 'deposit-sig', timestamp: '2026-08-26T00:00:00Z', flow: 'css-deposit', asset: 'Fuel', rawMint: 'fuel', quantity: 60, origin: 'wallet:hhd', destination: 'UST-1', faction: 'USTUR', starbase: 'UST-1' },
+    ],
+  });
+  assert.deepEqual(rows.map((row) => ({ side: row.side, faction: row.faction, timestamp: row.timestamp, quantity: row.quantity, unitPriceAtlas: row.unitPriceAtlas })), [
+    { side: 'buy', faction: 'USTUR', timestamp: '2026-08-26T00:00:00Z', quantity: 60, unitPriceAtlas: 400 / 150 },
+  ]);
+});
+
+test('GM sells consume faction withdrawal lots on fill but retain the withdrawal timestamp', () => {
+  const universe = buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { MUD: ['mud'] } });
+  const rows = projectGmFactionMarketplaceRows({
+    walletUniverse: universe,
+    trades: [{ id: 'fill', signature: 'fill-sig', orderId: 'order', timestamp: '2026-08-27T00:00:00Z', marketplace: 'GM', side: 'sell', wallet: 'gm', asset: 'Iron Ore', rawMint: 'iron', quantity: 40, unitPriceAtlas: 3, grossAtlas: 120, marketplaceFeeAtlas: 6, netAtlas: 114 }],
+    flows: [
+      { id: 'withdraw', signature: 'withdraw-sig', timestamp: '2026-08-25T00:00:00Z', flow: 'css-withdraw', asset: 'Iron Ore', rawMint: 'iron', quantity: 100, origin: 'MUD-1', destination: 'wallet:mud', faction: 'MUD', starbase: 'MUD-1' },
+      { id: 'move', signature: 'move-sig', timestamp: '2026-08-25T01:00:00Z', flow: 'wallet-transfer', asset: 'Iron Ore', rawMint: 'iron', quantity: 100, origin: 'wallet:mud', destination: 'wallet:gm' },
+    ],
+  });
+  assert.deepEqual(rows.map((row) => ({ side: row.side, faction: row.faction, timestamp: row.timestamp, quantity: row.quantity, unitPriceAtlas: row.unitPriceAtlas, netAtlas: row.netAtlas })), [
+    { side: 'sell', faction: 'MUD', timestamp: '2026-08-25T00:00:00Z', quantity: 40, unitPriceAtlas: 3, netAtlas: 114 },
+  ]);
+  assert.match(formatGmFactionMarketplaceTestLine(rows[0]), /^marketplace_reconciliation_test_v1,/);
+});
+
+test('GM sell fills cannot consume a faction withdrawal that arrives later', () => {
+  const universe = buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { MUD: ['mud'] } });
+  const rows = projectGmFactionMarketplaceRows({
+    walletUniverse: universe,
+    trades: [{ id: 'old-fill', timestamp: '2026-08-24T00:00:00Z', marketplace: 'GM', side: 'sell', wallet: 'gm', asset: 'Fuel', rawMint: 'fuel', quantity: 10, unitPriceAtlas: 2 }],
+    flows: [
+      { id: 'future-withdraw', timestamp: '2026-08-25T00:00:00Z', flow: 'css-withdraw', asset: 'Fuel', rawMint: 'fuel', quantity: 10, origin: 'MUD-1', destination: 'wallet:mud', faction: 'MUD' },
+      { id: 'future-move', timestamp: '2026-08-25T01:00:00Z', flow: 'wallet-transfer', asset: 'Fuel', rawMint: 'fuel', quantity: 10, origin: 'wallet:mud', destination: 'wallet:gm' },
+    ],
+  });
+  assert.deepEqual(rows, []);
 });

@@ -75,7 +75,12 @@ const {
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows } = require('./marketplace-asset-flow');
-const { enrichGmTradesWithInventoryBasis } = require('./gm-marketplace-accounting');
+const {
+  enrichGmTradesWithInventoryBasis,
+  buildGmWalletUniverse,
+  projectGmFactionMarketplaceRows,
+  formatGmFactionMarketplaceTestLine,
+} = require('./gm-marketplace-accounting');
 const {
   normalizeMarketplaceV2Row,
   deriveMarketplaceUnionKey,
@@ -4422,6 +4427,29 @@ async function writeInventoryBasisLinesToInflux(settings, lines) {
   if (!response.ok) throw new Error(`inventory_basis_influx_http_${response.status}`);
 }
 
+async function writeMarketplaceReconciliationTestLines(settings, rows) {
+  const lines = rows.map(formatGmFactionMarketplaceTestLine).filter(Boolean);
+  if (!lines.length) return { written: 0, error: '' };
+  try {
+    await writeInventoryBasisLinesToInflux(settings, lines.join('\n'));
+    return { written: lines.length, error: '' };
+  } catch (error) {
+    return { written: 0, error: marketplacePublicationErrorCode(error?.message, 'marketplace_reconciliation_test_write_failed') };
+  }
+}
+
+function buildGmShadowWalletUniverse(gmTradingWallets, assetFlows) {
+  const profileWalletsByFaction = { MUD: [], ONI: [], USTUR: [] };
+  for (const flow of assetFlows || []) {
+    const faction = normalizeFaction(flow.faction);
+    if (!profileWalletsByFaction[faction]) continue;
+    const location = flow.flow === 'css-deposit' ? flow.origin : flow.flow === 'css-withdraw' ? flow.destination : '';
+    const match = String(location).match(/^wallet:(.+)$/);
+    if (match) profileWalletsByFaction[faction].push(match[1]);
+  }
+  return buildGmWalletUniverse({ gmTradingWallets, profileWalletsByFaction });
+}
+
 function marketplaceTradeRank(trade) {
   return String(trade.orderId || '').trim() || String(trade.creationSignature || '').trim() || Number(trade.txFeeAtlas || 0) !== 0
     ? 'enriched' : 'fallback';
@@ -5214,6 +5242,9 @@ async function fetchGlobalMarketTrades(settings, connection) {
   for (const event of scanned.assetFlows) flowById.set(event.id, event);
   const assetFlows = Array.from(flowById.values()).filter((event) => Date.parse(event.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
+  const shadowWalletUniverse = buildGmShadowWalletUniverse(extraWallets, assetFlows);
+  const shadowRows = projectGmFactionMarketplaceRows({ trades, flows: assetFlows, walletUniverse: shadowWalletUniverse });
+  const shadowWrite = await writeMarketplaceReconciliationTestLines(settings, shadowRows);
   const checkpointCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
   const cursorOutputSnapshot = {
     walletCursors: checkpointCursors.walletCursors,
@@ -5273,7 +5304,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     assetFlowBackfilled: assetFlowBackfilledNext,
   });
   return {
-    trades, assetFlows, error: publishError,
+    trades, assetFlows, error: publishError, marketplaceReconciliationTest: shadowWrite,
     rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
     exhaustion: scanned.exhaustion || null,
   };

@@ -313,11 +313,11 @@ test('LM execution tx fee is attributed to the user when their wallet pays it an
   assert.equal(computeTxFeeAtlas({}, 1000), 0);
 });
 
-test('local market start ISO falls back to a rolling 30-day window after the anchor', () => {
+test('local market start ISO uses the temporary rolling 3-day validation window after the anchor', () => {
   const anchorMs = Date.parse('2026-07-24T00:00:00.000Z');
-  assert.equal(resolveLocalMarketStartIso(anchorMs + 6 * 24 * 60 * 60 * 1000), '2026-07-24T00:00:00.000Z');
-  assert.equal(resolveLocalMarketStartIso(anchorMs + 35 * 24 * 60 * 60 * 1000), '2026-07-29T00:00:00.000Z');
-  assert.equal(resolveLocalMarketStartIso(anchorMs + 90 * 24 * 60 * 60 * 1000), '2026-09-22T00:00:00.000Z');
+  assert.equal(resolveLocalMarketStartIso(anchorMs + 6 * 24 * 60 * 60 * 1000), '2026-07-27T00:00:00.000Z');
+  assert.equal(resolveLocalMarketStartIso(anchorMs + 35 * 24 * 60 * 60 * 1000), '2026-08-25T00:00:00.000Z');
+  assert.equal(resolveLocalMarketStartIso(anchorMs + 90 * 24 * 60 * 60 * 1000), '2026-10-19T00:00:00.000Z');
 });
 
 test('local market pacer spaces calls and never exceeds the configured rate', async () => {

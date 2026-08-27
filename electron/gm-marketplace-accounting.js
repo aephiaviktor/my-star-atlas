@@ -170,19 +170,19 @@ function matchGmCustodyFlows(flows, walletUniverse) {
     if (flow.flow === 'css-withdraw' && destinationWallet && profile.has(destinationWallet)) {
       addLot(destinationWallet, flow.asset, {
         direction: 'sell', quantity, withdrawalFlowId: flow.id, withdrawalTimestamp: flow.timestamp,
-        faction: normalizeFaction(flow.faction), starbase: flow.origin,
+        faction: normalizeFaction(flow.faction), starbase: flow.origin, rawMint: flow.rawMint,
       });
       continue;
     }
     if (flow.flow === 'css-deposit' && originWallet && profile.has(originWallet)) {
       const { taken, remaining } = takeLots(originWallet, flow.asset, quantity, 'buy');
       for (const lot of taken) buys.push({
-        asset: flow.asset, quantity: lot.quantity, faction: normalizeFaction(flow.faction), starbase: flow.destination,
+        asset: flow.asset, rawMint: flow.rawMint || lot.rawMint, quantity: lot.quantity, faction: normalizeFaction(flow.faction), starbase: flow.destination,
         depositTimestamp: flow.timestamp, depositFlowId: flow.id, sourceWallet: lot.sourceWallet,
         sourceFlowId: lot.sourceFlowId, provenance: 'exact',
       });
       if (remaining > 0) buys.push({
-        asset: flow.asset, quantity: remaining, faction: normalizeFaction(flow.faction), starbase: flow.destination,
+        asset: flow.asset, rawMint: flow.rawMint, quantity: remaining, faction: normalizeFaction(flow.faction), starbase: flow.destination,
         depositTimestamp: flow.timestamp, depositFlowId: flow.id, sourceWallet: '', sourceFlowId: '', provenance: 'imputed_fifo',
       });
       continue;
@@ -190,7 +190,7 @@ function matchGmCustodyFlows(flows, walletUniverse) {
     if (flow.flow !== 'wallet-transfer' || !originWallet || !destinationWallet) continue;
     if (gm.has(originWallet) && profile.has(destinationWallet)) {
       addLot(destinationWallet, flow.asset, {
-        direction: 'buy', quantity, sourceWallet: originWallet, sourceFlowId: flow.id,
+        direction: 'buy', quantity, rawMint: flow.rawMint, sourceWallet: originWallet, sourceFlowId: flow.id,
       });
       continue;
     }
@@ -210,9 +210,9 @@ function matchGmCustodyFlows(flows, walletUniverse) {
     if (profile.has(originWallet) && gm.has(destinationWallet)) {
       const { taken } = takeLots(originWallet, flow.asset, quantity, 'sell');
       for (const lot of taken) sells.push({
-        asset: flow.asset, quantity: lot.quantity, faction: lot.faction, starbase: lot.starbase,
+        asset: flow.asset, rawMint: flow.rawMint || lot.rawMint, quantity: lot.quantity, faction: lot.faction, starbase: lot.starbase,
         withdrawalTimestamp: lot.withdrawalTimestamp, withdrawalFlowId: lot.withdrawalFlowId,
-        destinationWallet, destinationFlowId: flow.id, provenance: 'exact',
+        arrivalTimestamp: flow.timestamp, destinationWallet, destinationFlowId: flow.id, provenance: 'exact',
       });
     }
   }
@@ -274,6 +274,101 @@ function enrichGmTradesWithInventoryBasis(trades, appliedEventResults, { fallbac
   });
 }
 
+function projectGmFactionMarketplaceRows({ trades = [], flows = [], walletUniverse } = {}) {
+  const gmWallets = new Set(walletUniverse?.gmWallets || []);
+  const inventoryEvents = [];
+  for (const trade of trades) {
+    if (String(trade?.marketplace || trade?.market || '').toUpperCase() !== 'GM' || !gmWallets.has(String(trade.wallet || ''))) continue;
+    const quantity = Number(trade.quantity);
+    if (!(quantity > 0)) continue;
+    if (trade.side === 'buy') inventoryEvents.push({
+      id: trade.id, timestamp: trade.timestamp, wallet: trade.wallet, asset: trade.asset,
+      side: 'buy', quantity, unitPriceAtlas: Number(trade.settledAtlas) / quantity,
+    });
+    else if (trade.side === 'sell') inventoryEvents.push({
+      id: trade.id, timestamp: trade.timestamp, wallet: trade.wallet, asset: trade.asset, side: 'sell', quantity,
+    });
+  }
+  for (const flow of flows) {
+    const wallet = walletFromLocation(flow.origin);
+    if (flow.flow === 'wallet-transfer' && gmWallets.has(wallet)) inventoryEvents.push({
+      id: flow.id, timestamp: flow.timestamp, wallet, asset: flow.asset, side: 'transfer-out', quantity: flow.quantity,
+    });
+  }
+  const basis = calculateGmWalletInventoryBasis(inventoryEvents);
+  const custody = matchGmCustodyFlows(flows, walletUniverse);
+  const rows = [];
+  for (const deposit of custody.buys) {
+    const allocation = basis.outgoingBasis.get(String(deposit.sourceFlowId || ''));
+    if (!allocation || deposit.provenance !== 'exact' || !(allocation.unitCostAtlas >= 0)) continue;
+    const unitPriceAtlas = allocation.unitCostAtlas;
+    rows.push({
+      id: `gm-buy:${deposit.depositFlowId}:${deposit.sourceFlowId}`, market: 'GM', side: 'buy',
+      faction: deposit.faction, profile: deposit.faction, timestamp: deposit.depositTimestamp,
+      asset: deposit.asset, rawMint: deposit.rawMint, starbase: deposit.starbase,
+      wallet: deposit.sourceWallet, quantity: deposit.quantity, unitPriceAtlas,
+      grossAtlas: deposit.quantity * unitPriceAtlas, marketplaceFeeAtlas: 0,
+      netAtlas: deposit.quantity * unitPriceAtlas, settledAtlas: deposit.quantity * unitPriceAtlas,
+      custodySignature: deposit.depositFlowId, sourceFlowId: deposit.sourceFlowId,
+    });
+  }
+  const sellQueues = new Map();
+  for (const lot of custody.sells) {
+    const key = `${lot.destinationWallet}\n${lot.asset}`;
+    if (!sellQueues.has(key)) sellQueues.set(key, []);
+    sellQueues.get(key).push({ ...lot });
+  }
+  const sellTrades = trades.filter((trade) => String(trade?.marketplace || trade?.market || '').toUpperCase() === 'GM'
+    && trade.side === 'sell' && gmWallets.has(String(trade.wallet || '')))
+    .slice().sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp) || String(left.id).localeCompare(String(right.id)));
+  for (const trade of sellTrades) {
+    const quantity = Number(trade.quantity);
+    const queue = sellQueues.get(`${trade.wallet}\n${trade.asset}`) || [];
+    let remaining = quantity;
+    for (const lot of queue) {
+      if (!(remaining > 0) || !(lot.quantity > 0) || Date.parse(lot.arrivalTimestamp) > Date.parse(trade.timestamp)) continue;
+      const allocated = Math.min(remaining, lot.quantity);
+      const ratio = quantity > 0 ? allocated / quantity : 0;
+      rows.push({
+        id: `gm-sell:${lot.withdrawalFlowId}:${trade.id}`, market: 'GM', side: 'sell',
+        faction: lot.faction, profile: lot.faction, timestamp: lot.withdrawalTimestamp,
+        asset: lot.asset, rawMint: lot.rawMint || trade.rawMint, starbase: lot.starbase,
+        wallet: trade.wallet, quantity: allocated, unitPriceAtlas: Number(trade.unitPriceAtlas),
+        grossAtlas: Number(trade.grossAtlas || 0) * ratio,
+        marketplaceFeeAtlas: Number(trade.marketplaceFeeAtlas || 0) * ratio,
+        netAtlas: Number(trade.netAtlas ?? trade.settledAtlas ?? 0) * ratio,
+        settledAtlas: Number(trade.settledAtlas ?? trade.netAtlas ?? 0) * ratio,
+        custodySignature: lot.withdrawalFlowId,
+        executionSignature: String(trade.signature || trade.id), orderId: String(trade.orderId || ''),
+      });
+      lot.quantity -= allocated;
+      remaining -= allocated;
+    }
+  }
+  return rows.sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.id.localeCompare(right.id));
+}
+
+function escapeInfluxTag(value) { return String(value ?? '').replace(/([ ,=])/g, '\\$1'); }
+function escapeInfluxString(value) { return `"${String(value ?? '').replace(/(["\\])/g, '\\$1')}"`; }
+function formatGmFactionMarketplaceTestLine(row) {
+  const timestampMs = Date.parse(row?.timestamp);
+  if (!Number.isFinite(timestampMs) || !(Number(row?.quantity) > 0) || !row?.id || !row?.faction) return '';
+  const tags = {
+    eventId: row.id, market: 'GM', faction: row.faction, profile: row.profile,
+    side: row.side, asset: row.asset, rawMint: row.rawMint, starbase: row.starbase,
+  };
+  const tagText = Object.entries(tags).filter(([, value]) => String(value || '').trim())
+    .map(([key, value]) => `${key}=${escapeInfluxTag(value)}`).join(',');
+  const fields = [
+    `quantity=${Number(row.quantity)}`, `unitPriceAtlas=${Number(row.unitPriceAtlas)}`,
+    `grossAtlas=${Number(row.grossAtlas || 0)}`, `marketplaceFeeAtlas=${Number(row.marketplaceFeeAtlas || 0)}`,
+    `netAtlas=${Number(row.netAtlas || 0)}`, `settledAtlas=${Number(row.settledAtlas || 0)}`,
+    `wallet=${escapeInfluxString(row.wallet)}`, `custodySignature=${escapeInfluxString(row.custodySignature)}`,
+    `executionSignature=${escapeInfluxString(row.executionSignature || '')}`, `orderId=${escapeInfluxString(row.orderId || '')}`,
+  ].join(',');
+  return `marketplace_reconciliation_test_v1,${tagText} ${fields} ${BigInt(timestampMs) * 1000000n}`;
+}
+
 module.exports = {
   buildGmWalletUniverse,
   createStarbasePoolKey,
@@ -282,4 +377,6 @@ module.exports = {
   matchGmCustodyFlows,
   calculateGmWalletInventoryBasis,
   enrichGmTradesWithInventoryBasis,
+  projectGmFactionMarketplaceRows,
+  formatGmFactionMarketplaceTestLine,
 };
