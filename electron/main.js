@@ -4382,7 +4382,7 @@ function marketplacePublicationSettings(settings, organization) {
 async function resolveMarketplacePublicationOrganization(settings) {
   const token = String(settings.influxAuthToken || '').trim().replace(/^(?:Token|Bearer)\s+/i, '');
   if (!settings.influxUrl || !settings.influxBucket || !token) return null;
-  try { return await resolveInfluxOrgId(settings.influxUrl, token, settings.influxBucket); }
+  try { return await resolveInfluxOrgId(getInfluxBaseUrl(settings.influxUrl), token, settings.influxBucket); }
   catch (_error) { return null; }
 }
 
@@ -5036,7 +5036,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   const influxNewestMs = await fetchNewestMarketplaceTradeMs(settings).catch(() => null);
   const anchorMs = Math.max(checkpointNewestMs, Number.isFinite(influxNewestMs) ? influxNewestMs : 0, startMs);
   const overlapStart = new Date(Math.max(startMs, anchorMs - 60 * 60 * 1000)).toISOString();
-  const needsTradeEnrichment = checkpoint.tradeEnrichmentVersion < 1;
+  const needsTradeEnrichment = checkpoint.tradeEnrichmentVersion < 2;
   const cursorInputSnapshot = marketplaceCursorSnapshot(
     needsTradeEnrichment ? {} : checkpoint.walletCursors,
     needsTradeEnrichment ? {} : checkpoint.orderCursors,
@@ -5107,7 +5107,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   const marketplaceBackfilledNext = publication.allCurrentComplete && holdsCompleted && !hasActiveTradeHold;
   const tradeEnrichmentVersionNext = marketplaceBackfilledNext
     && scanned.stats.transactionMisses === 0 && publishError === '' && publication.allEnrichableComplete
-    ? 1 : checkpoint.tradeEnrichmentVersion;
+    ? 2 : checkpoint.tradeEnrichmentVersion;
   await writeJsonAtomic(filePath, {
     ...checkpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
     marketplaceBackfilled: marketplaceBackfilledNext,
@@ -5138,9 +5138,10 @@ async function fetchGlobalMarketTrades(settings, connection) {
     return { trades: [], error: `gm_trading_wallet_invalid:${String(error?.message || error)}` };
   }
   const profileWallets = decodePlayerProfileWallets(accountInfo);
-  const executionWallets = extraWallets;
-  const trackedWallets = Array.from(new Set([...profileWallets, ...executionWallets]));
-  if (!executionWallets.length) return { trades: [], assetFlows: [], error: 'gm_trading_wallet_not_configured' };
+  // Profile wallets can execute GM orders directly. Configured extra wallets
+  // extend that universe; they are not a prerequisite for GM ingestion.
+  const executionWallets = Array.from(new Set([...profileWallets, ...extraWallets]));
+  const trackedWallets = executionWallets;
   const filePath = globalMarketCheckpointPath();
   const checkpoint = await loadLocalMarketTradeCheckpoint(filePath);
   let openOrders;

@@ -389,6 +389,10 @@ test('marketplace publication normalizes a configured Influx write URL to its ba
   const body = main.slice(start, end);
   assert.match(body, /baseUrl: getInfluxBaseUrl\(settings\.influxUrl\)/);
   assert.doesNotMatch(body, /baseUrl: String\(settings\.influxUrl/);
+  const organizationStart = main.indexOf('async function resolveMarketplacePublicationOrganization');
+  const organizationEnd = main.indexOf('async function writeInventoryBasisLinesToInflux', organizationStart);
+  const organizationBody = main.slice(organizationStart, organizationEnd);
+  assert.match(organizationBody, /resolveInfluxOrgId\(getInfluxBaseUrl\(settings\.influxUrl\), token, settings\.influxBucket\)/);
 });
 
 test('configuration and persisted diagnostics are bounded and secret-free', () => {

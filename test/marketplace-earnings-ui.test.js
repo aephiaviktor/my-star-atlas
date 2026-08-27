@@ -113,9 +113,10 @@ test('Marketplace reads use only the supported v2 Flux query instead of legacy M
   assert.doesNotMatch(main, /queryInfluxSql|type:\s*['"]sql['"]/);
 });
 
-test('Marketplace rescans local checkpoints for enrichment without legacy Influx compatibility dedupe', () => {
-  assert.match(main, /tradeEnrichmentVersion/);
+test('Marketplace rescans local checkpoints for buy/sell recovery without legacy Influx compatibility dedupe', () => {
+  assert.match(main, /checkpoint\.tradeEnrichmentVersion < 2/);
   assert.match(main, /needsTradeEnrichment \? \{\} : checkpoint\.walletCursors/);
+  assert.match(main, /tradeEnrichmentVersionNext[\s\S]*\? 2 : checkpoint\.tradeEnrichmentVersion/);
   assert.match(main, /prior\.signature === trade\.signature/);
   assert.doesNotMatch(main, /dedupeMarketplaceRows/);
 });
@@ -124,8 +125,9 @@ test('GM sync separates configured execution wallets from all profile custody wa
   assert.match(html, /name="gmTradingWallets"/);
   assert.match(renderer, /gmTradingWallets: String\(data\.get\('gmTradingWallets'\)/);
   assert.match(main, /const profileWallets = decodePlayerProfileWallets\(accountInfo\)/);
-  assert.match(main, /const executionWallets = extraWallets/);
-  assert.match(main, /const trackedWallets = Array\.from\(new Set\(\[\.\.\.profileWallets, \.\.\.executionWallets\]\)\)/);
+  assert.match(main, /const executionWallets = Array\.from\(new Set\(\[\.\.\.profileWallets, \.\.\.extraWallets\]\)\)/);
+  assert.match(main, /const trackedWallets = executionWallets/);
+  assert.doesNotMatch(main, /gm_trading_wallet_not_configured/);
   assert.match(main, /fetchOpenLocalMarketOrderIds\(connection, executionWallets\)/);
   assert.match(main, /executionWallets,/);
   assert.match(main, /faction: 'GLOBAL', profile: 'GLOBAL', market: 'GM'/);
@@ -180,8 +182,8 @@ test('Marketplace activation loads snapshots while background, faction refresh, 
   await context.refreshMarketplace({ sync: false });
   await context.refreshMarketplace({ sync: false });
   assert.equal(syncCalls, 0);
-  assert.equal(snapshotCalls, 2);
-  assert.deepEqual(snapshotPayloads.map((settings) => settings.faction), ['MUD', 'MUD']);
+  assert.equal(snapshotCalls, 1);
+  assert.deepEqual(snapshotPayloads.map((settings) => settings.faction), ['MUD']);
 
   let releaseSync;
   const syncGate = new Promise((resolve) => { releaseSync = resolve; });
@@ -194,7 +196,7 @@ test('Marketplace activation loads snapshots while background, faction refresh, 
   releaseSync();
   await Promise.all([startupBackground, scheduledTick, manualRefresh, factionRefresh]);
   assert.equal(syncCalls, 1);
-  assert.equal(snapshotCalls, 3);
+  assert.equal(snapshotCalls, 2);
 });
 
 test('Marketplace skipped cross-faction sync still loads and uses the requested faction snapshot', async () => {

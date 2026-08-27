@@ -7017,6 +7017,7 @@ function renderEarningsCargoAllocations(result) {
 // to the UI on first app start.
 let earningsRefreshInFlight = null;
 const marketplaceRefreshInFlight = new Map();
+const marketplaceSnapshotCache = new Map();
 const MARKETPLACE_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 
 async function refreshMarketplace({ sync = false } = {}) {
@@ -7027,7 +7028,15 @@ async function refreshMarketplace({ sync = false } = {}) {
   if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   const settings = { ...(latestSettings || getFormPayload()), trigger: telemetryTrigger };
   const faction = normalizeFaction(settings.faction);
-  if (marketplaceRefreshInFlight.has(faction)) return marketplaceRefreshInFlight.get(faction);
+  const profile = getActivePlayerProfile(settings);
+  const cacheKey = `${faction}:${profile}`;
+  if (!sync && marketplaceSnapshotCache.has(cacheKey)) {
+    const cached = marketplaceSnapshotCache.get(cacheKey);
+    latestEarningsResult = { ...(latestEarningsResult || {}), ...cached, ok: latestEarningsResult?.ok ?? cached.ok };
+    renderEarningsMarketplace(latestEarningsResult);
+    return cached;
+  }
+  if (marketplaceRefreshInFlight.has(cacheKey)) return marketplaceRefreshInFlight.get(cacheKey);
   const promise = (async () => {
     renderEarningsMarketplaceLoading(sync ? 'Syncing Marketplace data...' : 'Loading Marketplace data...');
     if (sync) {
@@ -7036,6 +7045,7 @@ async function refreshMarketplace({ sync = false } = {}) {
     }
     const result = await api.getMarketplaceSnapshot(settings);
     if (faction !== normalizeFaction((latestSettings || getFormPayload()).faction)) return result;
+    marketplaceSnapshotCache.set(cacheKey, result);
     latestEarningsResult = { ...(latestEarningsResult || {}), ...result, ok: latestEarningsResult?.ok ?? result.ok };
     renderEarningsMarketplace(latestEarningsResult);
     return result;
@@ -7043,9 +7053,9 @@ async function refreshMarketplace({ sync = false } = {}) {
     console.error(error);
     setText(earningsMarketplaceSyncStatus, 'Marketplace sync unavailable');
   }).finally(() => {
-    if (marketplaceRefreshInFlight.get(faction) === promise) marketplaceRefreshInFlight.delete(faction);
+    if (marketplaceRefreshInFlight.get(cacheKey) === promise) marketplaceRefreshInFlight.delete(cacheKey);
   });
-  marketplaceRefreshInFlight.set(faction, promise);
+  marketplaceRefreshInFlight.set(cacheKey, promise);
   return promise;
 }
 
