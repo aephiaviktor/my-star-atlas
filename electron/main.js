@@ -4314,6 +4314,18 @@ function marketplaceCursorSnapshot(walletCursors, orderCursors, activeOrderIds, 
   return { walletCursors, orderCursors, activeOrderIds, archivedOrderIds };
 }
 
+async function seedCurrentWalletCursors(connection, trackedWallets, walletCursors) {
+  if (Object.keys(walletCursors || {}).length) return walletCursors;
+  const seeded = {};
+  for (const wallet of trackedWallets) {
+    const rows = await connection.getSignaturesForAddress(new PublicKey(wallet), {
+      commitment: 'confirmed', limit: 1,
+    });
+    if (rows?.[0]?.signature) seeded[String(wallet)] = String(rows[0].signature);
+  }
+  return seeded;
+}
+
 function marketplaceTradeHoldCandidate(trade, { market, faction, profileScope, cursorInputSnapshot, cursorOutputSnapshot }, publicationInputs = []) {
   const logicalKey = deriveMarketplaceTradeId({
     market, faction, profileScope, executionSignature: trade.signature,
@@ -5041,11 +5053,14 @@ async function fetchLocalMarketTrades(settings, connection) {
   const anchorMs = Math.max(checkpointNewestMs, Number.isFinite(influxNewestMs) ? influxNewestMs : 0, startMs);
   const overlapStart = new Date(Math.max(startMs, anchorMs - 60 * 60 * 1000)).toISOString();
   const needsTradeEnrichment = checkpoint.tradeEnrichmentVersion < 2;
+  const migrationWalletCursors = needsTradeEnrichment
+    ? await seedCurrentWalletCursors(connection, trackedWallets, checkpoint.walletCursors)
+    : checkpoint.walletCursors;
   const cursorInputSnapshot = marketplaceCursorSnapshot(
-    checkpoint.walletCursors,
+    migrationWalletCursors,
     needsTradeEnrichment ? {} : checkpoint.orderCursors,
-    checkpoint.activeOrderIds,
-    checkpoint.archivedOrderIds,
+    needsTradeEnrichment ? checkpoint.orders.map((order) => String(order.orderId)).filter(Boolean) : checkpoint.activeOrderIds,
+    needsTradeEnrichment ? [] : checkpoint.archivedOrderIds,
   );
   const scanned = await scanLocalMarketTrades(connection, {
     trackedWallets,
