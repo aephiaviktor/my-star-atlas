@@ -80,7 +80,7 @@ function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsB
     const mint = String(info.mint || source?.mint || destination?.mint || '');
     const asset = assetsByMint[mint];
     const quantity = Number(info.tokenAmount?.uiAmountString ?? info.tokenAmount?.uiAmount ?? info.amount);
-    if (!asset || !source || !destination || !tracked.has(source.owner) || !tracked.has(destination.owner) || source.owner === destination.owner || !(quantity > 0)) return;
+    if (!asset || !source || !destination || (!tracked.has(source.owner) && !tracked.has(destination.owner)) || source.owner === destination.owner || !(quantity > 0)) return;
     events.push({
       id: `${signature}:${index}:wallet-transfer`, timestamp, signature, type: 'transfer',
       asset: asset.name || asset.asset || String(asset), rawMint: mint, quantity,

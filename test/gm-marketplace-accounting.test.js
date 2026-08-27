@@ -209,6 +209,26 @@ test('GM deposits blend known wallet basis with observed starbase basis for an i
   assert.equal(rows[0].grossAtlas, 15);
 });
 
+test('GM basis follows a priced upstream wallet purchase through the configured GM wallet into CSS', () => {
+  const walletUniverse = buildGmWalletUniverse({
+    gmTradingWallets: ['upstream', 'gm'], profileWalletsByFaction: { ONI: ['gm'] },
+  });
+  const rows = projectGmFactionMarketplaceRows({
+    walletUniverse,
+    trades: [{
+      id: 'buy', timestamp: '2026-08-24T00:00:00Z', marketplace: 'GM', side: 'buy',
+      wallet: 'upstream', asset: 'Fuel', rawMint: 'fuel', quantity: 100, settledAtlas: 25,
+    }],
+    flows: [
+      { id: 'upstream-hop', timestamp: '2026-08-24T01:00:00Z', flow: 'wallet-transfer', asset: 'Fuel', rawMint: 'fuel', quantity: 100, origin: 'wallet:upstream', destination: 'wallet:gm' },
+      { id: 'deposit', timestamp: '2026-08-24T02:00:00Z', flow: 'css-deposit', asset: 'Fuel', rawMint: 'fuel', quantity: 100, origin: 'wallet:gm', destination: 'ONI-1', faction: 'ONI' },
+    ],
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].basisAvailable, true);
+  assert.equal(rows[0].unitPriceAtlas, 0.25);
+});
+
 test('GM sells consume faction withdrawal lots on fill but retain the withdrawal timestamp', () => {
   const universe = buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { MUD: ['mud'] } });
   const rows = projectGmFactionMarketplaceRows({

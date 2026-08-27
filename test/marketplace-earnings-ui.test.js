@@ -136,6 +136,7 @@ test('GM sync separates configured execution wallets from all profile custody wa
   assert.match(main, /const trackedWallets = Array\.from\(new Set\(\[\.\.\.marketplaceWallets, \.\.\.extraWallets\]\)\)/);
   assert.match(main, /getMultipleAccountsInfo\(profileKeys, 'confirmed'\)/);
   assert.match(main, /maxPages: 1/);
+  assert.match(main, /startIso,\s*addressFactory:[\s\S]*decodeAssetFlows/);
   assert.doesNotMatch(main, /gm_trading_wallet_not_configured/);
   assert.match(main, /fetchOpenLocalMarketOrderIds\(connection, executionWallets\)/);
   assert.match(main, /executionWallets,/);

@@ -5270,8 +5270,6 @@ async function fetchGlobalMarketTrades(settings, connection) {
   const existing = checkpoint.trades;
   const startIso = resolveLocalMarketStartIso();
   const startMs = Date.parse(startIso);
-  const checkpointNewestMs = existing.reduce((max, trade) => Math.max(max, Date.parse(trade.timestamp) || 0), startMs);
-  const overlapStart = new Date(Math.max(startMs, checkpointNewestMs - 60 * 60 * 1000)).toISOString();
   const assetsByMint = Object.fromEntries(ASSET_REGISTRY.map((asset) => [asset.mint, asset]));
   const starbasesByKey = Object.fromEntries(STARBASE_REGISTRY.map((starbase) => [starbase.publicKey, {
     name: starbase.name, faction: starbase.faction,
@@ -5291,13 +5289,31 @@ async function fetchGlobalMarketTrades(settings, connection) {
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
     maxPages: 1,
-    startIso: overlapStart,
+    startIso,
     addressFactory: (value) => new PublicKey(value),
     atlasPerSol,
     decodeAssetFlows: (transaction) => decodeMarketplaceAssetFlows(transaction, {
       trackedWallets, assetsByMint, starbasesByKey, atlasPerSol,
     }),
   });
+  const primaryTrackedWallets = new Set(trackedWallets);
+  const upstreamWallets = Array.from(new Set(scanned.assetFlows.flatMap((flow) => {
+    if (flow.flow !== 'wallet-transfer') return [];
+    const origin = String(flow.origin || '').match(/^wallet:(.+)$/)?.[1] || '';
+    const destination = String(flow.destination || '').match(/^wallet:(.+)$/)?.[1] || '';
+    return origin && primaryTrackedWallets.has(destination) && !primaryTrackedWallets.has(origin) ? [origin] : [];
+  }))).sort().slice(0, 16);
+  const upstreamScan = upstreamWallets.length ? await scanLocalMarketTrades(connection, {
+    trackedWallets: upstreamWallets,
+    executionWallets: upstreamWallets,
+    marketAssetsByMint: buildGlobalMarketAssetMap(),
+    knownOrders: [...checkpoint.orders, ...scanned.orders],
+    walletCursors: {}, orderCursors: {}, activeOrderIds: [], archivedOrderIds: [], openOrderIds: [],
+    maxPages: 1,
+    startIso,
+    addressFactory: (value) => new PublicKey(value),
+    atlasPerSol,
+  }) : null;
   const byId = new Map(existing.map((trade) => [trade.id, trade]));
   for (const trade of scanned.trades) byId.set(trade.id, trade);
   const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= startMs)
@@ -5306,13 +5322,14 @@ async function fetchGlobalMarketTrades(settings, connection) {
   for (const event of scanned.assetFlows) flowById.set(event.id, event);
   const assetFlows = Array.from(flowById.values()).filter((event) => Date.parse(event.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
-  const shadowWalletUniverse = buildGmWalletUniverse({ gmTradingWallets: extraWallets, profileWalletsByFaction });
+  const shadowWalletUniverse = buildGmWalletUniverse({ gmTradingWallets: [...extraWallets, ...upstreamWallets], profileWalletsByFaction });
   const inventoryBasisObservations = await readInventoryBasisSnapshots({
     bucket: settings.influxBucket,
     query: async (flux) => parseInfluxCsv(await queryInfluxFlux(settings, flux)),
   }).catch(() => []);
   const shadowRows = projectGmFactionMarketplaceRows({
-    trades, flows: assetFlows, walletUniverse: shadowWalletUniverse, inventoryBasisObservations,
+    trades: [...trades, ...(upstreamScan?.trades || [])], flows: assetFlows,
+    walletUniverse: shadowWalletUniverse, inventoryBasisObservations,
   });
   const shadowWrite = await writeMarketplaceReconciliationTestLines(settings, shadowRows);
   const checkpointCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);

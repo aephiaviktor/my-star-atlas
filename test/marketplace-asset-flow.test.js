@@ -49,3 +49,16 @@ test('decodes direct tracked-wallet SPL transfer and divides one tx fee across f
   assert.equal(rows[0].destination, 'wallet:handler');
   assert.equal(rows[0].quantity, 10);
 });
+
+test('decodes an incoming SPL transfer when only the receiving wallet is tracked', () => {
+  const keys = ['payer', 'source-ata', 'destination-ata'];
+  const balances = [
+    { accountIndex: 1, owner: 'upstream-wallet', mint: 'food-mint', uiTokenAmount: { uiAmountString: '10' } },
+    { accountIndex: 2, owner: 'gm-wallet', mint: 'food-mint', uiTokenAmount: { uiAmountString: '0' } },
+  ];
+  const tx = transaction({ programId: 'token', parsed: { type: 'transferChecked', info: { source: 'source-ata', destination: 'destination-ata', mint: 'food-mint', tokenAmount: { uiAmountString: '10' } } } }, keys, balances);
+  const rows = decodeMarketplaceAssetFlows(tx, { trackedWallets: ['gm-wallet'], assetsByMint: { 'food-mint': { name: 'Food' } } });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].origin, 'wallet:upstream-wallet');
+  assert.equal(rows[0].destination, 'wallet:gm-wallet');
+});
