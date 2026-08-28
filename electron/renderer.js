@@ -1213,6 +1213,12 @@ function captureRendererTelemetryTrigger(fallback = 'unknown') {
 }
 function withTelemetryTrigger(payload, trigger) { return { ...payload, trigger: normalizeTelemetryTrigger(trigger) }; }
 
+function isEarningsSnapshotCacheComplete(result) {
+  if (!result || result.ok !== true) return false;
+  return !['scanningError', 'miningError', 'cargoError', 'craftingError', 'upgradingError']
+    .some((key) => String(result[key] || '').trim());
+}
+
 function getCachedFactionResult(faction, key) {
   const cache = factionCache.get(faction);
   return cache ? cache[key] : null;
@@ -1246,7 +1252,7 @@ async function runFactionBackgroundPrefetch(generation, faction, activeSection) 
   const profile = getActivePlayerProfile(settings);
   const marketplaceCacheKey = `${faction}:${profile}`;
   const earningsTasks = [
-    { key: 'earnings', cached: () => Boolean(getCachedFactionResult(faction, 'earnings')) || !profile, load: async () => { const result = await api.getEarningsSnapshot({ ...settings, earningsSubtab: 'crafting' }); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
+    { key: 'earnings', cached: () => isEarningsSnapshotCacheComplete(getCachedFactionResult(faction, 'earnings')) || !profile, load: async () => { const result = await api.getEarningsSnapshot({ ...settings, earningsSubtab: 'crafting' }); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
     { key: 'earnings-breakeven', cached: () => !profile || api.breakevenCache.inspect(getBreakevenCacheInput(settings))?.entry?.status === 'ready', load: () => api.breakevenCache.ensure(getBreakevenCacheInput(settings), () => api.getEarningsSnapshot({ ...settings, earningsSubtab: 'breakeven' })) },
     { key: 'earnings-upgrading', cached: () => !profile || api.upgradingCache.inspect(getUpgradingCacheInput(settings))?.entry?.status === 'ready', load: () => api.upgradingCache.ensure(getUpgradingCacheInput(settings), () => api.getEarningsSnapshot({ ...settings, earningsSubtab: 'upgrading' })) },
     { key: 'earnings-marketplace', cached: () => !profile || marketplaceSnapshotCache.has(marketplaceCacheKey), load: async () => { const result = await api.getMarketplaceSnapshot(settings); marketplaceSnapshotCache.set(marketplaceCacheKey, result); } },
