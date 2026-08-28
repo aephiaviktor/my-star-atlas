@@ -71,7 +71,7 @@ test('Earnings snapshot stays on the fast path and leaves Marketplace to its own
   assert.match(snapshot, /inventoryBasisFaction: ledgerFaction/);
   assert.match(snapshot, /pendingInventoryBasisSnapshots/);
   assert.doesNotMatch(snapshot, /syncMarketplaceFromChain\(/);
-  assert.match(renderer, /earningsSubtab: currentEarningsSubtab/);
+  assert.match(renderer, /earningsSubtab: 'crafting'/);
   assert.match(renderer, /renderEarningsMarketplaceLoading\('Loading Marketplace data\.\.\.'\)/);
 });
 
@@ -266,7 +266,7 @@ test('Marketplace skipped cross-faction sync still loads and uses the requested 
 test('Marketplace scheduler uses hourly guarded background synchronization', () => {
   assert.match(renderer, /const MARKETPLACE_SYNC_INTERVAL_MS = 60 \* 60 \* 1000;/);
   assert.doesNotMatch(renderer, /const MARKETPLACE_SYNC_INTERVAL_MS = 5 \* 60 \* 1000;/);
-  assert.match(renderer, /void runMarketplaceBackgroundSync\(\);/);
+  assert.match(renderer, /void loadVisibleThenPrefetch\(refreshVisibleFactionViews\)\.then\(runMarketplaceBackgroundSync\);/);
   assert.match(renderer, /setInterval\(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS\)/);
   assert.match(renderer, /function runMarketplaceBackgroundSync\(\) \{\s*if \(!latestSettings \|\| !getActivePlayerProfile\(latestSettings\)\) return Promise\.resolve\(\);\s*return refreshMarketplace\(\{ sync: true \}\);\s*\}/);
 });

@@ -53,7 +53,7 @@ test('current production anchors preserve raw pagination, unsupported V2 transit
 test('renderer attaches truthful bounded trigger metadata without adding an IPC channel', () => {
   const source = fs.readFileSync(path.join(__dirname, '../electron/renderer.js'), 'utf8');
   assert.match(source, /TELEMETRY_TRIGGERS = new Set\(\['startup', 'background', 'navigation', 'manual', 'settings', 'unknown'\]\)/);
-  assert.match(source, /setNextRendererTelemetryTrigger\('startup'\);\s*void runMarketplaceBackgroundSync\(\)/);
+  assert.match(source, /setNextRendererTelemetryTrigger\('startup'\);\s*void loadVisibleThenPrefetch\(refreshVisibleFactionViews\)\.then\(runMarketplaceBackgroundSync\)/);
   assert.match(source, /setInterval\(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS\)/);
   assert.match(source, /setNextRendererTelemetryTrigger\('navigation'\); setActiveEarningsSubtab/);
   assert.match(source, /setNextRendererTelemetryTrigger\('manual'\);\s*await refreshCurrentVisibleData\(\)/);

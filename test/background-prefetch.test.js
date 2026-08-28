@@ -7,7 +7,7 @@ const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'rendere
 
 test('visible faction data is followed by a cancellable sequential background prefetch', () => {
   assert.match(renderer, /let factionPrefetchGeneration = 0;/);
-  assert.match(renderer, /async function runFactionBackgroundPrefetch\(generation, faction\)/);
+  assert.match(renderer, /async function runFactionBackgroundPrefetch\(generation, faction, activeSection\)/);
   assert.match(renderer, /for \(const task of tasks\)/);
   assert.match(renderer, /if \(generation !== factionPrefetchGeneration\) return;/);
   assert.match(renderer, /await task\.load\(\);/);

@@ -125,5 +125,6 @@ test('automatic prefetch, profile-scoped checkpoint, IPC, renderer, and other Ea
   assert.match(renderer, /renderEarningsCrafting\(result\)/);
   assert.match(renderer, /profitMarginPercent == null \? '--'/);
   assert.doesNotMatch(basisSource, /Connection\(|getAccountInfo|fetch\(|RPC|setInterval|setTimeout/i);
-  assert.match(renderer, /\{ key: 'scanning'[^]*\{ key: 'mining'[^]*\{ key: 'crafting'[^]*\{ key: 'earnings'/);
+  assert.match(renderer, /const productionTasks = \[[^]*\{ key: 'scanning'[^]*\{ key: 'mining'[^]*\{ key: 'crafting'/);
+  assert.match(renderer, /activeSection === 'earnings'[^]*\.\.\.\(tasksBySection\[activeSection\] \|\| \[\]\), \.\.\.earningsTasks/);
 });

@@ -1231,7 +1231,7 @@ function cachePrefetchedFilterResult(faction, section, result, ...filters) {
   setCachedFactionResult(faction, getFilterCacheKey(faction, section, ...filters), result);
 }
 
-async function runFactionBackgroundPrefetch(generation, faction) {
+async function runFactionBackgroundPrefetch(generation, faction, activeSection) {
   const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
     ? rendererTelemetryTrigger
     : 'background';
@@ -1243,15 +1243,25 @@ async function runFactionBackgroundPrefetch(generation, faction) {
     playerProfiles: { ...((latestSettings || getFormPayload()).playerProfiles || {}) },
   };
   settings.trigger = telemetryTrigger;
-  const tasks = [
+  const profile = getActivePlayerProfile(settings);
+  const marketplaceCacheKey = `${faction}:${profile}`;
+  const earningsTasks = [
+    { key: 'earnings', cached: () => Boolean(getCachedFactionResult(faction, 'earnings')) || !profile, load: async () => { const result = await api.getEarningsSnapshot({ ...settings, earningsSubtab: 'crafting' }); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
+    { key: 'earnings-breakeven', cached: () => !profile || api.breakevenCache.inspect(getBreakevenCacheInput(settings))?.entry?.status === 'ready', load: () => api.breakevenCache.ensure(getBreakevenCacheInput(settings), () => api.getEarningsSnapshot({ ...settings, earningsSubtab: 'breakeven' })) },
+    { key: 'earnings-upgrading', cached: () => !profile || api.upgradingCache.inspect(getUpgradingCacheInput(settings))?.entry?.status === 'ready', load: () => api.upgradingCache.ensure(getUpgradingCacheInput(settings), () => api.getEarningsSnapshot({ ...settings, earningsSubtab: 'upgrading' })) },
+    { key: 'earnings-marketplace', cached: () => !profile || marketplaceSnapshotCache.has(marketplaceCacheKey), load: async () => { const result = await api.getMarketplaceSnapshot(settings); marketplaceSnapshotCache.set(marketplaceCacheKey, result); } },
+  ];
+  const fleetTasks = [
     {
       key: 'fleet',
-      cached: () => Boolean(getCachedFactionResult(faction, 'fleet')) || !getActivePlayerProfile(settings),
+      cached: () => Boolean(getCachedFactionResult(faction, 'fleet')) || !profile,
       load: async () => {
         const result = await api.getFleets(settings);
         if (result?.ok) setCachedFactionResult(faction, 'fleet', result);
       },
     },
+  ];
+  const productionTasks = [
     { key: 'scanning', cached: () => Boolean(getCachedFilterResult(faction, 'sdu', '')), load: async () => cachePrefetchedFilterResult(faction, 'sdu', await api.getDailySdu({ ...settings, fleetFilter: '' }), '') },
     { key: 'mining', cached: () => Boolean(getCachedFilterResult(faction, 'mining', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'mining', await api.getDailyMining({ ...settings, starbaseFilter: '', fleetFilter: '' }), '', '') },
     { key: 'crafting', cached: () => Boolean(getCachedFilterResult(faction, 'crafting', '', '')), load: async () => cachePrefetchedFilterResult(faction, 'crafting', await api.getDailyCrafting({ ...settings, starbaseFilter: '', recipeFilter: '' }), '', '') },
@@ -1264,10 +1274,18 @@ async function runFactionBackgroundPrefetch(generation, faction) {
     { key: 'consumption-total', cached: () => isConsumptionTotalCacheFresh(settings, '', ''), load: () => refreshConsTotal({ settings, starbaseFilter: '', assetFilter: '' }) },
     { key: 'pcr', cached: () => Boolean(getCachedFactionResult(faction, 'pcr')), load: async () => { const result = await api.getPcrCharts(settings); if (result?.ok) setCachedFactionResult(faction, 'pcr', result); } },
     { key: 'inventory', cached: () => Boolean(getCachedFactionResult(faction, 'inventory::__all__')), load: async () => { const result = await api.getInventory({ ...settings, starbaseFilter: '__all__' }); if (result?.ok) setCachedFactionResult(faction, 'inventory::__all__', result); } },
-    { key: 'earnings', cached: () => Boolean(getCachedFactionResult(faction, 'earnings')) || !getActivePlayerProfile(settings), load: async () => { const result = await api.getEarningsSnapshot({ ...settings, earningsSubtab: 'crafting' }); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
+  ];
+  const optimizationTasks = [
     { key: 'optimization-scanning', cached: () => Boolean(getCachedFilterResult(faction, 'optimizationScanning', '', '', '__all__', '__all__', '__all__', '__all__')), load: async () => { const result = await api.getScanningOptimization({ faction, start: null, stop: null, fleet: '__all__', eventType: '__all__', operation: '__all__', status: '__all__', offset: 0, limit: 500 }); if (result?.ok) setCachedFilterResult(faction, 'optimizationScanning', result, '', '', '__all__', '__all__', '__all__', '__all__'); } },
     { key: 'optimization-upgrading', cached: () => Boolean(getCachedFilterResult(faction, 'optimizationUpgrading', '', '')), load: async () => { const result = await api.getUpgradingOptimization({ faction, start: null, stop: null }); if (result?.ok) setCachedFilterResult(faction, 'optimizationUpgrading', result, '', ''); } },
   ];
+  const tasksBySection = { fleet: fleetTasks, production: productionTasks, optimization: optimizationTasks, earnings: earningsTasks };
+  // The foreground loader has already loaded the active tab. Finish only the
+  // active menu, then warm Earnings. Navigating increments the generation,
+  // abandoning this queue before its next task and starting the new menu first.
+  const tasks = activeSection === 'earnings'
+    ? earningsTasks
+    : [...(tasksBySection[activeSection] || []), ...earningsTasks];
 
   for (const task of tasks) {
     if (generation !== factionPrefetchGeneration) return;
@@ -1283,17 +1301,19 @@ async function runFactionBackgroundPrefetch(generation, faction) {
 function loadVisibleThenPrefetch(loader) {
   const generation = ++factionPrefetchGeneration;
   const faction = normalizeFaction((latestSettings || getFormPayload()).faction);
+  const activeSection = currentSection;
   const telemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
     ? rendererTelemetryTrigger
     : 'unknown';
   if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   return Promise.resolve()
     .then(() => { setNextRendererTelemetryTrigger(telemetryTrigger); return loader(); })
-    .finally(() => {
+    .then(async (result) => {
       if (generation === factionPrefetchGeneration && faction === normalizeFaction((latestSettings || getFormPayload()).faction)) {
         setNextRendererTelemetryTrigger(telemetryTrigger);
-        void runFactionBackgroundPrefetch(generation, faction);
+        await runFactionBackgroundPrefetch(generation, faction, activeSection);
       }
+      return result;
     });
 }
 
@@ -7032,15 +7052,15 @@ async function refreshMarketplace({ sync = false } = {}) {
   const faction = normalizeFaction(settings.faction);
   const profile = getActivePlayerProfile(settings);
   const cacheKey = `${faction}:${profile}`;
-  if (!sync && marketplaceSnapshotCache.has(cacheKey)) {
-    const cached = marketplaceSnapshotCache.get(cacheKey);
+  const cached = marketplaceSnapshotCache.get(cacheKey);
+  if (cached) {
     latestEarningsResult = { ...(latestEarningsResult || {}), ...cached, ok: latestEarningsResult?.ok ?? cached.ok };
     renderEarningsMarketplace(latestEarningsResult);
-    return cached;
+    if (!sync) return cached;
   }
   if (marketplaceRefreshInFlight.has(cacheKey)) return marketplaceRefreshInFlight.get(cacheKey);
   const promise = (async () => {
-    renderEarningsMarketplaceLoading(sync ? 'Syncing Marketplace data...' : 'Loading Marketplace data...');
+    if (!cached) renderEarningsMarketplaceLoading(sync ? 'Syncing Marketplace data...' : 'Loading Marketplace data...');
     if (sync) {
       setText(earningsMarketplaceSyncStatus, 'Marketplace sync running in background...');
       await api.syncMarketplace(settings);
@@ -7209,8 +7229,8 @@ async function refreshEarnings() {
   if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   if (earningsRefreshInFlight) return earningsRefreshInFlight;
   const refreshPromise = (async () => {
-    const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: currentEarningsSubtab };
-  settings.trigger = telemetryTrigger;
+    const settings = { ...(latestSettings || getFormPayload()), earningsSubtab: 'crafting' };
+    settings.trigger = telemetryTrigger;
     const context = {
       faction: normalizeFaction(settings?.faction),
       playerProfile: getActivePlayerProfile(settings),
@@ -8868,16 +8888,10 @@ function setActiveSection(section) {
     panel.classList.toggle('active', panel.dataset.sectionPanel === section);
   });
   updateTitle();
-  if (section === 'fleet' && !latestFleetResult) refreshFleets();
-  if (section === 'earnings' && currentEarningsSubtab === 'breakeven') refreshBreakeven();
-  else if (section === 'earnings' && currentEarningsSubtab === 'upgrading') refreshEarningsUpgrading();
-  else if (section === 'earnings' && !latestEarningsResult) refreshEarnings();
-  if (section === 'optimization') {
-    if (currentOptimizationSubtab === 'upgrading') refreshUpgradingOptimization();
-    else if (!latestOptimizationResult) refreshScanningOptimization();
-    renderOptimizationColumnControls();
-  }
-  if (section === 'production') refreshVisibleProductionSubtab();
+  if (section === 'optimization') renderOptimizationColumnControls();
+  // The active view renders immediately; all other menu datasets continue in
+  // the shared background queue and fill their faction-scoped caches.
+  void loadVisibleThenPrefetch(refreshVisibleFactionViews);
 }
 
 function refreshVisibleProductionSubtab() {
@@ -9076,9 +9090,7 @@ async function loadInitialState() {
   void checkForUpdates();
   initInventory();
   setNextRendererTelemetryTrigger('startup');
-  await loadVisibleThenPrefetch(refreshVisibleFactionViews);
-  setNextRendererTelemetryTrigger('startup');
-  void runMarketplaceBackgroundSync();
+  void loadVisibleThenPrefetch(refreshVisibleFactionViews).then(runMarketplaceBackgroundSync);
   setInterval(runMarketplaceBackgroundSync, MARKETPLACE_SYNC_INTERVAL_MS);
 }
 
