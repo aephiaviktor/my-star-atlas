@@ -23,7 +23,7 @@ test('activation, initial loading, stale display, and manual refresh use only Br
   assert.match(refresh,/breakevenCache\.inspect\(input\)/);
   assert.match(refresh,/initial\?\.entry\?\.value \|\| initial\?\.entry\?\.lastGoodValue/);
   assert.match(refresh,/breakevenCache\.ensure\(input/);
-  assert.match(refresh,/getEarningsSnapshot\(settings\)/);
+  assert.match(refresh,/fetchCompleteBreakevenSnapshot\(settings\)/);
   const manual=between('function refreshCurrentVisibleData','function setActiveSubtab');
   assert.match(manual,/currentEarningsSubtab === 'breakeven'\) return refreshBreakeven\(\{ force: true \}\)/);
 });

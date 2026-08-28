@@ -1253,7 +1253,7 @@ async function runFactionBackgroundPrefetch(generation, faction, activeSection) 
   const marketplaceCacheKey = `${faction}:${profile}`;
   const earningsTasks = [
     { key: 'earnings', cached: () => isEarningsSnapshotCacheComplete(getCachedFactionResult(faction, 'earnings')) || !profile, load: async () => { const result = await api.getEarningsSnapshot({ ...settings, earningsSubtab: 'crafting' }); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
-    { key: 'earnings-breakeven', cached: () => !profile || api.breakevenCache.inspect(getBreakevenCacheInput(settings))?.entry?.status === 'ready', load: () => api.breakevenCache.ensure(getBreakevenCacheInput(settings), () => api.getEarningsSnapshot({ ...settings, earningsSubtab: 'breakeven' })) },
+    { key: 'earnings-breakeven', cached: () => !profile || api.breakevenCache.inspect(getBreakevenCacheInput(settings))?.entry?.status === 'ready', load: () => api.breakevenCache.ensure(getBreakevenCacheInput(settings), () => fetchCompleteBreakevenSnapshot(settings)) },
     { key: 'earnings-upgrading', cached: () => !profile || api.upgradingCache.inspect(getUpgradingCacheInput(settings))?.entry?.status === 'ready', load: () => api.upgradingCache.ensure(getUpgradingCacheInput(settings), () => api.getEarningsSnapshot({ ...settings, earningsSubtab: 'upgrading' })) },
     { key: 'earnings-marketplace', cached: () => !profile || marketplaceSnapshotCache.has(marketplaceCacheKey), load: async () => { const result = await api.getMarketplaceSnapshot(settings); marketplaceSnapshotCache.set(marketplaceCacheKey, result); } },
   ];
@@ -6809,8 +6809,38 @@ function renderEarningsBreakevenHeader() {
   earningsBreakevenTableHead.appendChild(headRow);
 }
 
+function getBreakevenSnapshotError(result) {
+  if (!result || result.ok !== true) return String(result?.error || 'Breakeven snapshot failed');
+  const sources = [
+    ['breakevenError', 'Breakeven projection'],
+    ['openingInventoryError', 'Opening inventory baseline'],
+    ['ledgerCheckpointError', 'Inventory ledger checkpoint'],
+    ['cargoAllocationLedgerError', 'Cargo allocation ledger'],
+    ['scanningError', 'Scanning earnings'],
+    ['miningError', 'Mining earnings'],
+    ['cargoError', 'Cargo earnings'],
+    ['craftingError', 'Crafting earnings'],
+    ['upgradingError', 'Upgrading earnings'],
+    ['localMarketError', 'Local Marketplace'],
+  ];
+  for (const [key, label] of sources) {
+    const message = String(result[key] || '').trim();
+    if (message) return `${label}: ${message}`;
+  }
+  if (result.ledgerCheckpointStatus === 'baseline-unavailable') return 'Inventory ledger baseline is unavailable';
+  return '';
+}
+
+async function fetchCompleteBreakevenSnapshot(settings) {
+  const result = await api.getEarningsSnapshot({ ...settings, earningsSubtab: 'breakeven' });
+  const error = getBreakevenSnapshotError(result);
+  if (error) throw new Error(error);
+  return result;
+}
+
 function renderEarningsBreakeven(result) {
   const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
+  const snapshotError = getBreakevenSnapshotError(result);
   const baselineStatus = result?.openingInventoryError
     ? ` · opening baseline unavailable: ${result.openingInventoryError}`
     : Number(result?.openingInventoryCount || 0) > 0
@@ -6819,7 +6849,7 @@ function renderEarningsBreakeven(result) {
   const checkpointStatus = result?.ledgerCheckpointStatus
     ? ` · checkpoint ${result.ledgerCheckpointStatus}${result?.ledgerCheckpointError ? ': ' + result.ledgerCheckpointError : ''}`
     : '';
-  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${baselineStatus}${checkpointStatus}${result?.breakevenError ? ' · ' + result.breakevenError : ''}`;
+  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${baselineStatus}${checkpointStatus}${snapshotError ? ' · ' + snapshotError : ''}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
   populateEarningsFilterOptions('breakeven', rows);
   if (earningsBreakevenHideLowInventory) earningsBreakevenHideLowInventory.checked = earningsFilters.breakeven.hideLowInventory;
@@ -6830,7 +6860,7 @@ function renderEarningsBreakeven(result) {
   const filteredRows = getFilteredEarningsRows('breakeven', rows);
   const sortedRows = sortEarningsRows('breakeven', filteredRows);
   if (!sortedRows.length) {
-    return renderEarningsBreakevenEmpty(rows.length ? 'No breakeven rows match the current filters' : 'No breakeven data available — check mining, cargo, and inventory telemetry');
+    return renderEarningsBreakevenEmpty(rows.length ? 'No breakeven rows match the current filters' : snapshotError || 'No breakeven data available — check mining, cargo, and inventory telemetry');
   }
   const optionalColumns = getVisibleEarningsColumns('breakeven');
   for (const entry of sortedRows) {
@@ -7187,11 +7217,7 @@ async function refreshBreakeven({ force = false } = {}) {
   } else {
     renderEarningsBreakevenEmpty('Loading complete Breakeven data...');
   }
-  const settled = await api.breakevenCache.ensure(input, async () => {
-    const result = await api.getEarningsSnapshot(settings);
-    if (result?.ok === false) throw new Error(result.error || 'Breakeven snapshot failed');
-    return result;
-  });
+  const settled = await api.breakevenCache.ensure(input, () => fetchCompleteBreakevenSnapshot(settings));
   if (!isActiveBreakevenContext(settled.key, settled.entry.generation)) return settled;
   const value = settled.entry.value || settled.entry.lastGoodValue;
   if (value) {
