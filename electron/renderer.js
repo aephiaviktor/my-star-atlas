@@ -6819,10 +6819,11 @@ function createMarketplaceEarningsCell(entry, columnId, calculated) {
   };
   if (columnId !== 'signature') return createTextCell(values[columnId] ?? '--');
   const cell = document.createElement('td');
-  if (!entry.signature) { cell.textContent = '--'; return cell; }
+  const transactionSignature = String(entry.signature || '').trim().split(':')[0];
+  if (!transactionSignature) { cell.textContent = '--'; return cell; }
   const link = document.createElement('a');
-  link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
-  link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = entry.signature;
+  link.href = `https://solscan.io/tx/${encodeURIComponent(transactionSignature)}`;
+  link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = transactionSignature;
   cell.appendChild(link);
   return cell;
 }

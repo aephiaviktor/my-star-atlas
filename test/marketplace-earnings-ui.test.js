@@ -48,10 +48,12 @@ test('Update shares a row with Refresh data while the BUY SELL switch stays belo
   assert.match(html, /class="update-action-stack"[\s\S]*class="top-action-row"[\s\S]*id="refresh-data-btn"[\s\S]*id="update-btn"[\s\S]*id="earnings-marketplace-side-switch"/);
 });
 
-test('Marketplace renderer exposes LM scan errors and links execution signatures', () => {
+test('Marketplace renderer exposes LM scan errors and links canonical transaction signatures', () => {
   assert.match(renderer, /function renderEarningsMarketplace\(/);
   assert.match(renderer, /localMarketError/);
-  assert.match(renderer, /https:\/\/solscan\.io\/tx\//);
+  assert.match(renderer, /const transactionSignature = String\(entry\.signature \|\| ''\)\.trim\(\)\.split\(':'\)\[0\]/);
+  assert.match(renderer, /https:\/\/solscan\.io\/tx\/\$\{encodeURIComponent\(transactionSignature\)\}/);
+  assert.match(renderer, /link\.textContent = transactionSignature/);
   assert.match(main, /localMarketTrades: localMarketResult\.trades/);
   assert.match(renderer, /'en-US'/);
   assert.match(renderer, /toISOString/);
