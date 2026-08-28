@@ -20,6 +20,7 @@ const {
 const lockfile = require('proper-lockfile');
 const packageJson = require('../package.json');
 const { createAsyncTtlCache, fetchWithInfluxRetry } = require('./influx-resilience');
+const { queryCargoRowsWithWindowFallback } = require('./cargo-influx-window-recovery');
 const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
 const { createEarningsErrorDiagnostic } = require('./earnings-error-diagnostic');
@@ -6664,8 +6665,8 @@ async function fetchCargoEarningsRows(settings) {
   const bucket = escapeFluxString(settings.influxBucket);
   const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const coordinateMap = await fetchStarbaseCoordinateMap(settings).catch(() => new Map());
-  const cargoFlux = `from(bucket: "${bucket}")
-  |> range(start: -31d)
+  const buildCargoFlux = (rangeFlux) => `from(bucket: "${bucket}")
+  ${rangeFlux}
   |> filter(fn: (r) => r._measurement == "movement")
   |> filter(fn: (r) => r._field == "burnedFuel")
 ${scopeFilterFlux}
@@ -6676,8 +6677,7 @@ ${scopeFilterFlux}
   |> group(columns: ["fleet", "assignment", "starbase", "cycleId", "_time"])
   |> sum(column: "_value")
   |> group()
-  |> keep(columns: ["fleet", "assignment", "starbase", "cycleId", "_time", "_value"])
-  |> sort(columns: ["_time", "fleet", "assignment", "starbase"])`;
+  |> keep(columns: ["fleet", "assignment", "starbase", "cycleId", "_time", "_value"])`;
   const typeFlux = `from(bucket: "${bucket}")
   |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement")
@@ -6685,8 +6685,7 @@ ${scopeFilterFlux}
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
   |> filter(fn: (r) => exists r.fleet)
-  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
-  |> sort(columns: ["_time", "fleet", "assignment"])`;
+  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])`;
   const moveTimeFlux = `from(bucket: "${bucket}")
   |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement")
@@ -6694,8 +6693,7 @@ ${scopeFilterFlux}
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.assignment and (r.assignment == "Transport" or r.assignment == "Supply Chain"))
   |> filter(fn: (r) => exists r.fleet)
-  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
-  |> sort(columns: ["_time", "fleet", "assignment"])`;
+  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])`;
   const txDailyFlux = `from(bucket: "${bucket}")
   |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "movement" and r._field == "txCostSol")
@@ -6706,15 +6704,13 @@ ${scopeFilterFlux}
   |> group(columns: ["fleet", "_time"])
   |> sum(column: "_value")
   |> group()
-  |> keep(columns: ["fleet", "_time", "_value"])
-  |> sort(columns: ["_time", "fleet"])`;
+  |> keep(columns: ["fleet", "_time", "_value"])`;
   const completedCycleFlux = `from(bucket: "${bucket}")
   |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "cargo_cycle_completed" and r._field == "legCount")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet and exists r.assignment and exists r.cycleId)
-  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])
-  |> sort(columns: ["_time", "fleet", "assignment"])`;
+  |> keep(columns: ["fleet", "assignment", "cycleId", "_time", "_value"])`;
 
   const rowsByKey = new Map();
   const txDailyByDayFleet = new Map();
@@ -6745,7 +6741,11 @@ ${scopeFilterFlux}
   // Fetch the row-defining fuel query before the optional enrichment fan-out.
   // Running all five together can overload the Influx proxy and lose the core
   // Cargo table to a transient 504 even though the underlying rows are valid.
-  const cargoCsv = await queryInfluxFlux(settings, cargoFlux);
+  const cargoRecords = await queryCargoRowsWithWindowFallback({
+    query: (flux) => queryInfluxFlux(settings, flux),
+    buildQuery: buildCargoFlux,
+    parseCsv: parseInfluxCsv,
+  });
   const [typeResult, moveTimeResult, txDailyResult, completedCycleResult] = await Promise.allSettled([
     queryInfluxFlux(settings, typeFlux),
     queryInfluxFlux(settings, moveTimeFlux),
@@ -6784,7 +6784,7 @@ ${scopeFilterFlux}
     txDailyByDayFleet.set(key, current);
   }
 
-  for (const row of parseInfluxCsv(cargoCsv)) {
+  for (const row of cargoRecords) {
     const fleet = String(row.fleet || '').trim();
     const assignment = String(row.assignment || '').trim();
     const starbase = resolveStarbaseName(row, coordinateMap);

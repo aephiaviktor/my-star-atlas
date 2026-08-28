@@ -30,7 +30,7 @@ test('Cargo movement telemetry provides Txs Daily without being overwritten by a
 test('optional Cargo telemetry queries cannot discard core fleet rows', () => {
   const cargoFunction = main.slice(main.indexOf('async function fetchCargoEarningsRows'), main.indexOf('async function fetchCargoAllocationEarningsRows'));
   assert.match(cargoFunction, /const completedCycleFlux =/);
-  assert.match(cargoFunction, /const cargoCsv = await queryInfluxFlux\(settings, cargoFlux\);/);
+  assert.match(cargoFunction, /const cargoRecords = await queryCargoRowsWithWindowFallback\(\{/);
   assert.match(cargoFunction, /const \[typeResult, moveTimeResult, txDailyResult, completedCycleResult\] = await Promise\.allSettled/);
   assert.match(cargoFunction, /const optionalCsv = \(result\) => result\.status === 'fulfilled' \? result\.value : ''/);
 });
