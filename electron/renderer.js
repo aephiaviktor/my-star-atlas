@@ -169,6 +169,7 @@ const earningsCraftingBestRevenueNote = document.querySelector('#earnings-crafti
 const earningsCraftingDateFilter = document.querySelector('#earnings-crafting-date-filter');
 const earningsCraftingStarbaseFilter = document.querySelector('#earnings-crafting-starbase-filter');
 const earningsCraftingAssetFilter = document.querySelector('#earnings-crafting-asset-filter');
+const earningsCraftingPerUnitButton = document.querySelector('[data-earnings-per-unit="crafting"]');
 const earningsUpgradingSyncStatus = document.querySelector('#earnings-upgrading-sync-status');
 const earningsUpgradingTableHead = document.querySelector('#earnings-upgrading-table-head');
 const earningsUpgradingTableBody = document.querySelector('#earnings-upgrading-table-body');
@@ -176,6 +177,7 @@ const earningsUpgradingAssetNetProfitChart = document.querySelector('#earnings-u
 const earningsUpgradingDateFilter = document.querySelector('#earnings-upgrading-date-filter');
 const earningsUpgradingStarbaseFilter = document.querySelector('#earnings-upgrading-starbase-filter');
 const earningsUpgradingAssetFilter = document.querySelector('#earnings-upgrading-asset-filter');
+const earningsUpgradingPerUnitButton = document.querySelector('[data-earnings-per-unit="upgrading"]');
 const earningsBreakevenTableHead = document.querySelector('#earnings-breakeven-table-head');
 const earningsBreakevenTableBody = document.querySelector('#earnings-breakeven-table-body');
 const earningsBreakevenSyncStatus = document.querySelector('#earnings-breakeven-sync-status');
@@ -741,7 +743,6 @@ const craftingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
   Object.freeze({ id: 'npPerCrew', label: 'NP per crew' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
-  Object.freeze({ id: 'costsPerUnit', label: 'Cost per Unit' }),
 ]);
 
 const upgradingEarningsOptionalColumns = Object.freeze([
@@ -810,7 +811,7 @@ const earningsColumnState = {
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
   cargo: new Set(['txsDaily', 'cargoCycles', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
-  crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin', 'costsPerUnit']),
+  crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   breakeven: new Set(),
   marketplace: new Set(marketplaceEarningsOptionalColumns.map((column) => column.id)),
@@ -911,7 +912,6 @@ const earningsMetricGuideBySubtab = Object.freeze({
     ingCosts: ['Weighted inventory cost basis of ingredients consumed.', 'Σ consumed ingredient basis from the chronological ledger.', 'Includes upstream production and cargo basis; direct crafting fees remain separate.'],
     feeCosts: ['ATLAS crafting fees recorded for the activity.', 'Σ recorded crafting fee amount.', 'A direct crafting expense included in Total Costs.'],
     totalCosts: ['Cost basis of the crafted output.', 'Ingredient Cost Basis + Crafting Fee Cost + Txs Cost.', 'A dash means consumed ingredient basis is incomplete or explicitly uncosted.'],
-    costsPerUnit: ['Cost basis for each crafted output unit.', 'Total Costs ÷ Crafted.', 'This is carried forward in the weighted inventory ledger.'],
   }),
   upgrading: Object.freeze({
     installed: ['Components installed during the completed UTC day.', 'Σ installed component quantity.', 'This is the output quantity used for both estimated reward value and component cost.'],
@@ -972,6 +972,63 @@ const earningsCostBasisMode = {
   crafting: 'internal',
   upgrading: 'internal',
 };
+
+const earningsPerUnitModeByFaction = new Map();
+
+function getEarningsPerUnitState(faction = normalizeFaction(latestSettings?.faction)) {
+  if (!earningsPerUnitModeByFaction.has(faction)) {
+    earningsPerUnitModeByFaction.set(faction, { crafting: false, upgrading: false });
+  }
+  return earningsPerUnitModeByFaction.get(faction);
+}
+
+function resolveEarningsMonetaryDisplayValue(entry, subtab, columnId, perUnit) {
+  const fieldByColumn = {
+    revenue: 'revenueAtlasPerDay',
+    ingCosts: 'ingCostsAtlas',
+    feeCosts: 'feeCostsAtlas',
+    upgCosts: 'upgradingCostsAtlas',
+    txsCosts: 'txsCostsAtlas',
+    totalCosts: 'totalCostsAtlas',
+    netProfit: 'netProfitAtlas',
+  };
+  const rawValue = entry?.[fieldByColumn[columnId]];
+  if (rawValue == null || rawValue === '') return null;
+  const value = Number(rawValue);
+  if (!Number.isFinite(value)) return null;
+  if (!perUnit) return value;
+  const denominator = Number(subtab === 'crafting' ? entry?.crafted : entry?.installed);
+  return Number.isFinite(denominator) && denominator > 0 ? value / denominator : null;
+}
+
+function isEarningsPerUnitColumn(subtab, columnId) {
+  const columns = subtab === 'crafting'
+    ? ['revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit']
+    : subtab === 'upgrading'
+      ? ['revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit']
+      : [];
+  return columns.includes(columnId);
+}
+
+function isEarningsPerUnitEnabled(subtab) {
+  return getEarningsPerUnitState()[subtab] === true;
+}
+
+function applyEarningsPerUnitButtonState(subtab) {
+  const button = subtab === 'crafting' ? earningsCraftingPerUnitButton : earningsUpgradingPerUnitButton;
+  if (!button) return;
+  const active = isEarningsPerUnitEnabled(subtab);
+  button.classList.toggle('active', active);
+  button.setAttribute('aria-pressed', String(active));
+}
+
+function createPerUnitAwareEarningsCell(entry, subtab, columnId) {
+  const active = isEarningsPerUnitEnabled(subtab);
+  const value = resolveEarningsMonetaryDisplayValue(entry, subtab, columnId, active);
+  const cell = createTextCell(value == null ? '--' : active ? formatAtlasNumber(value, 6) : formatAtlasWhole(value));
+  if (active) cell.classList.add('earnings-per-unit-column');
+  return cell;
+}
 
 function applyEarningsCostBasis(row, subtab) {
   if (earningsCostBasisMode[subtab] !== 'external') return row;
@@ -1380,6 +1437,8 @@ function restoreFactionFilterState(faction) {
   selectedConsTotalStarbase = getCachedFactionResult(faction, 'selectedConsTotalStarbase') || '';
   selectedConsTotalAsset = getCachedFactionResult(faction, 'selectedConsTotalAsset') || '';
   invSelectedStarbase = getCachedFactionResult(faction, 'selectedInvStarbase') || '__all__';
+  applyEarningsPerUnitButtonState('crafting');
+  applyEarningsPerUnitButtonState('upgrading');
 }
 
 function openSettings() {
@@ -6075,6 +6134,9 @@ function sortEarningsRows(subtab, rows) {
   const sortState = earningsSort[subtab];
   if (!sortState || !sortState.column || !sortState.direction) return rows;
   const getValue = (row) => {
+    if (isEarningsPerUnitEnabled(subtab) && isEarningsPerUnitColumn(subtab, sortState.column)) {
+      return resolveEarningsMonetaryDisplayValue(row, subtab, sortState.column, true);
+    }
     if (subtab === 'breakeven' && sortState.column === 'asset') return row.asset;
     if (subtab === 'breakeven' && sortState.column === 'fuelCost') {
       const values = [row.baseFuelCostPerUnit, row.cargoFuelCostPerUnit].filter((value) => value != null && Number.isFinite(Number(value)));
@@ -6100,6 +6162,7 @@ function setupEarningsFilterHandlers() {
       else if (subtab === 'cargo') renderEarningsCargo(latestEarningsResult);
       else if (subtab === 'cargoAllocation') renderEarningsCargoAllocations(latestEarningsResult);
       else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
+      else if (subtab === 'upgrading') renderEarningsUpgrading(latestUpgradingResult);
       else if (subtab === 'breakeven') renderEarningsBreakeven(latestBreakevenResult);
       else if (latestEarningsResult) renderEarnings(latestEarningsResult);
     });
@@ -6177,6 +6240,7 @@ function setupEarningsHeaderSortHandlers() {
       if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
       else if (subtab === 'cargo') renderEarningsCargo(latestEarningsResult);
       else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
+      else if (subtab === 'upgrading') renderEarningsUpgrading(latestUpgradingResult);
       else if (subtab === 'breakeven') renderEarningsBreakeven(latestBreakevenResult);
       else if (latestEarningsResult) renderEarnings(latestEarningsResult);
       else renderEarningsHeader(subtab);
@@ -6191,11 +6255,12 @@ function setupEarningsHeaderSortHandlers() {
   handle(earningsBreakevenTableHead, 'breakeven');
 }
 
-function appendEarningsHeaderCell(row, columnId, label, sortState) {
+function appendEarningsHeaderCell(row, columnId, label, sortState, highlighted = false) {
   const th = document.createElement('th');
   th.scope = 'col';
   th.dataset.sortId = columnId;
   th.classList.add('earnings-sortable-th');
+  if (highlighted) th.classList.add('earnings-per-unit-column');
   const isActive = sortState && sortState.column === columnId && sortState.direction;
   if (isActive) th.classList.add('earnings-sort-active');
   const labelSpan = document.createElement('span');
@@ -6240,7 +6305,9 @@ function renderEarningsHeader(subtab = 'scanning') {
     let label = column.label;
     if (earningsCostBasisMode[subtab] === 'external' && column.id === 'ingCosts') label = 'Ingredient External Value';
     if (earningsCostBasisMode[subtab] === 'external' && column.id === 'upgCosts') label = 'Component External Value';
-    appendEarningsHeaderCell(row, column.id, label, sortState);
+    const perUnit = isEarningsPerUnitEnabled(subtab) && isEarningsPerUnitColumn(subtab, column.id);
+    if (perUnit) label = `${label} / Unit`;
+    appendEarningsHeaderCell(row, column.id, label, sortState, perUnit);
   }
   tableHead.textContent = '';
   tableHead.appendChild(row);
@@ -6320,15 +6387,9 @@ function createCraftingEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'txsDaily') return createTextCell(formatWholeNumber(entry.txsDaily || 0));
   if (columnId === 'crafted') return createTextCell(formatWholeNumber(entry.crafted || 0));
   if (columnId === 'crew') return createTextCell(entry.crew == null ? '--' : formatWholeNumber(entry.crew));
-  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasWhole(entry.revenueAtlasPerDay));
-  if (columnId === 'ingCosts') return createTextCell(entry.ingCostsAtlas == null ? '--' : formatAtlasWhole(entry.ingCostsAtlas));
-  if (columnId === 'feeCosts') return createTextCell(entry.feeCostsAtlas == null ? '--' : formatAtlasWhole(entry.feeCostsAtlas));
-  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
-  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
-  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
+  if (isEarningsPerUnitColumn('crafting', columnId)) return createPerUnitAwareEarningsCell(entry, 'crafting', columnId);
   if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
   if (columnId === 'profitMargin') return createTextCell(entry.profitMarginPercent == null ? '--' : formatPercentNumber(entry.profitMarginPercent, 1));
-  if (columnId === 'costsPerUnit') return createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6));
   return createTextCell('--');
 }
 
@@ -6336,11 +6397,7 @@ function createUpgradingEarningsOptionalCell(entry, columnId) {
   if (columnId === 'installed') return createTextCell(formatWholeNumber(entry.installed || 0));
   if (columnId === 'lpRedemption') return createTextCell(entry.factionRedeemedLp == null ? '--' : formatWholeNumber(entry.factionRedeemedLp));
   if (columnId === 'crew') return createTextCell(entry.crew > 0 ? formatWholeNumber(entry.crew) : '--');
-  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasWhole(entry.revenueAtlasPerDay));
-  if (columnId === 'upgCosts') return createTextCell(entry.upgradingCostsAtlas == null ? '--' : formatAtlasWhole(entry.upgradingCostsAtlas));
-  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
-  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
-  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
+  if (isEarningsPerUnitColumn('upgrading', columnId)) return createPerUnitAwareEarningsCell(entry, 'upgrading', columnId);
   if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
   if (columnId === 'profitMargin') return createTextCell(entry.profitMarginPercent == null ? '--' : formatPercentNumber(entry.profitMarginPercent, 1));
   return createTextCell('--');
@@ -6595,6 +6652,7 @@ function renderEarningsCrafting(result) {
   }
 
   const rows = Array.isArray(result.craftingRows) ? result.craftingRows.map((row) => applyEarningsCostBasis(row, 'crafting')) : [];
+  applyEarningsPerUnitButtonState('crafting');
   populateEarningsFilterOptions('crafting', rows);
   renderEarningsHeader('crafting');
   const craftingMode = earningsChartMode.crafting;
@@ -6917,6 +6975,7 @@ function renderEarningsUpgradingEmpty(message) {
 
 function renderEarningsUpgrading(result) {
   const rows = Array.isArray(result?.upgradingRows) ? result.upgradingRows.map((row) => applyEarningsCostBasis(row, 'upgrading')) : [];
+  applyEarningsPerUnitButtonState('upgrading');
   populateEarningsFilterOptions('upgrading', rows);
   renderEarningsHeader('upgrading');
   const colorMap = buildEarningsAssetColorMap(rows, (row) => row.asset || 'Unknown asset');
@@ -9723,6 +9782,18 @@ for (const button of document.querySelectorAll('[data-earnings-cost-basis]')) {
       sibling.classList.toggle('active', active);
       sibling.setAttribute('aria-pressed', String(active));
     }
+    if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
+    else renderEarningsUpgrading(latestUpgradingResult);
+  });
+}
+
+for (const button of document.querySelectorAll('[data-earnings-per-unit]')) {
+  button.addEventListener('click', () => {
+    const subtab = button.dataset.earningsPerUnit;
+    if (!['crafting', 'upgrading'].includes(subtab)) return;
+    const state = getEarningsPerUnitState();
+    state[subtab] = !state[subtab];
+    applyEarningsPerUnitButtonState(subtab);
     if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
     else renderEarningsUpgrading(latestUpgradingResult);
   });

@@ -1602,6 +1602,26 @@ select:focus {
   background: var(--cyan, #22d3ee);
 }
 
+.earnings-per-unit-btn {
+  appearance: none;
+  flex: 0 0 auto;
+  border: 1px solid rgba(251, 146, 60, 0.65);
+  border-radius: 6px;
+  background: rgba(251, 146, 60, 0.2);
+  color: #fed7aa;
+  cursor: pointer;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.earnings-per-unit-btn:hover { background: rgba(251, 146, 60, 0.34); }
+.earnings-per-unit-btn.active { border-color: #f97316; background: #f97316; color: #1f1307; }
+.earnings-table .earnings-per-unit-column { background: rgba(251, 146, 60, 0.16); }
+.earnings-table th.earnings-per-unit-column { color: #fed7aa; }
+
 .earnings-net-profit-chart {
   position: relative;
   max-width: 1120px;

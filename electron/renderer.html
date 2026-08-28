@@ -1463,6 +1463,7 @@
                   <button class="earnings-chart-mode-btn active" type="button" data-earnings-cost-basis="crafting" data-cost-basis-mode="internal" aria-pressed="true">Internal Cost Basis</button>
                   <button class="earnings-chart-mode-btn" type="button" data-earnings-cost-basis="crafting" data-cost-basis-mode="external" aria-pressed="false">External Cost Basis</button>
                 </div>
+                <button class="earnings-per-unit-btn" type="button" data-earnings-per-unit="crafting" aria-pressed="false">Per Unit</button>
               </div>
               <div id="earnings-crafting-sync-status" class="fleet-sync-status" role="status">Awaiting crafting data</div>
               <div class="fleet-table-wrap">
@@ -1483,12 +1484,11 @@
                       <th scope="col">Net Profit</th>
                       <th scope="col">NP per crew</th>
                       <th scope="col">Profit Margin</th>
-                      <th scope="col">Cost per Unit</th>
                     </tr>
                   </thead>
                   <tbody id="earnings-crafting-table-body">
                     <tr class="empty-row">
-                      <td colspan="15">No crafting data loaded</td>
+                      <td colspan="14">No crafting data loaded</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1514,6 +1514,7 @@
                 <label class="activity-filter"><span>Asset</span><select id="earnings-upgrading-asset-filter"><option value="">All Assets</option></select></label>
                 <span class="activity-filter-note">Filters combine with AND · Today excluded</span>
                 <div class="earnings-cost-basis-switch" role="group" aria-label="Upgrading valuation basis" title="Internal cost basis values components using your actual internal acquisition costs. External cost basis values components using current Galactic Marketplace prices."><button class="earnings-chart-mode-btn active" type="button" data-earnings-cost-basis="upgrading" data-cost-basis-mode="internal" aria-pressed="true">Internal Cost Basis</button><button class="earnings-chart-mode-btn" type="button" data-earnings-cost-basis="upgrading" data-cost-basis-mode="external" aria-pressed="false">External Cost Basis</button></div>
+                <button class="earnings-per-unit-btn" type="button" data-earnings-per-unit="upgrading" aria-pressed="false">Per Unit</button>
               </div>
               <div id="earnings-upgrading-sync-status" class="fleet-sync-status" role="status">Awaiting upgrading data</div>
               <div class="fleet-table-wrap"><table class="fleet-table earnings-table"><thead id="earnings-upgrading-table-head"><tr><th>Date</th><th>Starbase</th><th>Asset</th><th>Installed</th><th>Avg Crew</th><th>Revenue</th><th>Component Cost Basis</th><th>Txs Cost</th><th>Total Costs</th><th>Net Profit</th><th>Net Profit per Crew</th><th>Profit Margin</th></tr></thead><tbody id="earnings-upgrading-table-body"><tr class="empty-row"><td colspan="12">No upgrading data loaded</td></tr></tbody></table></div>
