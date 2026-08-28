@@ -12,6 +12,7 @@ const {
   createMarketplaceRpcAttemptBudget,
   DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
 } = require('../electron/marketplace-rpc-telemetry');
+const { createMarketplaceTransactionCacheConnection } = require('../electron/marketplace-transaction-cache');
 
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 
@@ -101,6 +102,7 @@ test('Marketplace sync returns separate partial LM and GM RPC summaries without 
     wrapMarketplaceConnection,
     createMarketplaceRpcAttemptBudget,
     DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
+    createMarketplaceTransactionCacheConnection,
     createSolanaConnection: (_settings, { instrumentation }) => {
       underlyingConnection = {
         marker: {},
@@ -189,6 +191,7 @@ test('Marketplace sync seals telemetry on unexpected failure and coalesces calle
     wrapMarketplaceConnection,
     createMarketplaceRpcAttemptBudget,
     DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
+    createMarketplaceTransactionCacheConnection,
     createSolanaConnection: (_settings, { instrumentation }) => {
       connectionCount += 1;
       return {
@@ -249,6 +252,8 @@ test('Marketplace sync preserves telemetry for primitive and frozen errors', asy
       wrapMarketplaceConnection,
       createMarketplaceRpcAttemptBudget,
       DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
+    createMarketplaceTransactionCacheConnection,
+      createMarketplaceTransactionCacheConnection,
       createSolanaConnection: (_settings, { instrumentation }) => ({
         async getAccountInfo() {
           instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'main' });
@@ -299,6 +304,7 @@ test('Marketplace sync returns bounded resumable LM exhaustion while still runni
     wrapMarketplaceConnection,
     createMarketplaceRpcAttemptBudget,
     DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
+    createMarketplaceTransactionCacheConnection,
     createSolanaConnection: (_settings, { instrumentation }) => ({
       async getAccountInfo() {
         instrumentation.admitAttempt({ method: 'getAccountInfo', provider: 'main' });
@@ -350,6 +356,7 @@ test('Marketplace gives GM an independent budget after LM reaches its operation 
     normalizeSettings: (value) => value, readSettings: async () => ({}), normalizeFaction: (value) => value,
     createMarketplaceRpcTelemetry, createMarketplaceRpcInstrumentation, wrapMarketplaceConnection,
     createMarketplaceRpcAttemptBudget, DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
+    createMarketplaceTransactionCacheConnection,
     createSolanaConnection: (_settings, { instrumentation }) => ({
       async getAccountInfo() { instrumentation.admitAttempt({ method: 'getAccountInfo', provider: 'main' }); return null; },
     }),

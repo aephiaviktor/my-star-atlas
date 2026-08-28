@@ -12,6 +12,7 @@ const {
   createMarketplaceRpcAttemptBudget,
   DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
 } = require('../electron/marketplace-rpc-telemetry');
+const { createMarketplaceTransactionCacheConnection } = require('../electron/marketplace-transaction-cache');
 
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 const start = main.indexOf('function marketplaceSyncAttempt');
@@ -30,6 +31,7 @@ function createContext(overrides = {}) {
     wrapMarketplaceConnection,
     createMarketplaceRpcAttemptBudget,
     DEFAULT_MARKETPLACE_RPC_ATTEMPT_LIMIT,
+    createMarketplaceTransactionCacheConnection,
     createSolanaConnection: (_settings, { instrumentation }) => ({
       async getAccountInfo() {
         instrumentation.recordAttempt({ method: 'getAccountInfo', provider: 'main' });

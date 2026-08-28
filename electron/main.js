@@ -74,6 +74,7 @@ const {
 } = require('./cargo-cost-source');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
+const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows } = require('./marketplace-asset-flow');
 const {
   enrichGmTradesWithInventoryBasis,
@@ -5461,8 +5462,9 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
     try {
       await recoverMarketplacePublication(settings);
       const connection = createSolanaConnection(settings, { instrumentation });
-      const localConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'LM' });
-      const globalConnection = wrapMarketplaceConnection(connection, { instrumentation, operation: 'GM' });
+      const cachedConnection = createMarketplaceTransactionCacheConnection(connection);
+      const localConnection = wrapMarketplaceConnection(cachedConnection, { instrumentation, operation: 'LM' });
+      const globalConnection = wrapMarketplaceConnection(cachedConnection, { instrumentation, operation: 'GM' });
       const local = await fetchLocalMarketTrades(settings, localConnection);
       const global = await fetchGlobalMarketTrades(settings, globalConnection);
       const exhaustions = [local.exhaustion, global.exhaustion].filter(Boolean);
