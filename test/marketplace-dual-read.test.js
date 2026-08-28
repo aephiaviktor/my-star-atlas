@@ -22,13 +22,13 @@ const tradesSource = declaration('fetchMarketplaceTradesFromInflux', 'fetchMarke
 function harness(queryImpl) {
   const factory = new Function(
     'queryInfluxFlux', 'parseInfluxCsv', 'getSelectedPlayerProfile', 'normalizeFaction', 'escapeFluxString', 'profileName',
-    'normalizeMarketplaceV2Row', 'deriveMarketplaceUnionKey',
+    'normalizeMarketplaceV1Row', 'normalizeMarketplaceV2Row', 'deriveMarketplaceUnionKey', 'dedupeMarketplaceRows',
     `${scopeSource}\n${newestSource}\n${tradesSource}\nreturn { fetchNewestMarketplaceTradeMs, fetchMarketplaceTradesFromInflux };`
   );
   return factory(
     queryImpl, (text) => JSON.parse(text), (settings) => settings.playerProfile, (value) => String(value).toUpperCase(),
     (value) => String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"'), 'USTUR',
-    compat.normalizeMarketplaceV2Row, compat.deriveMarketplaceUnionKey
+    compat.normalizeMarketplaceV1Row, compat.normalizeMarketplaceV2Row, compat.deriveMarketplaceUnionKey, compat.dedupeMarketplaceRows
   );
 }
 const settings = { influxBucket: 'Bucket A', playerProfile: 'PlayerKey', faction: 'USTUR' };
@@ -39,22 +39,26 @@ function routed({ v2Rows = [], failV2 = false, newestRows = null } = {}) {
   const calls = [];
   const api = harness(async (_settings, flux) => {
     calls.push(flux);
-    if (failV2) throw new Error('v2_missing');
-    return JSON.stringify(newestRows ?? v2Rows);
+    if (flux.includes('_measurement == "marketplace_v2"')) {
+      if (failV2) throw new Error('v2_missing');
+      return JSON.stringify(newestRows ?? v2Rows);
+    }
+    return '[]';
   });
   return { api, calls };
 }
 
 const scope = 'r.faction == "USTUR" and (not exists r.profile or r.profile == "USTUR" or r.profile == "PlayerKey")';
 
-test('trade reads faction LM plus faction-attributed GM deposits without GLOBAL inputs', async () => {
+test('trade reads v2, bounded legacy GM, and faction-attributed GM deposits', async () => {
   const { api, calls } = routed({ v2Rows: [v2] });
   const result = await api.fetchMarketplaceTradesFromInflux(settings);
   assert.equal(result.trades.length, 1);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(calls[0], `from(bucket: "Bucket A")\n  |> range(start: -40d)\n  |> filter(fn: (r) => r._measurement == "marketplace_v2")\n  |> filter(fn: (r) => ${scope})\n  |> pivot(rowKey: ["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"], columnKey: ["_field"], valueColumn: "_value")\n  |> sort(columns: ["_time"], desc: true)`);
-  assert.match(calls[1], /_measurement == "marketplace_reconciliation_test_v1"/);
-  assert.match(calls[1], /r\.faction == "USTUR"/);
+  assert.match(calls[1], /_measurement == "marketplace" and r\.market == "GM"/);
+  assert.match(calls[2], /_measurement == "marketplace_reconciliation_test_v1"/);
+  assert.match(calls[2], /r\.faction == "USTUR"/);
   assert.doesNotMatch(calls.join('\n'), /r\.faction == "GLOBAL"/);
   assert.doesNotMatch(calls[0], /_measurement == "marketplace"(?:\s|and|\))/);
   assert.ok(calls[0].indexOf('|> filter(fn: (r) =>') < calls[0].indexOf('|> pivot'));
@@ -80,11 +84,13 @@ test('newest Marketplace anchor queries only v2 fallback and enriched quantity f
   assert.doesNotMatch(calls[0], /union\(|\bv1\s*=/);
 });
 
-test('scope is exact and v2-only read path contains no mutation or v1 compatibility', () => {
+test('scope is exact and bounded compatibility read path contains no mutation', () => {
   assert.match(main, /not exists r\.profile or r\.profile == "\$\{escapeFluxString\(profileName\)\}" or r\.profile == "\$\{escapeFluxString\(profile\)\}"/);
   assert.doesNotMatch(tradesSource, /r\.faction == "GLOBAL"|r\.profile == "GLOBAL"/);
   assert.match(tradesSource, /marketplace_reconciliation_test_v1/);
-  for (const forbidden of ['normalizeMarketplaceV1Row', 'dedupeMarketplaceRows', '_measurement == "marketplace"', 'writeInflux', 'marketplace-outbox', 'publication-coordinator', 'saveMarketplace', 'cursor', 'checkpoint', 'fetchMarketplaceAssetFlowsFromInflux']) assert.doesNotMatch(tradesSource, new RegExp(forbidden));
+  assert.match(tradesSource, /normalizeMarketplaceV1Row/);
+  assert.match(tradesSource, /dedupeMarketplaceRows/);
+  for (const forbidden of ['writeInflux', 'marketplace-outbox', 'publication-coordinator', 'saveMarketplace', 'cursor', 'checkpoint', 'fetchMarketplaceAssetFlowsFromInflux']) assert.doesNotMatch(tradesSource, new RegExp(forbidden));
 });
 
 test('v2 timestamp order remains newest-first with deterministic identity tie break', async () => {

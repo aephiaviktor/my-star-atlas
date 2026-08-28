@@ -103,13 +103,14 @@ test('Marketplace sync discovers current player orders and persists incremental 
   assert.match(main, /schemaVersion: 2/);
 });
 
-test('Marketplace reads use only the supported v2 Flux query instead of legacy Marketplace or Influx SQL', () => {
+test('Marketplace reads union canonical v2 with bounded legacy GM evidence without Influx SQL', () => {
   const start = main.indexOf('async function fetchMarketplaceTradesFromInflux');
   const end = main.indexOf('async function fetchMarketplaceAssetFlowsFromInflux', start);
   const reader = main.slice(start, end);
   assert.match(reader, /_measurement == "marketplace_v2"/);
-  assert.doesNotMatch(reader, /_measurement == "marketplace"(?:\s|and|\))/);
+  assert.match(reader, /_measurement == "marketplace" and r\.market == "GM"/);
   assert.match(reader, /pivot\(rowKey: \["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"\]/);
+  assert.match(reader, /dedupeMarketplaceRows/);
   assert.doesNotMatch(main, /queryInfluxSql|type:\s*['"]sql['"]/);
 });
 
@@ -123,7 +124,6 @@ test('Marketplace rescans order history for sell recovery without replaying high
   assert.match(main, /pendingWalletCursors/);
   assert.match(main, /tradeEnrichmentVersionNext[\s\S]*\? 2 : checkpoint\.tradeEnrichmentVersion/);
   assert.match(main, /prior\.signature === trade\.signature/);
-  assert.doesNotMatch(main, /dedupeMarketplaceRows/);
 });
 
 test('GM sync separates configured execution wallets from all profile custody wallets', () => {

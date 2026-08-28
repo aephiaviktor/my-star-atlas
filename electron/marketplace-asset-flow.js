@@ -115,6 +115,50 @@ function buildAssetFlowLedgerEvents(events) {
   }));
 }
 
+function selectFactionAssetFlows(events, faction) {
+  const selectedFaction = String(faction || '').trim().toUpperCase().replace(/^UST$/, 'USTUR');
+  const rows = Array.from(events || []);
+  const inferFaction = (event) => {
+    const tagged = String(event?.faction || '').trim().toUpperCase().replace(/^UST$/, 'USTUR');
+    if (tagged) return tagged;
+    const starbase = event?.flow === 'css-deposit' ? event.destination : event?.flow === 'css-withdraw' ? event.origin : '';
+    const prefix = String(starbase || '').trim().toUpperCase().split('-')[0];
+    return prefix === 'UST' ? 'USTUR' : ['MUD', 'ONI'].includes(prefix) ? prefix : '';
+  };
+  const direct = rows.filter((event) => inferFaction(event) === selectedFaction);
+  const selected = new Set(direct);
+  const inboundWallets = new Set(direct
+    .filter((event) => event.flow === 'css-deposit' && String(event.origin || '').startsWith('wallet:'))
+    .map((event) => String(event.origin)));
+  const outboundWallets = new Set(direct
+    .filter((event) => event.flow === 'css-withdraw' && String(event.destination || '').startsWith('wallet:'))
+    .map((event) => String(event.destination)));
+  const unscopedWalletTransfers = rows.filter((event) => !String(event?.faction || '').trim()
+    && event?.flow === 'wallet-transfer'
+    && String(event.origin || '').startsWith('wallet:')
+    && String(event.destination || '').startsWith('wallet:'));
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const event of unscopedWalletTransfers) {
+      if (!inboundWallets.has(String(event.destination)) || selected.has(event)) continue;
+      selected.add(event);
+      inboundWallets.add(String(event.origin));
+      changed = true;
+    }
+    for (const event of rows) {
+      if (event?.flow !== 'css-withdraw' || !inboundWallets.has(String(event.destination)) || selected.has(event)) continue;
+      selected.add(event);
+      changed = true;
+    }
+  }
+  for (const event of unscopedWalletTransfers) {
+    if (outboundWallets.has(String(event.origin))) selected.add(event);
+  }
+  return rows.filter((event) => selected.has(event));
+}
+
 function projectAssetFlowInfluxRows(rows) {
   return (rows || []).flatMap((row) => {
     const timestamp = String(row?._time || '');
@@ -138,5 +182,6 @@ module.exports = {
   decodeMarketplaceAssetFlows,
   formatAssetFlowInfluxLine,
   buildAssetFlowLedgerEvents,
+  selectFactionAssetFlows,
   projectAssetFlowInfluxRows,
 };

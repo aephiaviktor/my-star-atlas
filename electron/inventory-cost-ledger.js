@@ -101,6 +101,16 @@ class InventoryCostLedger {
     return this.get(location, asset);
   }
 
+  acquireLot({ location, asset, quantity, uncostedQuantity = 0, costs = {}, cargoCost = 0 }) {
+    const units = requirePositive(quantity, 'quantity');
+    const uncosted = requireNonNegative(uncostedQuantity, 'uncostedQuantity');
+    if (uncosted > units + EPSILON) throw new Error('uncostedQuantity cannot exceed quantity');
+    const lot = { quantity: units, uncostedQuantity: uncosted, costs: emptyCosts(), cargoCost: requireNonNegative(cargoCost, 'cargoCost') };
+    for (const source of COST_SOURCES) lot.costs[source] = requireNonNegative(costs?.[source] ?? 0, `${source} cost`);
+    this.addLot(location, asset, lot);
+    return this.get(location, asset);
+  }
+
   consume({ location, asset, quantity }) {
     const units = requirePositive(quantity, 'quantity');
     const entry = this.ensure(location, asset);
@@ -162,6 +172,7 @@ class InventoryCostLedger {
   applyEvent(event) {
     if (!event || typeof event !== 'object') throw new Error('event is required');
     if (event.type === 'acquire') return this.acquire(event);
+    if (event.type === 'acquire-lot') return this.acquireLot(event);
     if (event.type === 'consume') return this.consume(event);
     if (event.type === 'transfer') return this.transfer(event);
     if (event.type === 'craft') return this.craft(event);

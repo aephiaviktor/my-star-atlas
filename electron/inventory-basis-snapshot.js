@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const SOURCE_COST_KEYS = Object.freeze(['scanning', 'mining', 'crafting', 'lm', 'gm']);
 
 function text(value) { return String(value || '').trim(); }
 function factionText(value) {
@@ -26,7 +27,13 @@ function createInventoryBasisSnapshot(input = {}) {
     || quantity === null || !(quantity > 0) || uncostedQuantity === null || uncostedQuantity > quantity) return null;
   const knownQuantity = quantity - uncostedQuantity;
   if (!(knownQuantity > 0)) return null;
-  const costs = input.costs && typeof input.costs === 'object' ? Object.values(input.costs) : [];
+  const hasSourceBreakdown = input.costs && typeof input.costs === 'object'
+    && SOURCE_COST_KEYS.every((key) => Object.hasOwn(input.costs, key));
+  const sourceCosts = hasSourceBreakdown
+    ? Object.fromEntries(SOURCE_COST_KEYS.map((key) => [key, finiteNonNegative(input.costs[key])]))
+    : null;
+  if (sourceCosts && Object.values(sourceCosts).some((value) => value === null)) return null;
+  const costs = sourceCosts ? Object.values(sourceCosts) : input.costs && typeof input.costs === 'object' ? Object.values(input.costs) : [];
   let knownInventoryValueAtlas = 0;
   for (const value of costs) {
     const cost = finiteNonNegative(value);
@@ -38,12 +45,17 @@ function createInventoryBasisSnapshot(input = {}) {
   knownInventoryValueAtlas += cargoCost;
   const timestamp = date.toISOString();
   const identity = [faction, starbase, asset, timestamp, eventId].join('\n');
-  return {
+  const snapshot = {
     snapshotId: crypto.createHash('sha256').update(identity).digest('hex'),
     faction, starbase, asset, timestamp, eventId,
     quantity, knownQuantity, uncostedQuantity, knownInventoryValueAtlas,
     weightedAveragePriceAtlas: knownInventoryValueAtlas / knownQuantity,
   };
+  if (sourceCosts) {
+    snapshot.sourceCosts = sourceCosts;
+    snapshot.cargoCost = cargoCost;
+  }
+  return snapshot;
 }
 
 function formatInventoryBasisSnapshotInfluxLine(snapshot) {
@@ -59,16 +71,26 @@ function formatInventoryBasisSnapshotInfluxLine(snapshot) {
     `knownInventoryValueAtlas=${canonical.knownInventoryValueAtlas}`,
     `weightedAveragePriceAtlas=${canonical.weightedAveragePriceAtlas}`,
     `eventId=${escapeField(canonical.eventId)}`,
+    ...(canonical.sourceCosts ? SOURCE_COST_KEYS.map((key) => `${key}CostAtlas=${canonical.sourceCosts[key]}`) : []),
+    ...(canonical.sourceCosts ? [`cargoCostAtlas=${canonical.cargoCost}`] : []),
   ].join(',');
   return `inventory_basis_snapshot,${tags} ${fields} ${BigInt(Date.parse(canonical.timestamp)) * 1000000n}`;
 }
 
 function projectInventoryBasisSnapshotRows(rows) {
   return (rows || []).flatMap((row) => {
+    const hasCanonicalSourceBreakdown = row?.sourceCosts && SOURCE_COST_KEYS.every((key) => row.sourceCosts[key] != null)
+      && row?.cargoCost != null;
+    const hasInfluxSourceBreakdown = SOURCE_COST_KEYS.every((key) => row?.[`${key}CostAtlas`] != null)
+      && row?.cargoCostAtlas != null;
+    const hasSourceBreakdown = hasCanonicalSourceBreakdown || hasInfluxSourceBreakdown;
     const snapshot = createInventoryBasisSnapshot({
       faction: row?.faction, starbase: row?.starbase, asset: row?.asset, timestamp: row?._time,
       eventId: row?.eventId, quantity: row?.quantity, uncostedQuantity: row?.uncostedQuantity,
-      costs: { basis: row?.knownInventoryValueAtlas }, cargoCost: 0,
+      costs: hasSourceBreakdown
+        ? Object.fromEntries(SOURCE_COST_KEYS.map((key) => [key, hasCanonicalSourceBreakdown ? row.sourceCosts[key] : row?.[`${key}CostAtlas`]]))
+        : { basis: row?.knownInventoryValueAtlas },
+      cargoCost: hasSourceBreakdown ? (hasCanonicalSourceBreakdown ? row.cargoCost : row?.cargoCostAtlas) : 0,
     });
     if (!snapshot || snapshot.snapshotId !== text(row?.snapshotId)) return [];
     const knownQuantity = finiteNonNegative(row?.knownQuantity);

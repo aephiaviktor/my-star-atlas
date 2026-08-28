@@ -36,6 +36,23 @@ test('inventory basis line and Influx projection preserve the canonical pool obs
   assert.deepEqual(projected, [snapshot]);
 });
 
+test('inventory basis snapshots round-trip every provenance source for cross-faction handoff', () => {
+  const costs = { scanning: 1, mining: 2, crafting: 3, lm: 4, gm: 5 };
+  const snapshot = createInventoryBasisSnapshot({
+    faction: 'ONI', starbase: 'ONI-1', asset: 'Framework', timestamp: '2026-08-28T10:00:00Z', eventId: 'event-sources',
+    quantity: 100, uncostedQuantity: 10, costs, cargoCost: 6,
+  });
+  assert.deepEqual(snapshot.sourceCosts, costs);
+  assert.equal(snapshot.cargoCost, 6);
+  const line = formatInventoryBasisSnapshotInfluxLine(snapshot);
+  assert.match(line, /scanningCostAtlas=1,miningCostAtlas=2,craftingCostAtlas=3,lmCostAtlas=4,gmCostAtlas=5,cargoCostAtlas=6/);
+  assert.deepEqual(projectInventoryBasisSnapshotRows([{
+    _time: snapshot.timestamp, snapshotId: snapshot.snapshotId, faction: snapshot.faction, starbase: snapshot.starbase, asset: snapshot.asset,
+    eventId: snapshot.eventId, quantity: '100', knownQuantity: '90', uncostedQuantity: '10', knownInventoryValueAtlas: '21', weightedAveragePriceAtlas: String(21 / 90),
+    scanningCostAtlas: '1', miningCostAtlas: '2', craftingCostAtlas: '3', lmCostAtlas: '4', gmCostAtlas: '5', cargoCostAtlas: '6',
+  }]), [snapshot]);
+});
+
 test('invalid or empty known basis is rejected instead of publishing misleading price', () => {
   assert.equal(createInventoryBasisSnapshot({ faction: 'ONI', starbase: 'ONI-1', asset: 'Food', timestamp: 'bad', eventId: 'x', quantity: 1 }), null);
   assert.equal(createInventoryBasisSnapshot({ faction: 'ONI', starbase: 'ONI-1', asset: 'Food', timestamp: '2026-08-01T00:00:00Z', eventId: 'x', quantity: 10, uncostedQuantity: 10, costs: {}, cargoCost: 0 }), null);

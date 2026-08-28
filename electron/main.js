@@ -21,6 +21,8 @@ const lockfile = require('proper-lockfile');
 const packageJson = require('../package.json');
 const { createAsyncTtlCache, fetchWithInfluxRetry } = require('./influx-resilience');
 const { queryCargoRowsWithWindowFallback } = require('./cargo-influx-window-recovery');
+const { excludeSelfReferentialCraftingEvents } = require('./crafting-event-integrity');
+const { buildFactionCustodyLedgerEvents } = require('./cross-faction-basis-handoff');
 const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
 const { createEarningsErrorDiagnostic } = require('./earnings-error-diagnostic');
@@ -76,7 +78,7 @@ const {
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
 const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
-const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows } = require('./marketplace-asset-flow');
+const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows, selectFactionAssetFlows } = require('./marketplace-asset-flow');
 const {
   enrichGmTradesWithInventoryBasis,
   buildGmWalletUniverse,
@@ -84,8 +86,10 @@ const {
   formatGmFactionMarketplaceTestLine,
 } = require('./gm-marketplace-accounting');
 const {
+  normalizeMarketplaceV1Row,
   normalizeMarketplaceV2Row,
   deriveMarketplaceUnionKey,
+  dedupeMarketplaceRows,
 } = require('./marketplace-trade-compat');
 const { deriveMarketplaceTradeId } = require('./marketplace-v2-point');
 const {
@@ -645,6 +649,11 @@ async function fetchMarketplaceTradesFromInflux(settings) {
   |> filter(fn: (r) => ${scope})
   |> pivot(rowKey: ["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
+  const legacyGmFlux = `from(bucket: "${escapeFluxString(bucket)}")
+  |> range(start: -40d)
+  |> filter(fn: (r) => r._measurement == "marketplace" and r.market == "GM")
+  |> pivot(rowKey: ["_time", "market", "faction", "profile", "side", "asset", "wallet"], columnKey: ["_field"], valueColumn: "_value")
+  |> sort(columns: ["_time"], desc: true)`;
   const factionGmFlux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -40d)
   |> filter(fn: (r) => r._measurement == "marketplace_reconciliation_test_v1")
@@ -652,15 +661,17 @@ async function fetchMarketplaceTradesFromInflux(settings) {
   |> pivot(rowKey: ["_time", "eventId", "market", "faction", "profile", "side", "asset", "rawMint", "starbase"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
   try {
-    const [v2Result, factionGmResult] = await Promise.all([
+    const [v2Result, legacyGmResult, factionGmResult] = await Promise.all([
       queryInfluxFlux(settings, v2Flux),
+      queryInfluxFlux(settings, legacyGmFlux),
       queryInfluxFlux(settings, factionGmFlux),
     ]);
     const context = { applicationProfile: profileName, selectedProfile: profile, faction, scopeProven: true };
-    const trades = [
+    const trades = dedupeMarketplaceRows([
       ...parseInfluxCsv(v2Result).map((row) => normalizeMarketplaceV2Row(row, context)).filter(Boolean),
+      ...parseInfluxCsv(legacyGmResult).map((row) => normalizeMarketplaceV1Row(row, context)).filter((row) => row?._certain),
       ...parseInfluxCsv(factionGmResult).map(normalizeFactionGmMarketplaceRow).filter(Boolean),
-    ];
+    ]);
     trades.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp) || deriveMarketplaceUnionKey(a).localeCompare(deriveMarketplaceUnionKey(b)));
     return { trades, error: '' };
   } catch (error) {
@@ -671,12 +682,14 @@ async function fetchMarketplaceTradesFromInflux(settings) {
 async function fetchMarketplaceAssetFlowsFromInflux(settings) {
   const bucket = String(settings.influxBucket || '').trim();
   if (!bucket) return [];
+  const faction = normalizeFaction(settings.faction);
   const flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -40d)
   |> filter(fn: (r) => r._measurement == "asset_flow")
   |> pivot(rowKey: ["_time", "flowId"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"])`;
-  return projectAssetFlowInfluxRows(parseInfluxCsv(await queryInfluxFlux(settings, flux)));
+  const flows = projectAssetFlowInfluxRows(parseInfluxCsv(await queryInfluxFlux(settings, flux)));
+  return selectFactionAssetFlows(flows, faction);
 }
 
 async function resolveInfluxOrgId(influxUrl, token, bucket) {
@@ -6429,7 +6442,7 @@ ${scopeFilterFlux}
   |> keep(columns: ["craftingID", "starbase", "output", "input", "type", "_field", "_time", "_value"])
   |> sort(columns: ["_time"])`;
 
-  const craftingRows = parseInfluxCsv(await queryInfluxFlux(settings, craftingFlux));
+  const craftingRows = excludeSelfReferentialCraftingEvents(parseInfluxCsv(await queryInfluxFlux(settings, craftingFlux)));
   const outputRows = craftingRows.filter((row) => row._field === 'amount' && row.type === 'Output');
   const inputRows = craftingRows.filter((row) => row._field === 'amount' && row.type === 'Input');
   const feeRows = craftingRows.filter((row) => row._field === 'fee' && row.type === 'Output');
@@ -7560,6 +7573,15 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     ? await fetchMarketplaceTradesFromInflux(settings)
     : { trades: [], error: '' };
   const marketplaceAssetFlowEvents = needsInventoryLedger ? await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []) : [];
+  const inventoryBasisObservations = needsInventoryLedger ? await readInventoryBasisSnapshots({
+    bucket: settings.influxBucket,
+    query: (flux) => queryInfluxFlux(settings, flux).then(parseInfluxCsv),
+  }).catch(() => []) : [];
+  const factionCustodyLedger = buildFactionCustodyLedgerEvents({
+    flows: marketplaceAssetFlowEvents,
+    observations: inventoryBasisObservations,
+    faction: ledgerFaction,
+  });
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
   const checkpoint = needsInventoryLedger
     ? await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName })
@@ -7587,13 +7609,16 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     craftingRows: ledgerCraftingRows,
     upgradingRows: upgradingRows.ledgerEvents || [],
     localMarketTrades: localMarketResult.trades,
-    assetFlowEvents: marketplaceAssetFlowEvents,
+    assetFlowEvents: factionCustodyLedger.events,
     inventoryBasisFaction: ledgerFaction,
   }) : { events: [], appliedEventResults: [], ledger: { snapshot: () => [] }, rejectedEvents: [], seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {}, inventoryBasisSnapshots: [] };
   const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
   const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
   const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
-  const inventoryCostLedgerRejectedEvents = inventoryCostLedgerResult.rejectedEvents;
+  const inventoryCostLedgerRejectedEvents = [
+    ...inventoryCostLedgerResult.rejectedEvents,
+    ...factionCustodyLedger.rejected.map(({ flow, reason }) => ({ event: flow, error: reason })),
+  ];
   let pendingInventoryBasisSnapshots = Array.from(new Map([
     ...(checkpoint.pendingInventoryBasisSnapshots || []),
     ...(inventoryCostLedgerResult.inventoryBasisSnapshots || []),

@@ -203,7 +203,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
       appliedEventResults.push({ event, result });
       if (inventoryBasisFaction) {
         const pools = [];
-        if (event.type === 'acquire' || event.type === 'consume') pools.push([event.location, event.asset]);
+        if (event.type === 'acquire' || event.type === 'acquire-lot' || event.type === 'consume') pools.push([event.location, event.asset]);
         if (event.type === 'transfer') pools.push([event.origin, event.asset], [event.destination, event.asset]);
         if (event.type === 'craft') {
           pools.push([event.location, event.outputAsset]);

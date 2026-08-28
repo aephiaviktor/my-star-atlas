@@ -5,7 +5,7 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 1;
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 2;
 
 function emptyResult(status, error = '') {
   return {

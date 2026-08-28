@@ -11,7 +11,7 @@ function buildInventoryBasisSnapshotFlux(bucket) {
   |> range(start: -30d)
   |> filter(fn: (r) => r._measurement == "inventory_basis_snapshot")
   |> pivot(rowKey: ["_time", "snapshotId", "faction", "starbase", "asset"], columnKey: ["_field"], valueColumn: "_value")
-  |> keep(columns: ["_time", "snapshotId", "faction", "starbase", "asset", "eventId", "quantity", "knownQuantity", "uncostedQuantity", "knownInventoryValueAtlas", "weightedAveragePriceAtlas"])
+  |> keep(columns: ["_time", "snapshotId", "faction", "starbase", "asset", "eventId", "quantity", "knownQuantity", "uncostedQuantity", "knownInventoryValueAtlas", "weightedAveragePriceAtlas", "scanningCostAtlas", "miningCostAtlas", "craftingCostAtlas", "lmCostAtlas", "gmCostAtlas", "cargoCostAtlas"])
   |> sort(columns: ["_time", "snapshotId"])`;
 }
 
