@@ -22,6 +22,7 @@ const packageJson = require('../package.json');
 const { createAsyncTtlCache, fetchWithInfluxRetry } = require('./influx-resilience');
 const { queryCargoRowsWithWindowFallback } = require('./cargo-influx-window-recovery');
 const { excludeSelfReferentialCraftingEvents } = require('./crafting-event-integrity');
+const { removeUpgradeMirroredCraftingEvents } = require('./crafting-upgrade-dedup');
 const { buildFactionCustodyLedgerEvents } = require('./cross-faction-basis-handoff');
 const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
 const { writeJsonAtomic } = require('./atomic-json');
@@ -6579,7 +6580,7 @@ ${scopeFilterFlux}
     const eventDate = new Date(raw._time);
     const timestamp = Number.isNaN(eventDate.getTime()) ? '' : eventDate.toISOString();
     if (!craftingId || !starbase || !output || !timestamp) continue;
-    if (!ledgerByCraftingId.has(craftingId)) ledgerByCraftingId.set(craftingId, { timestamp, starbase, output, crafted: 0, feeAmount: null, txCostSol: null, ingredients: [] });
+    if (!ledgerByCraftingId.has(craftingId)) ledgerByCraftingId.set(craftingId, { craftingId, timestamp, starbase, output, crafted: 0, feeAmount: null, txCostSol: null, crew: 0, ingredients: [] });
     const event = ledgerByCraftingId.get(craftingId);
     const value = Number(raw._value);
     if (!Number.isFinite(value)) continue;
@@ -6587,6 +6588,7 @@ ${scopeFilterFlux}
     else if (raw._field === 'amount' && raw.type === 'Input') event.ingredients.push({ input: String(raw.input || '').trim(), amount: value });
     else if (raw._field === 'fee' && raw.type === 'Output') event.feeAmount = (event.feeAmount || 0) + value;
     else if (raw._field === 'txCostSol' && raw.type === 'Output') event.txCostSol = (event.txCostSol || 0) + value;
+    else if (raw._field === 'crew' && raw.type === 'Output') event.crew += value;
   }
   result.ledgerEvents = Array.from(ledgerByCraftingId.values());
   return result;
@@ -7216,6 +7218,9 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   else craftingError = String(craftingResult.reason?.message || craftingResult.reason || 'crafting_rows_unavailable');
   if (upgradingResult.status === 'fulfilled') upgradingRows = upgradingResult.value;
   else upgradingError = String(upgradingResult.reason?.message || upgradingResult.reason || 'upgrading_rows_unavailable');
+  if (craftingResult.status === 'fulfilled' && upgradingResult.status === 'fulfilled') {
+    craftingRows = removeUpgradeMirroredCraftingEvents(craftingRows, upgradingRows.jobs || []);
+  }
   if (rawCargoCostResult.status === 'fulfilled') rawCargoCosts = rawCargoCostResult.value;
   else rawCargoCostError = String(rawCargoCostResult.reason?.message || rawCargoCostResult.reason || 'raw_cargo_cost_rows_unavailable');
   const cargoVolumeFetch = cargoVolumeResult.status === 'fulfilled'
