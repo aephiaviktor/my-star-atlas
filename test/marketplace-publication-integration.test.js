@@ -236,6 +236,16 @@ test('GM trades and flows form one atomic cursor-safety boundary', () => {
   assert.match(global, /publishedTradeIds:[\s\S]*publishedFlowIds:[\s\S]*\.\.\.cursorOutputSnapshot/);
 });
 
+test('GM routine synchronization resumes durable wallet cursors and batches transactions', () => {
+  const global = functionBody('fetchGlobalMarketTrades', 'let marketplaceSyncActive');
+  assert.match(global, /marketplaceCursorSnapshot\(\s*checkpoint\.walletCursors,/);
+  assert.equal((global.match(/transactionBatchSize: 5/g) || []).length, 2);
+  assert.doesNotMatch(global, /walletCursors: \{\}, orderCursors: \{\}/);
+  assert.match(global, /upstreamWalletCursors/);
+  assert.match(global, /combinedGlobalScan/);
+  assert.match(global, /resolveMarketplaceCheckpointCursors\(checkpoint, combinedGlobalScan\)/);
+});
+
 test('all candidates stage before first POST and one staging failure blocks every POST', async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'msa-gate7-stage-'));
   try {
@@ -378,7 +388,7 @@ test('backfill, enrichment, and GM trade-flow cursor interlock formulas remain e
   assert.match(local, /marketplaceBackfilledNext = publication\.allCurrentComplete && holdsCompleted && !hasActiveTradeHold/);
   assert.match(local, /scanned\.stats\.transactionMisses === 0 && publishError === '' && publication\.allEnrichableComplete/);
   assert.match(global, /marketplaceBackfilledNext = publication\.allTradeCurrentComplete && tradeHoldsCompleted && !hasActiveTradeHold/);
-  assert.match(global, /assetFlowBackfilledNext = scanned\.stats\.transactionMisses === 0 && publishError === ''/);
+  assert.match(global, /assetFlowBackfilledNext = combinedGlobalScan\.stats\.transactionMisses === 0 && publishError === ''/);
   assert.match(global, /\.\.\.trades\.map[\s\S]*\.\.\.assetFlows\.map/);
   assert.match(global, /tradeEnrichmentVersion: checkpoint\.tradeEnrichmentVersion/);
 });

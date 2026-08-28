@@ -5276,7 +5276,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
   }]));
   const atlasPerSol = await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null);
   const cursorInputSnapshot = marketplaceCursorSnapshot(
-    {},
+    checkpoint.walletCursors,
     checkpoint.orderCursors,
     checkpoint.activeOrderIds,
     checkpoint.archivedOrderIds,
@@ -5288,6 +5288,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     knownOrders: checkpoint.orders,
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
+    transactionBatchSize: 5,
     maxPages: 1,
     startIso,
     addressFactory: (value) => new PublicKey(value),
@@ -5303,12 +5304,16 @@ async function fetchGlobalMarketTrades(settings, connection) {
     const destination = String(flow.destination || '').match(/^wallet:(.+)$/)?.[1] || '';
     return origin && primaryTrackedWallets.has(destination) && !primaryTrackedWallets.has(origin) ? [origin] : [];
   }))).sort().slice(0, 16);
+  const upstreamWalletCursors = Object.fromEntries(
+    upstreamWallets.filter((wallet) => checkpoint.walletCursors[wallet]).map((wallet) => [wallet, checkpoint.walletCursors[wallet]]),
+  );
   const upstreamScan = upstreamWallets.length ? await scanLocalMarketTrades(connection, {
     trackedWallets: upstreamWallets,
     executionWallets: upstreamWallets,
     marketAssetsByMint: buildGlobalMarketAssetMap(),
     knownOrders: [...checkpoint.orders, ...scanned.orders],
-    walletCursors: {}, orderCursors: {}, activeOrderIds: [], archivedOrderIds: [], openOrderIds: [],
+    walletCursors: upstreamWalletCursors, orderCursors: {}, activeOrderIds: [], archivedOrderIds: [], openOrderIds: [],
+    transactionBatchSize: 5,
     maxPages: 1,
     startIso,
     addressFactory: (value) => new PublicKey(value),
@@ -5332,7 +5337,19 @@ async function fetchGlobalMarketTrades(settings, connection) {
     walletUniverse: shadowWalletUniverse, inventoryBasisObservations,
   });
   const shadowWrite = await writeMarketplaceReconciliationTestLines(settings, shadowRows);
-  const checkpointCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
+  const combinedGlobalScan = {
+    ...scanned,
+    exhaustion: scanned.exhaustion || upstreamScan?.exhaustion || null,
+    stats: {
+      ...scanned.stats,
+      transactionMisses: Number(scanned.stats?.transactionMisses || 0) + Number(upstreamScan?.stats?.transactionMisses || 0),
+      signatureRequests: Number(scanned.stats?.signatureRequests || 0) + Number(upstreamScan?.stats?.signatureRequests || 0),
+      transactionRequests: Number(scanned.stats?.transactionRequests || 0) + Number(upstreamScan?.stats?.transactionRequests || 0),
+      totalRpcRequests: Number(scanned.stats?.totalRpcRequests || 0) + Number(upstreamScan?.stats?.totalRpcRequests || 0),
+    },
+    walletCursors: { ...checkpoint.walletCursors, ...scanned.walletCursors, ...(upstreamScan?.walletCursors || {}) },
+  };
+  const checkpointCursors = resolveMarketplaceCheckpointCursors(checkpoint, combinedGlobalScan);
   const cursorOutputSnapshot = {
     walletCursors: checkpointCursors.walletCursors,
     orderCursors: checkpointCursors.orderCursors,
@@ -5383,7 +5400,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     hasActiveMarketplacePublicationHolds('GM', ['asset_flow']),
   ]);
   const marketplaceBackfilledNext = publication.allTradeCurrentComplete && tradeHoldsCompleted && !hasActiveTradeHold;
-  const assetFlowBackfilledNext = scanned.stats.transactionMisses === 0 && publishError === ''
+  const assetFlowBackfilledNext = combinedGlobalScan.stats.transactionMisses === 0 && publishError === ''
     && publication.allFlowCurrentComplete && flowHoldsCompleted && !hasActiveFlowHold;
   await writeJsonAtomic(filePath, {
     ...checkpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
@@ -5392,8 +5409,8 @@ async function fetchGlobalMarketTrades(settings, connection) {
   });
   return {
     trades, assetFlows, error: publishError, marketplaceReconciliationTest: shadowWrite,
-    rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
-    exhaustion: scanned.exhaustion || null,
+    rpc: { ...combinedGlobalScan.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: combinedGlobalScan.stats.totalRpcRequests + openOrders.requestCount },
+    exhaustion: combinedGlobalScan.exhaustion,
   };
 }
 
