@@ -8485,13 +8485,21 @@ function renderUpgradingMarginChart(analytics) {
   bindUpgradingRedemptionChartNavigation(svg, axes, analytics, 'margin', minY, maxY);
 }
 
+const UPGRADING_V1_LOGIC_START_DATE = '2026-08-14';
+function getUpgradingV1ChartStartDate(now = Date.now()) {
+  const rollingThirtyDayStart = new Date(now - (30 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+  return rollingThirtyDayStart > UPGRADING_V1_LOGIC_START_DATE ? rollingThirtyDayStart : UPGRADING_V1_LOGIC_START_DATE;
+}
+
 function renderUpgradingSelectionUtilizationV1(result) {
   const data = result?.selectionUtilizationV1;
   const unavailable = (container, reason) => { if (container) container.textContent = reason || 'Required cohort, hourly allocation, identity, or provenance evidence is incomplete.'; };
   if (!data) { for (const container of [optimizationUpgradingSelectionV1, optimizationUpgradingUtilizationV1, optimizationUpgradingClaimLockV1, optimizationUpgradingOperationalV1]) unavailable(container, 'Selection/utilization evidence is not available.'); return; }
-  const completeSelection = (data.selection || []).filter((row) => row.evidence_complete && Number.isFinite(row.atlas_per_lp) && Number.isFinite(row.selection_uplift_atlas_per_active_crew_day));
+  const upgradingV1ChartStartDate = getUpgradingV1ChartStartDate();
+  const completeSelection = (data.selection || [])
+    .filter((row) => row.date >= upgradingV1ChartStartDate)
+    .filter((row) => row.evidence_complete && Number.isFinite(row.atlas_per_lp) && Number.isFinite(row.selection_uplift_atlas_per_active_crew_day));
   if (optimizationUpgradingSelectionV1) {
-    optimizationUpgradingSelectionV1.title='Actual completed component mix versus neutral component mix replayed over the same completed-job population and protocol-active crew time. This measures selection, not uptime.';
     optimizationUpgradingSelectionV1.replaceChildren();
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingSelectionV1,760,340);
     if (!completeSelection.length) unavailable(optimizationUpgradingSelectionV1, data.selection?.[0]?.incomplete_reason || 'Matched completion-cohort evidence is incomplete.');
@@ -8501,19 +8509,18 @@ function renderUpgradingSelectionUtilizationV1(result) {
       appendOptimizationSvg(svg,'line',{x1:axes.left,x2:axes.width-axes.right,y1:axes.y(0),y2:axes.y(0),class:'optimization-zero-line'});
       const meanX=xs.reduce((a,b)=>a+b,0)/xs.length,meanY=ys.reduce((a,b)=>a+b,0)/ys.length,cov=completeSelection.reduce((s,r)=>s+(r.atlas_per_lp-meanX)*(r.selection_uplift_atlas_per_active_crew_day-meanY),0),variance=xs.reduce((s,x)=>s+(x-meanX)**2,0);
       if(variance){const slope=cov/variance,intercept=meanY-slope*meanX;appendOptimizationSvg(svg,'line',{x1:axes.x(minX),x2:axes.x(maxX),y1:axes.y(intercept+slope*minX),y2:axes.y(intercept+slope*maxX),class:'optimization-trend-line'});}
-      for(const row of completeSelection){const dot=appendOptimizationSvg(svg,'circle',{cx:axes.x(row.atlas_per_lp),cy:axes.y(row.selection_uplift_atlas_per_active_crew_day),r:5,fill:'#45d6c1',class:'mean-marker'});bindOptimizationAnalyticsTooltip(dot,`${row.date} · ATLAS/LP ${row.atlas_per_lp.toFixed(10)} · uplift ${row.selection_uplift_atlas.toLocaleString(undefined,{maximumFractionDigits:2})} ATLAS · ${row.selection_uplift_atlas_per_active_crew_day.toFixed(4)} ATLAS / active crew-day · ${row.selection_uplift_lp_per_active_crew_hour.toFixed(2)} LP / active crew-hour · ${row.completion_cohort_active_crew_hours.toLocaleString(undefined,{maximumFractionDigits:1})} active crew-hours · ${row.completed_job_count} jobs · ${row.price_basis} · price basis ${row.price_basis_complete?'complete':'incomplete'}`);}
+      for(const row of completeSelection){appendOptimizationSvg(svg,'circle',{cx:axes.x(row.atlas_per_lp),cy:axes.y(row.selection_uplift_atlas_per_active_crew_day),r:5,fill:'#45d6c1',class:'mean-marker'});}
     }
     const warning=document.createElement('strong'); warning.className='optimization-v1-warning'; warning.textContent=data.price_warning; optimizationUpgradingSelectionV1.append(warning);
   }
   if (optimizationUpgradingUtilizationV1) {
-    optimizationUpgradingUtilizationV1.title='Physical crew state inside this UTC period. States are mutually exclusive and sum to configured capacity. Unknown time is shown, never silently assigned.';
     optimizationUpgradingUtilizationV1.replaceChildren();
     const series=[['Protocol active','protocol_active','#22c55e'],['Claim locked','claim_locked','#f59e0b'],['Proven eligible idle','proven_eligible_idle','#38bdf8'],['Proven hard unavailable','proven_hard_unavailable','#ef4444'],['Capacity not observed','capacity_not_observed','#64748b']];
     const legend=document.createElement('div');legend.className='optimization-v1-legend';for(const [label,,color] of series){const item=document.createElement('span');item.textContent=label;item.style.setProperty('--legend-color',color);legend.append(item);}optimizationUpgradingUtilizationV1.append(legend);
-    const rows=(data.utilization||[]).filter(r=>r.identity_complete);
+    const rows=(data.utilization||[]).filter((row) => row.date >= upgradingV1ChartStartDate).filter(r=>r.identity_complete);
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingUtilizationV1,760,340);
     if(!rows.length) unavailable(optimizationUpgradingUtilizationV1,'UTC-calendar identity evidence is incomplete.');
-    else if(svg){const axes=renderUpgradingChartAxes(svg,{minY:0,maxY:100,xMin:0,xMax:rows.length,xTicks:rows.map((_,i)=>i+.5),xLabel:'UTC date',yLabel:'Configured capacity (%)',height:340,xFormatter:v=>rows[Math.max(0,Math.min(rows.length-1,Math.floor(v)))]?.date.slice(5)||''});rows.forEach((row,index)=>{let bottom=0;for(const [label,key,color] of series){const percent=Number(row[`${key}_percent`]||0),hours=Number(row[`${key}_crew_hours`]||0),rect=appendOptimizationSvg(svg,'rect',{x:axes.x(index+.12),y:axes.y(bottom+percent),width:Math.max(1,axes.x(index+.88)-axes.x(index+.12)),height:Math.max(0,axes.y(bottom)-axes.y(bottom+percent)),fill:color});bindOptimizationAnalyticsTooltip(rect,`${row.date} · ${label} · ${percent.toFixed(2)}% · ${hours.toLocaleString(undefined,{maximumFractionDigits:1})} crew-hours · UTC-calendar physical crew state`);bottom+=percent;}});}
+    else if(svg){const axes=renderUpgradingChartAxes(svg,{minY:0,maxY:100,xMin:0,xMax:rows.length,xTicks:rows.map((_,i)=>i+.5),xLabel:'UTC date',yLabel:'Configured capacity (%)',height:340,xFormatter:v=>rows[Math.max(0,Math.min(rows.length-1,Math.floor(v)))]?.date.slice(5)||''});rows.forEach((row,index)=>{let bottom=0;for(const [,key,color] of series){const percent=Number(row[`${key}_percent`]||0);appendOptimizationSvg(svg,'rect',{x:axes.x(index+.12),y:axes.y(bottom+percent),width:Math.max(1,axes.x(index+.88)-axes.x(index+.12)),height:Math.max(0,axes.y(bottom)-axes.y(bottom+percent)),fill:color});bottom+=percent;}});}
   }
   if (optimizationUpgradingClaimLockV1) { const claim=data.claim_lock||{}; optimizationUpgradingClaimLockV1.textContent=`${claim.claim_locked_crew_hours?.toLocaleString(undefined,{maximumFractionDigits:1}) ?? '--'} crew-hours · ${claim.claim_locked_percent?.toFixed(2) ?? '--'}% · delay median ${claim.median_claim_delay_seconds?.toFixed(1) ?? '--'}s · P90 ${claim.p90_claim_delay_seconds?.toFixed(1) ?? '--'}s · P95 ${claim.p95_claim_delay_seconds?.toFixed(1) ?? '--'}s · max ${claim.maximum_claim_delay_seconds?.toFixed(1) ?? '--'}s · attempts/retries/failures: NOT OBSERVED`; optimizationUpgradingClaimLockV1.title='Crew whose protocol work ended but whose completion/claim had not succeeded. This is not active or idle and is not presumed unavoidable.'; }
   if (optimizationUpgradingOperationalV1) { const rows=data.utilization||[]; const lower=rows.reduce((s,r)=>s+r.feasible_neutral_lower_crew_hours,0), upper=rows.reduce((s,r)=>s+r.feasible_neutral_upper_crew_hours,0); optimizationUpgradingOperationalV1.textContent=`UTC-calendar operational measurement combines selection and utilization; it is not component-selection uplift. Feasible-neutral capacity: ${lower.toLocaleString(undefined,{maximumFractionDigits:1})}–${upper.toLocaleString(undefined,{maximumFractionDigits:1})} crew-hours. Residual NOT OBSERVED remains uncertainty.`; }

@@ -328,6 +328,7 @@ select:focus {
 .optimization-upgrading-primary-chart-card .optimization-upgrading-tall-chart { width: 66.6667%; margin-inline: auto; }
 .optimization-upgrading-comparison-chart-card { grid-column: span 1; }
 .optimization-upgrading-comparison-chart-card .optimization-upgrading-tall-chart { width: 100%; }
+.optimization-upgrading-v1-card { grid-column: span 1; }
 .optimization-upgrading-v1-chart { min-width: 0; overflow: hidden; }
 .optimization-upgrading-v1-chart svg { width: 100%; height: auto; aspect-ratio: 760 / 340; }
 .optimization-v1-warning { display: block; margin-top: 8px; color: #fbbf24; font-size: 11px; overflow-wrap: anywhere; }

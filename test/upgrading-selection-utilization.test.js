@@ -87,6 +87,24 @@ test('accepted UTC-calendar stacks are exhaustive and preserve the two outliers'
   assert.ok(Math.abs(aug20.claimLocked / 960 - 13.070729166666666) < 1e-9);
 });
 
+test('V1 analytics charts sit side by side without chart tooltips', () => {
+  const renderer = fs.readFileSync('electron/renderer.js', 'utf8');
+  const html = fs.readFileSync('electron/renderer.html', 'utf8');
+  const css = fs.readFileSync('electron/renderer.css', 'utf8');
+  assert.equal((html.match(/optimization-upgrading-v1-card/g) || []).length, 2);
+  assert.match(css, /\.optimization-upgrading-v1-card\s*\{\s*grid-column:\s*span 1/);
+  const v1 = renderer.slice(renderer.indexOf('function renderUpgradingSelectionUtilizationV1'), renderer.indexOf('function renderUpgradingOptimizationAnalytics'));
+  assert.doesNotMatch(v1, /bindOptimizationAnalyticsTooltip/);
+  assert.doesNotMatch(v1, /optimizationUpgrading(?:Selection|Utilization)V1\.title/);
+});
+
+test('V1 analytics begin at the later of 2026-08-14 and the rolling 30-day boundary', () => {
+  const renderer = fs.readFileSync('electron/renderer.js', 'utf8');
+  assert.match(renderer, /const UPGRADING_V1_LOGIC_START_DATE = '2026-08-14';/);
+  assert.match(renderer, /function getUpgradingV1ChartStartDate/);
+  assert.match(renderer, /filter\(\(row\) => row\.date >= upgradingV1ChartStartDate/);
+});
+
 test('V1.1 renderer contains real scatter, trend, zero line, five-state stack, and responsive rules', () => {
   const renderer = fs.readFileSync('electron/renderer.js', 'utf8');
   const css = fs.readFileSync('electron/renderer.css', 'utf8');
@@ -108,7 +126,7 @@ test('production integration reuses existing acquisition functions and exposes f
   assert.match(main, /netAtlasDaily\.jobs/);
   assert.match(main, /neutralUpgradingDaily\.hourlyAllocations/);
   for (const wording of ['Component Selection Uplift — Matched Active Capacity', 'UTC-Calendar Crew-State Utilization', 'Claim-Locked Capacity', 'Operational Result vs Configured 24h Neutral']) assert.match(html, new RegExp(wording));
-  assert.match(renderer, /This measures selection, not uptime/);
-  assert.match(renderer, /Unknown time is shown, never silently assigned/);
+  assert.doesNotMatch(renderer, /This measures selection, not uptime/);
+  assert.doesNotMatch(renderer, /Unknown time is shown, never silently assigned/);
   assert.match(renderer, /attempts\/retries\/failures: NOT OBSERVED/);
 });
