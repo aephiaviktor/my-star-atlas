@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const compat = require('../electron/marketplace-trade-compat');
+const gmAccounting = require('../electron/gm-marketplace-accounting');
 const point = require('../electron/marketplace-v2-point');
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 
@@ -23,12 +24,14 @@ function harness(queryImpl) {
   const factory = new Function(
     'queryInfluxFlux', 'parseInfluxCsv', 'getSelectedPlayerProfile', 'normalizeFaction', 'escapeFluxString', 'profileName',
     'normalizeMarketplaceV1Row', 'normalizeMarketplaceV2Row', 'deriveMarketplaceUnionKey', 'dedupeMarketplaceRows',
+    'reconcileCurrentGmBuyProjectionRows',
     `${scopeSource}\n${newestSource}\n${tradesSource}\nreturn { fetchNewestMarketplaceTradeMs, fetchMarketplaceTradesFromInflux };`
   );
   return factory(
     queryImpl, (text) => JSON.parse(text), (settings) => settings.playerProfile, (value) => String(value).toUpperCase(),
     (value) => String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"'), 'USTUR',
-    compat.normalizeMarketplaceV1Row, compat.normalizeMarketplaceV2Row, compat.deriveMarketplaceUnionKey, compat.dedupeMarketplaceRows
+    compat.normalizeMarketplaceV1Row, compat.normalizeMarketplaceV2Row, compat.deriveMarketplaceUnionKey, compat.dedupeMarketplaceRows,
+    gmAccounting.reconcileCurrentGmBuyProjectionRows
   );
 }
 const settings = { influxBucket: 'Bucket A', playerProfile: 'PlayerKey', faction: 'USTUR' };

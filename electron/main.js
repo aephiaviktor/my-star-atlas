@@ -85,6 +85,7 @@ const {
   enrichGmTradesWithInventoryBasis,
   buildGmWalletUniverse,
   projectGmFactionMarketplaceRows,
+  reconcileCurrentGmBuyProjectionRows,
   formatGmFactionMarketplaceTestLine,
 } = require('./gm-marketplace-accounting');
 const {
@@ -684,11 +685,11 @@ async function fetchMarketplaceTradesFromInflux(settings) {
     ]);
     const context = { applicationProfile: profileName, selectedProfile: profile, faction, scopeProven: true };
     const factionRows = parseInfluxCsv(factionGmResult).map(normalizeFactionGmMarketplaceRow).filter(Boolean);
-    const currentFactionRows = factionRows.filter((row) => row.projectionVersion >= 2);
-    const currentBuyIds = currentFactionRows.filter((row) => row.side === 'buy').map((row) => row.id);
+    const buyReconciledFactionRows = reconcileCurrentGmBuyProjectionRows(factionRows);
+    const currentFactionRows = buyReconciledFactionRows.filter((row) => row.projectionVersion >= 2);
     const currentSellSignatures = new Set(currentFactionRows.filter((row) => row.side === 'sell').flatMap((row) => row.executionSignatures));
-    const filteredFactionRows = factionRows.filter((row) => row.projectionVersion >= 2
-      || (row.side === 'buy' && !currentBuyIds.some((id) => row.id.startsWith(`${id}:`)))
+    const filteredFactionRows = buyReconciledFactionRows.filter((row) => row.projectionVersion >= 2
+      || row.side === 'buy'
       || (row.side === 'sell' && !row.executionSignatures.some((signature) => currentSellSignatures.has(signature))));
     const trades = dedupeMarketplaceRows([
       ...parseInfluxCsv(v2Result).map((row) => normalizeMarketplaceV2Row(row, context)).filter(Boolean),

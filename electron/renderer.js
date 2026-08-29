@@ -781,7 +781,6 @@ const breakevenEarningsOptionalColumns = Object.freeze([]);
 
 const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'timestamp', label: 'Timestamp (UTC)' }),
-  Object.freeze({ id: 'custodySignatures', label: 'Deposit Cargo to Game Signature' }),
   Object.freeze({ id: 'marketplace', label: 'Marketplace' }),
   Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
@@ -792,6 +791,7 @@ const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'txsFee', label: 'Txs Fee' }),
   Object.freeze({ id: 'netAtlas', label: 'ATLAS Paid' }),
   Object.freeze({ id: 'unitMetric', label: 'Cost / Unit' }),
+  Object.freeze({ id: 'custodySignatures', label: 'Deposit Cargo to Game Signature' }),
   Object.freeze({ id: 'tradingSignatures', label: 'GM Trading Signatures' }),
 ]);
 

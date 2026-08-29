@@ -11,6 +11,7 @@ const {
   calculateGmWalletInventoryBasis,
   enrichGmTradesWithInventoryBasis,
   projectGmFactionMarketplaceRows,
+  reconcileCurrentGmBuyProjectionRows,
   formatGmFactionMarketplaceTestLine,
 } = require('../electron/gm-marketplace-accounting');
 
@@ -191,6 +192,33 @@ test('GM buy deposits aggregate execution lots under one DepositCargoToGame even
   })), [
     { timestamp: '2026-08-26T00:00:00Z', starbase: 'ONI-1', quantity: 70, grossAtlas: 17, marketplaceFeeAtlas: 0, txFeeAtlas: 0.07, settledAtlas: 17.07, custodySignature: 'deposit-sig', orderIds: ['order-1', 'order-2'], executionSignatures: ['fill-sig-1', 'fill-sig-2'] },
   ]);
+});
+
+test('current GM deposit rows absorb legacy split fees and trade links without double counting', () => {
+  const rows = reconcileCurrentGmBuyProjectionRows([
+    {
+      id: 'gm-buy:deposit-sig:4:deposit', side: 'buy', projectionVersion: 2,
+      quantity: 5_000_000, txFeeAtlas: 0,
+      custodySignatures: ['deposit-sig'], executionSignatures: ['deposit-sig'], orderIds: [],
+    },
+    {
+      id: 'legacy-1', side: 'buy', projectionVersion: 1,
+      quantity: 4_100_000, txFeeAtlas: 3.56,
+      custodySignatures: ['deposit-sig:4:deposit'], executionSignatures: ['fill-1'], orderIds: ['order-1'],
+    },
+    {
+      id: 'legacy-2', side: 'buy', projectionVersion: 1,
+      quantity: 900_000, txFeeAtlas: 0.71,
+      custodySignatures: ['deposit-sig:4:deposit'], executionSignatures: ['fill-2'], orderIds: ['order-2'],
+    },
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].quantity, 5_000_000);
+  assert.equal(rows[0].txFeeAtlas, 4.27);
+  assert.deepEqual(rows[0].custodySignatures, ['deposit-sig']);
+  assert.deepEqual(rows[0].executionSignatures, ['fill-1', 'fill-2']);
+  assert.deepEqual(rows[0].orderIds, ['order-1', 'order-2']);
 });
 
 test('GM deposits with unknown wallet basis use faction starbase observations instead of zero', () => {

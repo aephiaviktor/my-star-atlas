@@ -20,9 +20,9 @@ test('Marketplace earnings tab sits between Mining and Cargo with a BUY/SELL swi
   }
   assert.doesNotMatch(panel, /<th>Side<\/th>|<th>Order ID<\/th>/);
   assert.match(panel, /id="earnings-marketplace-unit-header"/);
-  assert.ok(panel.indexOf('Deposit Cargo to Game Signature') < panel.indexOf('Marketplace'));
   assert.ok(panel.indexOf('ATLAS Paid') < panel.indexOf('Cost / Unit'));
-  assert.ok(panel.indexOf('Cost / Unit') < panel.indexOf('GM Trading Signatures'));
+  assert.ok(panel.indexOf('Cost / Unit') < panel.indexOf('Deposit Cargo to Game Signature'));
+  assert.ok(panel.indexOf('Deposit Cargo to Game Signature') < panel.indexOf('GM Trading Signatures'));
 });
 
 test('Marketplace exposes every table column in the persistent Earnings sidebar selector', () => {
