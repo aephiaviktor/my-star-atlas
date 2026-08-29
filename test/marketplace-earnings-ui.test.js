@@ -92,6 +92,16 @@ test('Marketplace loader uses profile-scoped cached snapshots on tab and faction
   assert.match(renderer, /currentEarningsSubtab === 'marketplace' \? refreshMarketplace\(\{ sync: false \}\) : refreshEarnings\(\)/);
 });
 
+test('Marketplace sync surfaces faction-v2 write counts and failures', () => {
+  assert.match(main, /marketplaceFactionV2Write: shadowWrite/);
+  assert.match(main, /\[publication\.error, shadowWrite\.error\]\.filter\(Boolean\)\.join\('; '\)/);
+  assert.match(main, /marketplaceFactionV2Write: global\.marketplaceFactionV2Write/);
+  assert.match(renderer, /syncResult = await api\.syncMarketplace\(settings\)/);
+  assert.match(renderer, /Marketplace faction-v2 write failed:/);
+  assert.match(renderer, /Marketplace faction-v2: no qualifying rows/);
+  assert.match(renderer, /Marketplace faction-v2: .* written/);
+});
+
 test('Marketplace chain synchronization is exposed separately and runs in the background', () => {
   assert.match(main, /handleTrustedIpc\('marketplace:sync'/);
   assert.match(main, /handleTrustedIpc\('marketplace:snapshot'/);

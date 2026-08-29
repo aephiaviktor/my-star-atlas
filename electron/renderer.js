@@ -7190,10 +7190,11 @@ async function refreshMarketplace({ sync = false } = {}) {
   }
   if (marketplaceRefreshInFlight.has(cacheKey)) return marketplaceRefreshInFlight.get(cacheKey);
   const promise = (async () => {
+    let syncResult = null;
     if (!cached) renderEarningsMarketplaceLoading(sync ? 'Syncing Marketplace data...' : 'Loading Marketplace data...');
     if (sync) {
       setText(earningsMarketplaceSyncStatus, 'Marketplace sync running in background...');
-      await api.syncMarketplace(settings);
+      syncResult = await api.syncMarketplace(settings);
     }
     const result = await api.getMarketplaceSnapshot(settings);
     const currentSettings = latestSettings || getFormPayload();
@@ -7202,6 +7203,14 @@ async function refreshMarketplace({ sync = false } = {}) {
     marketplaceSnapshotCache.set(cacheKey, result);
     latestEarningsResult = { ...(latestEarningsResult || {}), ...result, ok: latestEarningsResult?.ok ?? result.ok };
     renderEarningsMarketplace(latestEarningsResult);
+    const factionWrite = syncResult?.marketplaceFactionV2Write;
+    if (factionWrite?.error) {
+      setText(earningsMarketplaceSyncStatus, `Marketplace faction-v2 write failed: ${factionWrite.error}`);
+    } else if (factionWrite && Number(factionWrite.written) > 0) {
+      setText(earningsMarketplaceSyncStatus, `Marketplace faction-v2: ${formatMarketplaceWhole(factionWrite.written)} written`);
+    } else if (syncResult) {
+      setText(earningsMarketplaceSyncStatus, 'Marketplace faction-v2: no qualifying rows');
+    }
     return result;
   })().catch((error) => {
     console.error(error);

@@ -5479,13 +5479,14 @@ async function fetchGlobalMarketTrades(settings, connection) {
     commitSafeCursor: () => writeJsonAtomic(filePath, safeCheckpointDocument),
   });
   if (!publication.safeCursorCommitted) return {
-    trades, assetFlows, error: publication.error,
+    trades, assetFlows, error: [publication.error, shadowWrite.error].filter(Boolean).join('; '),
+    marketplaceFactionV2Write: shadowWrite,
     rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
     exhaustion: scanned.exhaustion || null,
   };
   for (const id of publication.publishedTradeIds) checkpoint.publishedTradeIds.add(id);
   for (const id of publication.publishedFlowIds) checkpoint.publishedFlowIds.add(id);
-  let publishError = publication.error;
+  const publishError = [publication.error, shadowWrite.error].filter(Boolean).join('; ');
   const checkpointDocument = {
     ...safeCheckpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
@@ -5510,7 +5511,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     assetFlowBackfilled: assetFlowBackfilledNext,
   });
   return {
-    trades, assetFlows, error: publishError, marketplaceReconciliationTest: shadowWrite,
+    trades, assetFlows, error: publishError, marketplaceFactionV2Write: shadowWrite,
     rpc: { ...combinedGlobalScan.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: combinedGlobalScan.stats.totalRpcRequests + openOrders.requestCount },
     exhaustion: combinedGlobalScan.exhaustion,
   };
@@ -5575,6 +5576,7 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
         ok: errors.length === 0, trades: [...local.trades, ...global.trades], error: errors.join('; '),
         localMarketTrades: local.trades, globalMarketTrades: global.trades,
         localMarketRpc: local.rpc || null, globalMarketRpc: global.rpc || null,
+        marketplaceFactionV2Write: global.marketplaceFactionV2Write || { written: 0, error: '' },
         rpcCoverage: 'scanner_and_open_orders_only',
         marketplaceRpcTelemetry,
         faction, durationMs: Date.now() - startedAt, checkedAt: new Date().toISOString(),
