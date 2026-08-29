@@ -28,12 +28,12 @@ test('August 5 Fuel and lamports use exact August 4 seed provisionally', async (
   assert.deepEqual({status:sv.status,eventDay:sv.eventDay,priceDay:sv.priceDay,source:sv.source,amount:sv.amountATLExact}, {status:'provisional',eventDay:'2026-08-05',priceDay:'2026-08-04',source:'provisional_seed_carry_forward',amount:'0.00072139425'});
 }));
 
-test('exact-day authority supersedes provisional and no nearest/future fallback is used', async () => fixture(async (resolver) => {
+test('exact-day authority supersedes fallback and pre-coverage dates use the oldest historical point', async () => fixture(async (resolver) => {
   await resolver.captureCurrentPriceSeeds({ Fuel:'2' });
   const exact = await resolver.resolveAtlasPrice('Fuel','2026-08-05',{historicalByDate:{'2026-08-05':{fuel:{priceATL:'3.25',source:'aephia_historical'}}}});
   assert.equal(exact.status,'complete'); assert.equal(exact.priceATLExact,'3.25'); assert.equal(exact.priceDay,'2026-08-05');
   const futureOnly = await resolver.resolveAtlasPrice('Fuel','2026-08-05',{historicalByDate:{'2026-08-06':{fuel:{priceATL:'9'}}}});
-  assert.equal(futureOnly.status,'provisional'); assert.equal(futureOnly.priceATLExact,'2');
+  assert.equal(futureOnly.status,'complete'); assert.equal(futureOnly.priceATLExact,'9'); assert.equal(futureOnly.source,'aephia_series_backfilled_oldest');
 }));
 
 test('missing, malformed, zero, or negative August 4 seed stays incomplete', async () => fixture(async (resolver, filePath) => {

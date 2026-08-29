@@ -201,6 +201,7 @@ let mainWindow = null;
 const influxOrgIdCache = new Map();
 const DEFAULT_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const AEPHIA_RESOURCE_URL = 'https://get-ship-data.aephia.workers.dev/gm/resource';
+const AEPHIA_PRICE_SERIES_URL = 'https://get-ship-data.aephia.workers.dev/series';
 const AEPHIA_LP_SUMMARY_URL = 'https://store-sage-lp.aephia.workers.dev/summary';
 const GITHUB_REPO = 'aephiaviktor/my-star-atlas';
 const GITHUB_BRANCH = 'master';
@@ -270,6 +271,7 @@ const shipFieldOffsets = Object.freeze({
 });
 
 let aephiaResourceCache = null;
+const aephiaPriceSeriesCache = new Map();
 let aephiaLpSummaryCache = null;
 let tokenPriceCache = null;
 let shipStatsCache = null;
@@ -4163,6 +4165,83 @@ async function fetchAephiaResourceData() {
   return aephiaResourceCache.data;
 }
 
+function firstDailySeriesPrices(payload) {
+  const columns = Array.isArray(payload?.columns) ? payload.columns : [];
+  const tsIndex = columns.indexOf('ts');
+  const priceIndex = columns.indexOf('price');
+  if (tsIndex < 0 || priceIndex < 0) return {};
+  const daily = {};
+  const rows = (Array.isArray(payload?.rows) ? payload.rows : [])
+    .map((row) => ({ row, timestamp: Number(row?.[tsIndex]) }))
+    .filter(({ timestamp }) => Number.isFinite(timestamp))
+    .sort((left, right) => left.timestamp - right.timestamp);
+  for (const { row, timestamp } of rows) {
+    const priceATL = Number(row?.[priceIndex]);
+    if (!Number.isFinite(priceATL) || priceATL <= 0) continue;
+    const date = new Date(timestamp).toISOString().slice(0, 10);
+    if (!daily[date]) daily[date] = { priceATL, observedAt: new Date(timestamp).toISOString() };
+  }
+  return daily;
+}
+
+async function fetchAephiaSeries(pathname) {
+  const now = Date.now();
+  const cached = aephiaPriceSeriesCache.get(pathname);
+  if (cached?.expiresAt > now) return cached.data;
+  const response = await fetch(`${AEPHIA_PRICE_SERIES_URL}/${pathname}?days=36`, { signal: AbortSignal.timeout(10000) });
+  if (!response.ok) throw new Error(`aephia_price_series_${response.status}`);
+  const data = firstDailySeriesPrices(await response.json());
+  aephiaPriceSeriesCache.set(pathname, { data, expiresAt: now + 2 * 60 * 1000 });
+  return data;
+}
+
+async function fetchHistoricalAtlasPrices(asset) {
+  const key = normalizeShipName(asset);
+  if (key === 'sol') {
+    const [sol, atlas] = await Promise.all([fetchAephiaSeries('token/sol'), fetchAephiaSeries('token/atlas')]);
+    const dates = Array.from(new Set([...Object.keys(sol), ...Object.keys(atlas)])).sort();
+    const result = {};
+    let solPrice = null;
+    let atlasPrice = null;
+    for (const date of dates) {
+      solPrice = sol[date]?.priceATL ?? solPrice;
+      atlasPrice = atlas[date]?.priceATL ?? atlasPrice;
+      if (solPrice > 0 && atlasPrice > 0) result[date] = { priceATL: solPrice / atlasPrice };
+    }
+    return result;
+  }
+  const resources = await fetchAephiaResourceData();
+  const resource = resources.find((item) => normalizeShipName(item?.name) === key);
+  if (!resource?.mint) return {};
+  return fetchAephiaSeries(`ATLAS/${encodeURIComponent(resource.mint)}`);
+}
+
+async function resolveHistoricalAtlasPrice(asset, date) {
+  const key = normalizeShipName(asset);
+  const daily = await fetchHistoricalAtlasPrices(asset).catch(() => ({}));
+  if (Object.keys(daily).length === 0) {
+    let currentPrice = null;
+    if (key === 'sol') currentPrice = await fetchAtlasPerSol().then((value) => value?.atlasPerSol).catch(() => null);
+    else {
+      const resources = await fetchAephiaResourceData().catch(() => []);
+      currentPrice = Number(resources.find((item) => normalizeShipName(item?.name) === key)?.pricingATL?.priceATL);
+    }
+    if (Number.isFinite(currentPrice) && currentPrice > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      daily[today] = {
+        priceATL: currentPrice,
+        source: 'aephia_current_midpoint_fallback',
+        provenance: `Current Aephia midpoint used because no historical series was available on ${today}`,
+        estimated: true,
+      };
+    }
+  }
+  const historicalByDate = Object.fromEntries(Object.entries(daily).map(([day, value]) => [day, {
+    [key]: { source: 'aephia_historical_first_daily', provenance: `First valid Aephia midpoint observation on ${day}`, ...value },
+  }]));
+  return atlasPriceResolver.resolveAtlasPrice(asset, date, { historicalByDate });
+}
+
 async function fetchAtlasPerSol() {
   const now = Date.now();
   if (tokenPriceCache && tokenPriceCache.expiresAt > now) return tokenPriceCache.data;
@@ -6923,7 +7002,7 @@ const cargoAllocationSource = createCargoAllocationSource({
     exporterForFaction,
     selectCutover: selectLegacyRawCutover,
     valueRawCosts: valueCanonicalRawCosts,
-    resolvePrice: (asset, date) => atlasPriceResolver.resolveAtlasPrice(asset, date),
+    resolvePrice: (asset, date) => resolveHistoricalAtlasPrice(asset, date),
     requireFuelPrice: requireCargoFuelPrice,
     requireSameDatePrice: requireSameDateCargoPrice,
     aggregateRawCosts: aggregateRawCostsByFleetDay,
@@ -7253,8 +7332,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     : { cutover: null, legacyRows: cargoRows, rawRecords: [], trackingDisabled: false };
   const valuedCanonicalRawCosts = await valueCanonicalRawCosts(cutoverSelection.rawRecords, {
     resolvePrice: async (asset, date) => asset === 'Fuel'
-      ? requireCargoFuelPrice(await atlasPriceResolver.resolveAtlasPrice(asset, date), date)
-      : requireSameDateCargoPrice(await atlasPriceResolver.resolveAtlasPrice(asset, date), date),
+      ? requireCargoFuelPrice(await resolveHistoricalAtlasPrice(asset, date), date)
+      : requireSameDateCargoPrice(await resolveHistoricalAtlasPrice(asset, date), date),
   });
   const canonicalRawDailyRows = aggregateRawCostsByFleetDay(valuedCanonicalRawCosts)
     .map((row) => projectCargoTableRow(row, { formatDate: (isoDate) => formatShortUtcDate(new Date(`${isoDate}T00:00:00.000Z`)) }));
@@ -7421,7 +7500,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const activeKey = fleet?.key || (canonicalRaw ? String(cargoRow.allocationKey || '') : normalizeFleetLabel(cargoRow.fleet));
     activeCargoFleetKeys.add(activeKey);
     if (fleet) activeMappedCargoFleetKeys.add(fleet.key);
-    const fuelPrice = fuelCanonical ? cargoRow.fuelValuation : requireCargoFuelPrice(await atlasPriceResolver.resolveAtlasPrice('Fuel', cargoRow.isoDate), cargoRow.isoDate);
+    const fuelPrice = fuelCanonical ? cargoRow.fuelValuation : requireCargoFuelPrice(await resolveHistoricalAtlasPrice('Fuel', cargoRow.isoDate), cargoRow.isoDate);
     const fuelCostsAtlas = fuelCanonical
       ? (cargoRow.fuelValuation?.amountATL ?? null)
       : (['complete', 'provisional'].includes(fuelPrice.status) ? cargoRow.burnedFuel * fuelPrice.priceATL : null);

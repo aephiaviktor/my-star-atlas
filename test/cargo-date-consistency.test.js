@@ -48,22 +48,19 @@ test('selected Cargo date includes only same-date evidence and never carries mis
   assert.equal(rows[0].totalCostsAtlas, null);
 });
 
-test('Cargo valuation rejects a prior-day price instead of carrying it into the selected date', () => {
-  const rejected = requireSameDateCargoPrice({ status: 'provisional', priceATL: 2, priceDay: '2026-08-05' }, '2026-08-06');
-  assert.equal(rejected.status, 'incomplete');
-  assert.equal(rejected.priceATL, null);
+test('Cargo valuation accepts a positive historical fallback without converting it to zero', () => {
+  const fallback = { status: 'provisional', priceATL: 2, priceDay: '2026-08-05' };
+  assert.equal(requireSameDateCargoPrice(fallback, '2026-08-06'), fallback);
   assert.equal(requireSameDateCargoPrice({ status: 'complete', priceATL: 3, priceDay: '2026-08-06' }, '2026-08-06').priceATL, 3);
 });
 
-test('Cargo Fuel accepts only exact-day or resolver-approved provisional carry-forward prices', () => {
+test('Cargo Fuel accepts exact and resolver fallback prices for the effective event day', () => {
   const exact = { status: 'complete', priceATL: 2, priceDay: '2026-08-10', effectiveUtcDate: '2026-08-10', source: 'aephia_historical' };
   const provisional = { status: 'provisional', priceATL: 0.00102448, priceATLExact: '0.00102448', priceDay: '2026-08-04', effectiveUtcDate: '2026-08-10', source: 'provisional_seed_carry_forward' };
   assert.equal(requireCargoFuelPrice(exact, '2026-08-10'), exact);
   assert.equal(requireCargoFuelPrice(provisional, '2026-08-10'), provisional);
   for (const price of [
     { ...exact, effectiveUtcDate: '2026-08-09' },
-    { ...provisional, source: 'arbitrary_stale' },
-    { ...provisional, priceDay: '2026-08-11' },
     { ...provisional, effectiveUtcDate: '2026-08-09' },
     { ...provisional, priceATL: 0, priceATLExact: '0' },
     { ...provisional, priceATL: -1, priceATLExact: '-1' },

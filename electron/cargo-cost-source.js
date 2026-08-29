@@ -240,8 +240,8 @@ function valueNativeCost(record, price) {
 
 function requireSameDateCargoPrice(price, isoDate) {
   const eventDay = clean(isoDate);
-  const priceDay = clean(price?.priceDay || price?.effectiveUtcDate);
-  if (!price || !eventDay || priceDay !== eventDay) {
+  const priceATL = Number(price?.priceATLExact ?? price?.priceATL);
+  if (!price || !eventDay || !Number.isFinite(priceATL) || priceATL <= 0 || !['complete', 'provisional'].includes(price.status)) {
     return { status: 'incomplete', priceATL: null, priceATLExact: null, priceDay: null, effectiveUtcDate: eventDay, reason: 'same_date_price_missing' };
   }
   return price;
@@ -252,13 +252,8 @@ function requireCargoFuelPrice(price, isoDate) {
   const priceDay = clean(price?.priceDay || price?.effectiveUtcDate);
   const effectiveUtcDate = clean(price?.effectiveUtcDate);
   const priceATL = Number(price?.priceATLExact ?? price?.priceATL);
-  const exact = price?.status === 'complete' && priceDay === eventDay && effectiveUtcDate === eventDay;
-  const approvedProvisional = price?.status === 'provisional'
-    && price?.source === 'provisional_seed_carry_forward'
-    && effectiveUtcDate === eventDay
-    && /^\d{4}-\d{2}-\d{2}$/.test(priceDay)
-    && priceDay <= eventDay;
-  if (!eventDay || !Number.isFinite(priceATL) || priceATL <= 0 || (!exact && !approvedProvisional)) {
+  const approved = ['complete', 'provisional'].includes(price?.status) && effectiveUtcDate === eventDay;
+  if (!eventDay || !Number.isFinite(priceATL) || priceATL <= 0 || !approved) {
     return {
       status: 'incomplete', priceATL: null, priceATLExact: null,
       priceDay: priceDay || null, effectiveUtcDate: eventDay,

@@ -31,6 +31,13 @@ function incompletePrice(effectiveUtcDate, reason) {
   return { status: 'incomplete', priceATL: null, priceATLExact: null, effectiveUtcDate: effectiveUtcDate || null, priceDay: null, source: null, provenance: null, estimated: null, reason };
 }
 
+function historicalCandidates(historicalByDate, key, asset) {
+  return Object.entries(historicalByDate || {}).map(([date, values]) => ({
+    date: normalizeUtcDate(date), value: values?.[key] ?? values?.[asset],
+  })).filter((entry) => entry.date && entry.value != null && exactPositiveDecimal(entry.value?.priceATL ?? entry.value))
+    .sort((left, right) => left.date.localeCompare(right.date));
+}
+
 function emptyDocument() {
   return { schemaVersion: PRICE_SEED_SCHEMA_VERSION, seeds: {}, historical: {} };
 }
@@ -80,7 +87,11 @@ function createAtlasPriceResolver({ filePath, now = () => new Date().toISOString
     const effectiveUtcDate = normalizeUtcDate(valuationUtcDate);
     if (!key || !effectiveUtcDate) return incompletePrice(effectiveUtcDate, 'valuation_day_invalid');
     const document = await loadDocument(filePath);
-    const externalHistorical = historicalByDate?.[effectiveUtcDate]?.[key] ?? historicalByDate?.[effectiveUtcDate]?.[asset];
+    const candidates = historicalCandidates(historicalByDate, key, asset);
+    const exactCandidate = candidates.find((entry) => entry.date === effectiveUtcDate);
+    const earlierCandidate = candidates.filter((entry) => entry.date < effectiveUtcDate).at(-1);
+    const selectedCandidate = exactCandidate || earlierCandidate || candidates[0];
+    const externalHistorical = selectedCandidate?.value;
     const persistedHistorical = document.historical?.[effectiveUtcDate]?.[key];
     const historical = externalHistorical ?? persistedHistorical;
     if (historical != null) {
@@ -88,9 +99,12 @@ function createAtlasPriceResolver({ filePath, now = () => new Date().toISOString
       if (!historicalExact) return incompletePrice(effectiveUtcDate, 'historical_price_invalid');
       return {
         status: 'complete', priceATL: Number(historicalExact), priceATLExact: historicalExact,
-        effectiveUtcDate, priceDay: effectiveUtcDate,
-        source: historical?.source || 'aephia_historical',
-        provenance: historical?.provenance || 'Aephia exact UTC-date historical value', estimated: false,
+        effectiveUtcDate, priceDay: selectedCandidate?.date || effectiveUtcDate,
+        source: historical?.source || (exactCandidate ? 'aephia_historical_first_daily' : earlierCandidate ? 'aephia_series_carried_forward' : 'aephia_series_backfilled_oldest'),
+        provenance: historical?.provenance || (exactCandidate
+          ? 'First valid Aephia midpoint observation on the UTC date'
+          : earlierCandidate ? `Aephia midpoint carried forward from ${selectedCandidate.date}` : `Oldest Aephia midpoint backfilled from ${selectedCandidate.date}`),
+        estimated: exactCandidate ? historical?.estimated === true : true,
       };
     }
     const seed = document.seeds[key];
