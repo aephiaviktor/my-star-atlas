@@ -116,6 +116,14 @@ function computeTxFeeAtlas(transaction, atlasPerSol) {
   return (lamports / 1e9) * atlasPerSol;
 }
 
+function calculateExecutionAccounting(side, grossAtlas, observedMarketplaceFeeAtlas, txFeeAtlas, transferAtlas) {
+  const marketplaceFeeAtlas = side === 'sell' ? observedMarketplaceFeeAtlas : 0;
+  const netAtlas = side === 'sell'
+    ? Math.max(0, transferAtlas ?? (grossAtlas - marketplaceFeeAtlas)) - txFeeAtlas
+    : grossAtlas + txFeeAtlas;
+  return { marketplaceFeeAtlas, netAtlas };
+}
+
 function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { atlasPerSol } = {}) {
   const signature = String(transaction?.signature || transaction?.transaction?.signatures?.[0] || '');
   const timestamp = new Date(Number(transaction?.blockTime) * 1000);
@@ -132,7 +140,7 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { at
     const unitPriceAtlas = expectedPriceRaw >= 0 ? expectedPriceRaw / 1e8 : Number(order.priceAtlas);
     if (!(quantity > 0) || !(unitPriceAtlas >= 0)) continue;
     const grossAtlas = quantity * unitPriceAtlas;
-    const marketplaceFeeAtlas = Number(logAmounts.marketplaceFeeAtlas || 0);
+    const observedMarketplaceFeeAtlas = Number(logAmounts.marketplaceFeeAtlas || 0);
     const feePayer = keyText(transaction.transaction?.message?.accountKeys?.[0]);
     const executionTxFeeAtlas = tracked.has(feePayer) ? computeTxFeeAtlas(transaction, atlasPerSol) : 0;
     const originalQuantity = Number(order.originalQuantity);
@@ -140,9 +148,9 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { at
       ? Number(order.creationTxFeeAtlas || 0) * Math.min(1, quantity / originalQuantity)
       : Number(order.creationTxFeeAtlas || 0);
     const txFeeAtlas = executionTxFeeAtlas + allocatedCreationTxFeeAtlas;
-    const netAtlas = order.side === 'sell'
-      ? Math.max(0, logAmounts.transferAtlas ?? (grossAtlas - marketplaceFeeAtlas)) - txFeeAtlas
-      : grossAtlas + marketplaceFeeAtlas + txFeeAtlas;
+    const { marketplaceFeeAtlas, netAtlas } = calculateExecutionAccounting(
+      order.side, grossAtlas, observedMarketplaceFeeAtlas, txFeeAtlas, logAmounts.transferAtlas,
+    );
     return {
       id: `${signature}:${order.orderId}`, signature, timestamp: timestamp.toISOString(), marketplace: String(order.marketplace || 'LM'),
       side: order.side, orderId: order.orderId, wallet: order.initializer, starbase: order.starbase, asset: order.asset,
@@ -391,5 +399,5 @@ async function scanLocalMarketTrades(connection, {
 module.exports = {
   DEFAULT_START_ISO, MAX_LOOKBACK_MS, DEFAULT_REQUESTS_PER_SECOND,
   resolveLocalMarketStartIso, createLocalMarketPacer,
-  scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, computeTxFeeAtlas, fetchTransactions,
+  scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, computeTxFeeAtlas, calculateExecutionAccounting, fetchTransactions,
 };

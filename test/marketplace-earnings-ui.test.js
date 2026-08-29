@@ -15,12 +15,12 @@ test('Marketplace earnings tab sits between Mining and Cargo with a BUY/SELL swi
   assert.match(html, /id="earnings-marketplace-side-switch"[\s\S]*data-marketplace-side="buy"[^>]*>BUY<[\s\S]*data-marketplace-side="sell"[^>]*>SELL</);
   assert.doesNotMatch(html, /data-marketplace-side="(?:buy|sell)"[^>]*>\s*(?:BUY|SELL)\s*\(/);
   const panel = html.match(/data-earnings-panel="marketplace"[\s\S]*?<\/div>\s*<div class="earnings-panel" data-earnings-panel="cargo"/)?.[0] || '';
-  for (const label of ['Timestamp \\(UTC\\)', 'Marketplace', 'Starbase', 'Asset', 'Amount', 'Gross ATLAS', 'Price', 'Marketplace Fee', 'Txs Fee', 'Net ATLAS', 'Cost / Unit', 'Order ID', 'Signature']) {
+  for (const label of ['Timestamp \\(UTC\\)', 'Marketplace', 'Starbase', 'Asset', 'Amount', 'Purchase Value', 'Price', 'Marketplace Fee', 'Txs Fee', 'ATLAS Paid', 'Cost / Unit', 'Order ID', 'Signature']) {
     assert.match(panel, new RegExp(label));
   }
   assert.doesNotMatch(panel, /<th>Side<\/th>/);
   assert.match(panel, /id="earnings-marketplace-unit-header"/);
-  assert.ok(panel.indexOf('Net ATLAS') < panel.indexOf('Cost / Unit'));
+  assert.ok(panel.indexOf('ATLAS Paid') < panel.indexOf('Cost / Unit'));
   assert.ok(panel.indexOf('Cost / Unit') < panel.indexOf('Order ID'));
   assert.ok(panel.indexOf('Order ID') < panel.indexOf('Signature'));
 });
@@ -35,11 +35,14 @@ test('Marketplace exposes every table column in the persistent Earnings sidebar 
   assert.match(renderer, /subtab === 'marketplace'[\s\S]*renderEarningsMarketplace\(latestEarningsResult\)/);
 });
 
-test('Marketplace renderer filters rows by selected side and swaps the unit metric', () => {
+test('Marketplace renderer uses side-specific value labels and buyer-paid accounting', () => {
   assert.match(renderer, /let earningsMarketplaceSide = 'buy'/);
   assert.match(renderer, /entry\.side === earningsMarketplaceSide/);
+  assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Purchase Value' : 'Sale Value'/);
+  assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'ATLAS Paid' : 'ATLAS Received'/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Cost \/ Unit' : 'Income \/ Unit'/);
-  assert.match(renderer, /earningsMarketplaceSide === 'buy'[\s\S]*\(gross \+ txFee\) \/ quantity[\s\S]*net \/ quantity/);
+  assert.match(renderer, /earningsMarketplaceSide === 'buy'[\s\S]*gross \+ txFee[\s\S]*\(gross \+ txFee\) \/ quantity[\s\S]*net \/ quantity/);
+  assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Seller-paid'/);
   assert.match(renderer, /formatMarketplaceAtlas\(calculated\.txFee, 2\)/);
   assert.match(renderer, /formatMarketplaceAtlas\(calculated\.net, 2\)/);
 });

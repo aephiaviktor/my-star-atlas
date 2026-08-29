@@ -7,7 +7,7 @@ const {
   buildLocalMarketLedgerEvents,
   formatLocalMarketInfluxLine,
 } = require('../electron/local-market-trades');
-const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions, resolveLocalMarketStartIso, createLocalMarketPacer, computeTxFeeAtlas, DEFAULT_REQUESTS_PER_SECOND } = require('../electron/local-market-scanner');
+const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions, resolveLocalMarketStartIso, createLocalMarketPacer, computeTxFeeAtlas, calculateExecutionAccounting, DEFAULT_REQUESTS_PER_SECOND } = require('../electron/local-market-scanner');
 const crypto = require('node:crypto');
 const { MarketplaceRpcBudgetExhaustedError } = require('../electron/marketplace-rpc-telemetry');
 const bs58Module = require('bs58');
@@ -15,6 +15,17 @@ const bs58 = bs58Module.default || bs58Module;
 
 const GM_PROGRAM_ID = 'traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg';
 const ATLAS_MINT = 'ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
+
+test('buyer accounting excludes the seller-paid marketplace fee from ATLAS paid', () => {
+  assert.deepEqual(calculateExecutionAccounting('buy', 100, 5, 0.25, 95), {
+    marketplaceFeeAtlas: 0,
+    netAtlas: 100.25,
+  });
+  assert.deepEqual(calculateExecutionAccounting('sell', 100, 5, 0.25, 95), {
+    marketplaceFeeAtlas: 5,
+    netAtlas: 94.75,
+  });
+});
 
 function tx({ signature, wallet, assetMint, assetBefore, assetAfter, atlasBefore, atlasAfter }) {
   return {

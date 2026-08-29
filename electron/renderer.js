@@ -785,11 +785,11 @@ const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
   Object.freeze({ id: 'amount', label: 'Amount' }),
-  Object.freeze({ id: 'grossAtlas', label: 'Gross ATLAS' }),
+  Object.freeze({ id: 'grossAtlas', label: 'Purchase Value' }),
   Object.freeze({ id: 'price', label: 'Price' }),
   Object.freeze({ id: 'marketplaceFee', label: 'Marketplace Fee' }),
   Object.freeze({ id: 'txsFee', label: 'Txs Fee' }),
-  Object.freeze({ id: 'netAtlas', label: 'Net ATLAS' }),
+  Object.freeze({ id: 'netAtlas', label: 'ATLAS Paid' }),
   Object.freeze({ id: 'unitMetric', label: 'Cost / Unit' }),
   Object.freeze({ id: 'orderId', label: 'Order ID' }),
   Object.freeze({ id: 'signature', label: 'Signature' }),
@@ -6785,9 +6785,12 @@ function renderEarningsMarketplace(result) {
     const basisAvailable = entry.basisAvailable !== false;
     const gross = basisAvailable ? (Number(entry.grossAtlas) || 0) : null;
     const txFee = Number(entry.txFeeAtlas) || 0;
-    const net = Number(entry.netAtlas ?? entry.settledAtlas ?? 0);
+    const marketplaceFee = earningsMarketplaceSide === 'sell' ? Number(entry.marketplaceFeeAtlas) || 0 : 0;
+    const net = earningsMarketplaceSide === 'buy'
+      ? (gross == null ? null : gross + txFee)
+      : (gross == null ? null : Math.max(0, gross - marketplaceFee - txFee));
     const unitMetric = quantity > 0
-      ? (earningsMarketplaceSide === 'buy' ? (basisAvailable ? (gross + txFee) / quantity : null) : net / quantity)
+      ? (earningsMarketplaceSide === 'buy' ? (basisAvailable ? (gross + txFee) / quantity : null) : (net == null ? null : net / quantity))
       : null;
     for (const column of visibleColumns) tr.appendChild(createMarketplaceEarningsCell(entry, column.id, { quantity, gross, txFee, net, unitMetric }));
     earningsMarketplaceTableBody.appendChild(tr);
@@ -6800,9 +6803,13 @@ function renderMarketplaceHeader(visibleColumns) {
   row.textContent = '';
   for (const column of visibleColumns) {
     const th = document.createElement('th');
-    th.textContent = column.id === 'unitMetric'
-      ? (earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit')
-      : column.label;
+    th.textContent = column.id === 'grossAtlas'
+      ? (earningsMarketplaceSide === 'buy' ? 'Purchase Value' : 'Sale Value')
+      : column.id === 'netAtlas'
+        ? (earningsMarketplaceSide === 'buy' ? 'ATLAS Paid' : 'ATLAS Received')
+        : column.id === 'unitMetric'
+          ? (earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit')
+          : column.label;
     row.appendChild(th);
   }
 }
@@ -6813,8 +6820,9 @@ function createMarketplaceEarningsCell(entry, columnId, calculated) {
     starbase: entry.starbase || '--', asset: entry.asset || '--', amount: formatMarketplaceWhole(calculated.quantity),
     grossAtlas: calculated.gross == null ? '--' : formatMarketplaceAtlas(calculated.gross, 6),
     price: entry.basisAvailable === false ? '--' : formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
-    marketplaceFee: formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6), txsFee: formatMarketplaceAtlas(calculated.txFee, 2),
-    netAtlas: formatMarketplaceAtlas(calculated.net, 2), unitMetric: calculated.unitMetric == null ? '--' : formatMarketplaceAtlas(calculated.unitMetric, 8),
+    marketplaceFee: earningsMarketplaceSide === 'buy' ? 'Seller-paid' : formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6),
+    txsFee: formatMarketplaceAtlas(calculated.txFee, 2),
+    netAtlas: calculated.net == null ? '--' : formatMarketplaceAtlas(calculated.net, 2), unitMetric: calculated.unitMetric == null ? '--' : formatMarketplaceAtlas(calculated.unitMetric, 8),
     orderId: entry.orderId || '--', signature: entry.signature || '--',
   };
   if (columnId !== 'signature') return createTextCell(values[columnId] ?? '--');
