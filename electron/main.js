@@ -90,6 +90,7 @@ const {
   formatRawTransactionInfluxLine,
   formatRawEventInfluxLine,
 } = require('./marketplace-rawdata');
+const { filterLegacyMarketplaceInfluxLines } = require('./marketplace-write-policy');
 const {
   MARKETPLACE_FACTION_MEASUREMENT,
   MARKETPLACE_HISTORY_CUTOVER_ISO,
@@ -4653,6 +4654,8 @@ async function resolveMarketplacePublicationOrganization(settings) {
 }
 
 async function writeInventoryBasisLinesToInflux(settings, lines) {
+  const permittedLines = filterLegacyMarketplaceInfluxLines(lines);
+  if (!permittedLines) return;
   const token = String(settings.influxAuthToken || '').trim().replace(/^(?:Token|Bearer)\s+/i, '');
   const bucket = String(settings.influxBucket || '').trim();
   const organization = await resolveMarketplacePublicationOrganization(settings);
@@ -4661,7 +4664,7 @@ async function writeInventoryBasisLinesToInflux(settings, lines) {
   const response = await fetchWithInfluxRetry(({ signal }) => fetch(url, {
     method: 'POST',
     headers: { Authorization: `Token ${token}`, 'Content-Type': 'text/plain; charset=utf-8' },
-    body: lines,
+    body: permittedLines,
     signal,
   }), { timeoutMs: 15_000, retries: 1, retryDelayMs: 250 });
   if (!response.ok) throw new Error(`inventory_basis_influx_http_${response.status}`);
@@ -5025,6 +5028,22 @@ async function resolveMarketplaceExactPoint(settings, exact) {
 }
 
 async function publishMarketplaceCandidateSet(settings, candidates, holdContext, { commitSafeCursor } = {}) {
+  try {
+    if (typeof commitSafeCursor === 'function') await commitSafeCursor();
+  } catch (_error) {
+    return {
+      publishedTradeIds: new Set(), publishedFlowIds: new Set(), holdIdsToComplete: [], tradeHoldIdsToComplete: [], flowHoldIdsToComplete: [],
+      allCurrentComplete: false, allTradeCurrentComplete: false, allFlowCurrentComplete: false, allEnrichableComplete: false,
+      error: 'safe_cursor_checkpoint_failed', safeCursorCommitted: false,
+    };
+  }
+  return {
+    publishedTradeIds: new Set(), publishedFlowIds: new Set(), holdIdsToComplete: [], tradeHoldIdsToComplete: [], flowHoldIdsToComplete: [],
+    allCurrentComplete: true, allTradeCurrentComplete: true, allFlowCurrentComplete: true, allEnrichableComplete: true,
+    error: '', safeCursorCommitted: true,
+  };
+  // Frozen legacy publication implementation is retained below for tomorrow's
+  // deliberate removal; the canonical raw-data checkpoint above is now the boundary.
   const groups = groupMarketplacePublicationCandidates(candidates);
   const stagedCandidates = [];
   const representativeByGroupRank = new Map();

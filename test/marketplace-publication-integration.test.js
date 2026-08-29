@@ -178,17 +178,16 @@ test('checkpoint IDs are durable before hold completion and cursor release for L
   }
 });
 
-test('safe cursor is committed after durable retry holds and staging but before publish transport', () => {
+test('legacy Marketplace publication commits only the safe cursor and returns before staging or transport', () => {
   const start = main.indexOf('async function publishMarketplaceCandidateSet');
   const end = main.indexOf('async function completeMarketplacePublicationHolds', start);
   const body = main.slice(start, end);
-  const firstHold = body.indexOf('recordMarketplacePublicationHold');
-  const stageOnly = body.indexOf('const stagingCoordinator');
   const safeCheckpoint = body.indexOf('await commitSafeCursor()');
-  const publishingCoordinator = body.indexOf('const coordinator = createMarketplacePublicationCoordinator', stageOnly);
-  assert.ok(firstHold > 0 && firstHold < stageOnly);
-  assert.ok(stageOnly < safeCheckpoint && safeCheckpoint < publishingCoordinator);
-  assert.match(body, /fetchImpl: publicationSettings\.canPost && !stagingFailed \? fetch : undefined/);
+  const disabledReturn = body.indexOf('allCurrentComplete: true');
+  const legacyStaging = body.indexOf('const stagingCoordinator');
+  assert.ok(safeCheckpoint > 0 && safeCheckpoint < disabledReturn && disabledReturn < legacyStaging);
+  assert.match(body, /error: '', safeCursorCommitted: true/);
+  assert.ok(disabledReturn < body.indexOf('recordMarketplacePublicationHold'));
   assert.match(body, /error: 'safe_cursor_checkpoint_failed', safeCursorCommitted: false/);
 });
 
