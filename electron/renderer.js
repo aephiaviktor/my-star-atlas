@@ -188,6 +188,10 @@ const earningsBreakevenAssetFilter = document.querySelector('#earnings-breakeven
 const earningsBreakevenHideLowInventory = document.querySelector('#earnings-breakeven-hide-low-inventory');
 const earningsMarketplaceSyncStatus = document.querySelector('#earnings-marketplace-sync-status');
 const earningsMarketplaceTableBody = document.querySelector('#earnings-marketplace-table-body');
+const earningsMarketplaceRawStatus = document.querySelector('#earnings-marketplace-raw-status');
+const earningsMarketplaceRawTableBody = document.querySelector('#earnings-marketplace-raw-table-body');
+const earningsMarketplaceSubtabButtons = Array.from(document.querySelectorAll('[data-marketplace-subtab]'));
+const earningsMarketplacePanels = Array.from(document.querySelectorAll('[data-marketplace-panel]'));
 const earningsMarketplaceSideSwitch = document.querySelector('#earnings-marketplace-side-switch');
 const earningsMarketplaceSideButtons = Array.from(document.querySelectorAll('[data-marketplace-side]'));
 const earningsMarketplaceUnitHeader = document.querySelector('#earnings-marketplace-unit-header');
@@ -364,6 +368,7 @@ let currentSection = 'production';
 let currentSubtab = 'scanning';
 let currentEarningsSubtab = 'scanning';
 let earningsMarketplaceSide = 'buy';
+let currentMarketplaceSubtab = 'raw';
 let activeCargoTable = 'fleet';
 let latestSettings = null;
 let latestFleetResult = null;
@@ -6802,7 +6807,50 @@ function getVisibleMarketplaceColumns() {
   return reordered;
 }
 
+function updateMarketplaceSubtab() {
+  earningsMarketplaceSubtabButtons.forEach((button) => {
+    const active = button.dataset.marketplaceSubtab === currentMarketplaceSubtab;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  earningsMarketplacePanels.forEach((panel) => { panel.hidden = panel.dataset.marketplacePanel !== currentMarketplaceSubtab; });
+  if (earningsMarketplaceSideSwitch) earningsMarketplaceSideSwitch.hidden = currentMarketplaceSubtab !== 'calculations';
+}
+
+function renderMarketplaceRawData(result) {
+  const rows = Array.isArray(result?.marketplaceRawData) ? result.marketplaceRawData : [];
+  const error = String(result?.marketplaceRawDataError || '');
+  setText(earningsMarketplaceRawStatus, `${formatMarketplaceWhole(rows.length)} canonical raw records at ${formatCheckedAt(result?.checkedAt)}${error ? ` · ${error}` : ''}`);
+  if (!earningsMarketplaceRawTableBody) return;
+  earningsMarketplaceRawTableBody.textContent = '';
+  if (!rows.length) {
+    const tr = document.createElement('tr'); tr.className = 'empty-row';
+    const td = createTextCell(error ? `Marketplace raw-data read failed: ${error}` : 'No Marketplace raw records found');
+    td.colSpan = 9; tr.appendChild(td); earningsMarketplaceRawTableBody.appendChild(tr); return;
+  }
+  for (const entry of rows) {
+    const tr = document.createElement('tr');
+    tr.appendChild(createTextCell(formatMarketplaceTimestamp(entry.timestamp)));
+    tr.appendChild(createTextCell(entry.record || '--'));
+    tr.appendChild(createTextCell(entry.stream || entry.streams || '--'));
+    tr.appendChild(createTextCell(entry.record === 'transaction' ? (entry.success ? 'Success' : 'Failed') : 'Observed'));
+    tr.appendChild(createTextCell(entry.slot == null ? '--' : formatMarketplaceWhole(entry.slot)));
+    tr.appendChild(createTextCell(entry.eventId || '--'));
+    const signatureCell = document.createElement('td');
+    if (entry.signature) {
+      const link = document.createElement('a'); link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
+      link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = entry.signature; signatureCell.appendChild(link);
+    } else signatureCell.textContent = '--';
+    tr.appendChild(signatureCell);
+    tr.appendChild(createTextCell(entry.discoveredBy || '--'));
+    tr.appendChild(createTextCell(entry.payloadHash || '--'));
+    earningsMarketplaceRawTableBody.appendChild(tr);
+  }
+}
+
 function renderEarningsMarketplace(result) {
+  renderMarketplaceRawData(result);
+  updateMarketplaceSubtab();
   const rows = Array.isArray(result?.localMarketTrades) ? result.localMarketTrades : [];
   const visibleRows = rows.filter((entry) => entry.side === earningsMarketplaceSide);
   const errorSuffix = result?.localMarketError ? ` · Influx read failed: ${result.localMarketError}` : '';
@@ -9044,7 +9092,7 @@ function setActiveOptimizationView(view) {
 
 function updateMarketplaceSideSwitchVisibility() {
   if (earningsMarketplaceSideSwitch) {
-    earningsMarketplaceSideSwitch.hidden = !(currentSection === 'earnings' && currentEarningsSubtab === 'marketplace');
+    earningsMarketplaceSideSwitch.hidden = !(currentSection === 'earnings' && currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'calculations');
   }
 }
 
@@ -9278,6 +9326,13 @@ document.querySelectorAll('.subtab-button[data-subtab]').forEach((button) => {
 
 document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
   button.addEventListener('click', () => { setNextRendererTelemetryTrigger('navigation'); setActiveEarningsSubtab(button.dataset.earningsSubtab); });
+});
+
+earningsMarketplaceSubtabButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    currentMarketplaceSubtab = button.dataset.marketplaceSubtab === 'calculations' ? 'calculations' : 'raw';
+    updateMarketplaceSubtab();
+  });
 });
 
 earningsMarketplaceSideButtons.forEach((button) => {

@@ -1247,7 +1247,20 @@
           </div>
 
           <div class="earnings-panel" data-earnings-panel="marketplace">
-            <section class="work-surface earnings-surface">
+            <div class="section-subtabs" role="tablist" aria-label="Marketplace data view">
+              <button class="subtab-button active" type="button" data-marketplace-subtab="raw" aria-selected="true">Raw Data</button>
+              <button class="subtab-button" type="button" data-marketplace-subtab="calculations" aria-selected="false">Calculations</button>
+            </div>
+            <section class="work-surface earnings-surface" data-marketplace-panel="raw">
+              <div id="earnings-marketplace-raw-status" class="fleet-sync-status" role="status">Awaiting Marketplace raw data</div>
+              <div class="fleet-table-wrap">
+                <table class="fleet-table earnings-table">
+                  <thead><tr><th>Timestamp (UTC)</th><th>Record</th><th>Stream</th><th>Result</th><th>Slot</th><th>Event ID</th><th>Signature</th><th>Discovered By</th><th>Payload Hash</th></tr></thead>
+                  <tbody id="earnings-marketplace-raw-table-body"><tr class="empty-row"><td colspan="9">No Marketplace raw data loaded</td></tr></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="work-surface earnings-surface" data-marketplace-panel="calculations" hidden>
               <div id="earnings-marketplace-sync-status" class="fleet-sync-status" role="status">Awaiting LM executions</div>
               <div class="fleet-table-wrap">
                 <table class="fleet-table earnings-table">

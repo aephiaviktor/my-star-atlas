@@ -146,14 +146,18 @@ test('Marketplace rescans order history for sell recovery without replaying high
   assert.match(main, /prior\.signature === trade\.signature/);
 });
 
-test('GM sync separates configured execution wallets from all profile custody wallets', () => {
+test('GM raw sync scans configured trading wallets and narrow CSS/token scopes without broad profile-wallet history', () => {
   assert.match(html, /name="gmTradingWallets"/);
   assert.match(renderer, /gmTradingWallets: String\(data\.get\('gmTradingWallets'\)/);
   assert.match(main, /profileWalletsByFaction\[faction\] = decodePlayerProfileWallets\(accountInfo\)/);
   assert.match(main, /const profileWallets = Object\.values\(profileWalletsByFaction\)\.flat\(\)/);
-  assert.match(main, /const executionWallets = Array\.from\(new Set\(\[\.\.\.profileWallets, \.\.\.extraWallets\]\)\)/);
-  assert.match(main, /const marketplaceWallets = Object\.values\(marketplaceWalletsByFaction\)\.flat\(\)/);
-  assert.match(main, /const trackedWallets = Array\.from\(new Set\(\[\.\.\.marketplaceWallets, \.\.\.extraWallets\]\)\)/);
+  assert.match(main, /const executionWallets = Array\.from\(new Set\(extraWallets\)\)/);
+  assert.match(main, /const trackedWallets = Array\.from\(new Set\(extraWallets\)\)/);
+  assert.match(main, /syncMarketplaceRawData\(settings, connection/);
+  assert.match(main, /deriveCssStarbasePlayer/);
+  assert.match(main, /discoverPlayerTokenAccounts/);
+  assert.doesNotMatch(main, /const executionWallets = Array\.from\(new Set\(\[\.\.\.profileWallets/);
+  assert.doesNotMatch(main, /const trackedWallets = Array\.from\(new Set\(\[\.\.\.marketplaceWallets/);
   assert.match(main, /getMultipleAccountsInfo\(profileKeys, 'confirmed'\)/);
   assert.match(main, /maxPages: 1/);
   assert.equal((main.match(/const startIso = MARKETPLACE_HISTORY_CUTOVER_ISO;/g) || []).length, 2);

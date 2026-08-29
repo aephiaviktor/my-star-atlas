@@ -239,9 +239,10 @@ test('GM trades and flows form one atomic cursor-safety boundary', () => {
 test('GM routine synchronization resumes durable wallet cursors and batches transactions', () => {
   const global = functionBody('fetchGlobalMarketTrades', 'let marketplaceSyncActive');
   assert.match(global, /marketplaceCursorSnapshot\(\s*checkpoint\.walletCursors,/);
-  assert.equal((global.match(/transactionBatchSize: 5/g) || []).length, 2);
+  assert.equal((global.match(/transactionBatchSize: 5/g) || []).length, 1);
   assert.doesNotMatch(global, /walletCursors: \{\}, orderCursors: \{\}/);
-  assert.match(global, /upstreamWalletCursors/);
+  assert.doesNotMatch(global, /upstreamWalletCursors/);
+  assert.match(global, /const upstreamWallets = \[\]/);
   assert.match(global, /combinedGlobalScan/);
   assert.match(global, /resolveMarketplaceCheckpointCursors\(checkpoint, combinedGlobalScan\)/);
 });
