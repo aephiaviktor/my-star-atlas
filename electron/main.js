@@ -22,6 +22,7 @@ const packageJson = require('../package.json');
 const { createAsyncTtlCache, fetchWithInfluxRetry } = require('./influx-resilience');
 const { queryCargoRowsWithWindowFallback } = require('./cargo-influx-window-recovery');
 const { excludeSelfReferentialCraftingEvents } = require('./crafting-event-integrity');
+const { averageRecordedCrew } = require('./crafting-crew-average');
 const { removeUpgradeMirroredCraftingEvents } = require('./crafting-upgrade-dedup');
 const { buildFactionCustodyLedgerEvents } = require('./cross-faction-basis-handoff');
 const { assertTrustedSender, validateIpcPayload } = require('./ipc-security');
@@ -6557,6 +6558,7 @@ ${scopeFilterFlux}
   const seenFeeEvents = new Set();
   const seenTxsEvents = new Set();
   const seenCrewEvents = new Set();
+  const crewValuesByRow = new Map();
 
   for (const row of outputRows) {
     const starbase = resolveStarbaseName(row, coordinateMap);
@@ -6630,8 +6632,9 @@ ${scopeFilterFlux}
     entry.txsDaily += 1;
   }
 
-  // crewRows: crew required per crafting event, summed across all
-  // events for the (date, starbase, output) row.
+  // Crew is assigned capacity, not a consumable. Collect one observation per
+  // crafting event and average it for the (date, starbase, output) row so
+  // transaction count cannot multiply the displayed daily crew.
   for (const row of crewRows) {
     const starbase = resolveStarbaseName(row, coordinateMap);
     const output = String(row.output || '').trim();
@@ -6646,7 +6649,10 @@ ${scopeFilterFlux}
       seenCrewEvents.add(craftingID);
     }
     const entry = ensureRow(isoDate, starbase, output, date);
-    entry.crew += value;
+    const key = `${isoDate}\n${starbase}\n${output}`;
+    if (!crewValuesByRow.has(key)) crewValuesByRow.set(key, []);
+    crewValuesByRow.get(key).push(value);
+    entry.crew = averageRecordedCrew(crewValuesByRow.get(key));
   }
 
   const result = Array.from(rowsByKey.values())
