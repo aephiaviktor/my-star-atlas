@@ -608,10 +608,10 @@ function normalizeFactionGmMarketplaceRow(row) {
     wallet: String(row.wallet || ''), quantity,
     basisAvailable, unitPriceAtlas: basisAvailable ? Number(row.unitPriceAtlas || 0) : null,
     grossAtlas: basisAvailable ? Number(row.grossAtlas || 0) : null,
-    marketplaceFeeAtlas: Number(row.marketplaceFeeAtlas || 0), txFeeAtlas: 0,
+    marketplaceFeeAtlas: Number(row.marketplaceFeeAtlas || 0), txFeeAtlas: Number(row.txFeeAtlas || 0),
     netAtlas: basisAvailable ? Number(row.netAtlas || 0) : null,
     settledAtlas: basisAvailable ? Number(row.settledAtlas || 0) : null,
-    signature: String(row.custodySignature || ''), orderId: String(row.orderId || ''),
+    signature: String(row.executionSignature || row.custodySignature || ''), orderId: String(row.orderId || ''),
   };
 }
 

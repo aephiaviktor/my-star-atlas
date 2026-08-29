@@ -166,7 +166,31 @@ test('GM buys become faction rows only when DepositCargoToGame consumes global w
     ],
   });
   assert.deepEqual(rows.map((row) => ({ side: row.side, faction: row.faction, timestamp: row.timestamp, quantity: row.quantity, unitPriceAtlas: row.unitPriceAtlas })), [
-    { side: 'buy', faction: 'USTUR', timestamp: '2026-08-26T00:00:00Z', quantity: 60, unitPriceAtlas: 400 / 150 },
+    { side: 'buy', faction: 'USTUR', timestamp: '2026-08-24T00:00:00Z', quantity: 60, unitPriceAtlas: 2 },
+  ]);
+});
+
+test('GM buy deposits preserve and prorate original execution provenance across lots', () => {
+  const rows = projectGmFactionMarketplaceRows({
+    walletUniverse: buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { ONI: ['oni'] } }),
+    trades: [
+      { id: 'buy-1', signature: 'fill-sig-1', orderId: 'order-1', timestamp: '2026-08-24T00:00:00Z', marketplace: 'GM', side: 'buy', wallet: 'gm', asset: 'Framework', rawMint: 'framework', quantity: 40, grossAtlas: 8, marketplaceFeeAtlas: 0.4, txFeeAtlas: 0.04, settledAtlas: 8.44 },
+      { id: 'buy-2', signature: 'fill-sig-2', orderId: 'order-2', timestamp: '2026-08-24T01:00:00Z', marketplace: 'GM', side: 'buy', wallet: 'gm', asset: 'Framework', rawMint: 'framework', quantity: 60, grossAtlas: 18, marketplaceFeeAtlas: 0.9, txFeeAtlas: 0.06, settledAtlas: 18.96 },
+    ],
+    flows: [
+      { id: 'move', timestamp: '2026-08-25T00:00:00Z', flow: 'wallet-transfer', asset: 'Framework', rawMint: 'framework', quantity: 70, origin: 'wallet:gm', destination: 'wallet:oni' },
+      { id: 'deposit', timestamp: '2026-08-26T00:00:00Z', flow: 'css-deposit', asset: 'Framework', rawMint: 'framework', quantity: 70, origin: 'wallet:oni', destination: 'ONI-1', faction: 'ONI' },
+    ],
+  });
+
+  assert.deepEqual(rows.map((row) => ({
+    timestamp: row.timestamp, starbase: row.starbase, quantity: row.quantity,
+    grossAtlas: row.grossAtlas, marketplaceFeeAtlas: row.marketplaceFeeAtlas,
+    txFeeAtlas: row.txFeeAtlas, settledAtlas: row.settledAtlas,
+    orderId: row.orderId, executionSignature: row.executionSignature,
+  })), [
+    { timestamp: '2026-08-24T00:00:00Z', starbase: 'ONI-1', quantity: 40, grossAtlas: 8, marketplaceFeeAtlas: 0.4, txFeeAtlas: 0.04, settledAtlas: 8.44, orderId: 'order-1', executionSignature: 'fill-sig-1' },
+    { timestamp: '2026-08-24T01:00:00Z', starbase: 'ONI-1', quantity: 30, grossAtlas: 9, marketplaceFeeAtlas: 0.45, txFeeAtlas: 0.03, settledAtlas: 9.48, orderId: 'order-2', executionSignature: 'fill-sig-2' },
   ]);
 });
 
@@ -204,9 +228,11 @@ test('GM deposits blend known wallet basis with observed starbase basis for an i
       { timestamp: '2026-08-26T12:00:00Z', faction: 'MUD', starbase: 'MUD-1', asset: 'Fuel', knownQuantity: 100, knownInventoryValueAtlas: 40 },
     ],
   });
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].unitPriceAtlas, 0.3);
-  assert.equal(rows[0].grossAtlas, 15);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => ({ quantity: row.quantity, unitPriceAtlas: row.unitPriceAtlas, grossAtlas: row.grossAtlas })), [
+    { quantity: 25, unitPriceAtlas: 0.2, grossAtlas: 0 },
+    { quantity: 25, unitPriceAtlas: 0.3, grossAtlas: 7.5 },
+  ]);
 });
 
 test('GM basis follows a priced upstream wallet purchase through the configured GM wallet into CSS', () => {
