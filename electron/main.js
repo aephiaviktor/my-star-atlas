@@ -86,6 +86,7 @@ const {
   deriveCssStarbasePlayer,
   discoverPlayerTokenAccounts,
   scanMarketplaceRawData,
+  buildLmRawRecords,
   formatRawTransactionInfluxLine,
   formatRawEventInfluxLine,
 } = require('./marketplace-rawdata');
@@ -726,7 +727,7 @@ async function fetchMarketplaceRawDataFromInflux(settings) {
   |> pivot(rowKey: ["_time", "record", "signature", "eventId", "stream"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
   try {
-    const rows = parseInfluxCsv(await queryInfluxFlux(settings, flux)).map((row) => {
+    const rawRows = parseInfluxCsv(await queryInfluxFlux(settings, flux)).map((row) => {
       let payload = null;
       try { payload = row.payload ? JSON.parse(row.payload) : null; } catch (_error) { payload = null; }
       const signature = String(row.signature || payload?.signature || payload?.transaction?.signatures?.[0] || '');
@@ -735,9 +736,57 @@ async function fetchMarketplaceRawDataFromInflux(settings) {
         streams: String(row.streams || ''), eventId: String(row.eventId || payload?.eventId || ''), signature,
         slot: Number.isFinite(Number(row.slot)) ? Number(row.slot) : null,
         success: row.success === true || String(row.success).toLowerCase() === 'true',
-        discoveredBy: String(row.discoveredBy || ''), payloadHash: String(row.payloadHash || ''), payload,
+        discoveredBy: String(row.discoveredBy || ''),
+        payloadHash: String(row.payloadHash || '') || (row.payload ? crypto.createHash('sha256').update(String(row.payload)).digest('hex') : ''),
+        payload,
       };
     });
+    const streamsBySignature = new Map();
+    for (const row of rawRows.filter((entry) => entry.record === 'event')) {
+      streamsBySignature.set(row.signature, new Set([...(streamsBySignature.get(row.signature) || []), row.stream].filter(Boolean)));
+    }
+    const rows = [];
+    const transactionIndex = new Map();
+    for (const row of rawRows) {
+      if (row.record === 'event' && row.payload?.type === 'transaction_observed') continue;
+      if (row.record === 'transaction') {
+        const discovered = [...(streamsBySignature.get(row.signature) || [])];
+        if (!row.stream || row.stream === 'chain') row.stream = discovered.length === 1 ? discovered[0] : discovered.length > 1 ? 'multi' : row.stream;
+        const existingIndex = transactionIndex.get(row.signature);
+        if (existingIndex != null) {
+          if (rows[existingIndex].stream === 'chain' && row.stream !== 'chain') rows[existingIndex] = row;
+          continue;
+        }
+        transactionIndex.set(row.signature, rows.length);
+      }
+      const payload = row.payload || {};
+      const transactionMints = [...new Set([...(payload.meta?.preTokenBalances || []), ...(payload.meta?.postTokenBalances || [])]
+        .map((balance) => String(balance.mint || '')).filter(Boolean))];
+      const mint = String(payload.mint || payload.rawMint || (transactionMints.length === 1 ? transactionMints[0] : ''));
+      const asset = String(payload.asset || ASSET_REGISTRY.find((entry) => entry.mint === mint)?.name || '');
+      const logs = row.record === 'transaction' ? (payload.meta?.logMessages || []) : [];
+      const instruction = row.record === 'event'
+        ? String(payload.type || '')
+        : String(logs.map((line) => String(line).match(/Instruction:\s*([A-Za-z0-9_]+)/)?.[1]).find(Boolean) || 'transaction');
+      const messageInstructions = payload.transaction?.message?.instructions || [];
+      const programs = row.record === 'transaction'
+        ? [...new Set(messageInstructions.map((entry) => String(entry.programId || entry.program || '')).filter(Boolean))]
+        : [];
+      const firstSigner = (payload.transaction?.message?.accountKeys || []).find((entry) => entry?.signer);
+      rows.push({
+        ...row,
+        eventType: instruction,
+        fromWallet: String(payload.fromWallet || payload.wallet || payload.initializer || firstSigner?.pubkey || ''),
+        toWallet: String(payload.toWallet || ''),
+        mint,
+        asset,
+        quantityRaw: String(payload.quantityRaw ?? payload.quantity ?? ''),
+        decimals: Number.isInteger(Number(payload.decimals)) ? Number(payload.decimals) : 0,
+        atlasAmount: Number.isFinite(Number(payload.grossAtlas)) ? Number(payload.grossAtlas) : null,
+        program: programs.join(', '),
+        decodedStatus: row.record === 'event' ? 'decoded' : row.success ? 'raw' : 'failed',
+      });
+    }
     return { rows, error: '' };
   } catch (error) {
     return { rows: [], error: String(error?.message || error || 'marketplace_rawdata_influx_unavailable') };
@@ -4628,6 +4677,65 @@ async function loadMarketplaceRawDataCheckpoint() {
   }
 }
 
+function rawCursorComplete(cursor) {
+  return Boolean(cursor && typeof cursor === 'object' && cursor.backfillComplete === true);
+}
+
+async function buildMarketplaceRawDataCoverage(settings) {
+  const checkpoint = await loadMarketplaceRawDataCheckpoint();
+  let gmWallets = [];
+  try { gmWallets = parseGmTradingWallets(settings.gmTradingWallets); } catch (_error) { gmWallets = []; }
+  const sources = gmWallets.map((address) => ({
+    stream: 'gm', label: `GM · ${address}`, address, sourceCount: 1,
+    backfillComplete: rawCursorComplete(checkpoint.cursors[address]),
+  }));
+  for (const faction of ['MUD', 'ONI', 'USTUR']) {
+    const profile = String(settings.playerProfiles?.[faction] || '').trim();
+    const css = STARBASE_REGISTRY.find((entry) => entry.name === CSS_STARBASE_NAMES[faction]);
+    if (!profile || !css) continue;
+    const address = deriveCssStarbasePlayer({
+      sageProgramId: SAGE_PROGRAM_ID.toBase58(), gameId: SAGE_GAME_ID.toBase58(),
+      playerProfile: profile, starbase: css.publicKey,
+    });
+    sources.push({
+      stream: 'deposit/withdraw', label: `${faction} CSS StarbasePlayer`, address, sourceCount: 1,
+      backfillComplete: rawCursorComplete(checkpoint.cursors[address]),
+    });
+  }
+  const tokenAccountsByOwner = new Map();
+  for (const entry of checkpoint.tokenAccounts || []) {
+    tokenAccountsByOwner.set(entry.owner, [...(tokenAccountsByOwner.get(entry.owner) || []), entry.address]);
+  }
+  for (const [owner, addresses] of tokenAccountsByOwner) sources.push({
+    stream: 'transfer', label: `Transfers · ${owner}`, address: owner, sourceCount: addresses.length,
+    backfillComplete: addresses.length > 0 && addresses.every((address) => rawCursorComplete(checkpoint.cursors[address])),
+  });
+  const faction = normalizeFaction(settings.faction);
+  const lmCheckpoint = await loadLocalMarketTradeCheckpoint(localMarketCheckpointPath(faction));
+  sources.push({
+    stream: 'lm', label: `LM · ${faction}`, address: String(settings.playerProfiles?.[faction] || ''), sourceCount: 1,
+    backfillComplete: lmCheckpoint.marketplaceBackfilled === true,
+  });
+  return {
+    sources,
+    total: sources.length,
+    complete: sources.filter((source) => source.backfillComplete).length,
+    pending: sources.filter((source) => !source.backfillComplete).length,
+    lastSavedAt: String(checkpoint.savedAt || ''),
+  };
+}
+
+async function writeMarketplaceRawRecords(settings, records) {
+  const lines = [];
+  for (const record of records || []) {
+    const stream = record.streams?.length === 1 ? record.streams[0] : record.streams?.length > 1 ? 'multi' : 'chain';
+    lines.push(formatRawTransactionInfluxLine({ transaction: record.transaction, stream }));
+    for (const event of record.events || []) lines.push(formatRawEventInfluxLine(event, Number(record.transaction.blockTime)));
+  }
+  if (lines.length) await writeInventoryBasisLinesToInflux(settings, lines.join('\n'));
+  return { transactions: (records || []).length, events: (records || []).reduce((sum, record) => sum + (record.events || []).length, 0) };
+}
+
 async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets, configuredProfiles, profileWalletsByFaction }) {
   const checkpoint = await loadMarketplaceRawDataCheckpoint();
   const playerWallets = Object.values(profileWalletsByFaction).flat();
@@ -4655,20 +4763,13 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
     gmWallets, cssScopes, playerWallets, tokenAccounts: transferScanDue ? tokenAccounts : [], cursors: checkpoint.cursors,
     startIso: MARKETPLACE_HISTORY_CUTOVER_ISO, maxPages: 1,
   });
-  const lines = [];
-  for (const record of scanned.records) {
-    lines.push(formatRawTransactionInfluxLine({
-      transaction: record.transaction, discoveredBy: record.discoveredBy, streams: record.streams,
-    }));
-    for (const event of record.events) lines.push(formatRawEventInfluxLine(event, Number(record.transaction.blockTime)));
-  }
-  if (lines.length) await writeInventoryBasisLinesToInflux(settings, lines.join('\n'));
+  const written = await writeMarketplaceRawRecords(settings, scanned.records);
   await writeJsonAtomic(marketplaceRawDataCheckpointPath(), {
     schemaVersion: 1, savedAt: new Date().toISOString(), cursors: scanned.cursors, tokenAccounts,
     tokenAccountsRefreshedAt: refreshTokenAccounts ? new Date().toISOString() : checkpoint.tokenAccountsRefreshedAt,
     lastTransferScanAt: transferScanDue ? new Date().toISOString() : checkpoint.lastTransferScanAt,
   });
-  return { transactions: scanned.records.length, events: scanned.records.reduce((sum, record) => sum + record.events.length, 0), rpc: scanned.rpc };
+  return { ...written, rpc: scanned.rpc };
 }
 
 async function syncMarketplaceRawData(settings, connection, scope) {
@@ -5386,6 +5487,21 @@ async function fetchLocalMarketTrades(settings, connection) {
   }
   const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
+  const lmRawRecords = buildLmRawRecords({
+    transactions: scanned.rawTransactions,
+    orders: scanned.orders,
+    trades: scanned.trades,
+  });
+  try {
+    await writeMarketplaceRawRecords(settings, lmRawRecords);
+  } catch (error) {
+    return {
+      trades,
+      error: marketplacePublicationErrorCode(error?.message, 'marketplace_rawdata_lm_write_failed'),
+      rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
+      exhaustion: scanned.exhaustion || null,
+    };
+  }
   const checkpointCursors = resolveMarketplaceCheckpointCursors(checkpoint, scanned);
   const cursorOutputSnapshot = {
     walletCursors: checkpointCursors.walletCursors,
@@ -5732,9 +5848,10 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
 
 async function fetchMarketplaceSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
-  const [result, rawData, assetFlowEvents, inventoryBasisObservations] = await Promise.all([
+  const [result, rawData, rawDataCoverage, assetFlowEvents, inventoryBasisObservations] = await Promise.all([
     fetchMarketplaceTradesFromInflux(settings),
     fetchMarketplaceRawDataFromInflux(settings),
+    buildMarketplaceRawDataCoverage(settings).catch(() => ({ sources: [], total: 0, complete: 0, pending: 0, lastSavedAt: '' })),
     fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []),
     readInventoryBasisSnapshots({
       bucket: settings.influxBucket,
@@ -5748,6 +5865,7 @@ async function fetchMarketplaceSnapshot(payload) {
     marketplaceRawData: rawData.rows,
     marketplaceRawDataCount: rawData.rows.length,
     marketplaceRawDataError: rawData.error,
+    marketplaceRawDataCoverage: rawDataCoverage,
     localMarketTrades: trades,
     localMarketTradeCount: trades.length,
     localMarketError: result.error,

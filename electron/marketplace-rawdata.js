@@ -36,6 +36,10 @@ function canonicalJson(value) {
   return JSON.stringify(normalize(value));
 }
 
+function payloadHash(value) {
+  return crypto.createHash('sha256').update(canonicalJson(value)).digest('hex');
+}
+
 function deriveCssStarbasePlayer({ sageProgramId, gameId, playerProfile, starbase, starbaseSeqId = 0 }) {
   const program = new PublicKey(sageProgramId);
   const profile = new PublicKey(playerProfile);
@@ -83,6 +87,13 @@ function allInstructions(transaction) {
 function classifyCssCargoEvents(transaction, { sageProgramId, cssStarbasePlayer }) {
   const signature = String(transaction?.transaction?.signatures?.[0] || '');
   const { accountKeys, entries } = allInstructions(transaction);
+  const mintByTokenAccount = new Map();
+  const ownerByTokenAccount = new Map();
+  for (const balance of [...(transaction?.meta?.preTokenBalances || []), ...(transaction?.meta?.postTokenBalances || [])]) {
+    const account = String(accountKeys[balance.accountIndex]?.pubkey || accountKeys[balance.accountIndex] || '');
+    if (account && balance.mint) mintByTokenAccount.set(account, String(balance.mint));
+    if (account && balance.owner) ownerByTokenAccount.set(account, String(balance.owner));
+  }
   const events = [];
   for (const { instruction, outerIndex, innerIndex } of entries) {
     const programId = String(instruction?.programId || accountKeys[instruction?.programIdIndex]?.pubkey || accountKeys[instruction?.programIdIndex] || '');
@@ -94,9 +105,22 @@ function classifyCssCargoEvents(transaction, { sageProgramId, cssStarbasePlayer 
     if (!stream) continue;
     const accounts = instructionAccounts(instruction, accountKeys);
     if (!accounts.includes(String(cssStarbasePlayer))) continue;
+    const amountRaw = data.length >= 16 ? data.readBigUInt64LE(8).toString() : '';
+    const tokenFromIndex = stream === 'deposit' ? 10 : 11;
+    const tokenToIndex = stream === 'deposit' ? 11 : 12;
+    const explicitMintIndex = stream === 'withdraw' ? 13 : -1;
+    const mint = explicitMintIndex >= 0 ? String(accounts[explicitMintIndex] || '')
+      : String(mintByTokenAccount.get(accounts[tokenFromIndex]) || mintByTokenAccount.get(accounts[tokenToIndex]) || '');
     events.push({
       eventId: `${signature}:${outerIndex}:${innerIndex === null ? 'outer' : innerIndex}`,
-      signature, stream, outerIndex, innerIndex, cssStarbasePlayer: String(cssStarbasePlayer), accounts,
+      signature, stream, type: stream === 'deposit' ? 'deposit_cargo_to_game' : 'withdraw_cargo_from_game',
+      outerIndex, innerIndex, cssStarbasePlayer: String(cssStarbasePlayer),
+      starbase: String(accounts[stream === 'deposit' ? 0 : 1] || ''),
+      profile: String(accounts[stream === 'deposit' ? 6 : 4] || ''),
+      fromWallet: String(ownerByTokenAccount.get(accounts[tokenFromIndex]) || ''),
+      toWallet: String(ownerByTokenAccount.get(accounts[tokenToIndex]) || ''),
+      fromTokenAccount: String(accounts[tokenFromIndex] || ''), toTokenAccount: String(accounts[tokenToIndex] || ''),
+      mint, quantityRaw: amountRaw, accounts,
     });
   }
   return events;
@@ -168,24 +192,60 @@ function playerTransferEvents(transaction, playerWallets) {
   return events;
 }
 
-function formatRawTransactionInfluxLine({ transaction }) {
+function formatRawTransactionInfluxLine({ transaction, stream = 'chain' }) {
   const signature = String(transaction?.transaction?.signatures?.[0] || '').trim();
   const blockTime = Number(transaction?.blockTime);
   const slot = Number(transaction?.slot);
   if (!signature || !Number.isSafeInteger(slot) || !Number.isSafeInteger(blockTime)) throw new Error('invalid_raw_transaction');
   const payload = canonicalJson(transaction);
-  const payloadHash = crypto.createHash('sha256').update(payload).digest('hex');
+  const hash = crypto.createHash('sha256').update(payload).digest('hex');
   const fields = [
     `slot=${slot}i`, `success=${transaction?.meta?.err == null}`, `payload=${escapeField(payload)}`,
-    `payloadHash=${escapeField(payloadHash)}`,
+    `payloadHash=${escapeField(hash)}`,
   ];
-  return `${MARKETPLACE_RAWDATA_MEASUREMENT},record=transaction,stream=chain,eventId=transaction,signature=${escapeTag(signature)} ${fields.join(',')} ${BigInt(blockTime) * 1000000000n}`;
+  const normalizedStream = /^[a-z][a-z0-9_-]{0,31}$/.test(String(stream)) ? String(stream) : 'chain';
+  return `${MARKETPLACE_RAWDATA_MEASUREMENT},record=transaction,stream=${escapeTag(normalizedStream)},eventId=transaction,signature=${escapeTag(signature)} ${fields.join(',')} ${BigInt(blockTime) * 1000000000n}`;
 }
 
 function formatRawEventInfluxLine(event, blockTime) {
   if (!event?.eventId || !event?.signature || !event?.stream || !Number.isSafeInteger(Number(blockTime))) throw new Error('invalid_raw_event');
   const payload = canonicalJson(event);
-  return `${MARKETPLACE_RAWDATA_MEASUREMENT},record=event,stream=${escapeTag(event.stream)},eventId=${escapeTag(event.eventId)},signature=${escapeTag(event.signature)} payload=${escapeField(payload)} ${BigInt(blockTime) * 1000000000n}`;
+  return `${MARKETPLACE_RAWDATA_MEASUREMENT},record=event,stream=${escapeTag(event.stream)},eventId=${escapeTag(event.eventId)},signature=${escapeTag(event.signature)} payload=${escapeField(payload)},payloadHash=${escapeField(payloadHash(event))} ${BigInt(blockTime) * 1000000000n}`;
+}
+
+function buildLmRawRecords({ transactions = [], orders = [], trades = [] } = {}) {
+  const transactionBySignature = new Map(transactions.map((transaction) => [
+    String(transaction?.signature || transaction?.transaction?.signatures?.[0] || ''), transaction,
+  ]).filter(([signature]) => signature));
+  const eventsBySignature = new Map();
+  const add = (signature, event) => {
+    if (!transactionBySignature.has(signature)) return;
+    eventsBySignature.set(signature, [...(eventsBySignature.get(signature) || []), event]);
+  };
+  for (const order of orders) {
+    const signature = String(order?.creationSignature || '');
+    if (!signature || !order?.orderId) continue;
+    add(signature, {
+      eventId: `${signature}:lm-order:${order.orderId}`, signature, stream: 'lm', type: 'order_created',
+      orderId: String(order.orderId), side: String(order.side || ''), fromWallet: String(order.initializer || ''),
+      asset: String(order.asset || ''), mint: String(order.rawMint || order.certificateMint || ''),
+      quantityRaw: String(order.originalQuantity ?? ''), unitPriceAtlas: Number(order.priceAtlas),
+    });
+  }
+  for (const trade of trades) {
+    const signature = String(trade?.signature || '');
+    if (!signature || !trade?.id) continue;
+    add(signature, {
+      eventId: `${signature}:lm-execution:${trade.id}`, signature, stream: 'lm', type: 'execution',
+      orderId: String(trade.orderId || ''), side: String(trade.side || ''), fromWallet: String(trade.wallet || ''),
+      asset: String(trade.asset || ''), mint: String(trade.rawMint || trade.certificateMint || ''),
+      quantityRaw: String(trade.quantity ?? ''), grossAtlas: Number(trade.grossAtlas),
+      marketplaceFeeAtlas: Number(trade.marketplaceFeeAtlas || 0), txFeeAtlas: Number(trade.txFeeAtlas || 0),
+    });
+  }
+  return [...eventsBySignature.entries()].map(([signature, events]) => ({
+    signature, transaction: transactionBySignature.get(signature), streams: ['lm'], events,
+  }));
 }
 
 async function discoverPlayerTokenAccounts(connection, playerWallets, allowedMints = []) {
@@ -302,10 +362,6 @@ async function scanMarketplaceRawData(connection, {
     const gmScopes = item.scopes.filter((scope) => scope.kind === 'gm');
     const streams = new Set(gmScopes.map(() => 'gm'));
     const events = [];
-    if (gmScopes.length) events.push({
-      eventId: `${signature}:gm`, signature, stream: 'gm', type: 'transaction_observed',
-      wallets: [...new Set(gmScopes.map((scope) => scope.address))].sort(),
-    });
     for (const scope of item.scopes.filter((value) => value.kind === 'css')) {
       for (const event of classifyCssCargoEvents(transaction, { sageProgramId: scope.sageProgramId, cssStarbasePlayer: scope.address })) {
         events.push({ ...event, faction: scope.faction });
@@ -324,6 +380,6 @@ async function scanMarketplaceRawData(connection, {
 
 module.exports = Object.freeze({
   MARKETPLACE_RAWDATA_MEASUREMENT, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME, CSS_STARBASE_NAMES,
-  TOKEN_PROGRAM_IDS, deriveCssStarbasePlayer, classifyCssCargoEvents, playerTransferEvents,
+  TOKEN_PROGRAM_IDS, deriveCssStarbasePlayer, classifyCssCargoEvents, playerTransferEvents, buildLmRawRecords,
   formatRawTransactionInfluxLine, formatRawEventInfluxLine, discoverPlayerTokenAccounts, collectAddressTransactions, scanMarketplaceRawData,
 });

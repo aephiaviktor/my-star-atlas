@@ -1253,10 +1253,40 @@
             </div>
             <section class="work-surface earnings-surface" data-marketplace-panel="raw">
               <div id="earnings-marketplace-raw-status" class="fleet-sync-status" role="status">Awaiting Marketplace raw data</div>
+              <div class="activity-filters marketplace-raw-filters">
+                <label>From <input id="earnings-marketplace-raw-from" type="date"></label>
+                <label>To <input id="earnings-marketplace-raw-to" type="date"></label>
+                <label>Stream <select id="earnings-marketplace-raw-stream"><option value="">All</option></select></label>
+                <label>Record <select id="earnings-marketplace-raw-record"><option value="">All</option></select></label>
+                <label>Wallet <select id="earnings-marketplace-raw-wallet"><option value="">All</option></select></label>
+                <label>Event <select id="earnings-marketplace-raw-event"><option value="">All</option></select></label>
+                <label>Asset <select id="earnings-marketplace-raw-asset"><option value="">All</option></select></label>
+              </div>
+              <details class="earnings-metric-guide">
+                <summary id="earnings-marketplace-raw-coverage-summary">Source coverage awaiting checkpoint</summary>
+                <div id="earnings-marketplace-raw-coverage" class="earnings-metric-guide-list"></div>
+              </details>
               <div class="fleet-table-wrap">
                 <table class="fleet-table earnings-table">
-                  <thead><tr><th>Timestamp (UTC)</th><th>Record</th><th>Stream</th><th>Result</th><th>Slot</th><th>Event ID</th><th>Signature</th><th>Discovered By</th><th>Payload Hash</th></tr></thead>
-                  <tbody id="earnings-marketplace-raw-table-body"><tr class="empty-row"><td colspan="9">No Marketplace raw data loaded</td></tr></tbody>
+                  <thead><tr>
+                    <th><button type="button" data-marketplace-raw-sort="timestamp">Timestamp (UTC)</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="record">Record</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="stream">Stream</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="eventType">Event Type</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="decodedStatus">Status</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="fromWallet">Source Wallet</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="toWallet">Destination Wallet</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="asset">Asset / Mint</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="quantityRaw">Quantity</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="atlasAmount">ATLAS</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="program">Program</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="slot">Slot</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="eventId">Event ID</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="signature">Signature</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="payloadHash">Payload Hash</button></th>
+                    <th>Payload</th>
+                  </tr></thead>
+                  <tbody id="earnings-marketplace-raw-table-body"><tr class="empty-row"><td colspan="16">No Marketplace raw data loaded</td></tr></tbody>
                 </table>
               </div>
             </section>

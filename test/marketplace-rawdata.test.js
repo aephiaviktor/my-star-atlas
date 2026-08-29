@@ -7,7 +7,7 @@ const bs58 = bs58Module.default || bs58Module;
 const { Keypair } = require('@solana/web3.js');
 const {
   MARKETPLACE_RAWDATA_MEASUREMENT, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME,
-  deriveCssStarbasePlayer, classifyCssCargoEvents, playerTransferEvents,
+  deriveCssStarbasePlayer, classifyCssCargoEvents, playerTransferEvents, buildLmRawRecords,
   formatRawTransactionInfluxLine, formatRawEventInfluxLine,
 } = require('../electron/marketplace-rawdata');
 
@@ -69,5 +69,21 @@ test('raw Influx projection preserves the complete transaction and separate even
   assert.doesNotMatch(line, /discoveredBy=|streams=|fetchedAt=/);
   const eventA = formatRawEventInfluxLine({ eventId: `${signature}:0:outer`, signature, stream: 'deposit' }, transaction.blockTime);
   const eventB = formatRawEventInfluxLine({ eventId: `${signature}:1:outer`, signature, stream: 'deposit' }, transaction.blockTime);
+  assert.match(eventA, /payloadHash="[a-f0-9]{64}"/);
   assert.notEqual(eventA, eventB);
+});
+
+test('LM projection archives only already-fetched transactions with decoded order or execution facts', () => {
+  const orderSignature = key(); const executionSignature = key(); const unrelatedSignature = key();
+  const orderTransaction = tx({ signature: orderSignature });
+  const executionTransaction = tx({ signature: executionSignature });
+  const unrelatedTransaction = tx({ signature: unrelatedSignature });
+  const records = buildLmRawRecords({
+    transactions: [orderTransaction, executionTransaction, unrelatedTransaction],
+    orders: [{ orderId: 'order-1', creationSignature: orderSignature, side: 'buy', initializer: 'wallet-1', asset: 'Iron', rawMint: 'mint-1', originalQuantity: 25, priceAtlas: 2 }],
+    trades: [{ id: 'trade-1', orderId: 'order-1', signature: executionSignature, side: 'buy', wallet: 'wallet-1', asset: 'Iron', rawMint: 'mint-1', quantity: 5, grossAtlas: 10 }],
+  });
+  assert.deepEqual(records.map((record) => record.signature), [orderSignature, executionSignature]);
+  assert.deepEqual(records.flatMap((record) => record.events.map((event) => event.type)), ['order_created', 'execution']);
+  assert.ok(records.every((record) => record.streams[0] === 'lm'));
 });
