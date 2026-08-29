@@ -10,6 +10,24 @@
     return Number.isSafeInteger(number) && number >= 0 ? number : 0;
   }
 
+  const TABS_BY_MENU = Object.freeze({
+    MF: Object.freeze([Object.freeze({ value: 'fleets', label: 'My Fleets' })]),
+    PC: Object.freeze([
+      ['scanning', 'Scanning'], ['mining', 'Mining'], ['crafting', 'Crafting'],
+      ['production', 'Production'], ['consumption', 'Consumption'], ['pct-charts', 'PCR Charts'], ['inventory', 'Inventory'],
+    ].map(([value, label]) => Object.freeze({ value, label }))),
+    EA: Object.freeze([
+      ['scanning', 'Scanning'], ['mining', 'Mining'], ['marketplace', 'Marketplace'], ['cargo', 'Cargo'],
+      ['crafting', 'Crafting'], ['upgrading', 'Upgrading'], ['breakeven', 'Breakeven Analysis'],
+    ].map(([value, label]) => Object.freeze({ value, label }))),
+    OP: Object.freeze([Object.freeze({ value: 'scanning', label: 'Scanning' }), Object.freeze({ value: 'upgrading', label: 'Upgrading' })]),
+    other: Object.freeze([Object.freeze({ value: 'unattributed', label: 'Unattributed' })]),
+  });
+
+  function tabsForMenu(menu) {
+    return TABS_BY_MENU[menu] || [];
+  }
+
   function buildRpcUsageView(summary, { menu = 'all', tab = 'all', faction = 'all', method = 'all' } = {}) {
     const rows = Array.isArray(summary?.rows) ? summary.rows : [];
     const matching = rows.filter((row) => (
@@ -53,5 +71,5 @@
     };
   }
 
-  return { buildRpcUsageView };
+  return { buildRpcUsageView, tabsForMenu };
 }));

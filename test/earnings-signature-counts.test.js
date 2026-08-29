@@ -95,10 +95,10 @@ test('Allocation UI remains on demand while ledger-backed snapshots reuse its ca
  let registered;
  const loadAllocation = async (payload) => ({ payload });
  registerCargoAllocationIpc((channel, handler) => { registered = { channel, handler }; }, {
-   runTelemetry: async (payload, feature, operation) => ({ feature, value: await operation() }),
+   runTelemetry: async (payload, feature, operation, suboperation) => ({ feature, suboperation, value: await operation() }),
    loadAllocation,
  });
  assert.equal(registered.channel, CARGO_ALLOCATION_CHANNEL);
- assert.deepEqual(await registered.handler({}, { faction: 'MUD' }), { feature: 'Earnings Cargo Allocation', value: { payload: { faction: 'MUD' } } });
+ assert.deepEqual(await registered.handler({}, { faction: 'MUD' }), { feature: 'EA', suboperation: 'cargo', value: { payload: { faction: 'MUD' } } });
  assert.match(renderer,/activeCargoTable === 'allocation'\) refreshCargoAllocation\(\)/);
 });

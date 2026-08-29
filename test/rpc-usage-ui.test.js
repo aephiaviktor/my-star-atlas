@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { buildRpcUsageView } = require('../electron/rpc-usage-model');
+const { buildRpcUsageView, tabsForMenu } = require('../electron/rpc-usage-model');
 const { normalizeContext } = require('../electron/telemetry-context');
 
 const root = path.join(__dirname, '..');
@@ -30,6 +30,13 @@ test('cascading menu, tab, faction, and method filtering keeps the UTC-day total
   assert.deepEqual(view.methods.map((item) => item.method), ['getTransaction']);
 });
 
+test('RPC Usage tab choices follow the fixed visible menu structure', () => {
+  assert.deepEqual(tabsForMenu('MF').map((item) => item.label), ['My Fleets']);
+  assert.deepEqual(tabsForMenu('PC').map((item) => item.label), ['Scanning', 'Mining', 'Crafting', 'Production', 'Consumption', 'PCR Charts', 'Inventory']);
+  assert.deepEqual(tabsForMenu('EA').map((item) => item.label), ['Scanning', 'Mining', 'Marketplace', 'Cargo', 'Crafting', 'Upgrading', 'Breakeven Analysis']);
+  assert.deepEqual(tabsForMenu('OP').map((item) => item.label), ['Scanning', 'Upgrading']);
+});
+
 test('RPC Usage UI moves Settings readiness into the button and exposes one trusted aggregate endpoint', () => {
   const settingsButton = html.match(/<button id="open-settings-btn"[\s\S]*?<\/button>/)?.[0] || '';
   const versionLine = html.match(/<div class="version-line">[\s\S]*?<\/div>/)?.[0] || '';
@@ -46,6 +53,7 @@ test('RPC Usage UI moves Settings readiness into the button and exposes one trus
   assert.match(html, />Optimization</);
   assert.match(main, /'consumption:cargo': \['PC', 'consumption'\]/);
   assert.match(main, /'optimization:scanning': \['OP', 'scanning'\]/);
+  assert.match(html, /rpc-usage-date-select[\s\S]*rpc-usage-faction-select[\s\S]*rpc-usage-menu-select[\s\S]*rpc-usage-tab-select[\s\S]*rpc-usage-method-select/);
   assert.match(renderer, /Settings Ready/);
   assert.match(renderer, /Settings Incomplete/);
   assert.match(preload, /getRpcUsageDay: \(utcDate\) => ipcRenderer\.invoke\('telemetry:rpc-usage-day', utcDate\)/);

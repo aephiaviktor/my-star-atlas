@@ -1547,13 +1547,13 @@ function rpcUsageMethodsForSelection() {
 function populateRpcUsageTabs() {
   const selected = rpcUsageTabSelect.value || 'all';
   const menu = rpcUsageMenuSelect.value;
-  const tabs = menu === 'all' ? [] : (rpcUsageSummary?.tabsByMenu?.[menu] || []);
+  const tabs = menu === 'all' ? [] : rpcUsageModel.tabsForMenu(menu);
   rpcUsageTabSelect.replaceChildren();
   const total = document.createElement('option');
   total.value = 'all'; total.textContent = 'Total'; rpcUsageTabSelect.appendChild(total);
   for (const tab of tabs) {
-    const option = document.createElement('option'); option.value = tab;
-    option.textContent = tab === 'breakeven' ? 'Breakeven Analysis' : tab.replace(/(^|-)([a-z])/g, (_m, prefix, letter) => `${prefix ? ' ' : ''}${letter.toUpperCase()}`);
+    const option = document.createElement('option'); option.value = tab.value;
+    option.textContent = tab.label;
     rpcUsageTabSelect.appendChild(option);
   }
   rpcUsageTabSelect.disabled = menu === 'all';
