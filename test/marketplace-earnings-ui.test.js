@@ -43,6 +43,7 @@ test('Marketplace renderer uses side-specific value labels and buyer-paid accoun
   assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Cost \/ Unit' : 'Income \/ Unit'/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy'[\s\S]*gross \+ txFee[\s\S]*\(gross \+ txFee\) \/ quantity[\s\S]*net \/ quantity/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Seller-paid'/);
+  assert.match(renderer, /earningsMarketplaceSide !== 'sell'[\s\S]*reordered\.splice\(custodyIndex, 0, trading\)/);
   assert.match(renderer, /formatMarketplaceAtlas\(calculated\.txFee, 2\)/);
   assert.match(renderer, /formatMarketplaceAtlas\(calculated\.net, 2\)/);
 });
@@ -109,12 +110,14 @@ test('Marketplace sync discovers current player orders and persists incremental 
   assert.match(main, /schemaVersion: 2/);
 });
 
-test('Marketplace reads union canonical v2 with bounded legacy GM evidence without Influx SQL', () => {
+test('Marketplace reads only clean post-cutover LM and faction GM measurements without Influx SQL', () => {
   const start = main.indexOf('async function fetchMarketplaceTradesFromInflux');
   const end = main.indexOf('async function fetchMarketplaceAssetFlowsFromInflux', start);
   const reader = main.slice(start, end);
   assert.match(reader, /_measurement == "marketplace_v2"/);
-  assert.match(reader, /_measurement == "marketplace" and r\.market == "GM"/);
+  assert.match(reader, /MARKETPLACE_FACTION_MEASUREMENT/);
+  assert.match(reader, /MARKETPLACE_HISTORY_CUTOVER_ISO/);
+  assert.doesNotMatch(reader, /marketplace_reconciliation_test_v1|_measurement == "marketplace" and r\.market == "GM"/);
   assert.match(reader, /pivot\(rowKey: \["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"\]/);
   assert.match(reader, /dedupeMarketplaceRows/);
   assert.doesNotMatch(main, /queryInfluxSql|type:\s*['"]sql['"]/);
@@ -142,6 +145,7 @@ test('GM sync separates configured execution wallets from all profile custody wa
   assert.match(main, /const trackedWallets = Array\.from\(new Set\(\[\.\.\.marketplaceWallets, \.\.\.extraWallets\]\)\)/);
   assert.match(main, /getMultipleAccountsInfo\(profileKeys, 'confirmed'\)/);
   assert.match(main, /maxPages: 1/);
+  assert.equal((main.match(/const startIso = MARKETPLACE_HISTORY_CUTOVER_ISO;/g) || []).length, 2);
   assert.match(main, /startIso,\s*addressFactory:[\s\S]*decodeAssetFlows/);
   assert.doesNotMatch(main, /gm_trading_wallet_not_configured/);
   assert.match(main, /fetchOpenLocalMarketOrderIds\(connection, executionWallets\)/);
@@ -151,11 +155,11 @@ test('GM sync separates configured execution wallets from all profile custody wa
   assert.match(main, /fetchMarketplaceAssetFlowsFromInflux/);
 });
 
-test('Marketplace Influx read includes selected profile rows and faction-attributed GM deposits but excludes GLOBAL GM rows', () => {
+test('Marketplace Influx read includes selected profile rows and clean faction GM deposits but excludes GLOBAL and legacy rows', () => {
   assert.match(main, /r\.profile == "\$\{escapeFluxString\(profileName\)\}" or r\.profile == "\$\{escapeFluxString\(profile\)\}"/);
-  assert.match(main, /marketplace_reconciliation_test_v1/);
+  assert.match(main, /MARKETPLACE_FACTION_MEASUREMENT/);
   const reader = main.slice(main.indexOf('function marketplaceScopeFlux'), main.indexOf('async function fetchMarketplaceAssetFlowsFromInflux'));
-  assert.doesNotMatch(reader, /r\.faction == "GLOBAL"|r\.profile == "GLOBAL"/);
+  assert.doesNotMatch(reader, /r\.faction == "GLOBAL"|r\.profile == "GLOBAL"|marketplace_reconciliation_test_v1/);
 });
 
 test('ONI and MUD earnings accept second-instance SDU tags', () => {

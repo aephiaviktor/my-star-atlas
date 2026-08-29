@@ -3,6 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  MARKETPLACE_FACTION_MEASUREMENT,
+  MARKETPLACE_HISTORY_CUTOVER_ISO,
   buildGmWalletUniverse,
   createStarbasePoolKey,
   calculateForwardStockpileAverage,
@@ -11,9 +13,13 @@ const {
   calculateGmWalletInventoryBasis,
   enrichGmTradesWithInventoryBasis,
   projectGmFactionMarketplaceRows,
-  reconcileCurrentGmBuyProjectionRows,
-  formatGmFactionMarketplaceTestLine,
+  formatGmFactionMarketplaceV2Line,
 } = require('../electron/gm-marketplace-accounting');
+
+test('clean Marketplace history has an immutable measurement and UTC cutover', () => {
+  assert.equal(MARKETPLACE_FACTION_MEASUREMENT, 'marketplace_faction_v2');
+  assert.equal(MARKETPLACE_HISTORY_CUTOVER_ISO, '2026-08-29T00:00:00.000Z');
+});
 
 test('wallet universe keeps GM wallets separate from faction profile custody wallets', () => {
   const universe = buildGmWalletUniverse({
@@ -194,33 +200,6 @@ test('GM buy deposits aggregate execution lots under one DepositCargoToGame even
   ]);
 });
 
-test('current GM deposit rows absorb legacy split fees and trade links without double counting', () => {
-  const rows = reconcileCurrentGmBuyProjectionRows([
-    {
-      id: 'gm-buy:deposit-sig:4:deposit', side: 'buy', projectionVersion: 2,
-      quantity: 5_000_000, txFeeAtlas: 0,
-      custodySignatures: ['deposit-sig'], executionSignatures: ['deposit-sig'], orderIds: [],
-    },
-    {
-      id: 'legacy-1', side: 'buy', projectionVersion: 1,
-      quantity: 4_100_000, txFeeAtlas: 3.56,
-      custodySignatures: ['deposit-sig:4:deposit'], executionSignatures: ['fill-1'], orderIds: ['order-1'],
-    },
-    {
-      id: 'legacy-2', side: 'buy', projectionVersion: 1,
-      quantity: 900_000, txFeeAtlas: 0.71,
-      custodySignatures: ['deposit-sig:4:deposit'], executionSignatures: ['fill-2'], orderIds: ['order-2'],
-    },
-  ]);
-
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].quantity, 5_000_000);
-  assert.equal(rows[0].txFeeAtlas, 4.27);
-  assert.deepEqual(rows[0].custodySignatures, ['deposit-sig']);
-  assert.deepEqual(rows[0].executionSignatures, ['fill-1', 'fill-2']);
-  assert.deepEqual(rows[0].orderIds, ['order-1', 'order-2']);
-});
-
 test('GM deposits with unknown wallet basis use faction starbase observations instead of zero', () => {
   const universe = buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { USTUR: ['ust'] } });
   const input = {
@@ -296,7 +275,7 @@ test('GM sells remain one row per trade and retain withdrawal provenance', () =>
   ]);
   assert.deepEqual(rows[0].custodySignatures, ['withdraw-sig']);
   assert.deepEqual(rows[0].executionSignatures, ['fill-sig']);
-  assert.match(formatGmFactionMarketplaceTestLine(rows[0]), /^marketplace_reconciliation_test_v1,/);
+  assert.match(formatGmFactionMarketplaceV2Line(rows[0]), /^marketplace_faction_v2,/);
 });
 
 test('one GM sell trade aggregates multiple same-starbase withdrawal signatures', () => {

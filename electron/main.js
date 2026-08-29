@@ -78,18 +78,18 @@ const {
   valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
 } = require('./cargo-cost-source');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
-const { scanLocalMarketTrades, resolveLocalMarketStartIso } = require('./local-market-scanner');
+const { scanLocalMarketTrades } = require('./local-market-scanner');
 const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows, selectFactionAssetFlows } = require('./marketplace-asset-flow');
 const {
+  MARKETPLACE_FACTION_MEASUREMENT,
+  MARKETPLACE_HISTORY_CUTOVER_ISO,
   enrichGmTradesWithInventoryBasis,
   buildGmWalletUniverse,
   projectGmFactionMarketplaceRows,
-  reconcileCurrentGmBuyProjectionRows,
-  formatGmFactionMarketplaceTestLine,
+  formatGmFactionMarketplaceV2Line,
 } = require('./gm-marketplace-accounting');
 const {
-  normalizeMarketplaceV1Row,
   normalizeMarketplaceV2Row,
   deriveMarketplaceUnionKey,
   dedupeMarketplaceRows,
@@ -661,40 +661,26 @@ async function fetchMarketplaceTradesFromInflux(settings) {
   const faction = normalizeFaction(settings.faction);
   const scope = marketplaceScopeFlux(faction, profile);
   const v2Flux = `from(bucket: "${escapeFluxString(bucket)}")
-  |> range(start: -40d)
+  |> range(start: time(v: "${MARKETPLACE_HISTORY_CUTOVER_ISO}"))
   |> filter(fn: (r) => r._measurement == "marketplace_v2")
   |> filter(fn: (r) => ${scope})
   |> pivot(rowKey: ["_time", "market", "faction", "profile", "executionSignature", "rawMint", "side", "tradeId"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
-  const legacyGmFlux = `from(bucket: "${escapeFluxString(bucket)}")
-  |> range(start: -40d)
-  |> filter(fn: (r) => r._measurement == "marketplace" and r.market == "GM")
-  |> pivot(rowKey: ["_time", "market", "faction", "profile", "side", "asset", "wallet"], columnKey: ["_field"], valueColumn: "_value")
-  |> sort(columns: ["_time"], desc: true)`;
   const factionGmFlux = `from(bucket: "${escapeFluxString(bucket)}")
-  |> range(start: -40d)
-  |> filter(fn: (r) => r._measurement == "marketplace_reconciliation_test_v1")
+  |> range(start: time(v: "${MARKETPLACE_HISTORY_CUTOVER_ISO}"))
+  |> filter(fn: (r) => r._measurement == "${MARKETPLACE_FACTION_MEASUREMENT}")
   |> filter(fn: (r) => r.faction == "${escapeFluxString(faction)}")
   |> pivot(rowKey: ["_time", "eventId", "market", "faction", "profile", "side", "asset", "rawMint", "starbase"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
   try {
-    const [v2Result, legacyGmResult, factionGmResult] = await Promise.all([
+    const [v2Result, factionGmResult] = await Promise.all([
       queryInfluxFlux(settings, v2Flux),
-      queryInfluxFlux(settings, legacyGmFlux),
       queryInfluxFlux(settings, factionGmFlux),
     ]);
     const context = { applicationProfile: profileName, selectedProfile: profile, faction, scopeProven: true };
-    const factionRows = parseInfluxCsv(factionGmResult).map(normalizeFactionGmMarketplaceRow).filter(Boolean);
-    const buyReconciledFactionRows = reconcileCurrentGmBuyProjectionRows(factionRows);
-    const currentFactionRows = buyReconciledFactionRows.filter((row) => row.projectionVersion >= 2);
-    const currentSellSignatures = new Set(currentFactionRows.filter((row) => row.side === 'sell').flatMap((row) => row.executionSignatures));
-    const filteredFactionRows = buyReconciledFactionRows.filter((row) => row.projectionVersion >= 2
-      || row.side === 'buy'
-      || (row.side === 'sell' && !row.executionSignatures.some((signature) => currentSellSignatures.has(signature))));
     const trades = dedupeMarketplaceRows([
       ...parseInfluxCsv(v2Result).map((row) => normalizeMarketplaceV2Row(row, context)).filter(Boolean),
-      ...parseInfluxCsv(legacyGmResult).map((row) => normalizeMarketplaceV1Row(row, context)).filter((row) => row?._certain),
-      ...filteredFactionRows,
+      ...parseInfluxCsv(factionGmResult).map(normalizeFactionGmMarketplaceRow).filter(Boolean),
     ]);
     trades.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp) || deriveMarketplaceUnionKey(a).localeCompare(deriveMarketplaceUnionKey(b)));
     return { trades, error: '' };
@@ -4590,14 +4576,14 @@ async function writeInventoryBasisLinesToInflux(settings, lines) {
   if (!response.ok) throw new Error(`inventory_basis_influx_http_${response.status}`);
 }
 
-async function writeMarketplaceReconciliationTestLines(settings, rows) {
-  const lines = rows.map(formatGmFactionMarketplaceTestLine).filter(Boolean);
+async function writeMarketplaceFactionV2Lines(settings, rows) {
+  const lines = rows.map(formatGmFactionMarketplaceV2Line).filter(Boolean);
   if (!lines.length) return { written: 0, error: '' };
   try {
     await writeInventoryBasisLinesToInflux(settings, lines.join('\n'));
     return { written: lines.length, error: '' };
   } catch (error) {
-    return { written: 0, error: marketplacePublicationErrorCode(error?.message, 'marketplace_reconciliation_test_write_failed') };
+    return { written: 0, error: marketplacePublicationErrorCode(error?.message, 'marketplace_faction_v2_write_failed') };
   }
 }
 
@@ -5239,7 +5225,7 @@ async function fetchLocalMarketTrades(settings, connection) {
     return { trades: [], error: '', rpc: null, exhaustion: error };
   }
   const existing = checkpoint.trades;
-  const startIso = resolveLocalMarketStartIso();
+  const startIso = MARKETPLACE_HISTORY_CUTOVER_ISO;
   const startMs = Date.parse(startIso);
   const checkpointNewestMs = existing.reduce((max, trade) => Math.max(max, Date.parse(trade.timestamp) || 0), startMs);
   // Anchor: use the newer of the local checkpoint or what InfluxDB
@@ -5384,7 +5370,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     return { trades: [], assetFlows: [], error: '', rpc: null, exhaustion: error };
   }
   const existing = checkpoint.trades;
-  const startIso = resolveLocalMarketStartIso();
+  const startIso = MARKETPLACE_HISTORY_CUTOVER_ISO;
   const startMs = Date.parse(startIso);
   const assetsByMint = Object.fromEntries(ASSET_REGISTRY.map((asset) => [asset.mint, asset]));
   const starbasesByKey = Object.fromEntries(STARBASE_REGISTRY.map((starbase) => [starbase.publicKey, {
@@ -5452,7 +5438,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     trades: [...trades, ...(upstreamScan?.trades || [])], flows: assetFlows,
     walletUniverse: shadowWalletUniverse, inventoryBasisObservations,
   });
-  const shadowWrite = await writeMarketplaceReconciliationTestLines(settings, shadowRows);
+  const shadowWrite = await writeMarketplaceFactionV2Lines(settings, shadowRows);
   const combinedGlobalScan = {
     ...scanned,
     exhaustion: scanned.exhaustion || upstreamScan?.exhaustion || null,

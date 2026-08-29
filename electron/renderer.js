@@ -6758,6 +6758,18 @@ function renderEarningsCrafting(result) {
   }
 }
 
+function getVisibleMarketplaceColumns() {
+  const columns = getVisibleEarningsColumns('marketplace');
+  if (earningsMarketplaceSide !== 'sell') return columns;
+  const custodyIndex = columns.findIndex((column) => column.id === 'custodySignatures');
+  const tradingIndex = columns.findIndex((column) => column.id === 'tradingSignatures');
+  if (custodyIndex < 0 || tradingIndex < 0 || tradingIndex < custodyIndex) return columns;
+  const reordered = [...columns];
+  const [trading] = reordered.splice(tradingIndex, 1);
+  reordered.splice(custodyIndex, 0, trading);
+  return reordered;
+}
+
 function renderEarningsMarketplace(result) {
   const rows = Array.isArray(result?.localMarketTrades) ? result.localMarketTrades : [];
   const visibleRows = rows.filter((entry) => entry.side === earningsMarketplaceSide);
@@ -6770,7 +6782,7 @@ function renderEarningsMarketplace(result) {
     button.setAttribute('aria-pressed', String(active));
   });
   if (!earningsMarketplaceTableBody) return;
-  const visibleColumns = getVisibleEarningsColumns('marketplace');
+  const visibleColumns = getVisibleMarketplaceColumns();
   renderMarketplaceHeader(visibleColumns);
   earningsMarketplaceTableBody.textContent = '';
   if (!visibleRows.length) {
@@ -6854,7 +6866,7 @@ function renderEarningsMarketplaceLoading(message = 'Loading Marketplace data...
   setText(earningsMarketplaceSyncStatus, message);
   setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
   if (!earningsMarketplaceTableBody) return;
-  const visibleColumns = getVisibleEarningsColumns('marketplace');
+  const visibleColumns = getVisibleMarketplaceColumns();
   renderMarketplaceHeader(visibleColumns);
   earningsMarketplaceTableBody.textContent = '';
   const tr = document.createElement('tr');

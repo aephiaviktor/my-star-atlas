@@ -1,6 +1,8 @@
 'use strict';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MARKETPLACE_FACTION_MEASUREMENT = 'marketplace_faction_v2';
+const MARKETPLACE_HISTORY_CUTOVER_ISO = '2026-08-29T00:00:00.000Z';
 
 function unique(values) {
   return Array.from(new Set((values || []).map((value) => String(value || '').trim()).filter(Boolean)));
@@ -451,45 +453,9 @@ function projectGmFactionMarketplaceRows({ trades = [], flows = [], walletUniver
   return rows.sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.id.localeCompare(right.id));
 }
 
-function canonicalMarketplaceTransactionSignature(value) {
-  return String(value || '').trim().split(':')[0];
-}
-
-function reconcileCurrentGmBuyProjectionRows(rows = []) {
-  const currentRows = rows.filter((row) => row.projectionVersion >= 2 && row.side === 'buy');
-  const legacyRows = rows.filter((row) => row.projectionVersion < 2 && row.side === 'buy');
-  const currentCustodySignatures = new Set(currentRows.flatMap((row) => row.custodySignatures || [])
-    .map(canonicalMarketplaceTransactionSignature).filter(Boolean));
-  const reconciledCurrentRows = new Map(currentRows.map((current) => {
-    const custody = new Set((current.custodySignatures || []).map(canonicalMarketplaceTransactionSignature).filter(Boolean));
-    const matches = legacyRows.filter((legacy) => (legacy.custodySignatures || [])
-      .map(canonicalMarketplaceTransactionSignature).some((signature) => custody.has(signature)));
-    const legacyTxFeeAtlas = matches.reduce((sum, row) => sum + (Number(row.txFeeAtlas) || 0), 0);
-    const executionSignatures = Array.from(new Set([
-      ...(current.executionSignatures || []),
-      ...matches.flatMap((row) => row.executionSignatures || []),
-    ].map(canonicalMarketplaceTransactionSignature).filter((signature) => signature && !custody.has(signature))));
-    const orderIds = Array.from(new Set([
-      ...(current.orderIds || []),
-      ...matches.flatMap((row) => row.orderIds || []),
-    ].filter(Boolean)));
-    return [current.id, {
-      ...current,
-      txFeeAtlas: Number(current.txFeeAtlas) || legacyTxFeeAtlas,
-      executionSignatures,
-      orderIds,
-    }];
-  }));
-  return rows.map((row) => reconciledCurrentRows.get(row.id) || row).filter((row) => {
-    if (row.projectionVersion >= 2 || row.side !== 'buy') return true;
-    return !(row.custodySignatures || []).map(canonicalMarketplaceTransactionSignature)
-      .some((signature) => currentCustodySignatures.has(signature));
-  });
-}
-
 function escapeInfluxTag(value) { return String(value ?? '').replace(/([ ,=])/g, '\\$1'); }
 function escapeInfluxString(value) { return `"${String(value ?? '').replace(/(["\\])/g, '\\$1')}"`; }
-function formatGmFactionMarketplaceTestLine(row) {
+function formatGmFactionMarketplaceV2Line(row) {
   const timestampMs = Date.parse(row?.timestamp);
   if (!Number.isFinite(timestampMs) || !(Number(row?.quantity) > 0) || !row?.id || !row?.faction) return '';
   const tags = {
@@ -512,10 +478,12 @@ function formatGmFactionMarketplaceTestLine(row) {
     `orderIds=${escapeInfluxString(JSON.stringify(row.orderIds || (row.orderId ? [row.orderId] : [])))}`,
     'projectionVersion=2i',
   ].join(',');
-  return `marketplace_reconciliation_test_v1,${tagText} ${fields} ${BigInt(timestampMs) * 1000000n}`;
+  return `${MARKETPLACE_FACTION_MEASUREMENT},${tagText} ${fields} ${BigInt(timestampMs) * 1000000n}`;
 }
 
 module.exports = {
+  MARKETPLACE_FACTION_MEASUREMENT,
+  MARKETPLACE_HISTORY_CUTOVER_ISO,
   buildGmWalletUniverse,
   createStarbasePoolKey,
   calculateForwardStockpileAverage,
@@ -524,6 +492,5 @@ module.exports = {
   calculateGmWalletInventoryBasis,
   enrichGmTradesWithInventoryBasis,
   projectGmFactionMarketplaceRows,
-  reconcileCurrentGmBuyProjectionRows,
-  formatGmFactionMarketplaceTestLine,
+  formatGmFactionMarketplaceV2Line,
 };
