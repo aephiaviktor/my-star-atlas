@@ -1522,7 +1522,7 @@ function populateRpcUsageMethods(methods) {
   rpcUsageMethodSelect.replaceChildren();
   const all = document.createElement('option');
   all.value = 'all';
-  all.textContent = 'Total';
+  all.textContent = 'All';
   rpcUsageMethodSelect.appendChild(all);
   for (const method of Array.isArray(methods) ? methods : []) {
     const option = document.createElement('option');
@@ -1547,10 +1547,10 @@ function rpcUsageMethodsForSelection() {
 function populateRpcUsageTabs() {
   const selected = rpcUsageTabSelect.value || 'all';
   const menu = rpcUsageMenuSelect.value;
-  const tabs = menu === 'all' ? [] : rpcUsageModel.tabsForMenu(menu);
+  const tabs = menu === 'all' ? [] : rpcUsageModel.tabsForMenu(menu, rpcUsageSummary?.rows || []);
   rpcUsageTabSelect.replaceChildren();
   const total = document.createElement('option');
-  total.value = 'all'; total.textContent = 'Total'; rpcUsageTabSelect.appendChild(total);
+  total.value = 'all'; total.textContent = 'All'; rpcUsageTabSelect.appendChild(total);
   for (const tab of tabs) {
     const option = document.createElement('option'); option.value = tab.value;
     option.textContent = tab.label;

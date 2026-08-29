@@ -24,8 +24,12 @@
     other: Object.freeze([Object.freeze({ value: 'unattributed', label: 'Unattributed' })]),
   });
 
-  function tabsForMenu(menu) {
-    return TABS_BY_MENU[menu] || [];
+  function tabsForMenu(menu, rows = []) {
+    const tabs = TABS_BY_MENU[menu] || [];
+    const hasUnattributed = rows.some((row) => row?.menu === menu && row?.tab === 'unattributed');
+    return hasUnattributed && !tabs.some((tab) => tab.value === 'unattributed')
+      ? [...tabs, Object.freeze({ value: 'unattributed', label: 'Unattributed' })]
+      : tabs;
   }
 
   function buildRpcUsageView(summary, { menu = 'all', tab = 'all', faction = 'all', method = 'all' } = {}) {

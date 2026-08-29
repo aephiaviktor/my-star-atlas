@@ -35,6 +35,7 @@ test('RPC Usage tab choices follow the fixed visible menu structure', () => {
   assert.deepEqual(tabsForMenu('PC').map((item) => item.label), ['Scanning', 'Mining', 'Crafting', 'Production', 'Consumption', 'PCR Charts', 'Inventory']);
   assert.deepEqual(tabsForMenu('EA').map((item) => item.label), ['Scanning', 'Mining', 'Marketplace', 'Cargo', 'Crafting', 'Upgrading', 'Breakeven Analysis']);
   assert.deepEqual(tabsForMenu('OP').map((item) => item.label), ['Scanning', 'Upgrading']);
+  assert.deepEqual(tabsForMenu('EA', [{ menu: 'EA', tab: 'unattributed' }]).map((item) => item.label), ['Scanning', 'Mining', 'Marketplace', 'Cargo', 'Crafting', 'Upgrading', 'Breakeven Analysis', 'Unattributed']);
 });
 
 test('RPC Usage UI moves Settings readiness into the button and exposes one trusted aggregate endpoint', () => {
@@ -54,6 +55,7 @@ test('RPC Usage UI moves Settings readiness into the button and exposes one trus
   assert.match(main, /'consumption:cargo': \['PC', 'consumption'\]/);
   assert.match(main, /'optimization:scanning': \['OP', 'scanning'\]/);
   assert.match(html, /rpc-usage-date-select[\s\S]*rpc-usage-faction-select[\s\S]*rpc-usage-menu-select[\s\S]*rpc-usage-tab-select[\s\S]*rpc-usage-method-select/);
+  assert.doesNotMatch(html, /<option value="all">Total<\/option>/);
   assert.match(renderer, /Settings Ready/);
   assert.match(renderer, /Settings Incomplete/);
   assert.match(preload, /getRpcUsageDay: \(utcDate\) => ipcRenderer\.invoke\('telemetry:rpc-usage-day', utcDate\)/);

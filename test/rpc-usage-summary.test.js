@@ -42,6 +42,16 @@ test('wire attempts aggregate once while retry, fallback and batch counters rema
   assert.equal(result.factions.find((item) => item.key === 'unknown').requests, 1);
 });
 
+test('legacy internal Earnings operations remain visible as unattributed and reconcile with tab All', () => {
+  const counters = { wireAttempts: 2, retries: 0, fallbackAttempts: 0, batchElements: 0 };
+  const result = aggregateRpcUsageDay({ minutes: { '12:00': { rows: [
+    { dimensions: { faction: 'MUD', feature: 'Earnings', suboperation: 'fleet-discovery', rpcMethod: 'getAccountInfo', providerRole: 'main' }, counters },
+  ] } } });
+  assert.equal(result.rows[0].menu, 'EA');
+  assert.equal(result.rows[0].tab, 'unattributed');
+  assert.equal(result.menus.find((item) => item.key === 'EA').requests, 2);
+});
+
 test('UTC-day summaries split at midnight and reading them performs zero network calls', async (t) => {
   const userDataPath = await temporary();
   t.after(() => fs.rm(userDataPath, { recursive: true, force: true }));

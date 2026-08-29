@@ -14,12 +14,25 @@ const FACTION_CATEGORIES = Object.freeze([
 ]);
 const PROVIDER_CATEGORIES = Object.freeze(['main', 'fallback', 'direct', 'unknown']);
 const MENU_CATEGORIES = Object.freeze(['MF', 'PC', 'EA', 'OP', 'other']);
+const CANONICAL_TABS = Object.freeze({
+  MF: new Set(['fleets']),
+  PC: new Set(['scanning', 'mining', 'crafting', 'production', 'consumption', 'pct-charts', 'inventory']),
+  EA: new Set(['scanning', 'mining', 'marketplace', 'cargo', 'crafting', 'upgrading', 'breakeven']),
+  OP: new Set(['scanning', 'upgrading']),
+});
 function menuTab(d = {}) {
   const feature = String(d.feature || '');
-  if (MENU_CATEGORIES.includes(feature)) return { menu: feature, tab: String(d.suboperation || 'other') };
-  if (feature === 'Fleet discovery' || feature === 'Rental data') return { menu: 'MF', tab: feature === 'Rental data' ? 'rental' : 'fleets' };
+  if (CANONICAL_TABS[feature]) {
+    const tab = String(d.suboperation || '');
+    return { menu: feature, tab: CANONICAL_TABS[feature].has(tab) ? tab : 'unattributed' };
+  }
+  if (feature === 'Fleet discovery') return { menu: 'MF', tab: 'fleets' };
+  if (feature === 'Rental data') return { menu: 'MF', tab: 'unattributed' };
   if (feature === 'Marketplace LM' || feature === 'Marketplace GM') return { menu: 'EA', tab: 'marketplace' };
-  if (feature === 'Earnings') return { menu: 'EA', tab: String(d.suboperation || 'other') === 'none' ? 'other' : String(d.suboperation) };
+  if (feature === 'Earnings') {
+    const tab = String(d.suboperation || '');
+    return { menu: 'EA', tab: CANONICAL_TABS.EA.has(tab) ? tab : 'unattributed' };
+  }
   return { menu: 'other', tab: 'unattributed' };
 }
 const UTC_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
