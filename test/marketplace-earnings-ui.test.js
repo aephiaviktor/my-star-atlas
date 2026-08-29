@@ -56,7 +56,8 @@ test('Marketplace renderer exposes LM scan errors and links custody plus GM trad
   assert.match(renderer, /function renderEarningsMarketplace\(/);
   assert.match(renderer, /localMarketError/);
   assert.match(renderer, /entry\.custodySignatures \|\| \[\]/);
-  assert.match(renderer, /entry\.executionSignatures\?\.length \? entry\.executionSignatures : \[entry\.signature\]/);
+  assert.match(renderer, /entry\.executionSignatures \|\| \[\]/);
+  assert.doesNotMatch(renderer, /entry\.executionSignatures\?\.length \? entry\.executionSignatures : \[entry\.signature\]/);
   assert.match(renderer, /https:\/\/solscan\.io\/tx\/\$\{encodeURIComponent\(transactionSignature\)\}/);
   assert.match(renderer, /signatures\.length === 1 \? transactionSignature : String\(index \+ 1\)/);
   assert.match(main, /localMarketTrades: localMarketResult\.trades/);

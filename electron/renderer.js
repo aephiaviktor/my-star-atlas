@@ -6846,7 +6846,7 @@ function createMarketplaceEarningsCell(entry, columnId, calculated) {
   if (!['custodySignatures', 'tradingSignatures'].includes(columnId)) return createTextCell(values[columnId] ?? '--');
   const rawSignatures = columnId === 'custodySignatures'
     ? (entry.custodySignatures || [])
-    : (entry.executionSignatures?.length ? entry.executionSignatures : [entry.signature]);
+    : (entry.executionSignatures || []);
   const signatures = Array.from(new Set(rawSignatures.map((value) => String(value || '').trim().split(':')[0]).filter(Boolean)));
   const cell = document.createElement('td');
   if (!signatures.length) { cell.textContent = '--'; return cell; }
