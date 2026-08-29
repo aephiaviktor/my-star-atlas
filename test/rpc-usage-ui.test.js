@@ -13,17 +13,17 @@ const renderer = fs.readFileSync(path.join(root, 'electron', 'renderer.js'), 'ut
 const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
 const preload = fs.readFileSync(path.join(root, 'electron', 'preload.js'), 'utf8');
 
-test('combined faction and method filtering keeps the UTC-day total separate', () => {
+test('cascading menu, tab, faction, and method filtering keeps the UTC-day total separate', () => {
   const summary = {
     totalRequests: 10,
     rows: [
-      { faction: 'MUD', method: 'getTransaction', provider: 'main', requests: 4, retries: 1, fallbackAttempts: 0, batchElements: 0 },
-      { faction: 'MUD', method: 'getAccountInfo', provider: 'main', requests: 2, retries: 0, fallbackAttempts: 0, batchElements: 0 },
-      { faction: 'ONI', method: 'getTransaction', provider: 'fallback', requests: 3, retries: 1, fallbackAttempts: 1, batchElements: 0 },
+      { menu: 'EA', tab: 'scanning', faction: 'MUD', method: 'getTransaction', provider: 'main', requests: 4, retries: 1, fallbackAttempts: 0, batchElements: 0 },
+      { menu: 'EA', tab: 'mining', faction: 'MUD', method: 'getAccountInfo', provider: 'main', requests: 2, retries: 0, fallbackAttempts: 0, batchElements: 0 },
+      { menu: 'PC', tab: 'cargo', faction: 'ONI', method: 'getTransaction', provider: 'fallback', requests: 3, retries: 1, fallbackAttempts: 1, batchElements: 0 },
       { faction: 'global', method: 'batch', provider: 'direct', requests: 1, retries: 0, fallbackAttempts: 0, batchElements: 5 },
     ],
   };
-  const view = buildRpcUsageView(summary, { faction: 'MUD', method: 'getTransaction' });
+  const view = buildRpcUsageView(summary, { menu: 'EA', tab: 'scanning', faction: 'MUD', method: 'getTransaction' });
   assert.equal(view.dayTotal, 10);
   assert.deepEqual(view.filtered, { requests: 4, retries: 1, fallbackAttempts: 0, batchElements: 0 });
   assert.equal(view.filteredShare, 0.4);
@@ -38,6 +38,14 @@ test('RPC Usage UI moves Settings readiness into the button and exposes one trus
   assert.doesNotMatch(html, /id="settings-status"/);
   assert.match(versionLine, /id="version-label"/);
   assert.match(versionLine, /id="rpc-usage-btn"/);
+  assert.match(html, /id="rpc-usage-menu-select"/);
+  assert.match(html, /id="rpc-usage-tab-select"/);
+  assert.match(html, />My Fleets</);
+  assert.match(html, />Production \/ Consumption</);
+  assert.match(html, />Earnings</);
+  assert.match(html, />Optimization</);
+  assert.match(main, /'consumption:cargo': \['PC', 'consumption'\]/);
+  assert.match(main, /'optimization:scanning': \['OP', 'scanning'\]/);
   assert.match(renderer, /Settings Ready/);
   assert.match(renderer, /Settings Incomplete/);
   assert.match(preload, /getRpcUsageDay: \(utcDate\) => ipcRenderer\.invoke\('telemetry:rpc-usage-day', utcDate\)/);

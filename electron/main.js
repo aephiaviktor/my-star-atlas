@@ -8180,6 +8180,20 @@ function createWindow() {
 
 const rendererUrl = pathToFileURL(path.join(__dirname, 'renderer.html')).href;
 
+const RPC_USAGE_ROUTES = Object.freeze({
+  'fleet:list': ['MF', 'fleets'],
+  'earnings:snapshot': ['EA', null],
+  'earnings:cargo-allocation': ['EA', 'cargo'],
+  'marketplace:snapshot': ['EA', 'marketplace'], 'marketplace:sync': ['EA', 'marketplace'],
+  'sdu:daily': ['PC', 'scanning'], 'sdu:consumption': ['PC', 'scanning'],
+  'mining:daily': ['PC', 'mining'], 'crafting:daily': ['PC', 'crafting'], 'production:daily': ['PC', 'production'],
+  'consumption:mining': ['PC', 'consumption'], 'consumption:crafting': ['PC', 'consumption'],
+  'consumption:upgrading': ['PC', 'consumption'], 'consumption:scanning': ['PC', 'consumption'],
+  'consumption:cargo': ['PC', 'consumption'], 'consumption:total': ['PC', 'consumption'],
+  'pcr:daily': ['PC', 'pct-charts'], 'inventory:daily': ['PC', 'inventory'],
+  'optimization:scanning': ['OP', 'scanning'], 'optimization:upgrading': ['OP', 'upgrading'],
+});
+
 function handleTrustedIpc(channel, handler) {
   ipcMain.handle(channel, async (event, ...args) => {
     try {
@@ -8192,7 +8206,12 @@ function handleTrustedIpc(channel, handler) {
             ? hydrateSecureSettings(arg)
             : arg
         )));
-      return await handler(event, ...hydratedArgs);
+      const route = RPC_USAGE_ROUTES[channel];
+      if (!route) return await handler(event, ...hydratedArgs);
+      const [menu, fixedTab] = route;
+      const payload = hydratedArgs[0] || {};
+      const tab = fixedTab || String(payload.earningsSubtab || 'total');
+      return await runTelemetryFeature(payload, menu, () => handler(event, ...hydratedArgs), tab);
     } catch (error) {
       if (channel === 'earnings:snapshot') {
         const context = earningsDiagnosticContexts.get(error) || {};
@@ -8223,11 +8242,15 @@ handleTrustedIpc('settings:save', async (_event, payload) => redactSettings(awai
 handleTrustedIpc('rpc-limiter:get-status', () => getRpcLimiterStatus());
 handleTrustedIpc('rpc-limiter:send-settings', async (_event, payload) => sendSettingsToRpcLimiter(payload));
 
-function runTelemetryFeature(payload, feature, callback) {
+function runTelemetryFeature(payload, feature, callback, suboperation) {
+  const mappedFeature = feature === 'Fleet discovery' ? 'MF' : feature === 'Earnings' ? 'EA' : feature;
+  const mappedSuboperation = suboperation || (mappedFeature === 'MF' ? 'fleets'
+    : mappedFeature === 'EA' ? String(payload?.earningsSubtab || 'total') : 'none');
   const safe = normalizeTelemetryContext({
     profile: profileName,
     faction: payload?.faction,
-    feature,
+    feature: mappedFeature,
+    suboperation: mappedSuboperation,
     trigger: payload?.trigger,
   });
   return runFeature(safe, callback);
@@ -8297,7 +8320,7 @@ registerCargoAllocationIpc(handleTrustedIpc, {
   loadAllocation: fetchCargoAllocationSnapshot,
 });
 handleTrustedIpc('marketplace:snapshot', async (_event, payload) => fetchMarketplaceSnapshot(payload));
-handleTrustedIpc('marketplace:sync', async (_event, payload) => runTelemetryFeature(payload, 'Other', async () => {
+handleTrustedIpc('marketplace:sync', async (_event, payload) => runTelemetryFeature(payload, 'EA', async () => {
   try {
     return await syncMarketplaceTrades(payload);
   } catch (error) {
@@ -8309,7 +8332,7 @@ handleTrustedIpc('marketplace:sync', async (_event, payload) => runTelemetryFeat
       checkedAt: new Date().toISOString(),
     };
   }
-}));
+}, 'marketplace'));
 handleTrustedIpc('influx:test', async (_event, payload) => {
   try {
     return await testInfluxConnection(payload);

@@ -13,6 +13,15 @@ const FACTION_CATEGORIES = Object.freeze([
   Object.freeze({ key: 'unknown', label: 'Unknown' }),
 ]);
 const PROVIDER_CATEGORIES = Object.freeze(['main', 'fallback', 'direct', 'unknown']);
+const MENU_CATEGORIES = Object.freeze(['MF', 'PC', 'EA', 'OP', 'other']);
+function menuTab(d = {}) {
+  const feature = String(d.feature || '');
+  if (MENU_CATEGORIES.includes(feature)) return { menu: feature, tab: String(d.suboperation || 'other') };
+  if (feature === 'Fleet discovery' || feature === 'Rental data') return { menu: 'MF', tab: feature === 'Rental data' ? 'rental' : 'fleets' };
+  if (feature === 'Marketplace LM' || feature === 'Marketplace GM') return { menu: 'EA', tab: 'marketplace' };
+  if (feature === 'Earnings') return { menu: 'EA', tab: String(d.suboperation || 'other') === 'none' ? 'other' : String(d.suboperation) };
+  return { menu: 'other', tab: 'unattributed' };
+}
 const UTC_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function safeInteger(value) {
@@ -43,9 +52,10 @@ function aggregateRpcUsageDay(day) {
       const faction = normalizeFaction(row?.dimensions?.faction);
       const method = normalizeMethod(row?.dimensions?.rpcMethod);
       const provider = normalizeProvider(row?.dimensions?.providerRole);
-      const key = `${faction}\u001f${method}\u001f${provider}`;
+      const { menu, tab } = menuTab(row?.dimensions);
+      const key = `${menu}\u001f${tab}\u001f${faction}\u001f${method}\u001f${provider}`;
       const target = rowsByKey.get(key) || {
-        faction,
+        menu, tab, faction,
         method,
         provider,
         requests: 0,
@@ -83,6 +93,7 @@ function aggregateRpcUsageDay(day) {
     label: key === 'main' ? 'Main' : key === 'fallback' ? 'Fallback' : key === 'direct' ? 'Direct' : 'Unknown',
     requests: rows.filter((row) => row.provider === key).reduce((sum, row) => sum + row.requests, 0),
   }));
+  const menus = MENU_CATEGORIES.map((key) => ({ key, requests: rows.filter((row) => row.menu === key).reduce((sum, row) => sum + row.requests, 0) }));
   const factionTotal = factions.reduce((sum, item) => sum + item.requests, 0);
   const providerTotal = providers.reduce((sum, item) => sum + item.requests, 0);
   return {
@@ -90,12 +101,15 @@ function aggregateRpcUsageDay(day) {
     totals,
     factions,
     providers,
+    menus,
+    tabsByMenu: Object.fromEntries(MENU_CATEGORIES.map((menu) => [menu, [...new Set(rows.filter((row) => row.menu === menu).map((row) => row.tab))].sort()])),
     methods: [...new Set(rows.map((row) => row.method))],
     reconciliation: {
       factionTotal,
       providerTotal,
       factionsMatch: factionTotal === totals.requests,
       providersMatch: providerTotal === totals.requests,
+      menusMatch: menus.reduce((sum, item) => sum + item.requests, 0) === totals.requests,
     },
   };
 }
@@ -122,6 +136,8 @@ function unavailableSummary(utcDate, availableDates, reason) {
     rows: [],
     factions: [],
     providers: [],
+    menus: [],
+    tabsByMenu: {},
     methods: [],
     reconciliation: null,
   };

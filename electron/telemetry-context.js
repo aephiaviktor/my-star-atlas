@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 const { AsyncLocalStorage } = require('node:async_hooks');
 
-const FEATURES = new Set(['Marketplace LM', 'Marketplace GM', 'Fleet discovery', 'Rental data', 'Earnings', 'Mining counts', 'Other']);
+const FEATURES = new Set(['MF', 'PC', 'EA', 'OP', 'Marketplace LM', 'Marketplace GM', 'Fleet discovery', 'Rental data', 'Earnings', 'Mining counts', 'Other']);
 const TRIGGERS = new Set(['startup', 'background', 'navigation', 'manual', 'settings', 'unknown']);
 const PROVIDERS = new Set(['main', 'fallback', 'direct', 'unknown']);
 const FACTIONS = new Set(['MUD', 'ONI', 'USTUR', 'global', 'unknown']);
@@ -11,7 +11,8 @@ const METHODS = new Set([
   'getAccountInfo', 'getMultipleAccountsInfo', 'getProgramAccounts', 'getProgramAccountsV2',
   'getSignaturesForAddress', 'getParsedTransaction', 'batch', 'unknown',
 ]);
-const SUBOPERATIONS = new Set(['none', 'fleet-discovery', 'rental-data', 'marketplace-scan', 'marketplace-open-orders', 'unknown']);
+const SUBOPERATIONS = new Set(['none', 'fleets', 'rental', 'scanning', 'mining', 'marketplace', 'cargo', 'crafting', 'upgrading', 'breakeven', 'production', 'consumption', 'total', 'pct-charts', 'inventory', 'data', 'analytics', 'fleet-discovery', 'rental-data', 'marketplace-scan', 'marketplace-open-orders', 'unknown']);
+const MENU_FEATURES = new Set(['MF', 'PC', 'EA', 'OP']);
 const storage = new AsyncLocalStorage();
 let recorder = null;
 
@@ -50,7 +51,13 @@ function safeFlush() { try { return Promise.resolve(recorder?.flush?.()).catch((
 function runWithTelemetryContext(overrides, callback) {
   if (typeof callback !== 'function') throw new TypeError('Telemetry callback is required.');
   const current = getTelemetryContext();
-  return storage.run(normalizeContext({ ...current, ...overrides }), callback);
+  const next = { ...overrides };
+  if (MENU_FEATURES.has(current.feature)
+      && !Object.prototype.hasOwnProperty.call(next, 'feature')
+      && Object.prototype.hasOwnProperty.call(next, 'suboperation')) {
+    delete next.suboperation;
+  }
+  return storage.run(normalizeContext({ ...current, ...next }), callback);
 }
 
 function runFeature(context, callback) {

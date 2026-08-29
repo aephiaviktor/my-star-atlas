@@ -10,10 +10,12 @@
     return Number.isSafeInteger(number) && number >= 0 ? number : 0;
   }
 
-  function buildRpcUsageView(summary, { faction = 'all', method = 'all' } = {}) {
+  function buildRpcUsageView(summary, { menu = 'all', tab = 'all', faction = 'all', method = 'all' } = {}) {
     const rows = Array.isArray(summary?.rows) ? summary.rows : [];
     const matching = rows.filter((row) => (
-      (faction === 'all' || row.faction === faction)
+      (menu === 'all' || row.menu === menu)
+      && (tab === 'all' || row.tab === tab)
+      && (faction === 'all' || row.faction === faction)
       && (method === 'all' || row.method === method)
     ));
     const filtered = matching.reduce((result, row) => ({

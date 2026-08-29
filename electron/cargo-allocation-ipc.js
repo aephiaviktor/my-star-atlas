@@ -7,7 +7,7 @@ function registerCargoAllocationIpc(registerTrustedIpc, { runTelemetry, loadAllo
     throw new TypeError('cargo_allocation_ipc_dependencies_required');
   }
   registerTrustedIpc(CARGO_ALLOCATION_CHANNEL, async (_event, payload) =>
-    runTelemetry(payload, 'Earnings Cargo Allocation', async () => loadAllocation(payload)));
+    runTelemetry(payload, 'EA', async () => loadAllocation(payload), 'cargo'));
   return CARGO_ALLOCATION_CHANNEL;
 }
 

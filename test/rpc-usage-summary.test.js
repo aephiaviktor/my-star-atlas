@@ -27,15 +27,17 @@ test('RPC Usage validates real UTC calendar dates', () => {
 test('wire attempts aggregate once while retry, fallback and batch counters remain subsets', () => {
   const counters = (overrides = {}) => ({ wireAttempts: 0, retries: 0, fallbackAttempts: 0, batchElements: 0, ...overrides });
   const day = { minutes: { '12:00': { rows: [
-    { dimensions: { faction: 'MUD', rpcMethod: 'getTransaction', providerRole: 'main' }, counters: counters({ wireAttempts: 1 }) },
-    { dimensions: { faction: 'MUD', rpcMethod: 'getTransaction', providerRole: 'fallback' }, counters: counters({ wireAttempts: 1, retries: 1, fallbackAttempts: 1 }) },
-    { dimensions: { faction: 'global', rpcMethod: 'batch', providerRole: 'direct' }, counters: counters({ wireAttempts: 1, batchElements: 20 }) },
+    { dimensions: { faction: 'MUD', feature: 'EA', suboperation: 'scanning', rpcMethod: 'getTransaction', providerRole: 'main' }, counters: counters({ wireAttempts: 1 }) },
+    { dimensions: { faction: 'MUD', feature: 'EA', suboperation: 'scanning', rpcMethod: 'getTransaction', providerRole: 'fallback' }, counters: counters({ wireAttempts: 1, retries: 1, fallbackAttempts: 1 }) },
+    { dimensions: { faction: 'global', feature: 'EA', suboperation: 'marketplace', rpcMethod: 'batch', providerRole: 'direct' }, counters: counters({ wireAttempts: 1, batchElements: 20 }) },
     { dimensions: { faction: 'unknown', rpcMethod: 'getAccountInfo', providerRole: 'unknown' }, counters: counters({ wireAttempts: 1 }) },
   ] } } };
   const result = aggregateRpcUsageDay(day);
   assert.deepEqual(result.totals, { requests: 4, retries: 1, fallbackAttempts: 1, batchElements: 20 });
   assert.equal(result.reconciliation.factionsMatch, true);
   assert.equal(result.reconciliation.providersMatch, true);
+  assert.equal(result.reconciliation.menusMatch, true);
+  assert.equal(result.menus.find((item) => item.key === 'EA').requests, 3);
   assert.equal(result.factions.find((item) => item.key === 'global').requests, 1);
   assert.equal(result.factions.find((item) => item.key === 'unknown').requests, 1);
 });

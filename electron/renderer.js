@@ -42,6 +42,8 @@ const rpcUsageButton = document.querySelector('#rpc-usage-btn');
 const rpcUsageModal = document.querySelector('#rpc-usage-modal');
 const rpcUsageCloseButton = document.querySelector('#rpc-usage-close-btn');
 const rpcUsageDateSelect = document.querySelector('#rpc-usage-date-select');
+const rpcUsageMenuSelect = document.querySelector('#rpc-usage-menu-select');
+const rpcUsageTabSelect = document.querySelector('#rpc-usage-tab-select');
 const rpcUsageFactionSelect = document.querySelector('#rpc-usage-faction-select');
 const rpcUsageMethodSelect = document.querySelector('#rpc-usage-method-select');
 const rpcUsagePeriod = document.querySelector('#rpc-usage-period');
@@ -1520,7 +1522,7 @@ function populateRpcUsageMethods(methods) {
   rpcUsageMethodSelect.replaceChildren();
   const all = document.createElement('option');
   all.value = 'all';
-  all.textContent = 'All methods';
+  all.textContent = 'Total';
   rpcUsageMethodSelect.appendChild(all);
   for (const method of Array.isArray(methods) ? methods : []) {
     const option = document.createElement('option');
@@ -1529,6 +1531,33 @@ function populateRpcUsageMethods(methods) {
     rpcUsageMethodSelect.appendChild(option);
   }
   rpcUsageMethodSelect.value = [...rpcUsageMethodSelect.options].some((option) => option.value === selected) ? selected : 'all';
+}
+
+function rpcUsageMethodsForSelection() {
+  const menu = rpcUsageMenuSelect.value;
+  const tab = rpcUsageTabSelect.value;
+  const faction = rpcUsageFactionSelect.value;
+  return [...new Set((rpcUsageSummary?.rows || [])
+    .filter((row) => (menu === 'all' || row.menu === menu)
+      && (tab === 'all' || row.tab === tab)
+      && (faction === 'all' || row.faction === faction))
+    .map((row) => row.method))].sort();
+}
+
+function populateRpcUsageTabs() {
+  const selected = rpcUsageTabSelect.value || 'all';
+  const menu = rpcUsageMenuSelect.value;
+  const tabs = menu === 'all' ? [] : (rpcUsageSummary?.tabsByMenu?.[menu] || []);
+  rpcUsageTabSelect.replaceChildren();
+  const total = document.createElement('option');
+  total.value = 'all'; total.textContent = 'Total'; rpcUsageTabSelect.appendChild(total);
+  for (const tab of tabs) {
+    const option = document.createElement('option'); option.value = tab;
+    option.textContent = tab === 'breakeven' ? 'Breakeven Analysis' : tab.replace(/(^|-)([a-z])/g, (_m, prefix, letter) => `${prefix ? ' ' : ''}${letter.toUpperCase()}`);
+    rpcUsageTabSelect.appendChild(option);
+  }
+  rpcUsageTabSelect.disabled = menu === 'all';
+  rpcUsageTabSelect.value = [...rpcUsageTabSelect.options].some((option) => option.value === selected) ? selected : 'all';
 }
 
 function formatRpcUsagePercent(value) {
@@ -1545,6 +1574,8 @@ function renderRpcUsage() {
     return;
   }
   const view = rpcUsageModel.buildRpcUsageView(summary, {
+    menu: rpcUsageMenuSelect.value,
+    tab: rpcUsageTabSelect.value,
     faction: rpcUsageFactionSelect.value,
     method: rpcUsageMethodSelect.value,
   });
@@ -1602,7 +1633,8 @@ async function loadRpcUsage(utcDate = currentUtcDate()) {
     if (generation !== rpcUsageLoadGeneration) return;
     rpcUsageSummary = result;
     populateRpcUsageDates(rpcUsageSummary.availableDates, rpcUsageSummary.utcDate);
-    populateRpcUsageMethods(rpcUsageSummary.methods);
+    populateRpcUsageTabs();
+    populateRpcUsageMethods(rpcUsageMethodsForSelection());
   } catch (error) {
     if (generation !== rpcUsageLoadGeneration) return;
     console.error(error);
@@ -9615,7 +9647,9 @@ rpcUsageModal.addEventListener('click', (event) => {
   if (event.target === rpcUsageModal) setRpcUsageModalOpen(false);
 });
 rpcUsageDateSelect.addEventListener('change', () => void loadRpcUsage(rpcUsageDateSelect.value));
-rpcUsageFactionSelect.addEventListener('change', renderRpcUsage);
+rpcUsageMenuSelect.addEventListener('change', () => { populateRpcUsageTabs(); populateRpcUsageMethods(rpcUsageMethodsForSelection()); renderRpcUsage(); });
+rpcUsageTabSelect.addEventListener('change', () => { populateRpcUsageMethods(rpcUsageMethodsForSelection()); renderRpcUsage(); });
+rpcUsageFactionSelect.addEventListener('change', () => { populateRpcUsageMethods(rpcUsageMethodsForSelection()); renderRpcUsage(); });
 rpcUsageMethodSelect.addEventListener('change', renderRpcUsage);
 
 updateCancelButton.addEventListener('click', () => setUpdateModalOpen(false));

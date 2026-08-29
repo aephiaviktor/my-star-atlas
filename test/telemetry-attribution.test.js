@@ -25,6 +25,13 @@ test('Earnings remains primary while Fleet and Rental are bounded suboperations'
   assert.equal(rental.feature, 'Earnings'); assert.equal(rental.suboperation, 'rental-data');
 });
 
+test('menu tab attribution survives nested implementation suboperations', async () => {
+  const seen = await runFeature({ feature: 'EA', suboperation: 'scanning' }, () =>
+    runWithTelemetryContext({ suboperation: 'fleet-discovery' }, () => getTelemetryContext()));
+  assert.equal(seen.feature, 'EA');
+  assert.equal(seen.suboperation, 'scanning');
+});
+
 test('Mining counts feature itself performs zero Solana work', async () => {
   const ledger = collector(); setTelemetryRecorder(ledger);
   await runFeature({ feature: 'Mining counts', trigger: 'background' }, async () => 'influx-only');
