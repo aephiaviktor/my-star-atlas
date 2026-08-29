@@ -781,6 +781,7 @@ const breakevenEarningsOptionalColumns = Object.freeze([]);
 
 const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'timestamp', label: 'Timestamp (UTC)' }),
+  Object.freeze({ id: 'custodySignatures', label: 'Deposit Cargo to Game Signature' }),
   Object.freeze({ id: 'marketplace', label: 'Marketplace' }),
   Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
@@ -791,8 +792,7 @@ const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'txsFee', label: 'Txs Fee' }),
   Object.freeze({ id: 'netAtlas', label: 'ATLAS Paid' }),
   Object.freeze({ id: 'unitMetric', label: 'Cost / Unit' }),
-  Object.freeze({ id: 'orderId', label: 'Order ID' }),
-  Object.freeze({ id: 'signature', label: 'Signature' }),
+  Object.freeze({ id: 'tradingSignatures', label: 'GM Trading Signatures' }),
 ]);
 
 const earningsColumnsBySubtab = Object.freeze({
@@ -824,8 +824,11 @@ function restoreEarningsColumnState() {
     const saved = JSON.parse(localStorage.getItem(EARNINGS_COLUMN_STORAGE_KEY) || '{}');
     for (const subtab of Object.keys(earningsColumnState)) {
       if (!Array.isArray(saved[subtab])) continue;
+      const restoredIds = subtab === 'marketplace' && saved[subtab].includes('signature')
+        ? [...saved[subtab], 'custodySignatures', 'tradingSignatures']
+        : saved[subtab];
       const validIds = new Set(getEarningsColumns(subtab).map((column) => column.id));
-      earningsColumnState[subtab] = new Set(saved[subtab].filter((id) => validIds.has(id)));
+      earningsColumnState[subtab] = new Set(restoredIds.filter((id) => validIds.has(id)));
     }
   } catch (_error) {
     // Invalid or unavailable local storage should leave the built-in defaults intact.
@@ -6809,7 +6812,11 @@ function renderMarketplaceHeader(visibleColumns) {
         ? (earningsMarketplaceSide === 'buy' ? 'ATLAS Paid' : 'ATLAS Received')
         : column.id === 'unitMetric'
           ? (earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit')
-          : column.label;
+          : column.id === 'custodySignatures'
+            ? (earningsMarketplaceSide === 'buy' ? 'Deposit Cargo to Game Signature' : 'Withdraw Cargo from Game Signatures')
+            : column.id === 'tradingSignatures'
+              ? (earningsMarketplaceSide === 'buy' ? 'GM Trading Signatures' : 'GM Trading Signature')
+              : column.label;
     row.appendChild(th);
   }
 }
@@ -6818,21 +6825,28 @@ function createMarketplaceEarningsCell(entry, columnId, calculated) {
   const values = {
     timestamp: formatMarketplaceTimestamp(entry.timestamp), marketplace: entry.marketplace || 'LM',
     starbase: entry.starbase || '--', asset: entry.asset || '--', amount: formatMarketplaceWhole(calculated.quantity),
-    grossAtlas: calculated.gross == null ? '--' : formatMarketplaceAtlas(calculated.gross, 6),
+    grossAtlas: calculated.gross == null ? '--' : formatMarketplaceAtlas(calculated.gross, 2),
     price: entry.basisAvailable === false ? '--' : formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
     marketplaceFee: earningsMarketplaceSide === 'buy' ? 'Seller-paid' : formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6),
     txsFee: formatMarketplaceAtlas(calculated.txFee, 2),
     netAtlas: calculated.net == null ? '--' : formatMarketplaceAtlas(calculated.net, 2), unitMetric: calculated.unitMetric == null ? '--' : formatMarketplaceAtlas(calculated.unitMetric, 8),
-    orderId: entry.orderId || '--', signature: entry.signature || '--',
   };
-  if (columnId !== 'signature') return createTextCell(values[columnId] ?? '--');
+  if (!['custodySignatures', 'tradingSignatures'].includes(columnId)) return createTextCell(values[columnId] ?? '--');
+  const rawSignatures = columnId === 'custodySignatures'
+    ? (entry.custodySignatures || [])
+    : (entry.executionSignatures?.length ? entry.executionSignatures : [entry.signature]);
+  const signatures = Array.from(new Set(rawSignatures.map((value) => String(value || '').trim().split(':')[0]).filter(Boolean)));
   const cell = document.createElement('td');
-  const transactionSignature = String(entry.signature || '').trim().split(':')[0];
-  if (!transactionSignature) { cell.textContent = '--'; return cell; }
-  const link = document.createElement('a');
-  link.href = `https://solscan.io/tx/${encodeURIComponent(transactionSignature)}`;
-  link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = transactionSignature;
-  cell.appendChild(link);
+  if (!signatures.length) { cell.textContent = '--'; return cell; }
+  signatures.forEach((transactionSignature, index) => {
+    if (index) cell.appendChild(document.createTextNode(' · '));
+    const link = document.createElement('a');
+    link.href = `https://solscan.io/tx/${encodeURIComponent(transactionSignature)}`;
+    link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.textContent = signatures.length === 1 ? transactionSignature : String(index + 1);
+    link.title = transactionSignature;
+    cell.appendChild(link);
+  });
   return cell;
 }
 

@@ -598,6 +598,14 @@ function marketplaceScopeFlux(faction, profile) {
   return `r.faction == "${escapeFluxString(faction)}" and (not exists r.profile or r.profile == "${escapeFluxString(profileName)}" or r.profile == "${escapeFluxString(profile)}")`;
 }
 
+function parseMarketplaceSignatureList(value, fallback = '') {
+  try {
+    const parsed = JSON.parse(String(value || '[]'));
+    if (Array.isArray(parsed)) return Array.from(new Set(parsed.map(String).filter(Boolean)));
+  } catch {}
+  return fallback ? [String(fallback)] : [];
+}
+
 function normalizeFactionGmMarketplaceRow(row) {
   const quantity = Number(row?.quantity);
   const timestamp = String(row?._time || '');
@@ -614,7 +622,11 @@ function normalizeFactionGmMarketplaceRow(row) {
     marketplaceFeeAtlas: Number(row.marketplaceFeeAtlas || 0), txFeeAtlas: Number(row.txFeeAtlas || 0),
     netAtlas: basisAvailable ? Number(row.netAtlas || 0) : null,
     settledAtlas: basisAvailable ? Number(row.settledAtlas || 0) : null,
-    signature: String(row.executionSignature || row.custodySignature || ''), orderId: String(row.orderId || ''),
+    custodySignatures: parseMarketplaceSignatureList(row.custodySignatures, row.custodySignature),
+    executionSignatures: parseMarketplaceSignatureList(row.executionSignatures, row.executionSignature),
+    orderIds: parseMarketplaceSignatureList(row.orderIds, row.orderId),
+    signature: String(row.custodySignature || row.executionSignature || ''), orderId: String(row.orderId || ''),
+    projectionVersion: Number(row.projectionVersion || 1),
   };
 }
 
@@ -671,10 +683,17 @@ async function fetchMarketplaceTradesFromInflux(settings) {
       queryInfluxFlux(settings, factionGmFlux),
     ]);
     const context = { applicationProfile: profileName, selectedProfile: profile, faction, scopeProven: true };
+    const factionRows = parseInfluxCsv(factionGmResult).map(normalizeFactionGmMarketplaceRow).filter(Boolean);
+    const currentFactionRows = factionRows.filter((row) => row.projectionVersion >= 2);
+    const currentBuyIds = currentFactionRows.filter((row) => row.side === 'buy').map((row) => row.id);
+    const currentSellSignatures = new Set(currentFactionRows.filter((row) => row.side === 'sell').flatMap((row) => row.executionSignatures));
+    const filteredFactionRows = factionRows.filter((row) => row.projectionVersion >= 2
+      || (row.side === 'buy' && !currentBuyIds.some((id) => row.id.startsWith(`${id}:`)))
+      || (row.side === 'sell' && !row.executionSignatures.some((signature) => currentSellSignatures.has(signature))));
     const trades = dedupeMarketplaceRows([
       ...parseInfluxCsv(v2Result).map((row) => normalizeMarketplaceV2Row(row, context)).filter(Boolean),
       ...parseInfluxCsv(legacyGmResult).map((row) => normalizeMarketplaceV1Row(row, context)).filter((row) => row?._certain),
-      ...parseInfluxCsv(factionGmResult).map(normalizeFactionGmMarketplaceRow).filter(Boolean),
+      ...filteredFactionRows,
     ]);
     trades.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp) || deriveMarketplaceUnionKey(a).localeCompare(deriveMarketplaceUnionKey(b)));
     return { trades, error: '' };

@@ -15,14 +15,14 @@ test('Marketplace earnings tab sits between Mining and Cargo with a BUY/SELL swi
   assert.match(html, /id="earnings-marketplace-side-switch"[\s\S]*data-marketplace-side="buy"[^>]*>BUY<[\s\S]*data-marketplace-side="sell"[^>]*>SELL</);
   assert.doesNotMatch(html, /data-marketplace-side="(?:buy|sell)"[^>]*>\s*(?:BUY|SELL)\s*\(/);
   const panel = html.match(/data-earnings-panel="marketplace"[\s\S]*?<\/div>\s*<div class="earnings-panel" data-earnings-panel="cargo"/)?.[0] || '';
-  for (const label of ['Timestamp \\(UTC\\)', 'Marketplace', 'Starbase', 'Asset', 'Amount', 'Purchase Value', 'Price', 'Marketplace Fee', 'Txs Fee', 'ATLAS Paid', 'Cost / Unit', 'Order ID', 'Signature']) {
+  for (const label of ['Timestamp \\(UTC\\)', 'Deposit Cargo to Game Signature', 'Marketplace', 'Starbase', 'Asset', 'Amount', 'Purchase Value', 'Price', 'Marketplace Fee', 'Txs Fee', 'ATLAS Paid', 'Cost / Unit', 'GM Trading Signatures']) {
     assert.match(panel, new RegExp(label));
   }
-  assert.doesNotMatch(panel, /<th>Side<\/th>/);
+  assert.doesNotMatch(panel, /<th>Side<\/th>|<th>Order ID<\/th>/);
   assert.match(panel, /id="earnings-marketplace-unit-header"/);
+  assert.ok(panel.indexOf('Deposit Cargo to Game Signature') < panel.indexOf('Marketplace'));
   assert.ok(panel.indexOf('ATLAS Paid') < panel.indexOf('Cost / Unit'));
-  assert.ok(panel.indexOf('Cost / Unit') < panel.indexOf('Order ID'));
-  assert.ok(panel.indexOf('Order ID') < panel.indexOf('Signature'));
+  assert.ok(panel.indexOf('Cost / Unit') < panel.indexOf('GM Trading Signatures'));
 });
 
 test('Marketplace exposes every table column in the persistent Earnings sidebar selector', () => {
@@ -51,12 +51,13 @@ test('Update shares a row with Refresh data while the BUY SELL switch stays belo
   assert.match(html, /class="update-action-stack"[\s\S]*class="top-action-row"[\s\S]*id="refresh-data-btn"[\s\S]*id="update-btn"[\s\S]*id="earnings-marketplace-side-switch"/);
 });
 
-test('Marketplace renderer exposes LM scan errors and links canonical transaction signatures', () => {
+test('Marketplace renderer exposes LM scan errors and links custody plus GM trading signatures', () => {
   assert.match(renderer, /function renderEarningsMarketplace\(/);
   assert.match(renderer, /localMarketError/);
-  assert.match(renderer, /const transactionSignature = String\(entry\.signature \|\| ''\)\.trim\(\)\.split\(':'\)\[0\]/);
+  assert.match(renderer, /entry\.custodySignatures \|\| \[\]/);
+  assert.match(renderer, /entry\.executionSignatures\?\.length \? entry\.executionSignatures : \[entry\.signature\]/);
   assert.match(renderer, /https:\/\/solscan\.io\/tx\/\$\{encodeURIComponent\(transactionSignature\)\}/);
-  assert.match(renderer, /link\.textContent = transactionSignature/);
+  assert.match(renderer, /signatures\.length === 1 \? transactionSignature : String\(index \+ 1\)/);
   assert.match(main, /localMarketTrades: localMarketResult\.trades/);
   assert.match(renderer, /'en-US'/);
   assert.match(renderer, /toISOString/);

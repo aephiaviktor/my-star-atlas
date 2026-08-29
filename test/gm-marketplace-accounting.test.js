@@ -166,11 +166,11 @@ test('GM buys become faction rows only when DepositCargoToGame consumes global w
     ],
   });
   assert.deepEqual(rows.map((row) => ({ side: row.side, faction: row.faction, timestamp: row.timestamp, quantity: row.quantity, unitPriceAtlas: row.unitPriceAtlas })), [
-    { side: 'buy', faction: 'USTUR', timestamp: '2026-08-24T00:00:00Z', quantity: 60, unitPriceAtlas: 2 },
+    { side: 'buy', faction: 'USTUR', timestamp: '2026-08-26T00:00:00Z', quantity: 60, unitPriceAtlas: 2 },
   ]);
 });
 
-test('GM buy deposits preserve and prorate original execution provenance across lots', () => {
+test('GM buy deposits aggregate execution lots under one DepositCargoToGame event', () => {
   const rows = projectGmFactionMarketplaceRows({
     walletUniverse: buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { ONI: ['oni'] } }),
     trades: [
@@ -179,7 +179,7 @@ test('GM buy deposits preserve and prorate original execution provenance across 
     ],
     flows: [
       { id: 'move', timestamp: '2026-08-25T00:00:00Z', flow: 'wallet-transfer', asset: 'Framework', rawMint: 'framework', quantity: 70, origin: 'wallet:gm', destination: 'wallet:oni' },
-      { id: 'deposit', timestamp: '2026-08-26T00:00:00Z', flow: 'css-deposit', asset: 'Framework', rawMint: 'framework', quantity: 70, origin: 'wallet:oni', destination: 'ONI-1', faction: 'ONI' },
+      { id: 'deposit', signature: 'deposit-sig', timestamp: '2026-08-26T00:00:00Z', flow: 'css-deposit', asset: 'Framework', rawMint: 'framework', quantity: 70, origin: 'wallet:oni', destination: 'ONI-1', faction: 'ONI' },
     ],
   });
 
@@ -187,10 +187,9 @@ test('GM buy deposits preserve and prorate original execution provenance across 
     timestamp: row.timestamp, starbase: row.starbase, quantity: row.quantity,
     grossAtlas: row.grossAtlas, marketplaceFeeAtlas: row.marketplaceFeeAtlas,
     txFeeAtlas: row.txFeeAtlas, settledAtlas: row.settledAtlas,
-    orderId: row.orderId, executionSignature: row.executionSignature,
+    custodySignature: row.custodySignature, orderIds: row.orderIds, executionSignatures: row.executionSignatures,
   })), [
-    { timestamp: '2026-08-24T00:00:00Z', starbase: 'ONI-1', quantity: 40, grossAtlas: 8, marketplaceFeeAtlas: 0.4, txFeeAtlas: 0.04, settledAtlas: 8.44, orderId: 'order-1', executionSignature: 'fill-sig-1' },
-    { timestamp: '2026-08-24T01:00:00Z', starbase: 'ONI-1', quantity: 30, grossAtlas: 9, marketplaceFeeAtlas: 0.45, txFeeAtlas: 0.03, settledAtlas: 9.48, orderId: 'order-2', executionSignature: 'fill-sig-2' },
+    { timestamp: '2026-08-26T00:00:00Z', starbase: 'ONI-1', quantity: 70, grossAtlas: 17, marketplaceFeeAtlas: 0, txFeeAtlas: 0.07, settledAtlas: 17.07, custodySignature: 'deposit-sig', orderIds: ['order-1', 'order-2'], executionSignatures: ['fill-sig-1', 'fill-sig-2'] },
   ]);
 });
 
@@ -228,10 +227,9 @@ test('GM deposits blend known wallet basis with observed starbase basis for an i
       { timestamp: '2026-08-26T12:00:00Z', faction: 'MUD', starbase: 'MUD-1', asset: 'Fuel', knownQuantity: 100, knownInventoryValueAtlas: 40 },
     ],
   });
-  assert.equal(rows.length, 2);
+  assert.equal(rows.length, 1);
   assert.deepEqual(rows.map((row) => ({ quantity: row.quantity, unitPriceAtlas: row.unitPriceAtlas, grossAtlas: row.grossAtlas })), [
-    { quantity: 25, unitPriceAtlas: 0.2, grossAtlas: 0 },
-    { quantity: 25, unitPriceAtlas: 0.3, grossAtlas: 7.5 },
+    { quantity: 50, unitPriceAtlas: 0.25, grossAtlas: 12.5 },
   ]);
 });
 
@@ -255,7 +253,7 @@ test('GM basis follows a priced upstream wallet purchase through the configured 
   assert.equal(rows[0].unitPriceAtlas, 0.25);
 });
 
-test('GM sells consume faction withdrawal lots on fill but retain the withdrawal timestamp', () => {
+test('GM sells remain one row per trade and retain withdrawal provenance', () => {
   const universe = buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { MUD: ['mud'] } });
   const rows = projectGmFactionMarketplaceRows({
     walletUniverse: universe,
@@ -266,9 +264,28 @@ test('GM sells consume faction withdrawal lots on fill but retain the withdrawal
     ],
   });
   assert.deepEqual(rows.map((row) => ({ side: row.side, faction: row.faction, timestamp: row.timestamp, quantity: row.quantity, unitPriceAtlas: row.unitPriceAtlas, netAtlas: row.netAtlas })), [
-    { side: 'sell', faction: 'MUD', timestamp: '2026-08-25T00:00:00Z', quantity: 40, unitPriceAtlas: 3, netAtlas: 114 },
+    { side: 'sell', faction: 'MUD', timestamp: '2026-08-27T00:00:00Z', quantity: 40, unitPriceAtlas: 3, netAtlas: 114 },
   ]);
+  assert.deepEqual(rows[0].custodySignatures, ['withdraw-sig']);
+  assert.deepEqual(rows[0].executionSignatures, ['fill-sig']);
   assert.match(formatGmFactionMarketplaceTestLine(rows[0]), /^marketplace_reconciliation_test_v1,/);
+});
+
+test('one GM sell trade aggregates multiple same-starbase withdrawal signatures', () => {
+  const rows = projectGmFactionMarketplaceRows({
+    walletUniverse: buildGmWalletUniverse({ gmTradingWallets: ['gm'], profileWalletsByFaction: { ONI: ['oni'] } }),
+    trades: [{ id: 'fill', signature: 'fill-sig', timestamp: '2026-08-27T00:00:00Z', marketplace: 'GM', side: 'sell', wallet: 'gm', asset: 'Framework', quantity: 100, unitPriceAtlas: 2, grossAtlas: 200, marketplaceFeeAtlas: 10, txFeeAtlas: 1, netAtlas: 189 }],
+    flows: [
+      { id: 'w1', signature: 'withdraw-1', timestamp: '2026-08-25T00:00:00Z', flow: 'css-withdraw', asset: 'Framework', quantity: 40, origin: 'ONI-1', destination: 'wallet:oni', faction: 'ONI' },
+      { id: 'm1', timestamp: '2026-08-25T01:00:00Z', flow: 'wallet-transfer', asset: 'Framework', quantity: 40, origin: 'wallet:oni', destination: 'wallet:gm' },
+      { id: 'w2', signature: 'withdraw-2', timestamp: '2026-08-26T00:00:00Z', flow: 'css-withdraw', asset: 'Framework', quantity: 60, origin: 'ONI-1', destination: 'wallet:oni', faction: 'ONI' },
+      { id: 'm2', timestamp: '2026-08-26T01:00:00Z', flow: 'wallet-transfer', asset: 'Framework', quantity: 60, origin: 'wallet:oni', destination: 'wallet:gm' },
+    ],
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].quantity, 100);
+  assert.deepEqual(rows[0].custodySignatures, ['withdraw-1', 'withdraw-2']);
+  assert.deepEqual(rows[0].executionSignatures, ['fill-sig']);
 });
 
 test('GM sell fills cannot consume a faction withdrawal that arrives later', () => {

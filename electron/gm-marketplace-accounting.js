@@ -116,7 +116,8 @@ function calculateGmWalletInventoryBasis(events, { fallbackUnitCost = () => 0 } 
       state.totalCostAtlas += quantity * Number(event.unitPriceAtlas);
       lotsFor(String(event.wallet), String(event.asset)).push({
         tradeId: String(event.tradeId || event.id || ''), timestamp: event.timestamp,
-        originalQuantity: quantity, quantity, grossAtlas: Number(event.grossAtlas || 0),
+        originalQuantity: quantity, quantity,
+        grossAtlas: Number.isFinite(Number(event.grossAtlas)) ? Number(event.grossAtlas) : null,
         marketplaceFeeAtlas: Number(event.marketplaceFeeAtlas || 0), txFeeAtlas: Number(event.txFeeAtlas || 0),
         settledAtlas: Number(event.settledAtlas || 0), netAtlas: Number(event.netAtlas ?? event.settledAtlas ?? 0),
         signature: String(event.signature || ''), orderId: String(event.orderId || ''),
@@ -199,8 +200,9 @@ function matchGmCustodyFlows(flows, walletUniverse) {
     const quantity = Number(flow.quantity);
     if (flow.flow === 'css-withdraw' && destinationWallet && profile.has(destinationWallet)) {
       addLot(destinationWallet, flow.asset, {
-        direction: 'sell', quantity, withdrawalFlowId: flow.id, withdrawalTimestamp: flow.timestamp,
-        faction: normalizeFaction(flow.faction), starbase: flow.origin, rawMint: flow.rawMint,
+        direction: 'sell', quantity, withdrawalFlowId: flow.id, withdrawalSignature: flow.signature,
+        withdrawalTimestamp: flow.timestamp, faction: normalizeFaction(flow.faction),
+        starbase: flow.origin, rawMint: flow.rawMint,
       });
       continue;
     }
@@ -208,12 +210,13 @@ function matchGmCustodyFlows(flows, walletUniverse) {
       const { taken, remaining } = takeLots(originWallet, flow.asset, quantity, 'buy');
       for (const lot of taken) buys.push({
         asset: flow.asset, rawMint: flow.rawMint || lot.rawMint, quantity: lot.quantity, faction: normalizeFaction(flow.faction), starbase: flow.destination,
-        depositTimestamp: flow.timestamp, depositFlowId: flow.id, sourceWallet: lot.sourceWallet,
-        sourceFlowId: lot.sourceFlowId, provenance: 'exact',
+        depositTimestamp: flow.timestamp, depositFlowId: flow.id, depositSignature: flow.signature,
+        sourceWallet: lot.sourceWallet, sourceFlowId: lot.sourceFlowId, provenance: 'exact',
       });
       if (remaining > 0) buys.push({
         asset: flow.asset, rawMint: flow.rawMint, quantity: remaining, faction: normalizeFaction(flow.faction), starbase: flow.destination,
-        depositTimestamp: flow.timestamp, depositFlowId: flow.id, sourceWallet: '', sourceFlowId: '', provenance: 'imputed_fifo',
+        depositTimestamp: flow.timestamp, depositFlowId: flow.id, depositSignature: flow.signature,
+        sourceWallet: '', sourceFlowId: '', provenance: 'imputed_fifo',
       });
       continue;
     }
@@ -242,7 +245,8 @@ function matchGmCustodyFlows(flows, walletUniverse) {
       for (const lot of taken) sells.push({
         asset: flow.asset, rawMint: flow.rawMint || lot.rawMint, quantity: lot.quantity, faction: lot.faction, starbase: lot.starbase,
         withdrawalTimestamp: lot.withdrawalTimestamp, withdrawalFlowId: lot.withdrawalFlowId,
-        arrivalTimestamp: flow.timestamp, destinationWallet, destinationFlowId: flow.id, provenance: 'exact',
+        withdrawalSignature: lot.withdrawalSignature, arrivalTimestamp: flow.timestamp,
+        destinationWallet, destinationFlowId: flow.id, provenance: 'exact',
       });
     }
   }
@@ -335,49 +339,67 @@ function projectGmFactionMarketplaceRows({ trades = [], flows = [], walletUniver
   for (const [flowId, allocation] of basis.outgoingBasis) {
     buyLotsByFlow.set(flowId, (allocation.executionLots || []).map((lot) => ({ ...lot })));
   }
+  const depositGroups = new Map();
   for (const deposit of custody.buys) {
-    const allocation = basis.outgoingBasis.get(String(deposit.sourceFlowId || ''));
-    if (!allocation || deposit.provenance !== 'exact' || !(allocation.unitCostAtlas >= 0)) continue;
-    let unitPriceAtlas = allocation.unitCostAtlas;
-    let basisAvailable = allocation.imputedQuantity === 0;
-    if (!basisAvailable) {
-      const poolKey = createStarbasePoolKey({ faction: deposit.faction, starbase: deposit.starbase, asset: deposit.asset });
-      const estimate = calculateForwardStockpileAverage(
-        inventoryBasisObservations.filter((observation) => createStarbasePoolKey(observation) === poolKey),
-        { from: deposit.depositTimestamp },
-      );
-      if (estimate?.unitCostAtlas > 0) {
-        unitPriceAtlas = (allocation.totalCostAtlas + allocation.imputedQuantity * estimate.unitCostAtlas) / allocation.quantity;
-        basisAvailable = true;
+    if (!depositGroups.has(deposit.depositFlowId)) depositGroups.set(deposit.depositFlowId, []);
+    depositGroups.get(deposit.depositFlowId).push(deposit);
+  }
+  for (const deposits of depositGroups.values()) {
+    const first = deposits[0];
+    const aggregate = {
+      quantity: 0, grossAtlas: 0, txFeeAtlas: 0, basisAvailable: true,
+      executionSignatures: new Set(), orderIds: new Set(), sourceWallets: new Set(),
+    };
+    for (const deposit of deposits) {
+      aggregate.quantity += deposit.quantity;
+      if (deposit.sourceWallet) aggregate.sourceWallets.add(deposit.sourceWallet);
+      const allocation = basis.outgoingBasis.get(String(deposit.sourceFlowId || ''));
+      if (!allocation || deposit.provenance !== 'exact' || !(allocation.unitCostAtlas >= 0)) {
+        aggregate.basisAvailable = false;
+        continue;
       }
+      let fallbackUnitPrice = allocation.unitCostAtlas;
+      let segmentBasisAvailable = allocation.imputedQuantity === 0;
+      if (!segmentBasisAvailable) {
+        const poolKey = createStarbasePoolKey({ faction: deposit.faction, starbase: deposit.starbase, asset: deposit.asset });
+        const estimate = calculateForwardStockpileAverage(
+          inventoryBasisObservations.filter((observation) => createStarbasePoolKey(observation) === poolKey),
+          { from: deposit.depositTimestamp },
+        );
+        if (estimate?.unitCostAtlas > 0) {
+          fallbackUnitPrice = (allocation.totalCostAtlas + allocation.imputedQuantity * estimate.unitCostAtlas) / allocation.quantity;
+          segmentBasisAvailable = true;
+        }
+      }
+      aggregate.basisAvailable = aggregate.basisAvailable && segmentBasisAvailable;
+      const executionLots = buyLotsByFlow.get(String(deposit.sourceFlowId || '')) || [];
+      let remaining = deposit.quantity;
+      for (const lot of executionLots) {
+        if (!(remaining > 0) || !(lot.quantity > 0)) continue;
+        const quantity = Math.min(remaining, lot.quantity);
+        const ratio = lot.originalQuantity > 0 ? quantity / lot.originalQuantity : 0;
+        const lotGrossAtlas = lot.grossAtlas == null ? Number(lot.settledAtlas || 0) : Number(lot.grossAtlas);
+        aggregate.grossAtlas += lotGrossAtlas * ratio;
+        aggregate.txFeeAtlas += Number(lot.txFeeAtlas || 0) * ratio;
+        if (lot.signature) aggregate.executionSignatures.add(String(lot.signature));
+        if (lot.orderId) aggregate.orderIds.add(String(lot.orderId));
+        lot.quantity -= quantity;
+        remaining -= quantity;
+      }
+      if (remaining > 0) aggregate.grossAtlas += remaining * fallbackUnitPrice;
     }
-    const executionLots = buyLotsByFlow.get(String(deposit.sourceFlowId || '')) || [];
-    let remaining = deposit.quantity;
-    for (const lot of executionLots) {
-      if (!(remaining > 0) || !(lot.quantity > 0)) continue;
-      const quantity = Math.min(remaining, lot.quantity);
-      const ratio = lot.originalQuantity > 0 ? quantity / lot.originalQuantity : 0;
-      rows.push({
-        id: `gm-buy:${deposit.depositFlowId}:${deposit.sourceFlowId}:${lot.tradeId}:${lot.originalQuantity - lot.quantity}`,
-        market: 'GM', side: 'buy', faction: deposit.faction, profile: deposit.faction,
-        timestamp: lot.timestamp, asset: deposit.asset, rawMint: deposit.rawMint, starbase: deposit.starbase,
-        wallet: deposit.sourceWallet, quantity, unitPriceAtlas: Number(lot.settledAtlas || 0) / lot.originalQuantity,
-        grossAtlas: lot.grossAtlas * ratio, marketplaceFeeAtlas: lot.marketplaceFeeAtlas * ratio,
-        txFeeAtlas: lot.txFeeAtlas * ratio, netAtlas: lot.netAtlas * ratio, settledAtlas: lot.settledAtlas * ratio,
-        basisAvailable: true, custodySignature: deposit.depositFlowId, sourceFlowId: deposit.sourceFlowId,
-        executionSignature: lot.signature, orderId: lot.orderId,
-      });
-      lot.quantity -= quantity;
-      remaining -= quantity;
-    }
-    if (remaining > 0) rows.push({
-      id: `gm-buy:${deposit.depositFlowId}:${deposit.sourceFlowId}:basis`, market: 'GM', side: 'buy',
-      faction: deposit.faction, profile: deposit.faction, timestamp: deposit.depositTimestamp,
-      asset: deposit.asset, rawMint: deposit.rawMint, starbase: deposit.starbase,
-      wallet: deposit.sourceWallet, quantity: remaining, unitPriceAtlas,
-      grossAtlas: remaining * unitPriceAtlas, marketplaceFeeAtlas: 0, txFeeAtlas: 0,
-      netAtlas: remaining * unitPriceAtlas, settledAtlas: remaining * unitPriceAtlas,
-      basisAvailable, custodySignature: deposit.depositFlowId, sourceFlowId: deposit.sourceFlowId,
+    rows.push({
+      id: `gm-buy:${first.depositFlowId}`, market: 'GM', side: 'buy',
+      faction: first.faction, profile: first.faction, timestamp: first.depositTimestamp,
+      asset: first.asset, rawMint: first.rawMint, starbase: first.starbase,
+      wallet: Array.from(aggregate.sourceWallets).join(','), quantity: aggregate.quantity,
+      unitPriceAtlas: aggregate.basisAvailable && aggregate.quantity > 0 ? aggregate.grossAtlas / aggregate.quantity : null,
+      grossAtlas: aggregate.basisAvailable ? aggregate.grossAtlas : null,
+      marketplaceFeeAtlas: 0, txFeeAtlas: aggregate.txFeeAtlas,
+      netAtlas: aggregate.basisAvailable ? aggregate.grossAtlas + aggregate.txFeeAtlas : null,
+      settledAtlas: aggregate.basisAvailable ? aggregate.grossAtlas + aggregate.txFeeAtlas : null,
+      basisAvailable: aggregate.basisAvailable, custodySignature: first.depositSignature || first.depositFlowId,
+      executionSignatures: Array.from(aggregate.executionSignatures), orderIds: Array.from(aggregate.orderIds),
     });
   }
   const sellQueues = new Map();
@@ -392,25 +414,38 @@ function projectGmFactionMarketplaceRows({ trades = [], flows = [], walletUniver
   for (const trade of sellTrades) {
     const quantity = Number(trade.quantity);
     const queue = sellQueues.get(`${trade.wallet}\n${trade.asset}`) || [];
+    const consumed = [];
     let remaining = quantity;
     for (const lot of queue) {
       if (!(remaining > 0) || !(lot.quantity > 0) || Date.parse(lot.arrivalTimestamp) > Date.parse(trade.timestamp)) continue;
       const allocated = Math.min(remaining, lot.quantity);
-      const ratio = quantity > 0 ? allocated / quantity : 0;
-      rows.push({
-        id: `gm-sell:${lot.withdrawalFlowId}:${trade.id}`, market: 'GM', side: 'sell',
-        faction: lot.faction, profile: lot.faction, timestamp: lot.withdrawalTimestamp,
-        asset: lot.asset, rawMint: lot.rawMint || trade.rawMint, starbase: lot.starbase,
-        wallet: trade.wallet, quantity: allocated, unitPriceAtlas: Number(trade.unitPriceAtlas),
-        grossAtlas: Number(trade.grossAtlas || 0) * ratio,
-        marketplaceFeeAtlas: Number(trade.marketplaceFeeAtlas || 0) * ratio,
-        netAtlas: Number(trade.netAtlas ?? trade.settledAtlas ?? 0) * ratio,
-        settledAtlas: Number(trade.settledAtlas ?? trade.netAtlas ?? 0) * ratio,
-        custodySignature: lot.withdrawalFlowId,
-        executionSignature: String(trade.signature || trade.id), orderId: String(trade.orderId || ''),
-      });
+      consumed.push({ lot, allocated });
       lot.quantity -= allocated;
       remaining -= allocated;
+    }
+    const groups = new Map();
+    for (const item of consumed) {
+      const key = `${item.lot.faction}\n${item.lot.starbase}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    }
+    for (const group of groups.values()) {
+      const allocatedQuantity = group.reduce((sum, item) => sum + item.allocated, 0);
+      const ratio = allocatedQuantity / quantity;
+      const first = group[0].lot;
+      rows.push({
+        id: `gm-sell:${trade.id}:${first.faction}:${first.starbase}`, market: 'GM', side: 'sell',
+        faction: first.faction, profile: first.faction, timestamp: trade.timestamp,
+        asset: trade.asset, rawMint: trade.rawMint || first.rawMint, starbase: first.starbase,
+        wallet: trade.wallet, quantity: allocatedQuantity, unitPriceAtlas: Number(trade.unitPriceAtlas),
+        grossAtlas: Number(trade.grossAtlas || 0) * ratio,
+        marketplaceFeeAtlas: Number(trade.marketplaceFeeAtlas || 0) * ratio,
+        txFeeAtlas: Number(trade.txFeeAtlas || 0) * ratio,
+        netAtlas: Number(trade.netAtlas ?? trade.settledAtlas ?? 0) * ratio,
+        settledAtlas: Number(trade.settledAtlas ?? trade.netAtlas ?? 0) * ratio,
+        custodySignatures: Array.from(new Set(group.map(({ lot }) => lot.withdrawalSignature || lot.withdrawalFlowId).filter(Boolean))),
+        executionSignatures: [String(trade.signature || trade.id)], orderIds: trade.orderId ? [String(trade.orderId)] : [],
+      });
     }
   }
   return rows.sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.id.localeCompare(right.id));
@@ -432,8 +467,14 @@ function formatGmFactionMarketplaceTestLine(row) {
     `grossAtlas=${Number(row.grossAtlas || 0)}`, `marketplaceFeeAtlas=${Number(row.marketplaceFeeAtlas || 0)}`,
     `txFeeAtlas=${Number(row.txFeeAtlas || 0)}`,
     `netAtlas=${Number(row.netAtlas || 0)}`, `settledAtlas=${Number(row.settledAtlas || 0)}`,
-    `wallet=${escapeInfluxString(row.wallet)}`, `custodySignature=${escapeInfluxString(row.custodySignature)}`,
-    `executionSignature=${escapeInfluxString(row.executionSignature || '')}`, `orderId=${escapeInfluxString(row.orderId || '')}`,
+    `wallet=${escapeInfluxString(row.wallet)}`,
+    `custodySignature=${escapeInfluxString(row.custodySignature || row.custodySignatures?.[0] || '')}`,
+    `executionSignature=${escapeInfluxString(row.executionSignature || row.executionSignatures?.[0] || '')}`,
+    `orderId=${escapeInfluxString(row.orderId || row.orderIds?.[0] || '')}`,
+    `custodySignatures=${escapeInfluxString(JSON.stringify(row.custodySignatures || (row.custodySignature ? [row.custodySignature] : [])))}`,
+    `executionSignatures=${escapeInfluxString(JSON.stringify(row.executionSignatures || (row.executionSignature ? [row.executionSignature] : [])))}`,
+    `orderIds=${escapeInfluxString(JSON.stringify(row.orderIds || (row.orderId ? [row.orderId] : [])))}`,
+    'projectionVersion=2i',
   ].join(',');
   return `marketplace_reconciliation_test_v1,${tagText} ${fields} ${BigInt(timestampMs) * 1000000n}`;
 }
