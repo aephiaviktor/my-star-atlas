@@ -69,6 +69,10 @@ const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpo
 const { publishInventoryBasisSnapshots } = require('./inventory-basis-publication');
 const { readInventoryBasisSnapshots } = require('./inventory-basis-read');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
+const {
+  formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
+  diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux,
+} = require('./breakeven-basis-state');
 const { createAtlasPriceResolver } = require('./atlas-price-resolver');
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
 const {
@@ -4685,6 +4689,17 @@ async function writeInventoryBasisLinesToInflux(settings, lines) {
   if (!response.ok) throw new Error(`inventory_basis_influx_http_${response.status}`);
 }
 
+async function readLatestBreakevenBasisStates(settings) {
+  const csv = await queryInfluxFlux(settings, buildLatestBreakevenBasisStateFlux(settings.influxBucket));
+  return projectBreakevenBasisStateRows(parseInfluxCsv(csv));
+}
+
+async function writeBreakevenBasisStates(settings, states) {
+  const lines = (states || []).map(formatBreakevenBasisStateInfluxLine).filter(Boolean);
+  if (lines.length) await writeInventoryBasisLinesToInflux(settings, lines.join('\n'));
+  return lines.length;
+}
+
 async function loadMarketplaceRawDataCheckpoint() {
   try {
     const parsed = JSON.parse(await fs.readFile(marketplaceRawDataCheckpointPath(), 'utf8'));
@@ -6058,12 +6073,12 @@ function getCurrentResourcePriceAtl(prices, resourceName) {
 
 async function fetchCurrentPerStarbaseInventory(settings) {
   // Lightweight inventory snapshot for the Breakeven Analysis: the
-  // latest non-zero `curAmount` per (starbase, rss) within the last
-  // 7 days. Keeps the response under control because we already have
-  // the full day-by-day inventory elsewhere.
+  // latest `curAmount` per (starbase, rss). Inventory is state: an
+  // unchanged value remains current indefinitely until a newer point,
+  // including an explicit zero, replaces it.
   const bucket = escapeFluxString(settings.influxBucket);
   const flux = `from(bucket: "${bucket}")
-  |> range(start: -7d)
+  |> range(start: 0)
   |> filter(fn: (r) => r._measurement == "starbase")
   |> filter(fn: (r) => r._field == "curAmount")
   |> filter(fn: (r) => exists r.rss)
@@ -8199,14 +8214,45 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   // can warn instead of crashing the rest of the snapshot.
   let breakevenRows = [];
   let breakevenError = '';
+  let breakevenBasisStateSource = 'calculated';
+  let breakevenBasisStateWrittenCount = 0;
+  let breakevenBasisStateError = '';
+  const persistedBreakevenStates = await Promise.resolve(readLatestBreakevenBasisStates(settings)).catch((error) => {
+    breakevenBasisStateError = String(error?.message || error || 'breakeven_basis_state_read_failed');
+    return [];
+  });
   try {
     const inventoryRows = await fetchCurrentPerStarbaseInventory(settings);
     const factionStarbases = ledgerFactionStarbases || await fetchFactionStarbases(settings);
     const faction = ledgerFaction;
     breakevenRows = buildLedgerBreakevenRows({ ledgerRows: inventoryCostLedgerRows, inventoryRows, prices })
       .filter((row) => isStarbaseIncluded(row.starbase, factionStarbases, faction));
+    const changes = diffBreakevenBasisStates(breakevenRows, persistedBreakevenStates, {
+      faction, timestamp: new Date().toISOString(),
+    });
+    try {
+      breakevenBasisStateWrittenCount = await writeBreakevenBasisStates(settings, changes);
+      breakevenBasisStateError = '';
+    } catch (error) {
+      breakevenBasisStateError = String(error?.message || error || 'breakeven_basis_state_write_failed');
+    }
   } catch (error) {
     breakevenError = String(error?.message || error || 'breakeven_unavailable');
+    const factionStarbases = ledgerFactionStarbases || await fetchFactionStarbases(settings).catch(() => []);
+    breakevenRows = persistedBreakevenStates
+      .filter((row) => row.faction === ledgerFaction && row.inventory > 0)
+      .filter((row) => isStarbaseIncluded(row.starbase, factionStarbases, ledgerFaction))
+      .map((row) => ({
+        ...row,
+        inventoryValue: row.landedCostPerUnit == null ? null : row.inventory * row.landedCostPerUnit,
+        gmPricePerUnit: getCurrentResourcePriceAtl(prices, row.asset),
+        inventoryExternalValue: getCurrentResourcePriceAtl(prices, row.asset) == null
+          ? null : row.inventory * getCurrentResourcePriceAtl(prices, row.asset),
+      }));
+    if (breakevenRows.length) {
+      breakevenBasisStateSource = 'persisted';
+      breakevenError = '';
+    }
   }
 
   // Crafting per-row enrichment: each row is per (starbase, output, date).
@@ -8545,6 +8591,9 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     upgradingRows: upgrading,
     breakevenRows,
     breakevenError,
+    breakevenBasisStateSource,
+    breakevenBasisStateWrittenCount,
+    breakevenBasisStateError,
     localMarketTrades: localMarketResult.trades,
     localMarketTradeCount: localMarketResult.trades.length,
     localMarketError: localMarketResult.error,
