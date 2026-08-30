@@ -720,8 +720,8 @@ async function fetchMarketplaceAssetFlowsFromInflux(settings) {
 async function fetchMarketplaceRawDataFromInflux(settings) {
   const bucket = String(settings.influxBucket || '').trim();
   if (!bucket) return { rows: [], error: '' };
-  const rawDataCutoverIso = '2026-08-30T09:45:54.000Z';
-  const rawDataCutoverSlot = 442848431;
+  const rawDataCutoverIso = '2026-08-30T12:00:22.000Z';
+  const rawDataCutoverSlot = 442873938;
   const flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: time(v: "${rawDataCutoverIso}"))
   |> filter(fn: (r) => r._measurement == "marketplace_rawdata")
@@ -4641,10 +4641,18 @@ async function writeInventoryBasisLinesToInflux(settings, lines) {
 async function loadMarketplaceRawDataCheckpoint() {
   try {
     const parsed = JSON.parse(await fs.readFile(marketplaceRawDataCheckpointPath(), 'utf8'));
-    if (parsed?.schemaVersion !== 1 || typeof parsed.cursors !== 'object' || !Array.isArray(parsed.tokenAccounts)) throw new Error('invalid');
-    return parsed;
+    if (![1, 2].includes(parsed?.schemaVersion) || !parsed.cursors || typeof parsed.cursors !== 'object'
+      || Array.isArray(parsed.cursors) || !Array.isArray(parsed.tokenAccounts)) throw new Error('invalid');
+    return {
+      ...parsed,
+      schemaVersion: 2,
+      tokenAccountOwners: Array.isArray(parsed.tokenAccountOwners) ? parsed.tokenAccountOwners : [],
+    };
   } catch (_error) {
-    return { schemaVersion: 1, cursors: {}, tokenAccounts: [], tokenAccountsRefreshedAt: '', lastTransferScanAt: '' };
+    return {
+      schemaVersion: 2, cursors: {}, tokenAccounts: [], tokenAccountOwners: [],
+      tokenAccountsRefreshedAt: '', lastTransferScanAt: '',
+    };
   }
 }
 
