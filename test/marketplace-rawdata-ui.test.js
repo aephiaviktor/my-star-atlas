@@ -8,6 +8,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'electron', 'renderer.html'), 'utf8');
 const renderer = fs.readFileSync(path.join(root, 'electron', 'renderer.js'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'electron', 'renderer.css'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
 const raw = fs.readFileSync(path.join(root, 'electron', 'marketplace-rawdata.js'), 'utf8');
 
@@ -23,6 +24,13 @@ test('Marketplace Raw Data exposes only transaction filters, sortable facts, and
   assert.match(renderer, /setAttribute\('aria-sort'/);
   assert.match(renderer, /navigator\.clipboard\.writeText\(text\)/);
   assert.match(renderer, /className = 'marketplace-raw-payload'/);
+});
+
+test('Marketplace shows only the table belonging to the active Raw Data or Calculations subtab', () => {
+  assert.match(html, /data-marketplace-panel="raw"/);
+  assert.match(html, /data-marketplace-panel="calculations" hidden/);
+  assert.match(renderer, /panel\.hidden = panel\.dataset\.marketplacePanel !== currentMarketplaceSubtab/);
+  assert.match(css, /\[data-marketplace-panel\]\[hidden\]\s*\{\s*display:\s*none/);
 });
 
 test('Marketplace Raw Data owns persistent sidebar controls for its seven raw transaction columns', () => {

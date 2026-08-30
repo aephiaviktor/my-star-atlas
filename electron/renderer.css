@@ -1454,6 +1454,10 @@ select:focus {
   overflow: hidden;
 }
 
+[data-marketplace-panel][hidden] {
+  display: none;
+}
+
 .earnings-surface > .fleet-table-wrap {
   flex: 0 0 auto;
   height: 560px;
