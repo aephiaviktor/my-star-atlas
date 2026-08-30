@@ -43,8 +43,12 @@ test('Marketplace Decoded Events is a separate persisted event view linked to ra
   assert.match(renderer, /function renderMarketplaceDecodedEvents\(result\)/);
   assert.match(renderer, /renderMarketplaceDecodedEvents\(result\)/);
   assert.match(renderer, /eventsReadFailed[\s\S]*marketplaceEvents: prior\.marketplaceEvents/);
-  assert.match(main, /await writeMarketplaceRawRecords\(settings, gmEventTransactions[\s\S]*await writeMarketplaceEvents\(settings, gmEvents/);
+  assert.match(main, /async function syncMarketplaceEventsFromRawData[\s\S]*fetchMarketplaceRawDataFromInflux\(settings\)/);
+  assert.match(main, /deriveCustodyEventsFromRawRows\(rawData\.rows/);
+  assert.match(main, /projectMarketplaceEventsFromRawRows\(rawData\.rows, 'LM'\)/);
+  assert.match(main, /projectMarketplaceEventsFromRawRows\(rawData\.rows, 'GM'\)/);
   assert.match(main, /action: 'order_cancelled'/);
+  assert.doesNotMatch(main, /writeMarketplaceEvents\(settings, projectMarketplaceOrderAndExecutionEvents\(scanned/);
 });
 
 test('Marketplace Raw Data owns persistent sidebar controls for its seven raw transaction columns', () => {

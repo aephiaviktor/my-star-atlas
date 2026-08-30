@@ -78,20 +78,18 @@ const {
   valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
 } = require('./cargo-cost-source');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
-const { scanLocalMarketTrades } = require('./local-market-scanner');
+const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution } = require('./local-market-scanner');
 const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows, selectFactionAssetFlows } = require('./marketplace-asset-flow');
 const {
   CSS_STARBASE_NAMES,
   deriveCssStarbasePlayer,
-  classifyCssCargoEvents,
-  playerTransferEvents,
   discoverPlayerTokenAccounts,
   scanMarketplaceRawData,
   buildLmRawRecords,
   formatRawTransactionInfluxLine,
 } = require('./marketplace-rawdata');
-const { formatMarketplaceEventInfluxLine } = require('./marketplace-events');
+const { formatMarketplaceEventInfluxLine, deriveCustodyEventsFromRawRows } = require('./marketplace-events');
 const { filterLegacyMarketplaceInfluxLines } = require('./marketplace-write-policy');
 const {
   MARKETPLACE_FACTION_MEASUREMENT,
@@ -4799,6 +4797,61 @@ function projectMarketplaceOrderAndExecutionEvents(scanned, market) {
   return events;
 }
 
+function rawRowHasDiscoverySource(row, source) {
+  const discoverySource = String(row?.discoverySource || '');
+  return discoverySource === source || discoverySource === 'multiple';
+}
+
+function rawTransactionAccountKeys(transaction) {
+  return (transaction?.transaction?.message?.accountKeys || []).map((key) => String(key?.pubkey || key || '')).filter(Boolean);
+}
+
+function projectMarketplaceEventsFromRawRows(rawRows, market) {
+  const discoverySource = market === 'GM' ? 'gm_wallet' : 'lm_scanner';
+  const transactions = (rawRows || []).filter((row) => rawRowHasDiscoverySource(row, discoverySource))
+    .map((row) => row.payload).filter(Boolean);
+  const marketAssetsByMint = buildGlobalMarketAssetMap();
+  const ordersById = new Map();
+  for (const transaction of transactions) {
+    const order = decodeLocalMarketOrder(transaction, {
+      trackedWallets: rawTransactionAccountKeys(transaction), marketAssetsByMint,
+    });
+    if (order && order.marketplace === market) ordersById.set(order.orderId, order);
+  }
+  const trades = [];
+  for (const transaction of transactions) {
+    const trade = decodeOrderExecution(transaction, ordersById, rawTransactionAccountKeys(transaction));
+    if (trade && trade.marketplace === market) trades.push(trade);
+  }
+  return projectMarketplaceOrderAndExecutionEvents({
+    orders: Array.from(ordersById.values()), trades, rawTransactions: transactions,
+  }, market);
+}
+
+async function syncMarketplaceEventsFromRawData(settings) {
+  const rawData = await fetchMarketplaceRawDataFromInflux(settings);
+  if (rawData.error) throw new Error(rawData.error);
+  const cssScopes = ['MUD', 'ONI', 'USTUR'].map((faction) => ({
+    faction, profile: String(settings.playerProfiles?.[faction] || '').trim(),
+  })).filter((entry) => entry.profile).map(({ faction, profile }) => {
+    const css = STARBASE_REGISTRY.find((entry) => entry.name === CSS_STARBASE_NAMES[faction]);
+    if (!css) throw new Error(`marketplace_events_css_missing_${faction}`);
+    return {
+      sageProgramId: SAGE_PROGRAM_ID.toBase58(),
+      address: deriveCssStarbasePlayer({
+        sageProgramId: SAGE_PROGRAM_ID.toBase58(), gameId: SAGE_GAME_ID.toBase58(),
+        playerProfile: profile, starbase: css.publicKey,
+      }),
+    };
+  });
+  const events = [
+    ...deriveCustodyEventsFromRawRows(rawData.rows, { cssScopes }),
+    ...projectMarketplaceEventsFromRawRows(rawData.rows, 'LM'),
+    ...projectMarketplaceEventsFromRawRows(rawData.rows, 'GM'),
+  ];
+  return writeMarketplaceEvents(settings, events, rawData.rows.map((row) => row.payload).filter(Boolean));
+}
+
 async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets, configuredProfiles, profileWalletsByFaction }) {
   const checkpoint = await loadMarketplaceRawDataCheckpoint();
   const playerWallets = Object.values(profileWalletsByFaction).flat();
@@ -4830,27 +4883,12 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
     startIso: MARKETPLACE_RAWDATA_CUTOVER_ISO, startSlot: MARKETPLACE_RAWDATA_CUTOVER_SLOT, maxPages: 1,
   });
   const written = await writeMarketplaceRawRecords(settings, scanned.records);
-  const transactions = scanned.records.map((record) => record.transaction);
-  const decodedEvents = [];
-  for (const record of scanned.records) {
-    if (record.discoverySources.includes('css_account')) {
-      for (const scope of cssScopes) decodedEvents.push(...classifyCssCargoEvents(record.transaction, {
-        sageProgramId: scope.sageProgramId, cssStarbasePlayer: scope.address,
-      }).map((event) => ({ ...event, eventType: event.stream, action: event.type })));
-    }
-    if (record.discoverySources.includes('token_account')) {
-      decodedEvents.push(...playerTransferEvents(record.transaction, tokenAccountOwners).map((event) => ({
-        ...event, eventType: 'transfer', action: 'transfer',
-      })));
-    }
-  }
-  const eventWrite = await writeMarketplaceEvents(settings, decodedEvents, transactions);
   await writeJsonAtomic(marketplaceRawDataCheckpointPath(), {
     schemaVersion: 2, savedAt: new Date().toISOString(), cursors: scanned.cursors, tokenAccounts, tokenAccountOwners,
     tokenAccountsRefreshedAt: refreshTokenAccounts ? new Date().toISOString() : checkpoint.tokenAccountsRefreshedAt,
     lastTransferScanAt: transferScanDue ? new Date().toISOString() : checkpoint.lastTransferScanAt,
   });
-  return { ...written, decodedEvents: eventWrite.written, rpc: scanned.rpc };
+  return { ...written, rpc: scanned.rpc };
 }
 
 async function syncMarketplaceRawData(settings, connection, scope) {
@@ -5587,7 +5625,6 @@ async function fetchLocalMarketTrades(settings, connection) {
   const lmRawRecords = buildLmRawRecords({ transactions: scanned.rawTransactions });
   try {
     await writeMarketplaceRawRecords(settings, lmRawRecords);
-    await writeMarketplaceEvents(settings, projectMarketplaceOrderAndExecutionEvents(scanned, 'LM'), scanned.rawTransactions);
   } catch (error) {
     return {
       trades,
@@ -5730,19 +5767,14 @@ async function fetchGlobalMarketTrades(settings, connection) {
       trackedWallets, assetsByMint, starbasesByKey, atlasPerSol,
     }),
   });
-  try {
-    const gmEvents = projectMarketplaceOrderAndExecutionEvents(scanned, 'GM');
-    const gmEventSignatures = new Set(gmEvents.map((event) => event.signature));
-    const gmEventTransactions = scanned.rawTransactions.filter((transaction) => gmEventSignatures.has(String(
-      transaction?.signature || transaction?.transaction?.signatures?.[0] || '',
-    )));
-    await writeMarketplaceRawRecords(settings, gmEventTransactions.map((transaction) => ({
-      transaction, discoverySources: ['gm_wallet'],
-    })));
-    await writeMarketplaceEvents(settings, gmEvents, gmEventTransactions);
-  } catch (error) {
-    if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
-  }
+  const gmEvents = projectMarketplaceOrderAndExecutionEvents(scanned, 'GM');
+  const gmEventSignatures = new Set(gmEvents.map((event) => event.signature));
+  const gmEventTransactions = scanned.rawTransactions.filter((transaction) => gmEventSignatures.has(String(
+    transaction?.signature || transaction?.transaction?.signatures?.[0] || '',
+  )));
+  await writeMarketplaceRawRecords(settings, gmEventTransactions.map((transaction) => ({
+    transaction, discoverySources: ['gm_wallet'],
+  })));
   // Do not recursively signature-scan upstream or profile wallets. Cross-profile
   // movements are discovered only through the bounded token-account stream.
   const upstreamWallets = [];
@@ -5895,14 +5927,19 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
       const globalConnection = wrapMarketplaceConnection(cachedConnection, { instrumentation, operation: 'GM' });
       const local = await fetchLocalMarketTrades(settings, localConnection);
       const global = await fetchGlobalMarketTrades(settings, globalConnection);
+      const marketplaceEventsWrite = typeof syncMarketplaceEventsFromRawData === 'function'
+        ? await syncMarketplaceEventsFromRawData(settings)
+          .catch((error) => ({ written: 0, error: String(error?.message || error || 'marketplace_events_sync_failed') }))
+        : { written: 0, error: '' };
       const exhaustions = [local.exhaustion, global.exhaustion].filter(Boolean);
-      const errors = [local.error, global.error].filter(Boolean);
+      const errors = [local.error, global.error, marketplaceEventsWrite.error].filter(Boolean);
       const marketplaceRpcTelemetry = telemetry.finish();
       const result = {
         ok: errors.length === 0, trades: [...local.trades, ...global.trades], error: errors.join('; '),
         localMarketTrades: local.trades, globalMarketTrades: global.trades,
         localMarketRpc: local.rpc || null, globalMarketRpc: global.rpc || null,
         marketplaceFactionV2Write: global.marketplaceFactionV2Write || { written: 0, error: '' },
+        marketplaceEventsWrite,
         rpcCoverage: 'scanner_and_open_orders_only',
         marketplaceRpcTelemetry,
         faction, durationMs: Date.now() - startedAt, checkedAt: new Date().toISOString(),

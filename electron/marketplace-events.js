@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { classifyCssCargoEvents, playerTransferEvents } = require('./marketplace-rawdata');
 
 const MARKETPLACE_EVENTS_MEASUREMENT = 'marketplace_events';
 const EVENT_TYPES = new Set(['deposit', 'withdraw', 'transfer', 'lm', 'gm']);
@@ -38,4 +39,36 @@ function formatMarketplaceEventInfluxLine(event, blockTime) {
   return `${MARKETPLACE_EVENTS_MEASUREMENT},eventType=${escapeTag(eventType)},eventId=${escapeTag(eventId)},signature=${escapeTag(signature)} payload=${escapeField(canonicalJson(payload))},payloadHash=${escapeField(eventPayloadHash(payload))} ${BigInt(blockTime) * 1000000000n}`;
 }
 
-module.exports = { MARKETPLACE_EVENTS_MEASUREMENT, EVENT_TYPES, eventPayloadHash, formatMarketplaceEventInfluxLine };
+function rawRowSources(row) {
+  return new Set(String(row?.discoverySource || '').split(',').map((value) => value.trim()).filter(Boolean));
+}
+
+function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [] } = {}) {
+  const events = [];
+  for (const row of rawRows || []) {
+    const transaction = row?.payload;
+    if (!transaction || typeof transaction !== 'object') continue;
+    const sources = rawRowSources(row);
+    if (sources.has('css_account') || sources.has('multiple')) {
+      for (const scope of cssScopes) {
+        events.push(...classifyCssCargoEvents(transaction, {
+          sageProgramId: scope.sageProgramId, cssStarbasePlayer: scope.address,
+        }).map((event) => ({ ...event, eventType: event.stream, action: event.type })));
+      }
+    }
+    if (sources.has('token_account') || sources.has('multiple')) {
+      const balanceOwners = [...new Set([
+        ...(transaction.meta?.preTokenBalances || []), ...(transaction.meta?.postTokenBalances || []),
+      ].map((balance) => String(balance?.owner || '')).filter(Boolean))];
+      events.push(...playerTransferEvents(transaction, balanceOwners).map((event) => ({
+        ...event, eventType: 'transfer', action: 'transfer',
+      })));
+    }
+  }
+  return events;
+}
+
+module.exports = {
+  MARKETPLACE_EVENTS_MEASUREMENT, EVENT_TYPES, eventPayloadHash, formatMarketplaceEventInfluxLine,
+  deriveCustodyEventsFromRawRows,
+};
