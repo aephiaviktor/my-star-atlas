@@ -111,8 +111,34 @@ function buildLatestBreakevenBasisStateFlux(bucket) {
   |> sort(columns: ["faction", "starbase", "asset"])`;
 }
 
+function buildHistoricalBreakevenBasisStateFlux(bucket, { stop } = {}) {
+  const safeBucket = String(bucket || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const stopClause = stop ? `, stop: time(v: ${JSON.stringify(new Date(stop).toISOString())})` : '';
+  return `from(bucket: "${safeBucket}")
+  |> range(start: 0${stopClause})
+  |> filter(fn: (r) => r._measurement == "${MEASUREMENT}")
+  |> pivot(rowKey: ["_time", "faction", "starbase", "asset"], columnKey: ["_field"], valueColumn: "_value")
+  |> sort(columns: ["_time", "faction", "starbase", "asset"])`;
+}
+
+function resolveBreakevenBasisAtOrBefore(states, { faction, starbase, asset, timestamp } = {}) {
+  const targetMs = Date.parse(timestamp);
+  if (!Number.isFinite(targetMs)) return null;
+  const key = `${factionText(faction)}\n${text(starbase)}\n${text(asset)}`;
+  let selected = null;
+  for (const state of states || []) {
+    if (stateKey(state) !== key) continue;
+    const stateMs = Date.parse(state.timestamp);
+    if (!Number.isFinite(stateMs) || stateMs > targetMs || Number(state.inventory) <= 0
+      || !Number.isFinite(Number(state.landedCostPerUnit))) continue;
+    if (!selected || stateMs > Date.parse(selected.timestamp)) selected = state;
+  }
+  return selected;
+}
+
 module.exports = {
   BREAKEVEN_BASIS_STATE_MEASUREMENT: MEASUREMENT, COST_FIELDS, stateKey,
   createBreakevenBasisState, formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
-  diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux,
+  diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux, buildHistoricalBreakevenBasisStateFlux,
+  resolveBreakevenBasisAtOrBefore,
 };
