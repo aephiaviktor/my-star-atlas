@@ -116,7 +116,8 @@ function hasTraderProgramInstruction(transaction) {
 
 function hasTokenTransferInstruction(transaction, tokenAccount) {
   const { accountKeys, entries } = allInstructions(transaction);
-  return entries.some(({ instruction }) => {
+  return entries.some(({ instruction, innerIndex }) => {
+    if (innerIndex !== null) return false;
     const programId = String(instruction?.programId || accountKeys[instruction?.programIdIndex]?.pubkey || accountKeys[instruction?.programIdIndex] || '');
     if (!TOKEN_PROGRAM_IDS.includes(programId)) return false;
     const parsed = instruction?.parsed;

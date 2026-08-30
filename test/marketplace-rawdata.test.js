@@ -70,6 +70,13 @@ test('token qualification accepts exact transfer endpoints and rejects unrelated
   assert.equal(hasTokenTransferInstruction(tx({ instructions: [
     { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', parsed: { type: 'approve', info: { source } } },
   ] }), source), false);
+  const innerOnly = tx();
+  innerOnly.meta.innerInstructions = [{ index: 0, instructions: [{
+    programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', parsed: {
+      type: 'transferChecked', info: { source, destination, mint, tokenAmount: { amount: '5', decimals: 0 } },
+    },
+  }] }];
+  assert.equal(hasTokenTransferInstruction(innerOnly, source), false);
 });
 
 test('transfer projection keeps only balanced token movements between configured player owners', () => {
