@@ -88,7 +88,6 @@ const {
   scanMarketplaceRawData,
   buildLmRawRecords,
   formatRawTransactionInfluxLine,
-  formatRawEventInfluxLine,
 } = require('./marketplace-rawdata');
 const { filterLegacyMarketplaceInfluxLines } = require('./marketplace-write-policy');
 const {
@@ -724,7 +723,8 @@ async function fetchMarketplaceRawDataFromInflux(settings) {
   const flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: time(v: "${MARKETPLACE_HISTORY_CUTOVER_ISO}"))
   |> filter(fn: (r) => r._measurement == "marketplace_rawdata")
-  |> filter(fn: (r) => r._field == "slot" or r._field == "success" or r._field == "payloadHash" or r._field == "discoveredBy" or r._field == "streams" or r._field == "signature" or r._field == "payload")
+  |> filter(fn: (r) => r.record == "transaction")
+  |> filter(fn: (r) => r._field == "slot" or r._field == "success" or r._field == "payloadHash" or r._field == "payload")
   |> pivot(rowKey: ["_time", "record", "signature", "eventId", "stream"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
   try {
@@ -742,50 +742,16 @@ async function fetchMarketplaceRawDataFromInflux(settings) {
         payload,
       };
     });
-    const streamsBySignature = new Map();
-    for (const row of rawRows.filter((entry) => entry.record === 'event')) {
-      streamsBySignature.set(row.signature, new Set([...(streamsBySignature.get(row.signature) || []), row.stream].filter(Boolean)));
-    }
     const rows = [];
     const transactionIndex = new Map();
     for (const row of rawRows) {
-      if (row.record === 'event' && row.payload?.type === 'transaction_observed') continue;
-      if (row.record === 'transaction') {
-        const discovered = [...(streamsBySignature.get(row.signature) || [])];
-        if (!row.stream || row.stream === 'chain') row.stream = discovered.length === 1 ? discovered[0] : discovered.length > 1 ? 'multi' : row.stream;
-        const existingIndex = transactionIndex.get(row.signature);
-        if (existingIndex != null) {
-          if (rows[existingIndex].stream === 'chain' && row.stream !== 'chain') rows[existingIndex] = row;
-          continue;
-        }
-        transactionIndex.set(row.signature, rows.length);
+      const existingIndex = transactionIndex.get(row.signature);
+      if (existingIndex != null) {
+        if (rows[existingIndex].stream === 'chain' && row.stream !== 'chain') rows[existingIndex] = row;
+        continue;
       }
-      const payload = row.payload || {};
-      const transactionMints = [...new Set([...(payload.meta?.preTokenBalances || []), ...(payload.meta?.postTokenBalances || [])]
-        .map((balance) => String(balance.mint || '')).filter(Boolean))];
-      const mint = String(payload.mint || payload.rawMint || (transactionMints.length === 1 ? transactionMints[0] : ''));
-      const asset = String(payload.asset || ASSET_REGISTRY.find((entry) => entry.mint === mint)?.name || '');
-      const isEvent = row.record === 'event';
-      const messageInstructions = payload.transaction?.message?.instructions || [];
-      const programs = row.record === 'transaction'
-        ? [...new Set(messageInstructions.map((entry) => String(entry.programId || entry.program || '')).filter(Boolean))]
-        : [];
-      rows.push({
-        ...row,
-        // A transaction can contain actions performed by several parties. Do not
-        // attribute its first signer or first log instruction to this installation;
-        // ownership-aware decoded event rows carry those facts separately.
-        eventType: isEvent ? String(payload.type || '') : 'transaction',
-        fromWallet: isEvent ? String(payload.fromWallet || payload.wallet || payload.initializer || '') : '',
-        toWallet: isEvent ? String(payload.toWallet || '') : '',
-        mint,
-        asset,
-        quantityRaw: String(payload.quantityRaw ?? payload.quantity ?? ''),
-        decimals: Number.isInteger(Number(payload.decimals)) ? Number(payload.decimals) : 0,
-        atlasAmount: Number.isFinite(Number(payload.grossAtlas)) ? Number(payload.grossAtlas) : null,
-        program: programs.join(', '),
-        decodedStatus: row.record === 'event' ? 'decoded' : row.success ? 'raw' : 'failed',
-      });
+      transactionIndex.set(row.signature, rows.length);
+      rows.push(row);
     }
     return { rows, error: '' };
   } catch (error) {
@@ -4732,10 +4698,9 @@ async function writeMarketplaceRawRecords(settings, records) {
   for (const record of records || []) {
     const stream = record.streams?.length === 1 ? record.streams[0] : record.streams?.length > 1 ? 'multi' : 'chain';
     lines.push(formatRawTransactionInfluxLine({ transaction: record.transaction, stream }));
-    for (const event of record.events || []) lines.push(formatRawEventInfluxLine(event, Number(record.transaction.blockTime)));
   }
   if (lines.length) await writeInventoryBasisLinesToInflux(settings, lines.join('\n'));
-  return { transactions: (records || []).length, events: (records || []).reduce((sum, record) => sum + (record.events || []).length, 0) };
+  return { transactions: (records || []).length, events: 0 };
 }
 
 async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets, configuredProfiles, profileWalletsByFaction }) {

@@ -11,13 +11,12 @@ const renderer = fs.readFileSync(path.join(root, 'electron', 'renderer.js'), 'ut
 const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
 const raw = fs.readFileSync(path.join(root, 'electron', 'marketplace-rawdata.js'), 'utf8');
 
-test('Marketplace Raw Data exposes filters, coverage, sortable headers, and payload details', () => {
-  for (const id of ['raw-from', 'raw-to', 'raw-stream', 'raw-record', 'raw-wallet', 'raw-event', 'raw-asset']) {
-    assert.match(html, new RegExp(`id="earnings-marketplace-${id}"`));
-  }
+test('Marketplace Raw Data exposes only transaction filters, sortable facts, and payload details', () => {
+  for (const id of ['raw-from', 'raw-to', 'raw-stream']) assert.match(html, new RegExp(`id="earnings-marketplace-${id}"`));
+  for (const id of ['raw-record', 'raw-wallet', 'raw-event', 'raw-asset']) assert.doesNotMatch(html, new RegExp(`id="earnings-marketplace-${id}"`));
   assert.match(html, /id="earnings-marketplace-raw-coverage-summary"/);
   assert.match(html, /data-marketplace-raw-sort="timestamp"/);
-  assert.match(html, /data-marketplace-raw-sort="quantityRaw"/);
+  assert.match(html, /data-marketplace-raw-sort="success"/);
   assert.match(html, /data-marketplace-raw-sort="payloadHash"/);
   assert.match(renderer, /marketplaceRawSort = \{ column: 'timestamp', direction: 'desc' \}/);
   assert.match(renderer, /' ▲' : ' ▼'/);
@@ -26,11 +25,14 @@ test('Marketplace Raw Data exposes filters, coverage, sortable headers, and payl
   assert.match(renderer, /className = 'marketplace-raw-payload'/);
 });
 
-test('Marketplace Raw Data owns persistent sidebar controls for its current table columns', () => {
+test('Marketplace Raw Data owns persistent sidebar controls for its seven raw transaction columns', () => {
   assert.match(html, /id="earnings-marketplace-raw-table-head"/);
   assert.match(renderer, /const marketplaceRawColumns = Object\.freeze/);
-  for (const id of ['timestamp', 'record', 'stream', 'eventType', 'decodedStatus', 'fromWallet', 'toWallet', 'asset', 'quantityRaw', 'atlasAmount', 'program', 'slot', 'eventId', 'signature', 'payloadHash', 'payload']) {
+  for (const id of ['timestamp', 'stream', 'slot', 'success', 'signature', 'payloadHash', 'payload']) {
     assert.match(renderer, new RegExp(`id: '${id}'`));
+  }
+  for (const id of ['record', 'eventType', 'decodedStatus', 'fromWallet', 'toWallet', 'asset', 'quantityRaw', 'atlasAmount', 'program', 'eventId']) {
+    assert.doesNotMatch(renderer.match(/const marketplaceRawColumns = Object\.freeze\(\[[\s\S]*?\n\]\);/)?.[0] || '', new RegExp(`id: '${id}'`));
   }
   assert.match(renderer, /marketplaceRaw: new Set\(marketplaceRawColumns\.map/);
   assert.match(renderer, /currentMarketplaceSubtab === 'raw'\) return 'marketplaceRaw'/);
@@ -40,14 +42,16 @@ test('Marketplace Raw Data owns persistent sidebar controls for its current tabl
   assert.match(renderer, /updateMarketplaceSubtab\(\);\s*renderEarningsColumnControls\(\)/);
 });
 
-test('Raw reader keeps transaction rows neutral and attributes wallets only on decoded event rows', () => {
-  assert.match(main, /row\.payload\?\.type === 'transaction_observed'/);
-  assert.match(main, /eventType: isEvent \? String\(payload\.type \|\| ''\) : 'transaction'/);
-  assert.match(main, /fromWallet: isEvent \? String\(payload\.fromWallet/);
-  assert.match(main, /toWallet: isEvent \? String\(payload\.toWallet/);
-  assert.doesNotMatch(main, /firstSigner/);
-  assert.match(main, /quantityRaw:/);
-  assert.match(main, /decodedStatus:/);
+test('Raw reader and writer are transaction-only with no decoded-event projection', () => {
+  assert.match(main, /r\.record == "transaction"/);
+  assert.match(main, /r\._field == "slot" or r\._field == "success" or r\._field == "payloadHash" or r\._field == "payload"/);
+  assert.doesNotMatch(main, /streamsBySignature/);
+  assert.doesNotMatch(main, /eventType: isEvent/);
+  assert.doesNotMatch(main, /fromWallet: isEvent/);
+  assert.doesNotMatch(main, /quantityRaw:/);
+  assert.match(main, /lines\.push\(formatRawTransactionInfluxLine/);
+  assert.doesNotMatch(main, /lines\.push\(formatRawEventInfluxLine/);
+  assert.match(main, /return \{ transactions: \(records \|\| \[\]\)\.length, events: 0 \}/);
   assert.match(main, /marketplaceRawDataCoverage/);
 });
 

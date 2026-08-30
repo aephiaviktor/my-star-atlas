@@ -194,10 +194,6 @@ const earningsMarketplaceRawTableBody = document.querySelector('#earnings-market
 const earningsMarketplaceRawFrom = document.querySelector('#earnings-marketplace-raw-from');
 const earningsMarketplaceRawTo = document.querySelector('#earnings-marketplace-raw-to');
 const earningsMarketplaceRawStream = document.querySelector('#earnings-marketplace-raw-stream');
-const earningsMarketplaceRawRecord = document.querySelector('#earnings-marketplace-raw-record');
-const earningsMarketplaceRawWallet = document.querySelector('#earnings-marketplace-raw-wallet');
-const earningsMarketplaceRawEvent = document.querySelector('#earnings-marketplace-raw-event');
-const earningsMarketplaceRawAsset = document.querySelector('#earnings-marketplace-raw-asset');
 const earningsMarketplaceRawCoverageSummary = document.querySelector('#earnings-marketplace-raw-coverage-summary');
 const earningsMarketplaceRawCoverage = document.querySelector('#earnings-marketplace-raw-coverage');
 const earningsMarketplaceSubtabButtons = Array.from(document.querySelectorAll('[data-marketplace-subtab]'));
@@ -816,18 +812,9 @@ const marketplaceEarningsOptionalColumns = Object.freeze([
 
 const marketplaceRawColumns = Object.freeze([
   Object.freeze({ id: 'timestamp', label: 'Timestamp (UTC)', sortable: true }),
-  Object.freeze({ id: 'record', label: 'Record', sortable: true }),
   Object.freeze({ id: 'stream', label: 'Stream', sortable: true }),
-  Object.freeze({ id: 'eventType', label: 'Event Type', sortable: true }),
-  Object.freeze({ id: 'decodedStatus', label: 'Status', sortable: true }),
-  Object.freeze({ id: 'fromWallet', label: 'Source Wallet', sortable: true }),
-  Object.freeze({ id: 'toWallet', label: 'Destination Wallet', sortable: true }),
-  Object.freeze({ id: 'asset', label: 'Asset / Mint', sortable: true }),
-  Object.freeze({ id: 'quantityRaw', label: 'Quantity', sortable: true }),
-  Object.freeze({ id: 'atlasAmount', label: 'ATLAS', sortable: true }),
-  Object.freeze({ id: 'program', label: 'Program', sortable: true }),
   Object.freeze({ id: 'slot', label: 'Slot', sortable: true }),
-  Object.freeze({ id: 'eventId', label: 'Event ID', sortable: true }),
+  Object.freeze({ id: 'success', label: 'Success', sortable: true }),
   Object.freeze({ id: 'signature', label: 'Signature', sortable: true }),
   Object.freeze({ id: 'payloadHash', label: 'Payload Hash', sortable: true }),
   Object.freeze({ id: 'payload', label: 'Payload', sortable: false }),
@@ -6873,24 +6860,10 @@ function updateMarketplaceRawFilterOptions(select, values) {
   if (options.includes(selected)) select.value = selected;
 }
 
-function formatMarketplaceRawQuantity(entry) {
-  const raw = String(entry.quantityRaw || '');
-  if (!/^\d+$/.test(raw)) return '--';
-  const decimals = Math.max(0, Math.min(18, Number(entry.decimals) || 0));
-  if (!decimals) return BigInt(raw).toLocaleString();
-  const padded = raw.padStart(decimals + 1, '0');
-  const whole = padded.slice(0, -decimals);
-  const fraction = padded.slice(-decimals).replace(/0+$/, '');
-  return `${BigInt(whole).toLocaleString()}${fraction ? `.${fraction}` : ''}`;
-}
-
 function compareMarketplaceRawValues(a, b, column) {
   if (column === 'timestamp') return (Date.parse(a.timestamp) || 0) - (Date.parse(b.timestamp) || 0);
-  if (column === 'slot' || column === 'atlasAmount') return (Number(a[column]) || 0) - (Number(b[column]) || 0);
-  if (column === 'quantityRaw' && /^\d+$/.test(String(a.quantityRaw || '')) && /^\d+$/.test(String(b.quantityRaw || ''))) {
-    const left = BigInt(a.quantityRaw); const right = BigInt(b.quantityRaw);
-    return left < right ? -1 : left > right ? 1 : 0;
-  }
+  if (column === 'slot') return (Number(a[column]) || 0) - (Number(b[column]) || 0);
+  if (column === 'success') return Number(Boolean(a.success)) - Number(Boolean(b.success));
   return String(a[column] ?? '').localeCompare(String(b[column] ?? ''), undefined, { sensitivity: 'base', numeric: true });
 }
 
@@ -6940,18 +6913,9 @@ function renderMarketplaceRawHeader(visibleColumns) {
 
 function createMarketplaceRawCell(entry, columnId) {
   if (columnId === 'timestamp') return createTextCell(formatMarketplaceTimestamp(entry.timestamp));
-  if (columnId === 'record') return createTextCell(entry.record || '--');
   if (columnId === 'stream') return createTextCell(entry.stream || entry.streams || '--');
-  if (columnId === 'eventType') return createTextCell(entry.eventType || '--');
-  if (columnId === 'decodedStatus') return createTextCell(entry.decodedStatus || '--');
-  if (columnId === 'fromWallet') return createTextCell(entry.fromWallet || '--');
-  if (columnId === 'toWallet') return createTextCell(entry.toWallet || '--');
-  if (columnId === 'asset') return createTextCell(entry.asset || entry.mint || '--');
-  if (columnId === 'quantityRaw') return createTextCell(formatMarketplaceRawQuantity(entry));
-  if (columnId === 'atlasAmount') return createTextCell(entry.atlasAmount == null ? '--' : formatMarketplaceAtlas(entry.atlasAmount, 8));
-  if (columnId === 'program') return createTextCell(entry.program || '--');
   if (columnId === 'slot') return createTextCell(entry.slot == null ? '--' : formatMarketplaceWhole(entry.slot));
-  if (columnId === 'eventId') return createTextCell(entry.eventId || '--');
+  if (columnId === 'success') return createTextCell(entry.success ? 'Yes' : 'No');
   if (columnId === 'payloadHash') return createTextCell(entry.payloadHash || '--');
   if (columnId === 'payload') return createMarketplaceRawPayloadCell(entry);
   if (columnId === 'signature') {
@@ -6971,21 +6935,12 @@ function renderMarketplaceRawData(result) {
   const visibleColumns = getVisibleEarningsColumns('marketplaceRaw');
   renderMarketplaceRawHeader(visibleColumns);
   updateMarketplaceRawFilterOptions(earningsMarketplaceRawStream, rows.map((entry) => entry.stream));
-  updateMarketplaceRawFilterOptions(earningsMarketplaceRawRecord, rows.map((entry) => entry.record));
-  updateMarketplaceRawFilterOptions(earningsMarketplaceRawWallet, rows.flatMap((entry) => [entry.fromWallet, entry.toWallet]));
-  updateMarketplaceRawFilterOptions(earningsMarketplaceRawEvent, rows.map((entry) => entry.eventType));
-  updateMarketplaceRawFilterOptions(earningsMarketplaceRawAsset, rows.map((entry) => entry.asset || entry.mint));
   const from = earningsMarketplaceRawFrom?.value || '';
   const to = earningsMarketplaceRawTo?.value || '';
   const filtered = rows.filter((entry) => {
     const day = String(entry.timestamp || '').slice(0, 10);
-    const wallet = earningsMarketplaceRawWallet?.value || '';
     return (!from || day >= from) && (!to || day <= to)
-      && (!earningsMarketplaceRawStream?.value || entry.stream === earningsMarketplaceRawStream.value)
-      && (!earningsMarketplaceRawRecord?.value || entry.record === earningsMarketplaceRawRecord.value)
-      && (!wallet || entry.fromWallet === wallet || entry.toWallet === wallet)
-      && (!earningsMarketplaceRawEvent?.value || entry.eventType === earningsMarketplaceRawEvent.value)
-      && (!earningsMarketplaceRawAsset?.value || (entry.asset || entry.mint) === earningsMarketplaceRawAsset.value);
+      && (!earningsMarketplaceRawStream?.value || entry.stream === earningsMarketplaceRawStream.value);
   });
   const direction = marketplaceRawSort.direction === 'asc' ? 1 : -1;
   filtered.sort((a, b) => direction * compareMarketplaceRawValues(a, b, marketplaceRawSort.column)
@@ -7001,12 +6956,12 @@ function renderMarketplaceRawData(result) {
       earningsMarketplaceRawCoverage.appendChild(row);
     }
   }
-  setText(earningsMarketplaceRawStatus, `${formatMarketplaceWhole(filtered.length)} of ${formatMarketplaceWhole(rows.length)} canonical raw records at ${formatCheckedAt(result?.checkedAt)}${error ? ` · ${error}` : ''}`);
+  setText(earningsMarketplaceRawStatus, `${formatMarketplaceWhole(filtered.length)} of ${formatMarketplaceWhole(rows.length)} raw transactions at ${formatCheckedAt(result?.checkedAt)}${error ? ` · ${error}` : ''}`);
   if (!earningsMarketplaceRawTableBody) return;
   earningsMarketplaceRawTableBody.textContent = '';
   if (!filtered.length) {
     const tr = document.createElement('tr'); tr.className = 'empty-row';
-    const td = createTextCell(error ? `Marketplace raw-data read failed: ${error}` : rows.length ? 'No raw records match the selected filters' : 'No Marketplace raw records found');
+    const td = createTextCell(error ? `Marketplace raw-data read failed: ${error}` : rows.length ? 'No raw transactions match the selected filters' : 'No Marketplace raw transactions found');
     td.colSpan = Math.max(1, visibleColumns.length); tr.appendChild(td); earningsMarketplaceRawTableBody.appendChild(tr); return;
   }
   for (const entry of filtered) {
@@ -9506,7 +9461,6 @@ earningsMarketplaceSubtabButtons.forEach((button) => {
 
 [
   earningsMarketplaceRawFrom, earningsMarketplaceRawTo, earningsMarketplaceRawStream,
-  earningsMarketplaceRawRecord, earningsMarketplaceRawWallet, earningsMarketplaceRawEvent, earningsMarketplaceRawAsset,
 ].forEach((control) => control?.addEventListener('change', () => {
   if (latestMarketplaceResult) renderMarketplaceRawData(latestMarketplaceResult);
 }));

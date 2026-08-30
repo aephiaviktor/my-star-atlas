@@ -1257,10 +1257,6 @@
                 <label>From <input id="earnings-marketplace-raw-from" type="date"></label>
                 <label>To <input id="earnings-marketplace-raw-to" type="date"></label>
                 <label>Stream <select id="earnings-marketplace-raw-stream"><option value="">All</option></select></label>
-                <label>Record <select id="earnings-marketplace-raw-record"><option value="">All</option></select></label>
-                <label>Wallet <select id="earnings-marketplace-raw-wallet"><option value="">All</option></select></label>
-                <label>Event <select id="earnings-marketplace-raw-event"><option value="">All</option></select></label>
-                <label>Asset <select id="earnings-marketplace-raw-asset"><option value="">All</option></select></label>
               </div>
               <details class="earnings-metric-guide">
                 <summary id="earnings-marketplace-raw-coverage-summary">Source coverage awaiting checkpoint</summary>
@@ -1270,23 +1266,14 @@
                 <table class="fleet-table earnings-table">
                   <thead id="earnings-marketplace-raw-table-head"><tr>
                     <th><button type="button" data-marketplace-raw-sort="timestamp">Timestamp (UTC)</button></th>
-                    <th><button type="button" data-marketplace-raw-sort="record">Record</button></th>
                     <th><button type="button" data-marketplace-raw-sort="stream">Stream</button></th>
-                    <th><button type="button" data-marketplace-raw-sort="eventType">Event Type</button></th>
-                    <th><button type="button" data-marketplace-raw-sort="decodedStatus">Status</button></th>
-                    <th><button type="button" data-marketplace-raw-sort="fromWallet">Source Wallet</button></th>
-                    <th><button type="button" data-marketplace-raw-sort="toWallet">Destination Wallet</button></th>
-                    <th><button type="button" data-marketplace-raw-sort="asset">Asset / Mint</button></th>
-                    <th><button type="button" data-marketplace-raw-sort="quantityRaw">Quantity</button></th>
-                    <th><button type="button" data-marketplace-raw-sort="atlasAmount">ATLAS</button></th>
-                    <th><button type="button" data-marketplace-raw-sort="program">Program</button></th>
                     <th><button type="button" data-marketplace-raw-sort="slot">Slot</button></th>
-                    <th><button type="button" data-marketplace-raw-sort="eventId">Event ID</button></th>
+                    <th><button type="button" data-marketplace-raw-sort="success">Success</button></th>
                     <th><button type="button" data-marketplace-raw-sort="signature">Signature</button></th>
                     <th><button type="button" data-marketplace-raw-sort="payloadHash">Payload Hash</button></th>
                     <th>Payload</th>
                   </tr></thead>
-                  <tbody id="earnings-marketplace-raw-table-body"><tr class="empty-row"><td colspan="16">No Marketplace raw data loaded</td></tr></tbody>
+                  <tbody id="earnings-marketplace-raw-table-body"><tr class="empty-row"><td colspan="7">No Marketplace raw transactions loaded</td></tr></tbody>
                 </table>
               </div>
             </section>
