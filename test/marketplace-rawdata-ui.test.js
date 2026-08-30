@@ -13,7 +13,8 @@ const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
 const raw = fs.readFileSync(path.join(root, 'electron', 'marketplace-rawdata.js'), 'utf8');
 
 test('Marketplace Raw Data exposes only transaction filters, sortable facts, and payload details', () => {
-  for (const id of ['raw-from', 'raw-to', 'raw-stream']) assert.match(html, new RegExp(`id="earnings-marketplace-${id}"`));
+  for (const id of ['raw-from', 'raw-to', 'raw-discovery-source']) assert.match(html, new RegExp(`id="earnings-marketplace-${id}"`));
+  assert.doesNotMatch(html, /id="earnings-marketplace-raw-stream"/);
   for (const id of ['raw-record', 'raw-wallet', 'raw-event', 'raw-asset']) assert.doesNotMatch(html, new RegExp(`id="earnings-marketplace-${id}"`));
   assert.match(html, /id="earnings-marketplace-raw-coverage-summary"/);
   assert.match(html, /data-marketplace-raw-sort="timestamp"/);
@@ -36,7 +37,7 @@ test('Marketplace shows only the table belonging to the active Raw Data or Calcu
 test('Marketplace Raw Data owns persistent sidebar controls for its seven raw transaction columns', () => {
   assert.match(html, /id="earnings-marketplace-raw-table-head"/);
   assert.match(renderer, /const marketplaceRawColumns = Object\.freeze/);
-  for (const id of ['timestamp', 'stream', 'slot', 'success', 'signature', 'payloadHash', 'payload']) {
+  for (const id of ['timestamp', 'discoverySource', 'slot', 'success', 'signature', 'payloadHash', 'payload']) {
     assert.match(renderer, new RegExp(`id: '${id}'`));
   }
   for (const id of ['record', 'eventType', 'decodedStatus', 'fromWallet', 'toWallet', 'asset', 'quantityRaw', 'atlasAmount', 'program', 'eventId']) {
@@ -61,6 +62,15 @@ test('Raw reader and writer are transaction-only with no decoded-event projectio
   assert.doesNotMatch(main, /lines\.push\(formatRawEventInfluxLine/);
   assert.match(main, /return \{ transactions: \(records \|\| \[\]\)\.length, events: 0 \}/);
   assert.match(main, /marketplaceRawDataCoverage/);
+});
+
+test('Raw ingestion records factual discovery provenance without decoding event streams', () => {
+  assert.match(raw, /gm: 'gm_wallet', css: 'css_account', token: 'token_account'/);
+  assert.match(raw, /discoverySources: \['lm_scanner'\]/);
+  assert.doesNotMatch(raw.match(/async function scanMarketplaceRawData[\s\S]*?return \{ records, cursors:/)?.[0] || '', /classifyCssCargoEvents|playerTransferEvents/);
+  assert.match(main, /gm: 'gm_wallet', lm: 'lm_scanner', deposit: 'css_account', withdraw: 'css_account'/);
+  assert.match(main, /transfer: 'token_account', multi: 'multiple', chain: 'legacy_unknown'/);
+  assert.match(html, />Discovery Source <select id="earnings-marketplace-raw-discovery-source"/);
 });
 
 test('Marketplace snapshot state is independent and retains raw rows after a failed refresh', () => {

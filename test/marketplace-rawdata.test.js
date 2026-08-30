@@ -62,8 +62,8 @@ test('transfer projection keeps only balanced token movements between configured
 test('raw Influx projection preserves the complete transaction and separate event identities', () => {
   const signature = key();
   const transaction = tx({ signature });
-  const line = formatRawTransactionInfluxLine({ transaction });
-  assert.match(line, new RegExp(`^${MARKETPLACE_RAWDATA_MEASUREMENT},record=transaction,stream=chain,eventId=transaction,signature=`));
+  const line = formatRawTransactionInfluxLine({ transaction, discoverySource: 'gm_wallet' });
+  assert.match(line, new RegExp(`^${MARKETPLACE_RAWDATA_MEASUREMENT},record=transaction,discoverySource=gm_wallet,eventId=transaction,signature=`));
   assert.match(line, /payload="/);
   assert.match(line, /payloadHash="[a-f0-9]{64}"/);
   assert.doesNotMatch(line, /discoveredBy=|streams=|fetchedAt=/);
@@ -73,7 +73,7 @@ test('raw Influx projection preserves the complete transaction and separate even
   assert.notEqual(eventA, eventB);
 });
 
-test('LM projection archives only already-fetched transactions with decoded order or execution facts', () => {
+test('LM raw projection archives every already-fetched transaction without decoded events', () => {
   const orderSignature = key(); const executionSignature = key(); const unrelatedSignature = key();
   const orderTransaction = tx({ signature: orderSignature });
   const executionTransaction = tx({ signature: executionSignature });
@@ -83,7 +83,7 @@ test('LM projection archives only already-fetched transactions with decoded orde
     orders: [{ orderId: 'order-1', creationSignature: orderSignature, side: 'buy', initializer: 'wallet-1', asset: 'Iron', rawMint: 'mint-1', originalQuantity: 25, priceAtlas: 2 }],
     trades: [{ id: 'trade-1', orderId: 'order-1', signature: executionSignature, side: 'buy', wallet: 'wallet-1', asset: 'Iron', rawMint: 'mint-1', quantity: 5, grossAtlas: 10 }],
   });
-  assert.deepEqual(records.map((record) => record.signature), [orderSignature, executionSignature]);
-  assert.deepEqual(records.flatMap((record) => record.events.map((event) => event.type)), ['order_created', 'execution']);
-  assert.ok(records.every((record) => record.streams[0] === 'lm'));
+  assert.deepEqual(records.map((record) => record.signature), [orderSignature, executionSignature, unrelatedSignature]);
+  assert.ok(records.every((record) => !Object.hasOwn(record, 'events')));
+  assert.ok(records.every((record) => record.discoverySources[0] === 'lm_scanner'));
 });

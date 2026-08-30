@@ -725,16 +725,21 @@ async function fetchMarketplaceRawDataFromInflux(settings) {
   |> filter(fn: (r) => r._measurement == "marketplace_rawdata")
   |> filter(fn: (r) => r.record == "transaction")
   |> filter(fn: (r) => r._field == "slot" or r._field == "success" or r._field == "payloadHash" or r._field == "payload")
-  |> pivot(rowKey: ["_time", "record", "signature", "eventId", "stream"], columnKey: ["_field"], valueColumn: "_value")
+  |> map(fn: (r) => ({ r with discoverySource: if exists r.discoverySource then r.discoverySource else if exists r.stream then r.stream else "legacy_unknown" }))
+  |> pivot(rowKey: ["_time", "record", "signature", "eventId", "discoverySource"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
   try {
     const rawRows = parseInfluxCsv(await queryInfluxFlux(settings, flux)).map((row) => {
       let payload = null;
       try { payload = row.payload ? JSON.parse(row.payload) : null; } catch (_error) { payload = null; }
       const signature = String(row.signature || payload?.signature || payload?.transaction?.signatures?.[0] || '');
+      const legacySource = String(row.discoverySource || 'legacy_unknown');
+      const discoverySource = ({
+        gm: 'gm_wallet', lm: 'lm_scanner', deposit: 'css_account', withdraw: 'css_account',
+        transfer: 'token_account', multi: 'multiple', chain: 'legacy_unknown',
+      })[legacySource] || legacySource;
       return {
-        timestamp: String(row._time || ''), record: String(row.record || ''), stream: String(row.stream || ''),
-        streams: String(row.streams || ''), eventId: String(row.eventId || payload?.eventId || ''), signature,
+        timestamp: String(row._time || ''), discoverySource, signature,
         slot: Number.isFinite(Number(row.slot)) ? Number(row.slot) : null,
         success: row.success === true || String(row.success).toLowerCase() === 'true',
         discoveredBy: String(row.discoveredBy || ''),
@@ -747,7 +752,7 @@ async function fetchMarketplaceRawDataFromInflux(settings) {
     for (const row of rawRows) {
       const existingIndex = transactionIndex.get(row.signature);
       if (existingIndex != null) {
-        if (rows[existingIndex].stream === 'chain' && row.stream !== 'chain') rows[existingIndex] = row;
+        if (rows[existingIndex].discoverySource === 'legacy_unknown' && row.discoverySource !== 'legacy_unknown') rows[existingIndex] = row;
         continue;
       }
       transactionIndex.set(row.signature, rows.length);
@@ -4654,7 +4659,7 @@ async function buildMarketplaceRawDataCoverage(settings) {
   let gmWallets = [];
   try { gmWallets = parseGmTradingWallets(settings.gmTradingWallets); } catch (_error) { gmWallets = []; }
   const sources = gmWallets.map((address) => ({
-    stream: 'gm', label: `GM · ${address}`, address, sourceCount: 1,
+    discoverySource: 'gm_wallet', label: `GM wallet · ${address}`, address, sourceCount: 1,
     backfillComplete: rawCursorComplete(checkpoint.cursors[address]),
   }));
   for (const faction of ['MUD', 'ONI', 'USTUR']) {
@@ -4666,7 +4671,7 @@ async function buildMarketplaceRawDataCoverage(settings) {
       playerProfile: profile, starbase: css.publicKey,
     });
     sources.push({
-      stream: 'deposit/withdraw', label: `${faction} CSS StarbasePlayer`, address, sourceCount: 1,
+      discoverySource: 'css_account', label: `${faction} CSS account`, address, sourceCount: 1,
       backfillComplete: rawCursorComplete(checkpoint.cursors[address]),
     });
   }
@@ -4675,13 +4680,13 @@ async function buildMarketplaceRawDataCoverage(settings) {
     tokenAccountsByOwner.set(entry.owner, [...(tokenAccountsByOwner.get(entry.owner) || []), entry.address]);
   }
   for (const [owner, addresses] of tokenAccountsByOwner) sources.push({
-    stream: 'transfer', label: `Transfers · ${owner}`, address: owner, sourceCount: addresses.length,
+    discoverySource: 'token_account', label: `Token accounts · ${owner}`, address: owner, sourceCount: addresses.length,
     backfillComplete: addresses.length > 0 && addresses.every((address) => rawCursorComplete(checkpoint.cursors[address])),
   });
   const faction = normalizeFaction(settings.faction);
   const lmCheckpoint = await loadLocalMarketTradeCheckpoint(localMarketCheckpointPath(faction));
   sources.push({
-    stream: 'lm', label: `LM · ${faction}`, address: String(settings.playerProfiles?.[faction] || ''), sourceCount: 1,
+    discoverySource: 'lm_scanner', label: `LM scanner · ${faction}`, address: String(settings.playerProfiles?.[faction] || ''), sourceCount: 1,
     backfillComplete: lmCheckpoint.marketplaceBackfilled === true,
   });
   return {
@@ -4696,8 +4701,9 @@ async function buildMarketplaceRawDataCoverage(settings) {
 async function writeMarketplaceRawRecords(settings, records) {
   const lines = [];
   for (const record of records || []) {
-    const stream = record.streams?.length === 1 ? record.streams[0] : record.streams?.length > 1 ? 'multi' : 'chain';
-    lines.push(formatRawTransactionInfluxLine({ transaction: record.transaction, stream }));
+    const discoverySource = record.discoverySources?.length === 1 ? record.discoverySources[0]
+      : record.discoverySources?.length > 1 ? 'multiple' : 'legacy_unknown';
+    lines.push(formatRawTransactionInfluxLine({ transaction: record.transaction, discoverySource }));
   }
   if (lines.length) await writeInventoryBasisLinesToInflux(settings, lines.join('\n'));
   return { transactions: (records || []).length, events: 0 };
@@ -5470,11 +5476,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   }
   const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
-  const lmRawRecords = buildLmRawRecords({
-    transactions: scanned.rawTransactions,
-    orders: scanned.orders,
-    trades: scanned.trades,
-  });
+  const lmRawRecords = buildLmRawRecords({ transactions: scanned.rawTransactions });
   try {
     await writeMarketplaceRawRecords(settings, lmRawRecords);
   } catch (error) {

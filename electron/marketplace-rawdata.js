@@ -192,7 +192,7 @@ function playerTransferEvents(transaction, playerWallets) {
   return events;
 }
 
-function formatRawTransactionInfluxLine({ transaction, stream = 'chain' }) {
+function formatRawTransactionInfluxLine({ transaction, discoverySource = 'legacy_unknown' }) {
   const signature = String(transaction?.transaction?.signatures?.[0] || '').trim();
   const blockTime = Number(transaction?.blockTime);
   const slot = Number(transaction?.slot);
@@ -203,8 +203,9 @@ function formatRawTransactionInfluxLine({ transaction, stream = 'chain' }) {
     `slot=${slot}i`, `success=${transaction?.meta?.err == null}`, `payload=${escapeField(payload)}`,
     `payloadHash=${escapeField(hash)}`,
   ];
-  const normalizedStream = /^[a-z][a-z0-9_-]{0,31}$/.test(String(stream)) ? String(stream) : 'chain';
-  return `${MARKETPLACE_RAWDATA_MEASUREMENT},record=transaction,stream=${escapeTag(normalizedStream)},eventId=transaction,signature=${escapeTag(signature)} ${fields.join(',')} ${BigInt(blockTime) * 1000000000n}`;
+  const normalizedSource = /^(?:gm_wallet|lm_scanner|css_account|token_account|multiple)$/.test(String(discoverySource))
+    ? String(discoverySource) : 'legacy_unknown';
+  return `${MARKETPLACE_RAWDATA_MEASUREMENT},record=transaction,discoverySource=${escapeTag(normalizedSource)},eventId=transaction,signature=${escapeTag(signature)} ${fields.join(',')} ${BigInt(blockTime) * 1000000000n}`;
 }
 
 function formatRawEventInfluxLine(event, blockTime) {
@@ -213,39 +214,12 @@ function formatRawEventInfluxLine(event, blockTime) {
   return `${MARKETPLACE_RAWDATA_MEASUREMENT},record=event,stream=${escapeTag(event.stream)},eventId=${escapeTag(event.eventId)},signature=${escapeTag(event.signature)} payload=${escapeField(payload)},payloadHash=${escapeField(payloadHash(event))} ${BigInt(blockTime) * 1000000000n}`;
 }
 
-function buildLmRawRecords({ transactions = [], orders = [], trades = [] } = {}) {
-  const transactionBySignature = new Map(transactions.map((transaction) => [
-    String(transaction?.signature || transaction?.transaction?.signatures?.[0] || ''), transaction,
-  ]).filter(([signature]) => signature));
-  const eventsBySignature = new Map();
-  const add = (signature, event) => {
-    if (!transactionBySignature.has(signature)) return;
-    eventsBySignature.set(signature, [...(eventsBySignature.get(signature) || []), event]);
-  };
-  for (const order of orders) {
-    const signature = String(order?.creationSignature || '');
-    if (!signature || !order?.orderId) continue;
-    add(signature, {
-      eventId: `${signature}:lm-order:${order.orderId}`, signature, stream: 'lm', type: 'order_created',
-      orderId: String(order.orderId), side: String(order.side || ''), fromWallet: String(order.initializer || ''),
-      asset: String(order.asset || ''), mint: String(order.rawMint || order.certificateMint || ''),
-      quantityRaw: String(order.originalQuantity ?? ''), unitPriceAtlas: Number(order.priceAtlas),
-    });
-  }
-  for (const trade of trades) {
-    const signature = String(trade?.signature || '');
-    if (!signature || !trade?.id) continue;
-    add(signature, {
-      eventId: `${signature}:lm-execution:${trade.id}`, signature, stream: 'lm', type: 'execution',
-      orderId: String(trade.orderId || ''), side: String(trade.side || ''), fromWallet: String(trade.wallet || ''),
-      asset: String(trade.asset || ''), mint: String(trade.rawMint || trade.certificateMint || ''),
-      quantityRaw: String(trade.quantity ?? ''), grossAtlas: Number(trade.grossAtlas),
-      marketplaceFeeAtlas: Number(trade.marketplaceFeeAtlas || 0), txFeeAtlas: Number(trade.txFeeAtlas || 0),
-    });
-  }
-  return [...eventsBySignature.entries()].map(([signature, events]) => ({
-    signature, transaction: transactionBySignature.get(signature), streams: ['lm'], events,
-  }));
+function buildLmRawRecords({ transactions = [] } = {}) {
+  return transactions.map((transaction) => ({
+    signature: String(transaction?.signature || transaction?.transaction?.signatures?.[0] || ''),
+    transaction,
+    discoverySources: ['lm_scanner'],
+  })).filter((record) => record.signature);
 }
 
 async function discoverPlayerTokenAccounts(connection, playerWallets, allowedMints = []) {
@@ -359,21 +333,11 @@ async function scanMarketplaceRawData(connection, {
   for (const item of scanned.fetched) {
     const transaction = item.transaction;
     const signature = String(transaction.signature || transaction.transaction?.signatures?.[0] || '');
-    const gmScopes = item.scopes.filter((scope) => scope.kind === 'gm');
-    const streams = new Set(gmScopes.map(() => 'gm'));
-    const events = [];
-    for (const scope of item.scopes.filter((value) => value.kind === 'css')) {
-      for (const event of classifyCssCargoEvents(transaction, { sageProgramId: scope.sageProgramId, cssStarbasePlayer: scope.address })) {
-        events.push({ ...event, faction: scope.faction });
-        streams.add(event.stream);
-      }
-    }
-    for (const event of playerTransferEvents(transaction, playerWallets)) {
-      events.push(event);
-      streams.add('transfer');
-    }
-    if (!streams.size) continue;
-    records.push({ signature, transaction, streams: [...streams].sort(), discoveredBy: [...new Set(item.scopes.map((scope) => scope.address))].sort(), events });
+    const discoverySources = new Set(item.scopes.map((scope) => ({
+      gm: 'gm_wallet', css: 'css_account', token: 'token_account',
+    })[scope.kind]).filter(Boolean));
+    if (!discoverySources.size) continue;
+    records.push({ signature, transaction, discoverySources: [...discoverySources].sort() });
   }
   return { records, cursors: scanned.cursors, rpc: scanned.rpc };
 }
