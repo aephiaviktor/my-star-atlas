@@ -26,13 +26,24 @@ test('Marketplace Raw Data exposes filters, coverage, sortable headers, and payl
   assert.match(renderer, /className = 'marketplace-raw-payload'/);
 });
 
-test('Raw reader hides legacy generic GM observations and projects auditable fact summaries', () => {
+test('Raw reader keeps transaction rows neutral and attributes wallets only on decoded event rows', () => {
   assert.match(main, /row\.payload\?\.type === 'transaction_observed'/);
-  assert.match(main, /eventType: instruction/);
-  assert.match(main, /fromWallet:/);
+  assert.match(main, /eventType: isEvent \? String\(payload\.type \|\| ''\) : 'transaction'/);
+  assert.match(main, /fromWallet: isEvent \? String\(payload\.fromWallet/);
+  assert.match(main, /toWallet: isEvent \? String\(payload\.toWallet/);
+  assert.doesNotMatch(main, /firstSigner/);
   assert.match(main, /quantityRaw:/);
   assert.match(main, /decodedStatus:/);
   assert.match(main, /marketplaceRawDataCoverage/);
+});
+
+test('Marketplace snapshot state is independent and retains raw rows after a failed refresh', () => {
+  assert.match(renderer, /let latestMarketplaceResult = null/);
+  assert.match(renderer, /latestMarketplaceResult = cached/);
+  assert.match(renderer, /const rawReadFailed = Boolean\(result\?\.marketplaceRawDataError\)/);
+  assert.match(renderer, /marketplaceRawData: prior\.marketplaceRawData/);
+  assert.match(renderer, /renderMarketplaceRawData\(latestMarketplaceResult\)/);
+  assert.doesNotMatch(renderer, /renderMarketplaceRawData\(latestEarningsResult\)/);
 });
 
 test('LM uses already-fetched scanner transactions and GM no longer emits generic observation events', () => {

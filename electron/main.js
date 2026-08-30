@@ -765,20 +765,19 @@ async function fetchMarketplaceRawDataFromInflux(settings) {
         .map((balance) => String(balance.mint || '')).filter(Boolean))];
       const mint = String(payload.mint || payload.rawMint || (transactionMints.length === 1 ? transactionMints[0] : ''));
       const asset = String(payload.asset || ASSET_REGISTRY.find((entry) => entry.mint === mint)?.name || '');
-      const logs = row.record === 'transaction' ? (payload.meta?.logMessages || []) : [];
-      const instruction = row.record === 'event'
-        ? String(payload.type || '')
-        : String(logs.map((line) => String(line).match(/Instruction:\s*([A-Za-z0-9_]+)/)?.[1]).find(Boolean) || 'transaction');
+      const isEvent = row.record === 'event';
       const messageInstructions = payload.transaction?.message?.instructions || [];
       const programs = row.record === 'transaction'
         ? [...new Set(messageInstructions.map((entry) => String(entry.programId || entry.program || '')).filter(Boolean))]
         : [];
-      const firstSigner = (payload.transaction?.message?.accountKeys || []).find((entry) => entry?.signer);
       rows.push({
         ...row,
-        eventType: instruction,
-        fromWallet: String(payload.fromWallet || payload.wallet || payload.initializer || firstSigner?.pubkey || ''),
-        toWallet: String(payload.toWallet || ''),
+        // A transaction can contain actions performed by several parties. Do not
+        // attribute its first signer or first log instruction to this installation;
+        // ownership-aware decoded event rows carry those facts separately.
+        eventType: isEvent ? String(payload.type || '') : 'transaction',
+        fromWallet: isEvent ? String(payload.fromWallet || payload.wallet || payload.initializer || '') : '',
+        toWallet: isEvent ? String(payload.toWallet || '') : '',
         mint,
         asset,
         quantityRaw: String(payload.quantityRaw ?? payload.quantity ?? ''),

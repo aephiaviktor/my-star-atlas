@@ -32,7 +32,7 @@ test('Marketplace exposes every table column in the persistent Earnings sidebar 
   assert.match(renderer, /getVisibleEarningsColumns\('marketplace'\)/);
   assert.match(renderer, /renderMarketplaceHeader\(visibleColumns\)/);
   assert.match(renderer, /createMarketplaceEarningsCell\(entry, column\.id/);
-  assert.match(renderer, /subtab === 'marketplace'[\s\S]*renderEarningsMarketplace\(latestEarningsResult\)/);
+  assert.match(renderer, /subtab === 'marketplace'[\s\S]*renderEarningsMarketplace\(latestMarketplaceResult\)/);
 });
 
 test('Marketplace renderer uses side-specific value labels and buyer-paid accounting', () => {

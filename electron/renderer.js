@@ -384,6 +384,7 @@ let activeCargoTable = 'fleet';
 let latestSettings = null;
 let latestFleetResult = null;
 let latestEarningsResult = null;
+let latestMarketplaceResult = null;
 let latestCargoAllocationResult = null;
 let cargoAllocationRequestSequence = 0;
 let latestBreakevenResult = null;
@@ -1844,6 +1845,7 @@ function mergeSettingsFromForm(overrides = {}) {
 function resetFactionScopedState() {
   latestFleetResult = null;
   latestEarningsResult = null;
+  latestMarketplaceResult = null;
   latestBreakevenResult = null;
   latestOptimizationResult = null;
   optimizationRows = [];
@@ -5915,7 +5917,7 @@ function renderEarningsColumnControls() {
       } else if (subtab === 'breakeven') {
         renderEarningsBreakeven(latestBreakevenResult);
       } else if (subtab === 'marketplace') {
-        renderEarningsMarketplace(latestEarningsResult);
+        renderEarningsMarketplace(latestMarketplaceResult);
       } else if (latestEarningsResult) {
         renderEarnings(latestEarningsResult);
       } else {
@@ -7371,8 +7373,8 @@ async function refreshMarketplace({ sync = false } = {}) {
   const cacheKey = `${faction}:${profile}`;
   const cached = marketplaceSnapshotCache.get(cacheKey);
   if (cached) {
-    latestEarningsResult = { ...(latestEarningsResult || {}), ...cached, ok: latestEarningsResult?.ok ?? cached.ok };
-    renderEarningsMarketplace(latestEarningsResult);
+    latestMarketplaceResult = cached;
+    renderEarningsMarketplace(latestMarketplaceResult);
     if (!sync) return cached;
   }
   if (marketplaceRefreshInFlight.has(cacheKey)) return marketplaceRefreshInFlight.get(cacheKey);
@@ -7387,9 +7389,19 @@ async function refreshMarketplace({ sync = false } = {}) {
     const currentSettings = latestSettings || getFormPayload();
     if (faction !== normalizeFaction(currentSettings.faction)
       || profile !== getActivePlayerProfile(currentSettings)) return result;
-    marketplaceSnapshotCache.set(cacheKey, result);
-    latestEarningsResult = { ...(latestEarningsResult || {}), ...result, ok: latestEarningsResult?.ok ?? result.ok };
-    renderEarningsMarketplace(latestEarningsResult);
+    const prior = marketplaceSnapshotCache.get(cacheKey);
+    const rawReadFailed = Boolean(result?.marketplaceRawDataError);
+    const accepted = rawReadFailed && prior
+      ? {
+          ...result,
+          marketplaceRawData: prior.marketplaceRawData,
+          marketplaceRawDataCount: prior.marketplaceRawDataCount,
+          marketplaceRawDataCoverage: result.marketplaceRawDataCoverage || prior.marketplaceRawDataCoverage,
+        }
+      : result;
+    marketplaceSnapshotCache.set(cacheKey, accepted);
+    latestMarketplaceResult = accepted;
+    renderEarningsMarketplace(latestMarketplaceResult);
     const factionWrite = syncResult?.marketplaceFactionV2Write;
     if (factionWrite?.error) {
       setText(earningsMarketplaceSyncStatus, `Marketplace faction-v2 write failed: ${factionWrite.error}`);
@@ -9396,8 +9408,8 @@ function setActiveEarningsSubtab(subtab) {
   }
   if (subtab === 'mining' && latestEarningsResult) {
     renderEarningsMining(latestEarningsResult);
-  } else if (subtab === 'marketplace' && latestEarningsResult) {
-    renderEarningsMarketplace(latestEarningsResult);
+  } else if (subtab === 'marketplace' && latestMarketplaceResult) {
+    renderEarningsMarketplace(latestMarketplaceResult);
   } else if (subtab === 'cargo' && latestEarningsResult) {
     renderEarningsCargo(latestEarningsResult);
   }
@@ -9446,7 +9458,7 @@ earningsMarketplaceSubtabButtons.forEach((button) => {
   earningsMarketplaceRawFrom, earningsMarketplaceRawTo, earningsMarketplaceRawStream,
   earningsMarketplaceRawRecord, earningsMarketplaceRawWallet, earningsMarketplaceRawEvent, earningsMarketplaceRawAsset,
 ].forEach((control) => control?.addEventListener('change', () => {
-  if (latestEarningsResult) renderMarketplaceRawData(latestEarningsResult);
+  if (latestMarketplaceResult) renderMarketplaceRawData(latestMarketplaceResult);
 }));
 
 earningsMarketplaceRawSortButtons.forEach((button) => {
@@ -9455,14 +9467,14 @@ earningsMarketplaceRawSortButtons.forEach((button) => {
     marketplaceRawSort = marketplaceRawSort.column === column
       ? { column, direction: marketplaceRawSort.direction === 'asc' ? 'desc' : 'asc' }
       : { column, direction: 'asc' };
-    if (latestEarningsResult) renderMarketplaceRawData(latestEarningsResult);
+    if (latestMarketplaceResult) renderMarketplaceRawData(latestMarketplaceResult);
   });
 });
 
 earningsMarketplaceSideButtons.forEach((button) => {
   button.addEventListener('click', () => {
     earningsMarketplaceSide = button.dataset.marketplaceSide === 'sell' ? 'sell' : 'buy';
-    if (latestEarningsResult) renderEarningsMarketplace(latestEarningsResult);
+    if (latestMarketplaceResult) renderEarningsMarketplace(latestMarketplaceResult);
   });
 });
 
