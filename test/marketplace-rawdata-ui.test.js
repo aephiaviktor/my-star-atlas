@@ -52,6 +52,11 @@ test('Marketplace Raw Data owns persistent sidebar controls for its seven raw tr
 });
 
 test('Raw reader and writer are transaction-only with no decoded-event projection', () => {
+  assert.match(main, /const rawDataCutoverIso = '2026-08-30T09:45:54\.000Z'/);
+  assert.match(main, /const rawDataCutoverSlot = 442848431/);
+  assert.match(main, /range\(start: time\(v: "\$\{rawDataCutoverIso\}"\)\)/);
+  assert.match(main, /r\.discoverySource == "gm_wallet"[\s\S]*r\.discoverySource == "multiple"/);
+  assert.match(main, /exists r\.slot and r\.slot >= \$\{rawDataCutoverSlot\}/);
   assert.match(main, /r\.record == "transaction"/);
   assert.match(main, /r\._field == "slot" or r\._field == "success" or r\._field == "payloadHash" or r\._field == "payload"/);
   assert.doesNotMatch(main, /streamsBySignature/);
@@ -68,8 +73,7 @@ test('Raw ingestion records factual discovery provenance without decoding event 
   assert.match(raw, /gm: 'gm_wallet', css: 'css_account', token: 'token_account'/);
   assert.match(raw, /discoverySources: \['lm_scanner'\]/);
   assert.doesNotMatch(raw.match(/async function scanMarketplaceRawData[\s\S]*?return \{ records, cursors:/)?.[0] || '', /classifyCssCargoEvents|playerTransferEvents/);
-  assert.match(main, /gm: 'gm_wallet', lm: 'lm_scanner', deposit: 'css_account', withdraw: 'css_account'/);
-  assert.match(main, /transfer: 'token_account', multi: 'multiple', chain: 'legacy_unknown'/);
+  assert.doesNotMatch(main, /legacySource|chain: 'legacy_unknown'/);
   assert.match(html, />Discovery Source <select id="earnings-marketplace-raw-discovery-source"/);
 });
 

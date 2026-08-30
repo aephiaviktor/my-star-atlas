@@ -720,26 +720,24 @@ async function fetchMarketplaceAssetFlowsFromInflux(settings) {
 async function fetchMarketplaceRawDataFromInflux(settings) {
   const bucket = String(settings.influxBucket || '').trim();
   if (!bucket) return { rows: [], error: '' };
+  const rawDataCutoverIso = '2026-08-30T09:45:54.000Z';
+  const rawDataCutoverSlot = 442848431;
   const flux = `from(bucket: "${escapeFluxString(bucket)}")
-  |> range(start: time(v: "${MARKETPLACE_HISTORY_CUTOVER_ISO}"))
+  |> range(start: time(v: "${rawDataCutoverIso}"))
   |> filter(fn: (r) => r._measurement == "marketplace_rawdata")
   |> filter(fn: (r) => r.record == "transaction")
+  |> filter(fn: (r) => r.discoverySource == "gm_wallet" or r.discoverySource == "lm_scanner" or r.discoverySource == "css_account" or r.discoverySource == "token_account" or r.discoverySource == "multiple")
   |> filter(fn: (r) => r._field == "slot" or r._field == "success" or r._field == "payloadHash" or r._field == "payload")
-  |> map(fn: (r) => ({ r with discoverySource: if exists r.discoverySource then r.discoverySource else if exists r.stream then r.stream else "legacy_unknown" }))
   |> pivot(rowKey: ["_time", "record", "signature", "eventId", "discoverySource"], columnKey: ["_field"], valueColumn: "_value")
+  |> filter(fn: (r) => exists r.slot and r.slot >= ${rawDataCutoverSlot})
   |> sort(columns: ["_time"], desc: true)`;
   try {
     const rawRows = parseInfluxCsv(await queryInfluxFlux(settings, flux)).map((row) => {
       let payload = null;
       try { payload = row.payload ? JSON.parse(row.payload) : null; } catch (_error) { payload = null; }
       const signature = String(row.signature || payload?.signature || payload?.transaction?.signatures?.[0] || '');
-      const legacySource = String(row.discoverySource || 'legacy_unknown');
-      const discoverySource = ({
-        gm: 'gm_wallet', lm: 'lm_scanner', deposit: 'css_account', withdraw: 'css_account',
-        transfer: 'token_account', multi: 'multiple', chain: 'legacy_unknown',
-      })[legacySource] || legacySource;
       return {
-        timestamp: String(row._time || ''), discoverySource, signature,
+        timestamp: String(row._time || ''), discoverySource: String(row.discoverySource || ''), signature,
         slot: Number.isFinite(Number(row.slot)) ? Number(row.slot) : null,
         success: row.success === true || String(row.success).toLowerCase() === 'true',
         discoveredBy: String(row.discoveredBy || ''),
