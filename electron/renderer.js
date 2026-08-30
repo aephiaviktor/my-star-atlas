@@ -199,6 +199,8 @@ const earningsMarketplaceRawCoverage = document.querySelector('#earnings-marketp
 const earningsMarketplaceEventsStatus = document.querySelector('#earnings-marketplace-events-status');
 const earningsMarketplaceEventsTableBody = document.querySelector('#earnings-marketplace-events-table-body');
 const earningsMarketplaceEventsTableHead = document.querySelector('#earnings-marketplace-events-table-head');
+const earningsMarketplaceRawLinkedSignature = document.querySelector('#earnings-marketplace-raw-linked-signature');
+const earningsMarketplaceEventsLinkedSignature = document.querySelector('#earnings-marketplace-events-linked-signature');
 const earningsMarketplaceEventsFrom = document.querySelector('#earnings-marketplace-events-from');
 const earningsMarketplaceEventsTo = document.querySelector('#earnings-marketplace-events-to');
 const earningsMarketplaceEventsType = document.querySelector('#earnings-marketplace-events-type');
@@ -383,6 +385,7 @@ let earningsMarketplaceSide = 'buy';
 let currentMarketplaceSubtab = 'raw';
 let marketplaceRawSort = { column: 'timestamp', direction: 'desc' };
 let marketplaceEventsSort = { column: 'timestamp', direction: 'desc' };
+let marketplaceLinkedSignature = '';
 let activeCargoTable = 'fleet';
 let latestSettings = null;
 let latestFleetResult = null;
@@ -6916,9 +6919,39 @@ function createMarketplaceRawPayloadCell(entry) {
   return cell;
 }
 
+function renderMarketplaceLinkedSignature(container) {
+  if (!container) return;
+  container.hidden = !marketplaceLinkedSignature;
+  container.replaceChildren();
+  if (!marketplaceLinkedSignature) return;
+  const label = document.createElement('span');
+  label.textContent = `Linked signature: ${marketplaceLinkedSignature}`;
+  const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear';
+  clear.addEventListener('click', () => setMarketplaceLinkedSignature(''));
+  container.append(label, clear);
+}
+
+function setMarketplaceLinkedSignature(signature) {
+  marketplaceLinkedSignature = String(signature || '');
+  if (!latestMarketplaceResult) return;
+  renderMarketplaceRawData(latestMarketplaceResult);
+  renderMarketplaceDecodedEvents(latestMarketplaceResult);
+}
+
+function createMarketplaceSelectorCell(entry) {
+  const cell = document.createElement('td');
+  const input = document.createElement('input'); input.type = 'checkbox';
+  input.setAttribute('aria-label', `Link signature ${entry.signature || ''}`);
+  input.checked = Boolean(entry.signature && entry.signature === marketplaceLinkedSignature);
+  input.addEventListener('change', () => setMarketplaceLinkedSignature(input.checked ? entry.signature : ''));
+  cell.appendChild(input);
+  return cell;
+}
+
 function renderMarketplaceRawHeader(visibleColumns) {
   if (!earningsMarketplaceRawTableHead) return;
   const row = document.createElement('tr');
+  const selector = document.createElement('th'); selector.textContent = 'Selector'; row.appendChild(selector);
   for (const column of visibleColumns) {
     const cell = document.createElement('th');
     if (column.sortable) {
@@ -6961,12 +6994,14 @@ function renderMarketplaceRawData(result) {
   const error = String(result?.marketplaceRawDataError || '');
   const visibleColumns = getVisibleEarningsColumns('marketplaceRaw');
   renderMarketplaceRawHeader(visibleColumns);
+  renderMarketplaceLinkedSignature(earningsMarketplaceRawLinkedSignature);
   updateMarketplaceRawFilterOptions(earningsMarketplaceRawDiscoverySource, rows.map((entry) => entry.discoverySource));
   const from = earningsMarketplaceRawFrom?.value || '';
   const to = earningsMarketplaceRawTo?.value || '';
   const filtered = rows.filter((entry) => {
     const day = String(entry.timestamp || '').slice(0, 10);
-    return (!from || day >= from) && (!to || day <= to)
+    return (!marketplaceLinkedSignature || entry.signature === marketplaceLinkedSignature)
+      && (!from || day >= from) && (!to || day <= to)
       && (!earningsMarketplaceRawDiscoverySource?.value || entry.discoverySource === earningsMarketplaceRawDiscoverySource.value);
   });
   const direction = marketplaceRawSort.direction === 'asc' ? 1 : -1;
@@ -6989,10 +7024,11 @@ function renderMarketplaceRawData(result) {
   if (!filtered.length) {
     const tr = document.createElement('tr'); tr.className = 'empty-row';
     const td = createTextCell(error ? `Marketplace raw-data read failed: ${error}` : rows.length ? 'No raw transactions match the selected filters' : 'No Marketplace raw transactions found');
-    td.colSpan = Math.max(1, visibleColumns.length); tr.appendChild(td); earningsMarketplaceRawTableBody.appendChild(tr); return;
+    td.colSpan = Math.max(1, visibleColumns.length + 1); tr.appendChild(td); earningsMarketplaceRawTableBody.appendChild(tr); return;
   }
   for (const entry of filtered) {
     const tr = document.createElement('tr');
+    tr.appendChild(createMarketplaceSelectorCell(entry));
     for (const column of visibleColumns) tr.appendChild(createMarketplaceRawCell(entry, column.id));
     earningsMarketplaceRawTableBody.appendChild(tr);
   }
@@ -7017,6 +7053,7 @@ function compareMarketplaceEventValues(a, b, columnId) {
 function renderMarketplaceEventsHeader(visibleColumns) {
   if (!earningsMarketplaceEventsTableHead) return;
   const row = document.createElement('tr');
+  const selector = document.createElement('th'); selector.textContent = 'Selector'; row.appendChild(selector);
   for (const column of visibleColumns) {
     const cell = document.createElement('th');
     const button = document.createElement('button');
@@ -7048,12 +7085,14 @@ function renderMarketplaceDecodedEvents(result) {
   const rows = Array.isArray(result?.marketplaceEvents) ? result.marketplaceEvents : [];
   const visibleColumns = getVisibleEarningsColumns('marketplaceEvents');
   renderMarketplaceEventsHeader(visibleColumns);
+  renderMarketplaceLinkedSignature(earningsMarketplaceEventsLinkedSignature);
   updateMarketplaceRawFilterOptions(earningsMarketplaceEventsType, rows.map((entry) => entry.eventType));
   const from = earningsMarketplaceEventsFrom?.value || '';
   const to = earningsMarketplaceEventsTo?.value || '';
   const filtered = rows.filter((entry) => {
     const day = String(entry.timestamp || '').slice(0, 10);
-    return (!from || day >= from) && (!to || day <= to)
+    return (!marketplaceLinkedSignature || entry.signature === marketplaceLinkedSignature)
+      && (!from || day >= from) && (!to || day <= to)
       && (!earningsMarketplaceEventsType?.value || entry.eventType === earningsMarketplaceEventsType.value);
   });
   const direction = marketplaceEventsSort.direction === 'asc' ? 1 : -1;
@@ -7067,10 +7106,11 @@ function renderMarketplaceDecodedEvents(result) {
   if (!filtered.length) {
     const tr = document.createElement('tr'); tr.className = 'empty-row';
     const td = createTextCell(error ? `Marketplace event read failed: ${error}` : 'No decoded Marketplace events found');
-    td.colSpan = Math.max(1, visibleColumns.length); tr.appendChild(td); earningsMarketplaceEventsTableBody.appendChild(tr); return;
+    td.colSpan = Math.max(1, visibleColumns.length + 1); tr.appendChild(td); earningsMarketplaceEventsTableBody.appendChild(tr); return;
   }
   for (const entry of filtered) {
     const tr = document.createElement('tr');
+    tr.appendChild(createMarketplaceSelectorCell(entry));
     for (const column of visibleColumns) tr.appendChild(createMarketplaceEventCell(entry, column.id));
     earningsMarketplaceEventsTableBody.appendChild(tr);
   }
