@@ -5862,6 +5862,15 @@ function getVisibleEarningsColumns(subtab = currentEarningsSubtab) {
   return getEarningsColumns(subtab).filter((column) => selected.has(column.id));
 }
 
+function getMarketplaceCalculationColumnLabel(column) {
+  if (column.id === 'grossAtlas') return earningsMarketplaceSide === 'buy' ? 'Purchase Value' : 'Sale Value';
+  if (column.id === 'netAtlas') return earningsMarketplaceSide === 'buy' ? 'ATLAS Paid' : 'ATLAS Received';
+  if (column.id === 'unitMetric') return earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit';
+  if (column.id === 'custodySignatures') return earningsMarketplaceSide === 'buy' ? 'Deposit Cargo to Game Signature' : 'Withdraw Cargo from Game Signatures';
+  if (column.id === 'tradingSignatures') return earningsMarketplaceSide === 'buy' ? 'GM Trading Signatures' : 'GM Trading Signature';
+  return column.label;
+}
+
 function getEarningsMetricGuideEntry(subtab, columnId) {
   return earningsMetricGuideBySubtab[subtab]?.[columnId] || earningsMetricGuideCommon[columnId] || null;
 }
@@ -5950,7 +5959,7 @@ function renderEarningsColumnControls() {
       }
     });
     label.appendChild(input);
-    label.append(` ${column.label}`);
+    label.append(` ${subtab === 'marketplace' ? getMarketplaceCalculationColumnLabel(column) : column.label}`);
     earningsColumnControlsContainer.appendChild(label);
   }
   earningsColumnControls = Array.from(earningsColumnControlsContainer.querySelectorAll('[data-earnings-column]'));
@@ -6920,10 +6929,11 @@ function renderMarketplaceRawHeader(visibleColumns) {
       const active = marketplaceRawSort.column === column.id;
       button.textContent = `${column.label}${active ? (marketplaceRawSort.direction === 'asc' ? ' ▲' : ' ▼') : ''}`;
       cell.setAttribute('aria-sort', active ? (marketplaceRawSort.direction === 'asc' ? 'ascending' : 'descending') : 'none');
-      row.appendChild(button);
+      cell.appendChild(button);
     } else {
       cell.textContent = column.label;
     }
+    row.appendChild(cell);
   }
   earningsMarketplaceRawTableHead.replaceChildren(row);
 }
@@ -7056,17 +7066,7 @@ function renderMarketplaceHeader(visibleColumns) {
   row.textContent = '';
   for (const column of visibleColumns) {
     const th = document.createElement('th');
-    th.textContent = column.id === 'grossAtlas'
-      ? (earningsMarketplaceSide === 'buy' ? 'Purchase Value' : 'Sale Value')
-      : column.id === 'netAtlas'
-        ? (earningsMarketplaceSide === 'buy' ? 'ATLAS Paid' : 'ATLAS Received')
-        : column.id === 'unitMetric'
-          ? (earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit')
-          : column.id === 'custodySignatures'
-            ? (earningsMarketplaceSide === 'buy' ? 'Deposit Cargo to Game Signature' : 'Withdraw Cargo from Game Signatures')
-            : column.id === 'tradingSignatures'
-              ? (earningsMarketplaceSide === 'buy' ? 'GM Trading Signatures' : 'GM Trading Signature')
-              : column.label;
+    th.textContent = getMarketplaceCalculationColumnLabel(column);
     row.appendChild(th);
   }
 }
@@ -9524,6 +9524,7 @@ earningsMarketplaceRawTableHead?.addEventListener('click', (event) => {
 earningsMarketplaceSideButtons.forEach((button) => {
   button.addEventListener('click', () => {
     earningsMarketplaceSide = button.dataset.marketplaceSide === 'sell' ? 'sell' : 'buy';
+    renderEarningsColumnControls();
     if (latestMarketplaceResult) renderEarningsMarketplace(latestMarketplaceResult);
   });
 });

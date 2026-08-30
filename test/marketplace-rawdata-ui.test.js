@@ -35,6 +35,7 @@ test('Marketplace Raw Data owns persistent sidebar controls for its current tabl
   assert.match(renderer, /marketplaceRaw: new Set\(marketplaceRawColumns\.map/);
   assert.match(renderer, /currentMarketplaceSubtab === 'raw'\) return 'marketplaceRaw'/);
   assert.match(renderer, /renderMarketplaceRawHeader\(visibleColumns\)/);
+  assert.match(renderer, /cell\.appendChild\(button\);[\s\S]*row\.appendChild\(cell\)/);
   assert.match(renderer, /for \(const column of visibleColumns\) tr\.appendChild\(createMarketplaceRawCell/);
   assert.match(renderer, /updateMarketplaceSubtab\(\);\s*renderEarningsColumnControls\(\)/);
 });

@@ -38,9 +38,12 @@ test('Marketplace exposes every table column in the persistent Earnings sidebar 
 test('Marketplace renderer uses side-specific value labels and buyer-paid accounting', () => {
   assert.match(renderer, /let earningsMarketplaceSide = 'buy'/);
   assert.match(renderer, /entry\.side === earningsMarketplaceSide/);
+  assert.match(renderer, /function getMarketplaceCalculationColumnLabel\(column\)/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Purchase Value' : 'Sale Value'/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'ATLAS Paid' : 'ATLAS Received'/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Cost \/ Unit' : 'Income \/ Unit'/);
+  assert.match(renderer, /subtab === 'marketplace' \? getMarketplaceCalculationColumnLabel\(column\) : column\.label/);
+  assert.match(renderer, /earningsMarketplaceSide = button\.dataset\.marketplaceSide[\s\S]*renderEarningsColumnControls\(\)/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy'[\s\S]*gross \+ txFee[\s\S]*\(gross \+ txFee\) \/ quantity[\s\S]*net \/ quantity/);
   assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Seller-paid'/);
   assert.match(renderer, /earningsMarketplaceSide !== 'sell'[\s\S]*reordered\.splice\(custodyIndex, 0, trading\)/);
