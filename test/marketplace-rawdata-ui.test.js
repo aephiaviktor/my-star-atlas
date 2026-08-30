@@ -49,6 +49,12 @@ test('Marketplace Decoded Events is a separate persisted event view linked to ra
   assert.match(main, /projectMarketplaceEventsFromRawRows\(rawData\.rows, 'GM'\)/);
   assert.match(main, /action: 'order_cancelled'/);
   assert.doesNotMatch(main, /writeMarketplaceEvents\(settings, projectMarketplaceOrderAndExecutionEvents\(scanned/);
+  assert.match(renderer, /const marketplaceEventColumns = Object\.freeze/);
+  assert.match(renderer, /marketplaceEvents: new Set\(marketplaceEventColumns\.map/);
+  assert.match(renderer, /currentMarketplaceSubtab === 'events'\) return 'marketplaceEvents'/);
+  assert.match(renderer, /function renderMarketplaceEventsHeader\(visibleColumns\)/);
+  assert.match(renderer, /dataset\.marketplaceEventsSort = column\.id/);
+  assert.match(renderer, /compareMarketplaceEventValues/);
 });
 
 test('Marketplace Raw Data owns persistent sidebar controls for its seven raw transaction columns', () => {

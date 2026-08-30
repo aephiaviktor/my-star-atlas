@@ -198,6 +198,7 @@ const earningsMarketplaceRawCoverageSummary = document.querySelector('#earnings-
 const earningsMarketplaceRawCoverage = document.querySelector('#earnings-marketplace-raw-coverage');
 const earningsMarketplaceEventsStatus = document.querySelector('#earnings-marketplace-events-status');
 const earningsMarketplaceEventsTableBody = document.querySelector('#earnings-marketplace-events-table-body');
+const earningsMarketplaceEventsTableHead = document.querySelector('#earnings-marketplace-events-table-head');
 const earningsMarketplaceEventsFrom = document.querySelector('#earnings-marketplace-events-from');
 const earningsMarketplaceEventsTo = document.querySelector('#earnings-marketplace-events-to');
 const earningsMarketplaceEventsType = document.querySelector('#earnings-marketplace-events-type');
@@ -381,6 +382,7 @@ let currentEarningsSubtab = 'scanning';
 let earningsMarketplaceSide = 'buy';
 let currentMarketplaceSubtab = 'raw';
 let marketplaceRawSort = { column: 'timestamp', direction: 'desc' };
+let marketplaceEventsSort = { column: 'timestamp', direction: 'desc' };
 let activeCargoTable = 'fleet';
 let latestSettings = null;
 let latestFleetResult = null;
@@ -825,6 +827,21 @@ const marketplaceRawColumns = Object.freeze([
   Object.freeze({ id: 'payload', label: 'Payload', sortable: false }),
 ]);
 
+const marketplaceEventColumns = Object.freeze([
+  Object.freeze({ id: 'timestamp', label: 'Timestamp (UTC)' }),
+  Object.freeze({ id: 'eventType', label: 'Event Type' }),
+  Object.freeze({ id: 'action', label: 'Action' }),
+  Object.freeze({ id: 'market', label: 'Market' }),
+  Object.freeze({ id: 'fromWallet', label: 'From' }),
+  Object.freeze({ id: 'toWallet', label: 'To' }),
+  Object.freeze({ id: 'asset', label: 'Asset' }),
+  Object.freeze({ id: 'mint', label: 'Mint' }),
+  Object.freeze({ id: 'quantity', label: 'Quantity' }),
+  Object.freeze({ id: 'unitPrice', label: 'Unit Price' }),
+  Object.freeze({ id: 'orderId', label: 'Order ID' }),
+  Object.freeze({ id: 'signature', label: 'Transaction Signature' }),
+]);
+
 const earningsColumnsBySubtab = Object.freeze({
   scanning: scanningEarningsOptionalColumns,
   mining: miningEarningsOptionalColumns,
@@ -835,6 +852,7 @@ const earningsColumnsBySubtab = Object.freeze({
   breakeven: breakevenEarningsOptionalColumns,
   marketplace: marketplaceEarningsOptionalColumns,
   marketplaceRaw: marketplaceRawColumns,
+  marketplaceEvents: marketplaceEventColumns,
 });
 
 const earningsColumnState = {
@@ -847,6 +865,7 @@ const earningsColumnState = {
   breakeven: new Set(),
   marketplace: new Set(marketplaceEarningsOptionalColumns.map((column) => column.id)),
   marketplaceRaw: new Set(marketplaceRawColumns.map((column) => column.id)),
+  marketplaceEvents: new Set(marketplaceEventColumns.map((column) => column.id)),
 };
 
 const EARNINGS_COLUMN_STORAGE_KEY = 'my-star-atlas:earnings-columns:v1';
@@ -5843,6 +5862,7 @@ function getEarningsColumns(subtab = currentEarningsSubtab) {
 function getActiveEarningsColumnsSubtab() {
   if (currentEarningsSubtab === 'cargo' && activeCargoTable === 'allocation') return 'cargoAllocation';
   if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'raw') return 'marketplaceRaw';
+  if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'events') return 'marketplaceEvents';
   return currentEarningsSubtab;
 }
 
@@ -5944,6 +5964,8 @@ function renderEarningsColumnControls() {
         renderEarningsMarketplace(latestMarketplaceResult);
       } else if (subtab === 'marketplaceRaw') {
         renderMarketplaceRawData(latestMarketplaceResult);
+      } else if (subtab === 'marketplaceEvents') {
+        renderMarketplaceDecodedEvents(latestMarketplaceResult);
       } else if (latestEarningsResult) {
         renderEarnings(latestEarningsResult);
       } else {
@@ -6976,8 +6998,56 @@ function renderMarketplaceRawData(result) {
   }
 }
 
+function marketplaceEventColumnValue(entry, columnId) {
+  if (columnId === 'action') return entry.action || entry.type || '';
+  if (columnId === 'mint') return entry.mint || entry.rawMint || '';
+  if (columnId === 'quantity') return entry.quantityRaw ?? entry.quantity ?? '';
+  if (columnId === 'unitPrice') return entry.unitPriceAtlas ?? entry.priceAtlas ?? '';
+  return entry[columnId] ?? '';
+}
+
+function compareMarketplaceEventValues(a, b, columnId) {
+  const left = marketplaceEventColumnValue(a, columnId);
+  const right = marketplaceEventColumnValue(b, columnId);
+  if (columnId === 'timestamp') return (Date.parse(left) || 0) - (Date.parse(right) || 0);
+  if (columnId === 'quantity' || columnId === 'unitPrice') return (Number(left) || 0) - (Number(right) || 0);
+  return String(left).localeCompare(String(right), undefined, { sensitivity: 'base', numeric: true });
+}
+
+function renderMarketplaceEventsHeader(visibleColumns) {
+  if (!earningsMarketplaceEventsTableHead) return;
+  const row = document.createElement('tr');
+  for (const column of visibleColumns) {
+    const cell = document.createElement('th');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.marketplaceEventsSort = column.id;
+    const active = marketplaceEventsSort.column === column.id;
+    button.textContent = `${column.label}${active ? (marketplaceEventsSort.direction === 'asc' ? ' ▲' : ' ▼') : ''}`;
+    cell.setAttribute('aria-sort', active ? (marketplaceEventsSort.direction === 'asc' ? 'ascending' : 'descending') : 'none');
+    cell.appendChild(button); row.appendChild(cell);
+  }
+  earningsMarketplaceEventsTableHead.replaceChildren(row);
+}
+
+function createMarketplaceEventCell(entry, columnId) {
+  if (columnId === 'timestamp') return createTextCell(formatMarketplaceTimestamp(entry.timestamp));
+  if (columnId === 'signature') {
+    const cell = document.createElement('td');
+    if (entry.signature) {
+      const link = document.createElement('a'); link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
+      link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = entry.signature; cell.appendChild(link);
+    } else cell.textContent = '--';
+    return cell;
+  }
+  const value = marketplaceEventColumnValue(entry, columnId);
+  return createTextCell(value === '' ? '--' : value);
+}
+
 function renderMarketplaceDecodedEvents(result) {
   const rows = Array.isArray(result?.marketplaceEvents) ? result.marketplaceEvents : [];
+  const visibleColumns = getVisibleEarningsColumns('marketplaceEvents');
+  renderMarketplaceEventsHeader(visibleColumns);
   updateMarketplaceRawFilterOptions(earningsMarketplaceEventsType, rows.map((entry) => entry.eventType));
   const from = earningsMarketplaceEventsFrom?.value || '';
   const to = earningsMarketplaceEventsTo?.value || '';
@@ -6986,6 +7056,10 @@ function renderMarketplaceDecodedEvents(result) {
     return (!from || day >= from) && (!to || day <= to)
       && (!earningsMarketplaceEventsType?.value || entry.eventType === earningsMarketplaceEventsType.value);
   });
+  const direction = marketplaceEventsSort.direction === 'asc' ? 1 : -1;
+  filtered.sort((a, b) => direction * compareMarketplaceEventValues(a, b, marketplaceEventsSort.column)
+    || String(a.signature || '').localeCompare(String(b.signature || ''))
+    || String(a.eventId || '').localeCompare(String(b.eventId || '')));
   const error = String(result?.marketplaceEventsError || '');
   setText(earningsMarketplaceEventsStatus, `${formatMarketplaceWhole(filtered.length)} of ${formatMarketplaceWhole(rows.length)} decoded events at ${formatCheckedAt(result?.checkedAt)}${error ? ` · ${error}` : ''}`);
   if (!earningsMarketplaceEventsTableBody) return;
@@ -6993,19 +7067,12 @@ function renderMarketplaceDecodedEvents(result) {
   if (!filtered.length) {
     const tr = document.createElement('tr'); tr.className = 'empty-row';
     const td = createTextCell(error ? `Marketplace event read failed: ${error}` : 'No decoded Marketplace events found');
-    td.colSpan = 12; tr.appendChild(td); earningsMarketplaceEventsTableBody.appendChild(tr); return;
+    td.colSpan = Math.max(1, visibleColumns.length); tr.appendChild(td); earningsMarketplaceEventsTableBody.appendChild(tr); return;
   }
   for (const entry of filtered) {
     const tr = document.createElement('tr');
-    for (const value of [
-      formatMarketplaceTimestamp(entry.timestamp), entry.eventType, entry.action || entry.type || '--', entry.market || '--',
-      entry.fromWallet || '--', entry.toWallet || '--', entry.asset || '--', entry.mint || entry.rawMint || '--',
-      entry.quantityRaw ?? entry.quantity ?? '--', entry.unitPriceAtlas ?? entry.priceAtlas ?? '--', entry.orderId || '--',
-    ]) tr.appendChild(createTextCell(value));
-    const signatureCell = document.createElement('td');
-    const link = document.createElement('a'); link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
-    link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = entry.signature; signatureCell.appendChild(link);
-    tr.appendChild(signatureCell); earningsMarketplaceEventsTableBody.appendChild(tr);
+    for (const column of visibleColumns) tr.appendChild(createMarketplaceEventCell(entry, column.id));
+    earningsMarketplaceEventsTableBody.appendChild(tr);
   }
 }
 
@@ -9526,6 +9593,16 @@ earningsMarketplaceRawTableHead?.addEventListener('click', (event) => {
     ? { column, direction: marketplaceRawSort.direction === 'asc' ? 'desc' : 'asc' }
     : { column, direction: 'asc' };
   if (latestMarketplaceResult) renderMarketplaceRawData(latestMarketplaceResult);
+});
+
+earningsMarketplaceEventsTableHead?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-marketplace-events-sort]');
+  if (!button) return;
+  const column = button.dataset.marketplaceEventsSort;
+  marketplaceEventsSort = marketplaceEventsSort.column === column
+    ? { column, direction: marketplaceEventsSort.direction === 'asc' ? 'desc' : 'asc' }
+    : { column, direction: 'asc' };
+  if (latestMarketplaceResult) renderMarketplaceDecodedEvents(latestMarketplaceResult);
 });
 
 earningsMarketplaceSideButtons.forEach((button) => {
