@@ -26,6 +26,19 @@ test('Marketplace Raw Data exposes filters, coverage, sortable headers, and payl
   assert.match(renderer, /className = 'marketplace-raw-payload'/);
 });
 
+test('Marketplace Raw Data owns persistent sidebar controls for its current table columns', () => {
+  assert.match(html, /id="earnings-marketplace-raw-table-head"/);
+  assert.match(renderer, /const marketplaceRawColumns = Object\.freeze/);
+  for (const id of ['timestamp', 'record', 'stream', 'eventType', 'decodedStatus', 'fromWallet', 'toWallet', 'asset', 'quantityRaw', 'atlasAmount', 'program', 'slot', 'eventId', 'signature', 'payloadHash', 'payload']) {
+    assert.match(renderer, new RegExp(`id: '${id}'`));
+  }
+  assert.match(renderer, /marketplaceRaw: new Set\(marketplaceRawColumns\.map/);
+  assert.match(renderer, /currentMarketplaceSubtab === 'raw'\) return 'marketplaceRaw'/);
+  assert.match(renderer, /renderMarketplaceRawHeader\(visibleColumns\)/);
+  assert.match(renderer, /for \(const column of visibleColumns\) tr\.appendChild\(createMarketplaceRawCell/);
+  assert.match(renderer, /updateMarketplaceSubtab\(\);\s*renderEarningsColumnControls\(\)/);
+});
+
 test('Raw reader keeps transaction rows neutral and attributes wallets only on decoded event rows', () => {
   assert.match(main, /row\.payload\?\.type === 'transaction_observed'/);
   assert.match(main, /eventType: isEvent \? String\(payload\.type \|\| ''\) : 'transaction'/);

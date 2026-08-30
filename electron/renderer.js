@@ -189,6 +189,7 @@ const earningsBreakevenHideLowInventory = document.querySelector('#earnings-brea
 const earningsMarketplaceSyncStatus = document.querySelector('#earnings-marketplace-sync-status');
 const earningsMarketplaceTableBody = document.querySelector('#earnings-marketplace-table-body');
 const earningsMarketplaceRawStatus = document.querySelector('#earnings-marketplace-raw-status');
+const earningsMarketplaceRawTableHead = document.querySelector('#earnings-marketplace-raw-table-head');
 const earningsMarketplaceRawTableBody = document.querySelector('#earnings-marketplace-raw-table-body');
 const earningsMarketplaceRawFrom = document.querySelector('#earnings-marketplace-raw-from');
 const earningsMarketplaceRawTo = document.querySelector('#earnings-marketplace-raw-to');
@@ -199,7 +200,6 @@ const earningsMarketplaceRawEvent = document.querySelector('#earnings-marketplac
 const earningsMarketplaceRawAsset = document.querySelector('#earnings-marketplace-raw-asset');
 const earningsMarketplaceRawCoverageSummary = document.querySelector('#earnings-marketplace-raw-coverage-summary');
 const earningsMarketplaceRawCoverage = document.querySelector('#earnings-marketplace-raw-coverage');
-const earningsMarketplaceRawSortButtons = Array.from(document.querySelectorAll('[data-marketplace-raw-sort]'));
 const earningsMarketplaceSubtabButtons = Array.from(document.querySelectorAll('[data-marketplace-subtab]'));
 const earningsMarketplacePanels = Array.from(document.querySelectorAll('[data-marketplace-panel]'));
 const earningsMarketplaceSideSwitch = document.querySelector('#earnings-marketplace-side-switch');
@@ -814,6 +814,25 @@ const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'tradingSignatures', label: 'GM Trading Signatures' }),
 ]);
 
+const marketplaceRawColumns = Object.freeze([
+  Object.freeze({ id: 'timestamp', label: 'Timestamp (UTC)', sortable: true }),
+  Object.freeze({ id: 'record', label: 'Record', sortable: true }),
+  Object.freeze({ id: 'stream', label: 'Stream', sortable: true }),
+  Object.freeze({ id: 'eventType', label: 'Event Type', sortable: true }),
+  Object.freeze({ id: 'decodedStatus', label: 'Status', sortable: true }),
+  Object.freeze({ id: 'fromWallet', label: 'Source Wallet', sortable: true }),
+  Object.freeze({ id: 'toWallet', label: 'Destination Wallet', sortable: true }),
+  Object.freeze({ id: 'asset', label: 'Asset / Mint', sortable: true }),
+  Object.freeze({ id: 'quantityRaw', label: 'Quantity', sortable: true }),
+  Object.freeze({ id: 'atlasAmount', label: 'ATLAS', sortable: true }),
+  Object.freeze({ id: 'program', label: 'Program', sortable: true }),
+  Object.freeze({ id: 'slot', label: 'Slot', sortable: true }),
+  Object.freeze({ id: 'eventId', label: 'Event ID', sortable: true }),
+  Object.freeze({ id: 'signature', label: 'Signature', sortable: true }),
+  Object.freeze({ id: 'payloadHash', label: 'Payload Hash', sortable: true }),
+  Object.freeze({ id: 'payload', label: 'Payload', sortable: false }),
+]);
+
 const earningsColumnsBySubtab = Object.freeze({
   scanning: scanningEarningsOptionalColumns,
   mining: miningEarningsOptionalColumns,
@@ -823,6 +842,7 @@ const earningsColumnsBySubtab = Object.freeze({
   upgrading: upgradingEarningsOptionalColumns,
   breakeven: breakevenEarningsOptionalColumns,
   marketplace: marketplaceEarningsOptionalColumns,
+  marketplaceRaw: marketplaceRawColumns,
 });
 
 const earningsColumnState = {
@@ -834,6 +854,7 @@ const earningsColumnState = {
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   breakeven: new Set(),
   marketplace: new Set(marketplaceEarningsOptionalColumns.map((column) => column.id)),
+  marketplaceRaw: new Set(marketplaceRawColumns.map((column) => column.id)),
 };
 
 const EARNINGS_COLUMN_STORAGE_KEY = 'my-star-atlas:earnings-columns:v1';
@@ -5828,7 +5849,9 @@ function getEarningsColumns(subtab = currentEarningsSubtab) {
 }
 
 function getActiveEarningsColumnsSubtab() {
-  return currentEarningsSubtab === 'cargo' && activeCargoTable === 'allocation' ? 'cargoAllocation' : currentEarningsSubtab;
+  if (currentEarningsSubtab === 'cargo' && activeCargoTable === 'allocation') return 'cargoAllocation';
+  if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'raw') return 'marketplaceRaw';
+  return currentEarningsSubtab;
 }
 
 function getVisibleEarningsColumns(subtab = currentEarningsSubtab) {
@@ -5918,6 +5941,8 @@ function renderEarningsColumnControls() {
         renderEarningsBreakeven(latestBreakevenResult);
       } else if (subtab === 'marketplace') {
         renderEarningsMarketplace(latestMarketplaceResult);
+      } else if (subtab === 'marketplaceRaw') {
+        renderMarketplaceRawData(latestMarketplaceResult);
       } else if (latestEarningsResult) {
         renderEarnings(latestEarningsResult);
       } else {
@@ -6882,9 +6907,59 @@ function createMarketplaceRawPayloadCell(entry) {
   return cell;
 }
 
+function renderMarketplaceRawHeader(visibleColumns) {
+  if (!earningsMarketplaceRawTableHead) return;
+  const row = document.createElement('tr');
+  for (const column of visibleColumns) {
+    const cell = document.createElement('th');
+    if (column.sortable) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.marketplaceRawSort = column.id;
+      button.dataset.baseLabel = column.label;
+      const active = marketplaceRawSort.column === column.id;
+      button.textContent = `${column.label}${active ? (marketplaceRawSort.direction === 'asc' ? ' ▲' : ' ▼') : ''}`;
+      cell.setAttribute('aria-sort', active ? (marketplaceRawSort.direction === 'asc' ? 'ascending' : 'descending') : 'none');
+      row.appendChild(button);
+    } else {
+      cell.textContent = column.label;
+    }
+  }
+  earningsMarketplaceRawTableHead.replaceChildren(row);
+}
+
+function createMarketplaceRawCell(entry, columnId) {
+  if (columnId === 'timestamp') return createTextCell(formatMarketplaceTimestamp(entry.timestamp));
+  if (columnId === 'record') return createTextCell(entry.record || '--');
+  if (columnId === 'stream') return createTextCell(entry.stream || entry.streams || '--');
+  if (columnId === 'eventType') return createTextCell(entry.eventType || '--');
+  if (columnId === 'decodedStatus') return createTextCell(entry.decodedStatus || '--');
+  if (columnId === 'fromWallet') return createTextCell(entry.fromWallet || '--');
+  if (columnId === 'toWallet') return createTextCell(entry.toWallet || '--');
+  if (columnId === 'asset') return createTextCell(entry.asset || entry.mint || '--');
+  if (columnId === 'quantityRaw') return createTextCell(formatMarketplaceRawQuantity(entry));
+  if (columnId === 'atlasAmount') return createTextCell(entry.atlasAmount == null ? '--' : formatMarketplaceAtlas(entry.atlasAmount, 8));
+  if (columnId === 'program') return createTextCell(entry.program || '--');
+  if (columnId === 'slot') return createTextCell(entry.slot == null ? '--' : formatMarketplaceWhole(entry.slot));
+  if (columnId === 'eventId') return createTextCell(entry.eventId || '--');
+  if (columnId === 'payloadHash') return createTextCell(entry.payloadHash || '--');
+  if (columnId === 'payload') return createMarketplaceRawPayloadCell(entry);
+  if (columnId === 'signature') {
+    const cell = document.createElement('td');
+    if (entry.signature) {
+      const link = document.createElement('a'); link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
+      link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = entry.signature; cell.appendChild(link);
+    } else cell.textContent = '--';
+    return cell;
+  }
+  return createTextCell('--');
+}
+
 function renderMarketplaceRawData(result) {
   const rows = Array.isArray(result?.marketplaceRawData) ? result.marketplaceRawData : [];
   const error = String(result?.marketplaceRawDataError || '');
+  const visibleColumns = getVisibleEarningsColumns('marketplaceRaw');
+  renderMarketplaceRawHeader(visibleColumns);
   updateMarketplaceRawFilterOptions(earningsMarketplaceRawStream, rows.map((entry) => entry.stream));
   updateMarketplaceRawFilterOptions(earningsMarketplaceRawRecord, rows.map((entry) => entry.record));
   updateMarketplaceRawFilterOptions(earningsMarketplaceRawWallet, rows.flatMap((entry) => [entry.fromWallet, entry.toWallet]));
@@ -6906,12 +6981,6 @@ function renderMarketplaceRawData(result) {
   filtered.sort((a, b) => direction * compareMarketplaceRawValues(a, b, marketplaceRawSort.column)
     || String(a.signature || '').localeCompare(String(b.signature || ''))
     || String(a.eventId || '').localeCompare(String(b.eventId || '')));
-  earningsMarketplaceRawSortButtons.forEach((button) => {
-    if (!button.dataset.baseLabel) button.dataset.baseLabel = button.textContent;
-    const active = button.dataset.marketplaceRawSort === marketplaceRawSort.column;
-    button.textContent = `${button.dataset.baseLabel}${active ? (marketplaceRawSort.direction === 'asc' ? ' ▲' : ' ▼') : ''}`;
-    button.closest('th')?.setAttribute('aria-sort', active ? (marketplaceRawSort.direction === 'asc' ? 'ascending' : 'descending') : 'none');
-  });
   const coverage = result?.marketplaceRawDataCoverage || { sources: [], total: 0, complete: 0, pending: 0 };
   setText(earningsMarketplaceRawCoverageSummary, `Source coverage: ${coverage.complete}/${coverage.total} complete${coverage.pending ? ` · ${coverage.pending} backfilling` : ''}`);
   if (earningsMarketplaceRawCoverage) {
@@ -6928,31 +6997,11 @@ function renderMarketplaceRawData(result) {
   if (!filtered.length) {
     const tr = document.createElement('tr'); tr.className = 'empty-row';
     const td = createTextCell(error ? `Marketplace raw-data read failed: ${error}` : rows.length ? 'No raw records match the selected filters' : 'No Marketplace raw records found');
-    td.colSpan = 16; tr.appendChild(td); earningsMarketplaceRawTableBody.appendChild(tr); return;
+    td.colSpan = Math.max(1, visibleColumns.length); tr.appendChild(td); earningsMarketplaceRawTableBody.appendChild(tr); return;
   }
   for (const entry of filtered) {
     const tr = document.createElement('tr');
-    tr.appendChild(createTextCell(formatMarketplaceTimestamp(entry.timestamp)));
-    tr.appendChild(createTextCell(entry.record || '--'));
-    tr.appendChild(createTextCell(entry.stream || entry.streams || '--'));
-    tr.appendChild(createTextCell(entry.eventType || '--'));
-    tr.appendChild(createTextCell(entry.decodedStatus || '--'));
-    tr.appendChild(createTextCell(entry.fromWallet || '--'));
-    tr.appendChild(createTextCell(entry.toWallet || '--'));
-    tr.appendChild(createTextCell(entry.asset || entry.mint || '--'));
-    tr.appendChild(createTextCell(formatMarketplaceRawQuantity(entry)));
-    tr.appendChild(createTextCell(entry.atlasAmount == null ? '--' : formatMarketplaceAtlas(entry.atlasAmount, 8)));
-    tr.appendChild(createTextCell(entry.program || '--'));
-    tr.appendChild(createTextCell(entry.slot == null ? '--' : formatMarketplaceWhole(entry.slot)));
-    tr.appendChild(createTextCell(entry.eventId || '--'));
-    const signatureCell = document.createElement('td');
-    if (entry.signature) {
-      const link = document.createElement('a'); link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
-      link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = entry.signature; signatureCell.appendChild(link);
-    } else signatureCell.textContent = '--';
-    tr.appendChild(signatureCell);
-    tr.appendChild(createTextCell(entry.payloadHash || '--'));
-    tr.appendChild(createMarketplaceRawPayloadCell(entry));
+    for (const column of visibleColumns) tr.appendChild(createMarketplaceRawCell(entry, column.id));
     earningsMarketplaceRawTableBody.appendChild(tr);
   }
 }
@@ -9451,6 +9500,7 @@ earningsMarketplaceSubtabButtons.forEach((button) => {
   button.addEventListener('click', () => {
     currentMarketplaceSubtab = button.dataset.marketplaceSubtab === 'calculations' ? 'calculations' : 'raw';
     updateMarketplaceSubtab();
+    renderEarningsColumnControls();
   });
 });
 
@@ -9461,14 +9511,14 @@ earningsMarketplaceSubtabButtons.forEach((button) => {
   if (latestMarketplaceResult) renderMarketplaceRawData(latestMarketplaceResult);
 }));
 
-earningsMarketplaceRawSortButtons.forEach((button) => {
-  button.addEventListener('click', () => {
-    const column = button.dataset.marketplaceRawSort;
-    marketplaceRawSort = marketplaceRawSort.column === column
-      ? { column, direction: marketplaceRawSort.direction === 'asc' ? 'desc' : 'asc' }
-      : { column, direction: 'asc' };
-    if (latestMarketplaceResult) renderMarketplaceRawData(latestMarketplaceResult);
-  });
+earningsMarketplaceRawTableHead?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-marketplace-raw-sort]');
+  if (!button) return;
+  const column = button.dataset.marketplaceRawSort;
+  marketplaceRawSort = marketplaceRawSort.column === column
+    ? { column, direction: marketplaceRawSort.direction === 'asc' ? 'desc' : 'asc' }
+    : { column, direction: 'asc' };
+  if (latestMarketplaceResult) renderMarketplaceRawData(latestMarketplaceResult);
 });
 
 earningsMarketplaceSideButtons.forEach((button) => {
