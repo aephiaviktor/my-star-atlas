@@ -6,6 +6,7 @@ const bs58Module = require('bs58');
 const bs58 = bs58Module.default || bs58Module;
 
 const MARKETPLACE_RAWDATA_MEASUREMENT = 'marketplace_rawdata';
+const GM_PROGRAM_ID = 'traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg';
 const DEPOSIT_CARGO_TO_GAME = Buffer.from([87, 49, 117, 148, 241, 247, 176, 18]);
 const WITHDRAW_CARGO_FROM_GAME = Buffer.from([102, 218, 88, 53, 255, 194, 24, 62]);
 const CSS_STARBASE_NAMES = Object.freeze({ MUD: 'MUD-1', ONI: 'ONI-1', USTUR: 'UST-1' });
@@ -82,6 +83,53 @@ function allInstructions(transaction) {
     instruction, outerIndex: Number(group.index), innerIndex: index,
   })));
   return { accountKeys, entries: [...outer, ...inner] };
+}
+
+function hasCssCargoGameInstruction(transaction, { sageProgramId, cssStarbasePlayer }) {
+  const { accountKeys, entries } = allInstructions(transaction);
+  return entries.some(({ instruction }) => {
+    const programId = String(instruction?.programId || accountKeys[instruction?.programIdIndex]?.pubkey || accountKeys[instruction?.programIdIndex] || '');
+    if (programId !== String(sageProgramId)) return false;
+    const data = instructionData(instruction);
+    if (!data || data.length < 8) return false;
+    const discriminator = data.subarray(0, 8);
+    if (!discriminator.equals(DEPOSIT_CARGO_TO_GAME) && !discriminator.equals(WITHDRAW_CARGO_FROM_GAME)) return false;
+    return instructionAccounts(instruction, accountKeys).includes(String(cssStarbasePlayer));
+  });
+}
+
+function hasGmProgramInstruction(transaction, wallet) {
+  const { accountKeys, entries } = allInstructions(transaction);
+  return entries.some(({ instruction }) => {
+    const programId = String(instruction?.programId || accountKeys[instruction?.programIdIndex]?.pubkey || accountKeys[instruction?.programIdIndex] || '');
+    return programId === GM_PROGRAM_ID && instructionAccounts(instruction, accountKeys).includes(String(wallet));
+  });
+}
+
+function hasTraderProgramInstruction(transaction) {
+  const { accountKeys, entries } = allInstructions(transaction);
+  return entries.some(({ instruction }) => {
+    const programId = String(instruction?.programId || accountKeys[instruction?.programIdIndex]?.pubkey || accountKeys[instruction?.programIdIndex] || '');
+    return programId === GM_PROGRAM_ID;
+  });
+}
+
+function hasTokenTransferInstruction(transaction, tokenAccount) {
+  const { accountKeys, entries } = allInstructions(transaction);
+  return entries.some(({ instruction }) => {
+    const programId = String(instruction?.programId || accountKeys[instruction?.programIdIndex]?.pubkey || accountKeys[instruction?.programIdIndex] || '');
+    if (!TOKEN_PROGRAM_IDS.includes(programId)) return false;
+    const parsed = instruction?.parsed;
+    if (parsed && ['transfer', 'transferChecked'].includes(String(parsed.type))) {
+      const info = parsed.info || {};
+      return [info.source, info.destination].map(String).includes(String(tokenAccount));
+    }
+    const data = instructionData(instruction);
+    if (!data?.length || ![3, 12].includes(data[0])) return false;
+    const accounts = instructionAccounts(instruction, accountKeys);
+    const endpoints = data[0] === 12 ? [accounts[0], accounts[2]] : [accounts[0], accounts[1]];
+    return endpoints.includes(String(tokenAccount));
+  });
 }
 
 function classifyCssCargoEvents(transaction, { sageProgramId, cssStarbasePlayer }) {
@@ -215,7 +263,7 @@ function formatRawEventInfluxLine(event, blockTime) {
 }
 
 function buildLmRawRecords({ transactions = [] } = {}) {
-  return transactions.map((transaction) => ({
+  return transactions.filter(hasTraderProgramInstruction).map((transaction) => ({
     signature: String(transaction?.signature || transaction?.transaction?.signatures?.[0] || ''),
     transaction,
     discoverySources: ['lm_scanner'],
@@ -333,9 +381,15 @@ async function scanMarketplaceRawData(connection, {
   for (const item of scanned.fetched) {
     const transaction = item.transaction;
     const signature = String(transaction.signature || transaction.transaction?.signatures?.[0] || '');
-    const discoverySources = new Set(item.scopes.map((scope) => ({
-      gm: 'gm_wallet', css: 'css_account', token: 'token_account',
-    })[scope.kind]).filter(Boolean));
+    const discoverySources = new Set();
+    for (const scope of item.scopes) {
+      if (scope.kind === 'gm' && hasGmProgramInstruction(transaction, scope.address)) discoverySources.add('gm_wallet');
+      if (scope.kind === 'token' && hasTokenTransferInstruction(transaction, scope.address)) discoverySources.add('token_account');
+      if (scope.kind === 'css' && hasCssCargoGameInstruction(transaction, {
+        sageProgramId: scope.sageProgramId,
+        cssStarbasePlayer: scope.address,
+      })) discoverySources.add('css_account');
+    }
     if (!discoverySources.size) continue;
     records.push({ signature, transaction, discoverySources: [...discoverySources].sort() });
   }
@@ -343,7 +397,9 @@ async function scanMarketplaceRawData(connection, {
 }
 
 module.exports = Object.freeze({
-  MARKETPLACE_RAWDATA_MEASUREMENT, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME, CSS_STARBASE_NAMES,
-  TOKEN_PROGRAM_IDS, deriveCssStarbasePlayer, classifyCssCargoEvents, playerTransferEvents, buildLmRawRecords,
+  MARKETPLACE_RAWDATA_MEASUREMENT, GM_PROGRAM_ID, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME, CSS_STARBASE_NAMES,
+  TOKEN_PROGRAM_IDS, deriveCssStarbasePlayer, hasCssCargoGameInstruction, hasGmProgramInstruction, hasTraderProgramInstruction,
+  hasTokenTransferInstruction,
+  classifyCssCargoEvents, playerTransferEvents, buildLmRawRecords,
   formatRawTransactionInfluxLine, formatRawEventInfluxLine, discoverPlayerTokenAccounts, collectAddressTransactions, scanMarketplaceRawData,
 });

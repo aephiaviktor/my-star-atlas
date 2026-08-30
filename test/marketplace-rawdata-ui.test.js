@@ -70,8 +70,14 @@ test('Raw reader and writer are transaction-only with no decoded-event projectio
 });
 
 test('Raw ingestion records factual discovery provenance without decoding event streams', () => {
-  assert.match(raw, /gm: 'gm_wallet', css: 'css_account', token: 'token_account'/);
+  assert.match(raw, /scope\.kind === 'css' && hasCssCargoGameInstruction/);
+  assert.match(raw, /discoverySources\.add\('css_account'\)/);
+  assert.match(raw, /scope\.kind === 'gm' && hasGmProgramInstruction/);
+  assert.match(raw, /scope\.kind === 'token' && hasTokenTransferInstruction/);
+  assert.match(main, /\[\.\.\.playerWallets, \.\.\.gmWallets\]/);
+  assert.match(main, /discoverPlayerTokenAccounts\(connection, tokenAccountOwners/);
   assert.match(raw, /discoverySources: \['lm_scanner'\]/);
+  assert.match(raw, /transactions\.filter\(hasTraderProgramInstruction\)/);
   assert.doesNotMatch(raw.match(/async function scanMarketplaceRawData[\s\S]*?return \{ records, cursors:/)?.[0] || '', /classifyCssCargoEvents|playerTransferEvents/);
   assert.doesNotMatch(main, /legacySource|chain: 'legacy_unknown'/);
   assert.match(html, />Discovery Source <select id="earnings-marketplace-raw-discovery-source"/);

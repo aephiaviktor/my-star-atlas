@@ -6,8 +6,9 @@ const bs58Module = require('bs58');
 const bs58 = bs58Module.default || bs58Module;
 const { Keypair } = require('@solana/web3.js');
 const {
-  MARKETPLACE_RAWDATA_MEASUREMENT, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME,
-  deriveCssStarbasePlayer, classifyCssCargoEvents, playerTransferEvents, buildLmRawRecords,
+  MARKETPLACE_RAWDATA_MEASUREMENT, GM_PROGRAM_ID, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME,
+  deriveCssStarbasePlayer, hasCssCargoGameInstruction, hasGmProgramInstruction, hasTraderProgramInstruction, hasTokenTransferInstruction,
+  classifyCssCargoEvents, playerTransferEvents, buildLmRawRecords,
   formatRawTransactionInfluxLine, formatRawEventInfluxLine,
 } = require('../electron/marketplace-rawdata');
 
@@ -39,6 +40,36 @@ test('CSS candidate classification retains only exact deposit and withdraw instr
   assert.deepEqual(classifyCssCargoEvents(transaction, { sageProgramId, cssStarbasePlayer: css }).map((row) => row.eventId), [
     `${signature}:0:outer`, `${signature}:1:outer`,
   ]);
+  assert.equal(hasCssCargoGameInstruction(transaction, { sageProgramId, cssStarbasePlayer: css }), true);
+  assert.equal(hasCssCargoGameInstruction(transaction, { sageProgramId, cssStarbasePlayer: other }), true);
+  assert.equal(hasCssCargoGameInstruction(tx({ accountKeys: [sageProgramId, css], instructions: [
+    { programIdIndex: 0, accounts: [1], data: bs58.encode(Buffer.alloc(8, 9)) },
+  ] }), { sageProgramId, cssStarbasePlayer: css }), false);
+});
+
+test('GM qualification requires the exact GM program instruction and configured wallet account', () => {
+  const wallet = key(); const other = key();
+  const transaction = tx({ accountKeys: [GM_PROGRAM_ID, wallet, other], instructions: [
+    { programIdIndex: 0, accounts: [1], data: bs58.encode(Buffer.alloc(8, 7)) },
+  ] });
+  assert.equal(hasGmProgramInstruction(transaction, wallet), true);
+  assert.equal(hasGmProgramInstruction(transaction, other), false);
+  assert.equal(hasGmProgramInstruction(tx({ accountKeys: [wallet], instructions: [] }), wallet), false);
+});
+
+test('token qualification accepts exact transfer endpoints and rejects unrelated token instructions', () => {
+  const source = key(); const destination = key(); const mint = key();
+  const transaction = tx({ instructions: [
+    { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', parsed: {
+      type: 'transferChecked', info: { source, destination, mint, tokenAmount: { amount: '5', decimals: 0 } },
+    } },
+  ] });
+  assert.equal(hasTokenTransferInstruction(transaction, source), true);
+  assert.equal(hasTokenTransferInstruction(transaction, destination), true);
+  assert.equal(hasTokenTransferInstruction(transaction, mint), false);
+  assert.equal(hasTokenTransferInstruction(tx({ instructions: [
+    { programId: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', parsed: { type: 'approve', info: { source } } },
+  ] }), source), false);
 });
 
 test('transfer projection keeps only balanced token movements between configured player owners', () => {
@@ -73,17 +104,23 @@ test('raw Influx projection preserves the complete transaction and separate even
   assert.notEqual(eventA, eventB);
 });
 
-test('LM raw projection archives every already-fetched transaction without decoded events', () => {
+test('LM raw projection archives only trader-program transactions without decoding instruction types', () => {
   const orderSignature = key(); const executionSignature = key(); const unrelatedSignature = key();
-  const orderTransaction = tx({ signature: orderSignature });
-  const executionTransaction = tx({ signature: executionSignature });
+  const orderTransaction = tx({ signature: orderSignature, accountKeys: [GM_PROGRAM_ID], instructions: [
+    { programIdIndex: 0, accounts: [], data: bs58.encode(Buffer.alloc(8, 1)) },
+  ] });
+  const executionTransaction = tx({ signature: executionSignature, instructions: [
+    { programId: GM_PROGRAM_ID, accounts: [], data: bs58.encode(Buffer.alloc(8, 2)) },
+  ] });
   const unrelatedTransaction = tx({ signature: unrelatedSignature });
   const records = buildLmRawRecords({
     transactions: [orderTransaction, executionTransaction, unrelatedTransaction],
     orders: [{ orderId: 'order-1', creationSignature: orderSignature, side: 'buy', initializer: 'wallet-1', asset: 'Iron', rawMint: 'mint-1', originalQuantity: 25, priceAtlas: 2 }],
     trades: [{ id: 'trade-1', orderId: 'order-1', signature: executionSignature, side: 'buy', wallet: 'wallet-1', asset: 'Iron', rawMint: 'mint-1', quantity: 5, grossAtlas: 10 }],
   });
-  assert.deepEqual(records.map((record) => record.signature), [orderSignature, executionSignature, unrelatedSignature]);
+  assert.equal(hasTraderProgramInstruction(orderTransaction), true);
+  assert.equal(hasTraderProgramInstruction(unrelatedTransaction), false);
+  assert.deepEqual(records.map((record) => record.signature), [orderSignature, executionSignature]);
   assert.ok(records.every((record) => !Object.hasOwn(record, 'events')));
   assert.ok(records.every((record) => record.discoverySources[0] === 'lm_scanner'));
 });

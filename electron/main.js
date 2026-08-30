@@ -4722,13 +4722,16 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
       }),
     };
   });
+  const tokenAccountOwners = [...new Set([...playerWallets, ...gmWallets].map(String).filter(Boolean))].sort();
+  const checkpointTokenAccountOwners = [...new Set((checkpoint.tokenAccountOwners || []).map(String).filter(Boolean))].sort();
+  const tokenAccountOwnersChanged = JSON.stringify(tokenAccountOwners) !== JSON.stringify(checkpointTokenAccountOwners);
   const transferScanAge = Date.now() - Date.parse(checkpoint.lastTransferScanAt || '');
-  const transferScanDue = !Number.isFinite(transferScanAge) || transferScanAge >= 24 * 60 * 60 * 1000;
+  const transferScanDue = tokenAccountOwnersChanged || !Number.isFinite(transferScanAge) || transferScanAge >= 24 * 60 * 60 * 1000;
   const tokenAccountsAge = Date.now() - Date.parse(checkpoint.tokenAccountsRefreshedAt || '');
   const refreshTokenAccounts = transferScanDue
-    && (!checkpoint.tokenAccounts.length || !Number.isFinite(tokenAccountsAge) || tokenAccountsAge >= 24 * 60 * 60 * 1000);
+    && (tokenAccountOwnersChanged || !checkpoint.tokenAccounts.length || !Number.isFinite(tokenAccountsAge) || tokenAccountsAge >= 24 * 60 * 60 * 1000);
   const tokenAccounts = refreshTokenAccounts
-    ? await discoverPlayerTokenAccounts(connection, playerWallets, ASSET_REGISTRY.map((asset) => asset.mint))
+    ? await discoverPlayerTokenAccounts(connection, tokenAccountOwners, ASSET_REGISTRY.map((asset) => asset.mint))
     : checkpoint.tokenAccounts;
   const scanned = await scanMarketplaceRawData(connection, {
     gmWallets, cssScopes, playerWallets, tokenAccounts: transferScanDue ? tokenAccounts : [], cursors: checkpoint.cursors,
@@ -4736,7 +4739,7 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
   });
   const written = await writeMarketplaceRawRecords(settings, scanned.records);
   await writeJsonAtomic(marketplaceRawDataCheckpointPath(), {
-    schemaVersion: 1, savedAt: new Date().toISOString(), cursors: scanned.cursors, tokenAccounts,
+    schemaVersion: 2, savedAt: new Date().toISOString(), cursors: scanned.cursors, tokenAccounts, tokenAccountOwners,
     tokenAccountsRefreshedAt: refreshTokenAccounts ? new Date().toISOString() : checkpoint.tokenAccountsRefreshedAt,
     lastTransferScanAt: transferScanDue ? new Date().toISOString() : checkpoint.lastTransferScanAt,
   });
