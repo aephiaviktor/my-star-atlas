@@ -231,6 +231,8 @@ const ATLAS_MINT = 'ATLASXmbPQxBUYbxPsV97usA3fPQYEqzQBUHgiFCUsXx';
 const SES_SHIP_STATS_URL = 'https://ses.staratlas.com/tools/ship-stats/engine/data/sot.js';
 const SAGE_PROGRAM_ID = new PublicKey('SAGE2HAwep459SNq61LHvjxPk4pLPEJLoMETef7f7EE');
 const GM_PROGRAM_ID = new PublicKey('traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg');
+const MARKETPLACE_RAWDATA_CUTOVER_ISO = '2026-08-30T12:00:22.000Z';
+const MARKETPLACE_RAWDATA_CUTOVER_SLOT = 442873938;
 const PLAYER_PROFILE_PROGRAM_ID = new PublicKey('pprofELXjL5Kck7Jn5hCpwAL82DpTkSYBENzahVtbc9');
 const SAGE_GAME_ID = new PublicKey('GAMEzqJehF8yAnKiTARUuhZMvLvkZVAsCVri5vSfemLr');
 const SRSLY_PROGRAM_ID = new PublicKey('SRSLYxcFnjd5jG2DpJw4as6UEyjwJQK1U4J1TD1hvZH');
@@ -720,16 +722,14 @@ async function fetchMarketplaceAssetFlowsFromInflux(settings) {
 async function fetchMarketplaceRawDataFromInflux(settings) {
   const bucket = String(settings.influxBucket || '').trim();
   if (!bucket) return { rows: [], error: '' };
-  const rawDataCutoverIso = '2026-08-30T12:00:22.000Z';
-  const rawDataCutoverSlot = 442873938;
   const flux = `from(bucket: "${escapeFluxString(bucket)}")
-  |> range(start: time(v: "${rawDataCutoverIso}"))
+  |> range(start: time(v: "${MARKETPLACE_RAWDATA_CUTOVER_ISO}"))
   |> filter(fn: (r) => r._measurement == "marketplace_rawdata")
   |> filter(fn: (r) => r.record == "transaction")
   |> filter(fn: (r) => r.discoverySource == "gm_wallet" or r.discoverySource == "lm_scanner" or r.discoverySource == "css_account" or r.discoverySource == "token_account" or r.discoverySource == "multiple")
   |> filter(fn: (r) => r._field == "slot" or r._field == "success" or r._field == "payloadHash" or r._field == "payload")
   |> pivot(rowKey: ["_time", "record", "signature", "eventId", "discoverySource"], columnKey: ["_field"], valueColumn: "_value")
-  |> filter(fn: (r) => exists r.slot and r.slot >= ${rawDataCutoverSlot})
+  |> filter(fn: (r) => exists r.slot and r.slot >= ${MARKETPLACE_RAWDATA_CUTOVER_SLOT})
   |> sort(columns: ["_time"], desc: true)`;
   try {
     const rawRows = parseInfluxCsv(await queryInfluxFlux(settings, flux)).map((row) => {
@@ -4743,7 +4743,7 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
     : checkpoint.tokenAccounts;
   const scanned = await scanMarketplaceRawData(connection, {
     gmWallets, cssScopes, playerWallets, tokenAccounts: transferScanDue ? tokenAccounts : [], cursors: checkpoint.cursors,
-    startIso: MARKETPLACE_HISTORY_CUTOVER_ISO, maxPages: 1,
+    startIso: MARKETPLACE_RAWDATA_CUTOVER_ISO, startSlot: MARKETPLACE_RAWDATA_CUTOVER_SLOT, maxPages: 1,
   });
   const written = await writeMarketplaceRawRecords(settings, scanned.records);
   await writeJsonAtomic(marketplaceRawDataCheckpointPath(), {

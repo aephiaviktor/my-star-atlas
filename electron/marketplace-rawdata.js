@@ -287,7 +287,7 @@ async function discoverPlayerTokenAccounts(connection, playerWallets, allowedMin
   return rows.sort((a, b) => a.address.localeCompare(b.address) || a.owner.localeCompare(b.owner));
 }
 
-async function collectAddressTransactions(connection, scopes, cursors = {}, { startIso, maxPages = 1, batchSize = 5 } = {}) {
+async function collectAddressTransactions(connection, scopes, cursors = {}, { startIso, startSlot = 0, maxPages = 1, batchSize = 5 } = {}) {
   const startMs = Date.parse(startIso || '2026-07-24T00:00:00.000Z');
   const signatures = new Map();
   const nextCursors = { ...cursors };
@@ -297,7 +297,7 @@ async function collectAddressTransactions(connection, scopes, cursors = {}, { st
   const recordRows = (rows, addressScopes) => {
     let reachedStart = false;
     for (const row of rows || []) {
-      if (Number(row.blockTime) * 1000 < startMs) { reachedStart = true; continue; }
+      if (Number(row.blockTime) * 1000 < startMs || Number(row.slot) < Number(startSlot || 0)) { reachedStart = true; continue; }
       if (!row.err && row.signature) {
         const current = signatures.get(String(row.signature)) || { row, scopes: [] };
         current.scopes.push(...addressScopes);
@@ -370,14 +370,14 @@ async function collectAddressTransactions(connection, scopes, cursors = {}, { st
 }
 
 async function scanMarketplaceRawData(connection, {
-  gmWallets = [], cssScopes = [], playerWallets = [], tokenAccounts = [], cursors = {}, startIso, maxPages = 1,
+  gmWallets = [], cssScopes = [], playerWallets = [], tokenAccounts = [], cursors = {}, startIso, startSlot = 0, maxPages = 1,
 } = {}) {
   const scopes = [
     ...gmWallets.map((address) => ({ address: String(address), kind: 'gm' })),
     ...cssScopes.map((scope) => ({ address: String(scope.address), kind: 'css', faction: scope.faction, sageProgramId: String(scope.sageProgramId) })),
     ...tokenAccounts.map((scope) => ({ address: String(scope.address), kind: 'token', owner: String(scope.owner) })),
   ];
-  const scanned = await collectAddressTransactions(connection, scopes, cursors, { startIso, maxPages });
+  const scanned = await collectAddressTransactions(connection, scopes, cursors, { startIso, startSlot, maxPages });
   const records = [];
   for (const item of scanned.fetched) {
     const transaction = item.transaction;

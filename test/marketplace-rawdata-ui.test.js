@@ -52,11 +52,13 @@ test('Marketplace Raw Data owns persistent sidebar controls for its seven raw tr
 });
 
 test('Raw reader and writer are transaction-only with no decoded-event projection', () => {
-  assert.match(main, /const rawDataCutoverIso = '2026-08-30T12:00:22\.000Z'/);
-  assert.match(main, /const rawDataCutoverSlot = 442873938/);
-  assert.match(main, /range\(start: time\(v: "\$\{rawDataCutoverIso\}"\)\)/);
+  assert.match(main, /const MARKETPLACE_RAWDATA_CUTOVER_ISO = '2026-08-30T12:00:22\.000Z'/);
+  assert.match(main, /const MARKETPLACE_RAWDATA_CUTOVER_SLOT = 442873938/);
+  assert.match(main, /range\(start: time\(v: "\$\{MARKETPLACE_RAWDATA_CUTOVER_ISO\}"\)\)/);
   assert.match(main, /r\.discoverySource == "gm_wallet"[\s\S]*r\.discoverySource == "multiple"/);
-  assert.match(main, /exists r\.slot and r\.slot >= \$\{rawDataCutoverSlot\}/);
+  assert.match(main, /exists r\.slot and r\.slot >= \$\{MARKETPLACE_RAWDATA_CUTOVER_SLOT\}/);
+  assert.match(main, /startIso: MARKETPLACE_RAWDATA_CUTOVER_ISO, startSlot: MARKETPLACE_RAWDATA_CUTOVER_SLOT/);
+  assert.match(raw, /Number\(row\.slot\) < Number\(startSlot \|\| 0\)/);
   assert.match(main, /r\.record == "transaction"/);
   assert.match(main, /r\._field == "slot" or r\._field == "success" or r\._field == "payloadHash" or r\._field == "payload"/);
   assert.doesNotMatch(main, /streamsBySignature/);
