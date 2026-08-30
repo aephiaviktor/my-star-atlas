@@ -196,6 +196,11 @@ const earningsMarketplaceRawTo = document.querySelector('#earnings-marketplace-r
 const earningsMarketplaceRawDiscoverySource = document.querySelector('#earnings-marketplace-raw-discovery-source');
 const earningsMarketplaceRawCoverageSummary = document.querySelector('#earnings-marketplace-raw-coverage-summary');
 const earningsMarketplaceRawCoverage = document.querySelector('#earnings-marketplace-raw-coverage');
+const earningsMarketplaceEventsStatus = document.querySelector('#earnings-marketplace-events-status');
+const earningsMarketplaceEventsTableBody = document.querySelector('#earnings-marketplace-events-table-body');
+const earningsMarketplaceEventsFrom = document.querySelector('#earnings-marketplace-events-from');
+const earningsMarketplaceEventsTo = document.querySelector('#earnings-marketplace-events-to');
+const earningsMarketplaceEventsType = document.querySelector('#earnings-marketplace-events-type');
 const earningsMarketplaceSubtabButtons = Array.from(document.querySelectorAll('[data-marketplace-subtab]'));
 const earningsMarketplacePanels = Array.from(document.querySelectorAll('[data-marketplace-panel]'));
 const earningsMarketplaceSideSwitch = document.querySelector('#earnings-marketplace-side-switch');
@@ -6971,8 +6976,42 @@ function renderMarketplaceRawData(result) {
   }
 }
 
+function renderMarketplaceDecodedEvents(result) {
+  const rows = Array.isArray(result?.marketplaceEvents) ? result.marketplaceEvents : [];
+  updateMarketplaceRawFilterOptions(earningsMarketplaceEventsType, rows.map((entry) => entry.eventType));
+  const from = earningsMarketplaceEventsFrom?.value || '';
+  const to = earningsMarketplaceEventsTo?.value || '';
+  const filtered = rows.filter((entry) => {
+    const day = String(entry.timestamp || '').slice(0, 10);
+    return (!from || day >= from) && (!to || day <= to)
+      && (!earningsMarketplaceEventsType?.value || entry.eventType === earningsMarketplaceEventsType.value);
+  });
+  const error = String(result?.marketplaceEventsError || '');
+  setText(earningsMarketplaceEventsStatus, `${formatMarketplaceWhole(filtered.length)} of ${formatMarketplaceWhole(rows.length)} decoded events at ${formatCheckedAt(result?.checkedAt)}${error ? ` · ${error}` : ''}`);
+  if (!earningsMarketplaceEventsTableBody) return;
+  earningsMarketplaceEventsTableBody.textContent = '';
+  if (!filtered.length) {
+    const tr = document.createElement('tr'); tr.className = 'empty-row';
+    const td = createTextCell(error ? `Marketplace event read failed: ${error}` : 'No decoded Marketplace events found');
+    td.colSpan = 12; tr.appendChild(td); earningsMarketplaceEventsTableBody.appendChild(tr); return;
+  }
+  for (const entry of filtered) {
+    const tr = document.createElement('tr');
+    for (const value of [
+      formatMarketplaceTimestamp(entry.timestamp), entry.eventType, entry.action || entry.type || '--', entry.market || '--',
+      entry.fromWallet || '--', entry.toWallet || '--', entry.asset || '--', entry.mint || entry.rawMint || '--',
+      entry.quantityRaw ?? entry.quantity ?? '--', entry.unitPriceAtlas ?? entry.priceAtlas ?? '--', entry.orderId || '--',
+    ]) tr.appendChild(createTextCell(value));
+    const signatureCell = document.createElement('td');
+    const link = document.createElement('a'); link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
+    link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = entry.signature; signatureCell.appendChild(link);
+    tr.appendChild(signatureCell); earningsMarketplaceEventsTableBody.appendChild(tr);
+  }
+}
+
 function renderEarningsMarketplace(result) {
   renderMarketplaceRawData(result);
+  renderMarketplaceDecodedEvents(result);
   updateMarketplaceSubtab();
   const rows = Array.isArray(result?.localMarketTrades) ? result.localMarketTrades : [];
   const visibleRows = rows.filter((entry) => entry.side === earningsMarketplaceSide);
@@ -7395,12 +7434,19 @@ async function refreshMarketplace({ sync = false } = {}) {
       || profile !== getActivePlayerProfile(currentSettings)) return result;
     const prior = marketplaceSnapshotCache.get(cacheKey);
     const rawReadFailed = Boolean(result?.marketplaceRawDataError);
-    const accepted = rawReadFailed && prior
+    const eventsReadFailed = Boolean(result?.marketplaceEventsError);
+    const accepted = (rawReadFailed || eventsReadFailed) && prior
       ? {
           ...result,
-          marketplaceRawData: prior.marketplaceRawData,
-          marketplaceRawDataCount: prior.marketplaceRawDataCount,
-          marketplaceRawDataCoverage: result.marketplaceRawDataCoverage || prior.marketplaceRawDataCoverage,
+          ...(rawReadFailed ? {
+            marketplaceRawData: prior.marketplaceRawData,
+            marketplaceRawDataCount: prior.marketplaceRawDataCount,
+            marketplaceRawDataCoverage: result.marketplaceRawDataCoverage || prior.marketplaceRawDataCoverage,
+          } : {}),
+          ...(eventsReadFailed ? {
+            marketplaceEvents: prior.marketplaceEvents,
+            marketplaceEventCount: prior.marketplaceEventCount,
+          } : {}),
         }
       : result;
     marketplaceSnapshotCache.set(cacheKey, accepted);
@@ -9453,11 +9499,18 @@ document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
 
 earningsMarketplaceSubtabButtons.forEach((button) => {
   button.addEventListener('click', () => {
-    currentMarketplaceSubtab = button.dataset.marketplaceSubtab === 'calculations' ? 'calculations' : 'raw';
+    currentMarketplaceSubtab = ['raw', 'events', 'calculations'].includes(button.dataset.marketplaceSubtab)
+      ? button.dataset.marketplaceSubtab : 'raw';
     updateMarketplaceSubtab();
     renderEarningsColumnControls();
   });
 });
+
+[
+  earningsMarketplaceEventsFrom, earningsMarketplaceEventsTo, earningsMarketplaceEventsType,
+].forEach((control) => control?.addEventListener('change', () => {
+  if (latestMarketplaceResult) renderMarketplaceDecodedEvents(latestMarketplaceResult);
+}));
 
 [
   earningsMarketplaceRawFrom, earningsMarketplaceRawTo, earningsMarketplaceRawDiscoverySource,

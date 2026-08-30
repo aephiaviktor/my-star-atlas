@@ -18,7 +18,8 @@ test('Marketplace earnings tab sits between Mining and Cargo with a BUY/SELL swi
   for (const label of ['Timestamp \\(UTC\\)', 'Deposit Cargo to Game Signature', 'Marketplace', 'Starbase', 'Asset', 'Amount', 'Purchase Value', 'Price', 'Marketplace Fee', 'Txs Fee', 'ATLAS Paid', 'Cost / Unit', 'GM Trading Signatures']) {
     assert.match(panel, new RegExp(label));
   }
-  assert.doesNotMatch(panel, /<th>Side<\/th>|<th>Order ID<\/th>/);
+  const calculationsPanel = panel.match(/data-marketplace-panel="calculations"[\s\S]*?<\/section>/)?.[0] || '';
+  assert.doesNotMatch(calculationsPanel, /<th>Side<\/th>|<th>Order ID<\/th>/);
   assert.match(panel, /id="earnings-marketplace-unit-header"/);
   assert.ok(panel.indexOf('ATLAS Paid') < panel.indexOf('Cost / Unit'));
   assert.ok(panel.indexOf('Cost / Unit') < panel.indexOf('Deposit Cargo to Game Signature'));

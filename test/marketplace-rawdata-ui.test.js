@@ -29,9 +29,22 @@ test('Marketplace Raw Data exposes only transaction filters, sortable facts, and
 
 test('Marketplace shows only the table belonging to the active Raw Data or Calculations subtab', () => {
   assert.match(html, /data-marketplace-panel="raw"/);
+  assert.match(html, /data-marketplace-panel="events" hidden/);
   assert.match(html, /data-marketplace-panel="calculations" hidden/);
   assert.match(renderer, /panel\.hidden = panel\.dataset\.marketplacePanel !== currentMarketplaceSubtab/);
   assert.match(css, /\[data-marketplace-panel\]\[hidden\]\s*\{\s*display:\s*none/);
+});
+
+test('Marketplace Decoded Events is a separate persisted event view linked to raw signatures', () => {
+  assert.match(html, /data-marketplace-subtab="events"[^>]*>Decoded Events</);
+  assert.match(html, /id="earnings-marketplace-events-table-body"/);
+  assert.match(main, /r\._measurement == "marketplace_events"/);
+  assert.match(main, /decodedEvents\.rows\.filter\(\(event\) => rawSignatures\.has\(event\.signature\)\)/);
+  assert.match(renderer, /function renderMarketplaceDecodedEvents\(result\)/);
+  assert.match(renderer, /renderMarketplaceDecodedEvents\(result\)/);
+  assert.match(renderer, /eventsReadFailed[\s\S]*marketplaceEvents: prior\.marketplaceEvents/);
+  assert.match(main, /await writeMarketplaceRawRecords\(settings, gmEventTransactions[\s\S]*await writeMarketplaceEvents\(settings, gmEvents/);
+  assert.match(main, /action: 'order_cancelled'/);
 });
 
 test('Marketplace Raw Data owns persistent sidebar controls for its seven raw transaction columns', () => {
@@ -61,11 +74,9 @@ test('Raw reader and writer are transaction-only with no decoded-event projectio
   assert.match(raw, /Number\(row\.slot\) < Number\(startSlot \|\| 0\)/);
   assert.match(main, /r\.record == "transaction"/);
   assert.match(main, /r\._field == "slot" or r\._field == "success" or r\._field == "payloadHash" or r\._field == "payload"/);
-  assert.doesNotMatch(main, /streamsBySignature/);
-  assert.doesNotMatch(main, /eventType: isEvent/);
-  assert.doesNotMatch(main, /fromWallet: isEvent/);
-  assert.doesNotMatch(main, /quantityRaw:/);
-  assert.match(main, /lines\.push\(formatRawTransactionInfluxLine/);
+  const rawWriter = main.match(/async function writeMarketplaceRawRecords[\s\S]*?\n}\n/)?.[0] || '';
+  assert.doesNotMatch(rawWriter, /streamsBySignature|eventType|fromWallet|quantityRaw/);
+  assert.match(rawWriter, /lines\.push\(formatRawTransactionInfluxLine/);
   assert.doesNotMatch(main, /lines\.push\(formatRawEventInfluxLine/);
   assert.match(main, /return \{ transactions: \(records \|\| \[\]\)\.length, events: 0 \}/);
   assert.match(main, /marketplaceRawDataCoverage/);

@@ -44,6 +44,6 @@ test('regular Earnings snapshots always retain Crafting internal ingredient basi
 test('Marketplace stale cache remains rendered while background synchronization runs', () => {
   const refresh = renderer.slice(renderer.indexOf('async function refreshMarketplace'), renderer.indexOf('function runMarketplaceBackgroundSync'));
   assert.match(refresh, /const cached = marketplaceSnapshotCache\.get\(cacheKey\)/);
-  assert.match(refresh, /if \(cached\) \{[\s\S]*renderEarningsMarketplace\(latestEarningsResult\)/);
+  assert.match(refresh, /if \(cached\) \{[\s\S]*renderEarningsMarketplace\(latestMarketplaceResult\)/);
   assert.match(refresh, /if \(!cached\) renderEarningsMarketplaceLoading/);
 });

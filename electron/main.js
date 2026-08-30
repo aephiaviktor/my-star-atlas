@@ -84,11 +84,14 @@ const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlow
 const {
   CSS_STARBASE_NAMES,
   deriveCssStarbasePlayer,
+  classifyCssCargoEvents,
+  playerTransferEvents,
   discoverPlayerTokenAccounts,
   scanMarketplaceRawData,
   buildLmRawRecords,
   formatRawTransactionInfluxLine,
 } = require('./marketplace-rawdata');
+const { formatMarketplaceEventInfluxLine } = require('./marketplace-events');
 const { filterLegacyMarketplaceInfluxLines } = require('./marketplace-write-policy');
 const {
   MARKETPLACE_FACTION_MEASUREMENT,
@@ -759,6 +762,33 @@ async function fetchMarketplaceRawDataFromInflux(settings) {
     return { rows, error: '' };
   } catch (error) {
     return { rows: [], error: String(error?.message || error || 'marketplace_rawdata_influx_unavailable') };
+  }
+}
+
+async function fetchMarketplaceEventsFromInflux(settings) {
+  const bucket = String(settings.influxBucket || '').trim();
+  if (!bucket) return { rows: [], error: '' };
+  const flux = `from(bucket: "${escapeFluxString(bucket)}")
+  |> range(start: time(v: "${MARKETPLACE_RAWDATA_CUTOVER_ISO}"))
+  |> filter(fn: (r) => r._measurement == "marketplace_events")
+  |> filter(fn: (r) => r.eventType == "deposit" or r.eventType == "withdraw" or r.eventType == "transfer" or r.eventType == "lm" or r.eventType == "gm")
+  |> filter(fn: (r) => r._field == "payload" or r._field == "payloadHash")
+  |> pivot(rowKey: ["_time", "eventType", "eventId", "signature"], columnKey: ["_field"], valueColumn: "_value")
+  |> sort(columns: ["_time"], desc: true)`;
+  try {
+    const rows = parseInfluxCsv(await queryInfluxFlux(settings, flux)).map((row) => {
+      let payload = null;
+      try { payload = JSON.parse(String(row.payload || '')); } catch (_error) { payload = null; }
+      return {
+        ...(payload && typeof payload === 'object' ? payload : {}),
+        timestamp: String(row._time || ''), eventType: String(row.eventType || payload?.eventType || ''),
+        eventId: String(row.eventId || payload?.eventId || ''), signature: String(row.signature || payload?.signature || ''),
+        payloadHash: String(row.payloadHash || ''),
+      };
+    }).filter((row) => row.eventId && row.signature);
+    return { rows, error: '' };
+  } catch (error) {
+    return { rows: [], error: marketplacePublicationErrorCode(error?.message, 'marketplace_events_read_failed') };
   }
 }
 
@@ -4715,6 +4745,60 @@ async function writeMarketplaceRawRecords(settings, records) {
   return { transactions: (records || []).length, events: 0 };
 }
 
+async function writeMarketplaceEvents(settings, events, transactions = []) {
+  const transactionBySignature = new Map((transactions || []).map((transaction) => [
+    String(transaction?.signature || transaction?.transaction?.signatures?.[0] || ''), transaction,
+  ]).filter(([signature]) => signature));
+  const lines = [];
+  const seen = new Set();
+  for (const event of events || []) {
+    if (!event?.eventId || seen.has(event.eventId)) continue;
+    const transaction = transactionBySignature.get(String(event.signature || ''));
+    if (!transaction || !Number.isSafeInteger(Number(transaction.blockTime))) continue;
+    seen.add(event.eventId);
+    lines.push(formatMarketplaceEventInfluxLine(event, Number(transaction.blockTime)));
+  }
+  if (lines.length) await writeInventoryBasisLinesToInflux(settings, lines.join('\n'));
+  return { written: lines.length };
+}
+
+function projectMarketplaceOrderAndExecutionEvents(scanned, market) {
+  const eventType = String(market || '').toLowerCase();
+  const events = [];
+  for (const order of scanned?.orders || []) {
+    const signature = String(order.creationSignature || '');
+    if (!signature || !order.orderId) continue;
+    events.push({
+      eventId: `${signature}:${eventType}:order:${order.orderId}`, signature, eventType,
+      action: 'order_created', market: String(market || '').toUpperCase(), orderId: String(order.orderId),
+      side: String(order.side || ''), fromWallet: String(order.initializer || ''), asset: String(order.asset || ''),
+      mint: String(order.rawMint || order.certificateMint || ''), quantityRaw: String(order.originalQuantity ?? ''),
+      unitPriceAtlas: Number(order.priceAtlas),
+    });
+  }
+  for (const trade of scanned?.trades || []) {
+    const signature = String(trade.signature || '');
+    if (!signature || !trade.id) continue;
+    events.push({
+      eventId: `${signature}:${eventType}:execution:${trade.id}`, signature, eventType,
+      action: 'execution', market: String(market || '').toUpperCase(), orderId: String(trade.orderId || ''),
+      side: String(trade.side || ''), fromWallet: String(trade.wallet || ''), asset: String(trade.asset || ''),
+      mint: String(trade.rawMint || trade.certificateMint || ''), quantityRaw: String(trade.quantity ?? ''),
+      unitPriceAtlas: Number(trade.unitPriceAtlas ?? trade.priceAtlas), grossAtlas: Number(trade.grossAtlas),
+      marketplaceFeeAtlas: Number(trade.marketplaceFeeAtlas || 0), txFeeAtlas: Number(trade.txFeeAtlas || 0),
+    });
+  }
+  for (const transaction of scanned?.rawTransactions || []) {
+    const signature = String(transaction?.signature || transaction?.transaction?.signatures?.[0] || '');
+    const cancellations = (transaction?.meta?.logMessages || []).filter((line) => String(line).includes('Instruction: ProcessCancel'));
+    cancellations.forEach((_line, index) => events.push({
+      eventId: `${signature}:${eventType}:cancel:${index}`, signature, eventType,
+      action: 'order_cancelled', market: String(market || '').toUpperCase(),
+    }));
+  }
+  return events;
+}
+
 async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets, configuredProfiles, profileWalletsByFaction }) {
   const checkpoint = await loadMarketplaceRawDataCheckpoint();
   const playerWallets = Object.values(profileWalletsByFaction).flat();
@@ -4746,12 +4830,27 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
     startIso: MARKETPLACE_RAWDATA_CUTOVER_ISO, startSlot: MARKETPLACE_RAWDATA_CUTOVER_SLOT, maxPages: 1,
   });
   const written = await writeMarketplaceRawRecords(settings, scanned.records);
+  const transactions = scanned.records.map((record) => record.transaction);
+  const decodedEvents = [];
+  for (const record of scanned.records) {
+    if (record.discoverySources.includes('css_account')) {
+      for (const scope of cssScopes) decodedEvents.push(...classifyCssCargoEvents(record.transaction, {
+        sageProgramId: scope.sageProgramId, cssStarbasePlayer: scope.address,
+      }).map((event) => ({ ...event, eventType: event.stream, action: event.type })));
+    }
+    if (record.discoverySources.includes('token_account')) {
+      decodedEvents.push(...playerTransferEvents(record.transaction, tokenAccountOwners).map((event) => ({
+        ...event, eventType: 'transfer', action: 'transfer',
+      })));
+    }
+  }
+  const eventWrite = await writeMarketplaceEvents(settings, decodedEvents, transactions);
   await writeJsonAtomic(marketplaceRawDataCheckpointPath(), {
     schemaVersion: 2, savedAt: new Date().toISOString(), cursors: scanned.cursors, tokenAccounts, tokenAccountOwners,
     tokenAccountsRefreshedAt: refreshTokenAccounts ? new Date().toISOString() : checkpoint.tokenAccountsRefreshedAt,
     lastTransferScanAt: transferScanDue ? new Date().toISOString() : checkpoint.lastTransferScanAt,
   });
-  return { ...written, rpc: scanned.rpc };
+  return { ...written, decodedEvents: eventWrite.written, rpc: scanned.rpc };
 }
 
 async function syncMarketplaceRawData(settings, connection, scope) {
@@ -5488,6 +5587,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   const lmRawRecords = buildLmRawRecords({ transactions: scanned.rawTransactions });
   try {
     await writeMarketplaceRawRecords(settings, lmRawRecords);
+    await writeMarketplaceEvents(settings, projectMarketplaceOrderAndExecutionEvents(scanned, 'LM'), scanned.rawTransactions);
   } catch (error) {
     return {
       trades,
@@ -5630,6 +5730,19 @@ async function fetchGlobalMarketTrades(settings, connection) {
       trackedWallets, assetsByMint, starbasesByKey, atlasPerSol,
     }),
   });
+  try {
+    const gmEvents = projectMarketplaceOrderAndExecutionEvents(scanned, 'GM');
+    const gmEventSignatures = new Set(gmEvents.map((event) => event.signature));
+    const gmEventTransactions = scanned.rawTransactions.filter((transaction) => gmEventSignatures.has(String(
+      transaction?.signature || transaction?.transaction?.signatures?.[0] || '',
+    )));
+    await writeMarketplaceRawRecords(settings, gmEventTransactions.map((transaction) => ({
+      transaction, discoverySources: ['gm_wallet'],
+    })));
+    await writeMarketplaceEvents(settings, gmEvents, gmEventTransactions);
+  } catch (error) {
+    if (!isMarketplaceRpcBudgetExhaustedError(error)) throw error;
+  }
   // Do not recursively signature-scan upstream or profile wallets. Cross-profile
   // movements are discovered only through the bounded token-account stream.
   const upstreamWallets = [];
@@ -5842,9 +5955,10 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
 
 async function fetchMarketplaceSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
-  const [result, rawData, rawDataCoverage, assetFlowEvents, inventoryBasisObservations] = await Promise.all([
+  const [result, rawData, decodedEvents, rawDataCoverage, assetFlowEvents, inventoryBasisObservations] = await Promise.all([
     fetchMarketplaceTradesFromInflux(settings),
     fetchMarketplaceRawDataFromInflux(settings),
+    fetchMarketplaceEventsFromInflux(settings),
     buildMarketplaceRawDataCoverage(settings).catch(() => ({ sources: [], total: 0, complete: 0, pending: 0, lastSavedAt: '' })),
     fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []),
     readInventoryBasisSnapshots({
@@ -5854,12 +5968,17 @@ async function fetchMarketplaceSnapshot(payload) {
   ]);
   const accounting = buildCostLedgerResult({ localMarketTrades: result.trades, assetFlowEvents });
   const trades = enrichGmTradesWithInventoryBasis(result.trades, accounting.appliedEventResults, { inventoryBasisObservations });
+  const rawSignatures = new Set(rawData.rows.map((row) => row.signature));
+  const marketplaceEvents = decodedEvents.rows.filter((event) => rawSignatures.has(event.signature));
   return {
     ok: !result.error,
     marketplaceRawData: rawData.rows,
     marketplaceRawDataCount: rawData.rows.length,
     marketplaceRawDataError: rawData.error,
     marketplaceRawDataCoverage: rawDataCoverage,
+    marketplaceEvents,
+    marketplaceEventCount: marketplaceEvents.length,
+    marketplaceEventsError: decodedEvents.error,
     localMarketTrades: trades,
     localMarketTradeCount: trades.length,
     localMarketError: result.error,

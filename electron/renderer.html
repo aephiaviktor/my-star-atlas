@@ -1249,6 +1249,7 @@
           <div class="earnings-panel" data-earnings-panel="marketplace">
             <div class="section-subtabs" role="tablist" aria-label="Marketplace data view">
               <button class="subtab-button active" type="button" data-marketplace-subtab="raw" aria-selected="true">Raw Data</button>
+              <button class="subtab-button" type="button" data-marketplace-subtab="events" aria-selected="false">Decoded Events</button>
               <button class="subtab-button" type="button" data-marketplace-subtab="calculations" aria-selected="false">Calculations</button>
             </div>
             <section class="work-surface earnings-surface" data-marketplace-panel="raw">
@@ -1274,6 +1275,20 @@
                     <th>Payload</th>
                   </tr></thead>
                   <tbody id="earnings-marketplace-raw-table-body"><tr class="empty-row"><td colspan="7">No Marketplace raw transactions loaded</td></tr></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="work-surface earnings-surface" data-marketplace-panel="events" hidden>
+              <div id="earnings-marketplace-events-status" class="fleet-sync-status" role="status">Awaiting decoded Marketplace events</div>
+              <div class="activity-filters marketplace-raw-filters">
+                <label>From <input id="earnings-marketplace-events-from" type="date"></label>
+                <label>To <input id="earnings-marketplace-events-to" type="date"></label>
+                <label>Event Type <select id="earnings-marketplace-events-type"><option value="">All</option></select></label>
+              </div>
+              <div class="fleet-table-wrap">
+                <table class="fleet-table earnings-table">
+                  <thead><tr><th>Timestamp (UTC)</th><th>Event Type</th><th>Action</th><th>Market</th><th>From</th><th>To</th><th>Asset</th><th>Mint</th><th>Quantity</th><th>Unit Price</th><th>Order ID</th><th>Transaction Signature</th></tr></thead>
+                  <tbody id="earnings-marketplace-events-table-body"><tr class="empty-row"><td colspan="12">No decoded Marketplace events loaded</td></tr></tbody>
                 </table>
               </div>
             </section>
