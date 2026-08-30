@@ -68,7 +68,55 @@ function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [] } = {}) {
   return events;
 }
 
+function priceAtOrBefore(rows, timestampMs) {
+  let selected = null;
+  for (const row of rows || []) {
+    const ts = Number(row?.[0]);
+    const price = Number(row?.[1]);
+    if (!Number.isFinite(ts) || ts > timestampMs) continue;
+    if (!Number.isFinite(price) || price <= 0) continue;
+    if (!selected || ts > selected.ts) selected = { ts, price };
+  }
+  return selected;
+}
+
+function transactionSignature(transaction) {
+  return String(transaction?.signature || transaction?.transaction?.signatures?.[0] || '');
+}
+
+function transactionFeePayer(transaction) {
+  const key = transaction?.transaction?.message?.accountKeys?.[0];
+  return String(key?.pubkey || key || '');
+}
+
+function enrichMarketplaceEventsWithTransactionFees(events, transactions, priceSeries = {}) {
+  const transactionsBySignature = new Map((transactions || []).map((transaction) => [transactionSignature(transaction), transaction]));
+  return (events || []).map((event) => {
+    const transaction = transactionsBySignature.get(String(event?.signature || ''));
+    const feeLamports = Number(transaction?.meta?.fee);
+    const transactionFeeSol = Number.isFinite(feeLamports) && feeLamports >= 0 ? feeLamports / 1e9 : null;
+    const timestampMs = Number(transaction?.blockTime) * 1000;
+    const sol = priceAtOrBefore(priceSeries.sol, timestampMs);
+    const atlas = priceAtOrBefore(priceSeries.atlas, timestampMs);
+    const transactionFeeAtlas = transactionFeeSol != null && sol && atlas
+      ? transactionFeeSol * sol.price / atlas.price
+      : null;
+    return {
+      ...event,
+      transactionFeeSol,
+      transactionFeeAtlas,
+      transactionFeePayer: transactionFeePayer(transaction),
+      transactionFeeConversionStatus: transactionFeeAtlas == null ? 'missing_price' : 'complete',
+      transactionFeeConversionSource: 'Aephia token price series',
+      solUsdPrice: sol?.price ?? null,
+      solUsdPriceTimestamp: sol ? new Date(sol.ts).toISOString() : '',
+      atlasUsdPrice: atlas?.price ?? null,
+      atlasUsdPriceTimestamp: atlas ? new Date(atlas.ts).toISOString() : '',
+    };
+  });
+}
+
 module.exports = {
   MARKETPLACE_EVENTS_MEASUREMENT, EVENT_TYPES, eventPayloadHash, formatMarketplaceEventInfluxLine,
-  deriveCustodyEventsFromRawRows,
+  deriveCustodyEventsFromRawRows, enrichMarketplaceEventsWithTransactionFees,
 };

@@ -422,6 +422,20 @@ select:focus {
   accent-color: var(--cyan);
 }
 
+.marketplace-selector-cell {
+  width: 72px;
+  text-align: center;
+}
+
+.marketplace-selector-checkbox {
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  margin: 0;
+  vertical-align: middle;
+  accent-color: var(--cyan);
+}
+
 .app-shell.nav-collapsed .left-nav {
   padding-inline: 12px;
 }

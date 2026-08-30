@@ -841,6 +841,9 @@ const marketplaceEventColumns = Object.freeze([
   Object.freeze({ id: 'mint', label: 'Mint' }),
   Object.freeze({ id: 'quantity', label: 'Quantity' }),
   Object.freeze({ id: 'unitPrice', label: 'Unit Price' }),
+  Object.freeze({ id: 'marketplaceFeeAtlas', label: 'Marketplace Fee (ATLAS)' }),
+  Object.freeze({ id: 'transactionFeeSol', label: 'Transaction Fee (SOL)' }),
+  Object.freeze({ id: 'transactionFeeAtlas', label: 'Transaction Fee (ATLAS)' }),
   Object.freeze({ id: 'orderId', label: 'Order ID' }),
   Object.freeze({ id: 'signature', label: 'Transaction Signature' }),
 ]);
@@ -6939,8 +6942,8 @@ function setMarketplaceLinkedSignature(signature) {
 }
 
 function createMarketplaceSelectorCell(entry) {
-  const cell = document.createElement('td');
-  const input = document.createElement('input'); input.type = 'checkbox';
+  const cell = document.createElement('td'); cell.className = 'marketplace-selector-cell';
+  const input = document.createElement('input'); input.type = 'checkbox'; input.className = 'marketplace-selector-checkbox';
   input.setAttribute('aria-label', `Link signature ${entry.signature || ''}`);
   input.checked = Boolean(entry.signature && entry.signature === marketplaceLinkedSignature);
   input.addEventListener('change', () => setMarketplaceLinkedSignature(input.checked ? entry.signature : ''));
@@ -7046,7 +7049,9 @@ function compareMarketplaceEventValues(a, b, columnId) {
   const left = marketplaceEventColumnValue(a, columnId);
   const right = marketplaceEventColumnValue(b, columnId);
   if (columnId === 'timestamp') return (Date.parse(left) || 0) - (Date.parse(right) || 0);
-  if (columnId === 'quantity' || columnId === 'unitPrice') return (Number(left) || 0) - (Number(right) || 0);
+  if (['quantity', 'unitPrice', 'marketplaceFeeAtlas', 'transactionFeeSol', 'transactionFeeAtlas'].includes(columnId)) {
+    return (Number(left) || 0) - (Number(right) || 0);
+  }
   return String(left).localeCompare(String(right), undefined, { sensitivity: 'base', numeric: true });
 }
 

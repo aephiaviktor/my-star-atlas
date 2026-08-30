@@ -55,6 +55,10 @@ test('Marketplace Decoded Events is a separate persisted event view linked to ra
   assert.match(renderer, /function renderMarketplaceEventsHeader\(visibleColumns\)/);
   assert.match(renderer, /dataset\.marketplaceEventsSort = column\.id/);
   assert.match(renderer, /compareMarketplaceEventValues/);
+  for (const id of ['marketplaceFeeAtlas', 'transactionFeeSol', 'transactionFeeAtlas']) {
+    assert.match(renderer, new RegExp(`id: '${id}'`));
+  }
+  assert.doesNotMatch(renderer, /id: 'transactionFeeLamports'/);
 });
 
 test('Raw Data and Decoded Events share one reversible signature selector', () => {
@@ -66,6 +70,7 @@ test('Raw Data and Decoded Events share one reversible signature selector', () =
   assert.match(renderer, /!marketplaceLinkedSignature \|\| entry\.signature === marketplaceLinkedSignature/);
   assert.match(renderer, /renderMarketplaceRawData\(latestMarketplaceResult\)[\s\S]*renderMarketplaceDecodedEvents\(latestMarketplaceResult\)/);
   assert.match(renderer, /input\.checked = Boolean\(entry\.signature && entry\.signature === marketplaceLinkedSignature\)/);
+  assert.match(css, /\.marketplace-selector-checkbox\s*\{[\s\S]*width:\s*14px;[\s\S]*height:\s*14px;/);
 });
 
 test('Marketplace Raw Data owns persistent sidebar controls for its seven raw transaction columns', () => {

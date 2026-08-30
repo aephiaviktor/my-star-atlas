@@ -89,7 +89,9 @@ const {
   buildLmRawRecords,
   formatRawTransactionInfluxLine,
 } = require('./marketplace-rawdata');
-const { formatMarketplaceEventInfluxLine, deriveCustodyEventsFromRawRows } = require('./marketplace-events');
+const {
+  formatMarketplaceEventInfluxLine, deriveCustodyEventsFromRawRows, enrichMarketplaceEventsWithTransactionFees,
+} = require('./marketplace-events');
 const { filterLegacyMarketplaceInfluxLines } = require('./marketplace-write-policy');
 const {
   MARKETPLACE_FACTION_MEASUREMENT,
@@ -213,6 +215,7 @@ let mainWindow = null;
 const influxOrgIdCache = new Map();
 const DEFAULT_RPC_URL = 'https://api.mainnet-beta.solana.com';
 const AEPHIA_RESOURCE_URL = 'https://get-ship-data.aephia.workers.dev/gm/resource';
+const AEPHIA_TOKEN_SERIES_BASE_URL = 'https://get-ship-data.aephia.workers.dev/series/token';
 const AEPHIA_PRICE_SERIES_URL = 'https://get-ship-data.aephia.workers.dev/series';
 const AEPHIA_LP_SUMMARY_URL = 'https://store-sage-lp.aephia.workers.dev/summary';
 const GITHUB_REPO = 'aephiaviktor/my-star-atlas';
@@ -288,6 +291,7 @@ let aephiaResourceCache = null;
 const aephiaPriceSeriesCache = new Map();
 let aephiaLpSummaryCache = null;
 let tokenPriceCache = null;
+const aephiaTokenSeriesCache = new Map();
 let shipStatsCache = null;
 
 function settingsPath() {
@@ -4360,6 +4364,21 @@ async function fetchAtlasPerSol() {
   return result;
 }
 
+async function fetchAephiaTokenPriceSeries(token, fromMs, toMs) {
+  const from = new Date(fromMs).toISOString();
+  const to = new Date(toMs).toISOString();
+  const cacheKey = `${token}:${from}:${to}`;
+  const cached = aephiaTokenSeriesCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.rows;
+  const url = `${AEPHIA_TOKEN_SERIES_BASE_URL}/${encodeURIComponent(token)}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`aephia_token_series_${token}_${response.status}`);
+  const payload = await response.json();
+  const rows = Array.isArray(payload?.rows) ? payload.rows.filter((row) => Array.isArray(row) && row.length >= 2) : [];
+  aephiaTokenSeriesCache.set(cacheKey, { rows, expiresAt: Date.now() + 2 * 60 * 1000 });
+  return rows;
+}
+
 async function fetchSduPriceAtl() {
   const resources = await fetchAephiaResourceData();
   const sdu = resources.find((item) => normalizeShipName(item?.name) === 'survey data unit');
@@ -4844,12 +4863,20 @@ async function syncMarketplaceEventsFromRawData(settings) {
       }),
     };
   });
-  const events = [
+  const transactions = rawData.rows.map((row) => row.payload).filter(Boolean);
+  const blockTimes = transactions.map((transaction) => Number(transaction?.blockTime)).filter(Number.isFinite);
+  const fromMs = (Math.min(...blockTimes) * 1000) - 24 * 60 * 60 * 1000;
+  const toMs = (Math.max(...blockTimes) * 1000) + 10 * 60 * 1000;
+  const [sol, atlas] = blockTimes.length ? await Promise.all([
+    fetchAephiaTokenPriceSeries('sol', fromMs, toMs).catch(() => []),
+    fetchAephiaTokenPriceSeries('atlas', fromMs, toMs).catch(() => []),
+  ]) : [[], []];
+  const events = enrichMarketplaceEventsWithTransactionFees([
     ...deriveCustodyEventsFromRawRows(rawData.rows, { cssScopes }),
     ...projectMarketplaceEventsFromRawRows(rawData.rows, 'LM'),
     ...projectMarketplaceEventsFromRawRows(rawData.rows, 'GM'),
-  ];
-  return writeMarketplaceEvents(settings, events, rawData.rows.map((row) => row.payload).filter(Boolean));
+  ], transactions, { sol, atlas });
+  return writeMarketplaceEvents(settings, events, transactions);
 }
 
 async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets, configuredProfiles, profileWalletsByFaction }) {

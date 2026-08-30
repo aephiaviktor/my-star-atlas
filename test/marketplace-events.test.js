@@ -6,7 +6,7 @@ const bs58Module = require('bs58');
 const bs58 = bs58Module.default || bs58Module;
 const {
   MARKETPLACE_EVENTS_MEASUREMENT, eventPayloadHash, formatMarketplaceEventInfluxLine,
-  deriveCustodyEventsFromRawRows,
+  deriveCustodyEventsFromRawRows, enrichMarketplaceEventsWithTransactionFees,
 } = require('../electron/marketplace-events');
 const { DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME } = require('../electron/marketplace-rawdata');
 
@@ -19,6 +19,37 @@ test('Marketplace event lines preserve deterministic identity and source transac
   assert.match(line, /payload="/);
   assert.match(line, /payloadHash="[a-f0-9]{64}"/);
   assert.equal(eventPayloadHash(event), eventPayloadHash({ quantityRaw: '25', asset: 'Food', eventType: 'deposit', signature, eventId: `${signature}:0:outer` }));
+});
+
+test('transaction fees use independently forward-filled historical SOL/USD and ATLAS/USD prices', () => {
+  const transaction = {
+    signature: 'fee-signature', blockTime: 1788091200,
+    transaction: { signatures: ['fee-signature'], message: { accountKeys: [{ pubkey: 'fee-payer' }] } },
+    meta: { fee: 5000 },
+  };
+  const [event] = enrichMarketplaceEventsWithTransactionFees([
+    { eventId: 'fee-signature:0', signature: 'fee-signature', eventType: 'transfer' },
+  ], [transaction], {
+    sol: [[1788090000000, 150], [1788091800000, 999]],
+    atlas: [[1788089400000, 0.0015], [1788090600000, 0.002], [1788091800000, 9]],
+  });
+  assert.equal(event.transactionFeeSol, 0.000005);
+  assert.equal(event.transactionFeeAtlas, 0.375);
+  assert.equal(event.transactionFeePayer, 'fee-payer');
+  assert.equal(event.transactionFeeConversionSource, 'Aephia token price series');
+  assert.equal(event.solUsdPriceTimestamp, '2026-08-30T11:40:00.000Z');
+  assert.equal(event.atlasUsdPriceTimestamp, '2026-08-30T11:50:00.000Z');
+});
+
+test('transaction fee ATLAS remains unavailable without both prior positive token prices', () => {
+  const transaction = { signature: 'missing-price', blockTime: 1788091200,
+    transaction: { signatures: ['missing-price'], message: { accountKeys: ['payer'] } }, meta: { fee: 5000 } };
+  const [event] = enrichMarketplaceEventsWithTransactionFees([
+    { eventId: 'missing-price:0', signature: 'missing-price', eventType: 'deposit' },
+  ], [transaction], { sol: [[1788091800000, 150]], atlas: [[1788090600000, 0.002]] });
+  assert.equal(event.transactionFeeSol, 0.000005);
+  assert.equal(event.transactionFeeAtlas, null);
+  assert.equal(event.transactionFeeConversionStatus, 'missing_price');
 });
 
 test('Marketplace event lines reject missing transaction links and unknown types', () => {
