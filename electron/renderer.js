@@ -7235,6 +7235,7 @@ function setInventoryLedgerView(view) {
   for (const panel of inventoryLedgerViewPanels) panel.hidden = panel.dataset.inventoryLedgerViewPanel !== currentInventoryLedgerView;
 }
 
+const costLedgerBasisFormatter = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const costLedgerUnitFormatter = new Intl.NumberFormat(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 });
 
 function isDisplayableInventoryLedgerRow(row) {
@@ -7269,9 +7270,9 @@ function renderInventoryCostLedger(result) {
     const totalBasis = Object.values(costs).reduce((sum, value) => sum + Number(value || 0), cargo);
     const values = [
       row.location, row.asset, formatWholeNumber(quantity), formatWholeNumber(Math.max(0, quantity - uncosted)), formatWholeNumber(uncosted),
-      formatAtlasWhole(costs.scanning || 0), formatAtlasWhole(costs.mining || 0), formatAtlasWhole(costs.crafting || 0),
-      formatAtlasWhole(costs.lm || 0), formatAtlasWhole(costs.gm || 0), formatAtlasWhole(cargo),
-      formatAtlasWhole(totalBasis), quantity > 0 ? costLedgerUnitFormatter.format(totalBasis / quantity) : '--',
+      costLedgerBasisFormatter.format(costs.scanning || 0), costLedgerBasisFormatter.format(costs.mining || 0), costLedgerBasisFormatter.format(costs.crafting || 0),
+      costLedgerBasisFormatter.format(costs.lm || 0), costLedgerBasisFormatter.format(costs.gm || 0), costLedgerBasisFormatter.format(cargo),
+      costLedgerBasisFormatter.format(totalBasis), quantity > 0 ? costLedgerUnitFormatter.format(totalBasis / quantity) : '--',
       quantity <= 0 ? 'Empty' : uncosted > 0 ? 'Partial' : 'Costed',
     ];
     const tr = document.createElement('tr');
