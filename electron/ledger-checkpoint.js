@@ -5,7 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 3;
+// Version 4 forces a clean replay after historical price valuation became authoritative.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 4;
 
 function emptyResult(status, error = '') {
   return {

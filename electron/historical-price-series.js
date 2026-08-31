@@ -39,6 +39,11 @@ function valuationTimestampMs(value) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+function selectAssetSeriesCurrency(resource = {}) {
+  if (!String(resource.mint || '').trim()) return '';
+  return resource.usdcMarketId && !resource.atlasMarketId ? 'USDC' : 'ATLAS';
+}
+
 function latestPointAtOrBefore(series, timestampMs) {
   if (!Number.isFinite(Number(timestampMs))) return null;
   let selected = null;
@@ -57,7 +62,9 @@ function resolveSolAtlasPriceAtOrBefore(solUsdSeries, atlasUsdSeries, timestampM
   return {
     status: 'complete', priceATL, priceATLExact: exactNumber(priceATL),
     effectiveTimestamp: new Date(Number(timestampMs)).toISOString(),
+    effectiveUtcDate: new Date(Number(timestampMs)).toISOString().slice(0, 10),
     observedAt: new Date(Math.max(sol.timestamp, atlas.timestamp)).toISOString(),
+    priceDay: new Date(Math.max(sol.timestamp, atlas.timestamp)).toISOString().slice(0, 10),
     solUsdObservedAt: new Date(sol.timestamp).toISOString(),
     atlasUsdObservedAt: new Date(atlas.timestamp).toISOString(),
     solUsdPrice: sol.price, atlasUsdPrice: atlas.price,
@@ -80,7 +87,9 @@ function resolveAssetAtlasPriceAtOrBefore(assetSeries, timestampMs, { atlasUsdSe
   return {
     status: 'complete', priceATL, priceATLExact: exactNumber(priceATL),
     effectiveTimestamp: new Date(Number(timestampMs)).toISOString(),
+    effectiveUtcDate: new Date(Number(timestampMs)).toISOString().slice(0, 10),
     observedAt: new Date(asset.timestamp).toISOString(),
+    priceDay: new Date(asset.timestamp).toISOString().slice(0, 10),
     source: 'Aephia asset price series', currency, quoteField: 'price',
     bestBid: asset.bestBid, bestAsk: asset.bestAsk, estimated: false,
     ...(atlas ? { atlasUsdPrice: atlas.price, atlasUsdObservedAt: new Date(atlas.timestamp).toISOString() } : {}),
@@ -88,6 +97,6 @@ function resolveAssetAtlasPriceAtOrBefore(assetSeries, timestampMs, { atlasUsdSe
 }
 
 module.exports = {
-  parseAephiaPriceSeries, valuationTimestampMs, latestPointAtOrBefore,
+  parseAephiaPriceSeries, valuationTimestampMs, selectAssetSeriesCurrency, latestPointAtOrBefore,
   resolveAssetAtlasPriceAtOrBefore, resolveSolAtlasPriceAtOrBefore,
 };

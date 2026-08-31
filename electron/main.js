@@ -74,7 +74,7 @@ const {
   diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux,
 } = require('./breakeven-basis-state');
 const {
-  parseAephiaPriceSeries, valuationTimestampMs,
+  parseAephiaPriceSeries, valuationTimestampMs, selectAssetSeriesCurrency,
   resolveAssetAtlasPriceAtOrBefore, resolveSolAtlasPriceAtOrBefore,
 } = require('./historical-price-series');
 const { revalueMarketplaceScanWithHistoricalSol } = require('./marketplace-historical-fees');
@@ -4330,7 +4330,7 @@ async function resolveHistoricalAtlasPrice(asset, date) {
     };
     const resources = await fetchAephiaResourceData();
     const resource = resources.find((item) => normalizeShipName(item?.name) === key);
-    const currency = resource?.atlasMarketId ? 'ATLAS' : resource?.usdcMarketId ? 'USDC' : '';
+    const currency = selectAssetSeriesCurrency(resource);
     if (!resource?.mint || !currency) return { status: 'incomplete', priceATL: null, reason: 'asset_market_missing' };
     const [series, atlas] = await Promise.all([
       fetchAephiaSeries(`${currency}/${encodeURIComponent(resource.mint)}`),

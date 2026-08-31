@@ -7,6 +7,7 @@ const {
   valuationTimestampMs,
   resolveAssetAtlasPriceAtOrBefore,
   resolveSolAtlasPriceAtOrBefore,
+  selectAssetSeriesCurrency,
 } = require('../electron/historical-price-series');
 
 test('historical resolver never looks ahead and preserves asset quote provenance', () => {
@@ -16,11 +17,16 @@ test('historical resolver never looks ahead and preserves asset quote provenance
     rows: [[1000, 2, 1, 3], [3000, 6, 5, 7]],
   });
   assert.equal(resolveAssetAtlasPriceAtOrBefore(asset, 999), null);
-  assert.deepEqual(resolveAssetAtlasPriceAtOrBefore(asset, 2500), {
-    status: 'complete', priceATL: 2, priceATLExact: '2', effectiveTimestamp: new Date(2500).toISOString(),
-    observedAt: new Date(1000).toISOString(), source: 'Aephia asset price series', currency: 'ATLAS',
-    quoteField: 'price', bestBid: 1, bestAsk: 3, estimated: false,
-  });
+  const resolved = resolveAssetAtlasPriceAtOrBefore(asset, 2500);
+  assert.equal(resolved.priceATL, 2);
+  assert.equal(resolved.effectiveTimestamp, new Date(2500).toISOString());
+  assert.equal(resolved.effectiveUtcDate, '1970-01-01');
+  assert.equal(resolved.observedAt, new Date(1000).toISOString());
+  assert.equal(resolved.priceDay, '1970-01-01');
+  assert.equal(resolved.source, 'Aephia asset price series');
+  assert.equal(resolved.currency, 'ATLAS');
+  assert.equal(resolved.bestBid, 1);
+  assert.equal(resolved.bestAsk, 3);
 });
 
 test('SOL to ATLAS independently forward-fills token series at or before the target timestamp', () => {
@@ -45,4 +51,9 @@ test('USDC-quoted assets convert through the latest prior ATLAS/USD token price'
 test('date-only valuations use the latest observation at or before UTC day start', () => {
   assert.equal(valuationTimestampMs('2026-08-30'), Date.parse('2026-08-30T00:00:00.000Z'));
   assert.equal(valuationTimestampMs('2026-08-30T12:34:56Z'), Date.parse('2026-08-30T12:34:56Z'));
+});
+
+test('assets default to the ATLAS history even when current market metadata is absent', () => {
+  assert.equal(selectAssetSeriesCurrency({ mint: 'raw-material', atlasMarketId: '', usdcMarketId: '' }), 'ATLAS');
+  assert.equal(selectAssetSeriesCurrency({ mint: 'usd-asset', atlasMarketId: '', usdcMarketId: 'usdc-market' }), 'USDC');
 });

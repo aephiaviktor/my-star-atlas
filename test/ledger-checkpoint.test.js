@@ -50,7 +50,7 @@ test('corrupt or mismatched checkpoint fails safely without loading basis', asyn
     assert.equal(corrupt.status, 'invalid');
     assert.match(corrupt.error, /JSON|Unexpected|property name/i);
 
-    await fs.writeFile(filePath, JSON.stringify({ schemaVersion: 3, faction: 'MUD', profile: 'MUD', ledgerRows: [], seenEventFingerprints: [] }));
+    await fs.writeFile(filePath, JSON.stringify({ schemaVersion: 4, faction: 'MUD', profile: 'MUD', ledgerRows: [], seenEventFingerprints: [] }));
     const mismatch = await loadLedgerCheckpoint(filePath, { faction: 'USTUR', profile: 'USTUR' });
     assert.equal(mismatch.status, 'invalid');
     assert.match(mismatch.error, /faction/);
