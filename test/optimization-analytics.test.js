@@ -290,3 +290,19 @@ test('Scanning Data date changes do not invalidate or reload Analytics history',
   const renderer = fs.readFileSync(rendererPath, 'utf8');
   assert.doesNotMatch(renderer, /for \(const filter of \[optimizationStartFilter, optimizationStopFilter\]\) \{[\s\S]*?optimizationAnalyticsRows = \[\];[\s\S]*?refreshScanningOptimizationAnalyticsData/);
 });
+
+test('scanning analytics values each historical event with its own at-or-before price evidence', () => {
+  const { build } = loadAnalytics();
+  const identity = { experimentId: 'scan-20260830-historical-2', optimizationValues: '{"scanMin":8}', optimizationBlockIndex: 0, fleet: 'A' };
+  const result = build([
+    { ...identity, time: '2026-08-30T10:00:00Z', event_type: 'scan_result', success: true, sduFound: 2, burnedFood: 1,
+      historicalPrices: { sduPriceAtl: 3, foodPriceAtl: 5, solPriceAtl: 100 } },
+    { ...identity, time: '2026-08-30T10:01:00Z', event_type: 'transaction', operation: 'WARP', movementPhase: 'start', burnedFuel: 2, txCostSol: 0.01,
+      historicalPrices: { fuelPriceAtl: 7, solPriceAtl: 100 } },
+  ], '__latest__', { prices: { sduPriceAtl: 999, foodPriceAtl: 999, fuelPriceAtl: 999, solPriceAtl: 999 } });
+  const block = result.groups[0];
+  assert.equal(block.grossRevenueAtlas, 6);
+  assert.equal(block.foodCostAtlas, 5);
+  assert.equal(block.fuelCostAtlas, 14);
+  assert.equal(block.txCostAtlas, 1);
+});

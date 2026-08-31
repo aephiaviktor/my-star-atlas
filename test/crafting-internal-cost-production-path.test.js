@@ -92,6 +92,19 @@ test('current inventory basis remains unavailable across starbases or with uncos
   }).get('2026-08-08\nMRZ-20\nFramework').uncosted, true);
 });
 
+test('crafting price resolvers receive the historical row date for assets and SOL', () => {
+  const seen = [];
+  const [row] = enrichCraftingEarningsRows({
+    craftingRows: [craftRow({ isoDate: '2026-08-30', txCostSol: 0.01 })],
+    craftingBasisByDay: new Map(),
+    resolvePrice: (asset, date) => { seen.push(`${asset}:${date}`); return asset === 'Framework' ? 4 : 2; },
+    resolveSolPrice: (date) => { seen.push(`SOL:${date}`); return 100; },
+  });
+  assert.ok(seen.every((entry) => entry.endsWith(':2026-08-30')));
+  assert.equal(row.outputPriceAtl, 4);
+  assert.equal(row.txsCostsAtlas, 1);
+});
+
 test('automatic prefetch requests ledger-backed Crafting snapshot through IPC and renderer fails margin closed', () => {
   assert.match(renderer, /api\.getEarningsSnapshot\(\{ \.\.\.settings, earningsSubtab: 'crafting' \}\)/);
   assert.match(main, /needsInventoryLedger = \['breakeven', 'crafting', 'upgrading'\]\.includes\(snapshotScope\)/);

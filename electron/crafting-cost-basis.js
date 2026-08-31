@@ -66,15 +66,15 @@ function buildCurrentInventoryCraftingBasisByDay({ craftingRows = [], inventoryR
   return basisByDay;
 }
 
-function enrichCraftingEarningsRows({ craftingRows = [], craftingBasisByDay = new Map(), resolvePrice = () => null, atlasPerSol = null } = {}) {
+function enrichCraftingEarningsRows({ craftingRows = [], craftingBasisByDay = new Map(), resolvePrice = () => null, resolveSolPrice = null, atlasPerSol = null } = {}) {
   return craftingRows.map((craftingRow) => {
-    const outputPriceAtl = finiteOrNull(resolvePrice(craftingRow.output));
+    const outputPriceAtl = finiteOrNull(resolvePrice(craftingRow.output, craftingRow.isoDate));
     const crafted = finiteOrNull(craftingRow.crafted);
     const revenueAtlasPerDay = outputPriceAtl != null && crafted != null ? crafted * outputPriceAtl : null;
     const craftingBasis = craftingBasisByDay.get(`${craftingRow.isoDate}\n${craftingRow.starbase}\n${craftingRow.output}`);
     const ingCostsAtlas = craftingBasis && !craftingBasis.uncosted ? finiteOrNull(craftingBasis.basis) : null;
     const ingredientExternalValues = (craftingRow.ingredients || []).map(({ input, amount }) => {
-      const price = finiteOrNull(resolvePrice(input));
+      const price = finiteOrNull(resolvePrice(input, craftingRow.isoDate));
       const quantity = finiteOrNull(amount);
       return price == null || quantity == null ? null : quantity * price;
     });
@@ -82,7 +82,7 @@ function enrichCraftingEarningsRows({ craftingRows = [], craftingBasisByDay = ne
       ? ingredientExternalValues.reduce((sum, value) => sum + value, 0) : null;
     const feeCostsAtlas = finiteOrNull(craftingRow.feeAmount);
     const txCostSol = finiteOrNull(craftingRow.txCostSol);
-    const solPrice = finiteOrNull(atlasPerSol);
+    const solPrice = finiteOrNull(typeof resolveSolPrice === 'function' ? resolveSolPrice(craftingRow.isoDate) : atlasPerSol);
     const txsCostsAtlas = solPrice != null && txCostSol != null ? txCostSol * solPrice : null;
     const totalCostsAtlas = ingCostsAtlas != null && feeCostsAtlas != null && txsCostsAtlas != null ? ingCostsAtlas + feeCostsAtlas + txsCostsAtlas : null;
     const costsPerUnitAtlas = totalCostsAtlas != null && crafted > 0 ? totalCostsAtlas / crafted : null;

@@ -73,7 +73,11 @@ const {
   formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
   diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux,
 } = require('./breakeven-basis-state');
-const { createAtlasPriceResolver } = require('./atlas-price-resolver');
+const {
+  parseAephiaPriceSeries, valuationTimestampMs,
+  resolveAssetAtlasPriceAtOrBefore, resolveSolAtlasPriceAtOrBefore,
+} = require('./historical-price-series');
+const { revalueMarketplaceScanWithHistoricalSol } = require('./marketplace-historical-fees');
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
 const {
   RAW_COST_CUTOVER_MANIFEST_VERSION, buildRawCostFluxQuery, projectRawCostEvents,
@@ -175,9 +179,6 @@ const earningsRendererErrorDiagnostic = createEarningsErrorDiagnostic({
 const earningsDiagnosticContexts = new Map();
 const telemetryLedger = createTelemetryLedger({ userDataPath: app.getPath('userData'), profile: profileName });
 const getRpcUsageDay = createRpcUsageReader({ ledger: telemetryLedger, userDataPath: app.getPath('userData') });
-const atlasPriceResolver = createAtlasPriceResolver({
-  filePath: path.join(app.getPath('userData'), 'price-history', 'current-price-seeds-v1.json'),
-});
 setTelemetryRecorder(telemetryLedger);
 app.setName(`My Star Atlas - ${profileName}`);
 if (typeof app.setDesktopName === 'function') {
@@ -931,15 +932,34 @@ async function fetchScanningOptimization(payload = {}) {
   |> sort(columns: ["_time"], desc: true)
   |> limit(n: ${pageSize + 1}, offset: ${offset})`;
   const parsed = parseInfluxCsv(await queryInfluxFlux(querySettings, flux)).map(cleanOptimizationRow);
-  const rows = parsed.slice(0, pageSize);
+  let rows = parsed.slice(0, pageSize);
+  if (payload.analytics === true) {
+    rows = await Promise.all(rows.map(async (row) => {
+      const timestamp = String(row.time || '');
+      const [sdu, food, fuel, sol] = await Promise.all([
+        resolveHistoricalAtlasPrice('Survey Data Unit', timestamp),
+        resolveHistoricalAtlasPrice('Food', timestamp),
+        resolveHistoricalAtlasPrice('Fuel', timestamp),
+        resolveHistoricalAtlasPrice('SOL', timestamp),
+      ]);
+      return {
+        ...row,
+        historicalPrices: {
+          sduPriceAtl: sdu.status === 'complete' ? sdu.priceATL : null,
+          foodPriceAtl: food.status === 'complete' ? food.priceATL : null,
+          fuelPriceAtl: fuel.status === 'complete' ? fuel.priceATL : null,
+          solPriceAtl: sol.status === 'complete' ? sol.priceATL : null,
+          provenance: { sdu, food, fuel, sol },
+        },
+      };
+    }));
+  }
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
-  const prices = payload.analytics === true
-    ? await fetchCurrentEarningsPrices().then((value) => ({
-      ...value,
-      checkedAt: new Date().toISOString(),
-      resourcePriceSource: 'Aephia /gm/resource pricingATL.priceATL',
-    })).catch(() => null)
-    : null;
+  const prices = payload.analytics === true ? {
+    basis: 'historical_at_or_before',
+    checkedAt: new Date().toISOString(),
+    resourcePriceSource: 'Aephia historical asset and token series',
+  } : null;
   return {
     ok: true,
     rows,
@@ -1025,31 +1045,28 @@ async function fetchPointsStoreRedemptionRates(settings, faction) {
 }
 
 async function fetchDailyUpgradingNetAtlas(settings, redemptionRates) {
-  const [rows, resources, atlasPerSol] = await Promise.all([
-    fetchUpgradingEarningsRows(settings).catch(() => []),
-    fetchAephiaResourceData().catch(() => []),
-    fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null),
-  ]);
+  const rows = await fetchUpgradingEarningsRows(settings).catch(() => []);
   const ratesByDate = new Map((redemptionRates || []).map((row) => [String(row.date), Number(row.atlasPerLp)]));
-  const pricesByAsset = new Map();
-  for (const resource of resources) {
-    const name = normalizeShipName(resource?.name);
-    const price = Number(resource?.pricingATL?.priceATL);
-    if (name && Number.isFinite(price) && price > 0) pricesByAsset.set(name, price);
-  }
+  const componentPricesByDate = {};
   const daily = new Map();
   for (const row of rows) {
     const date = String(row.isoDate || '');
     const lpPerUnit = UPGRADE_LP_BY_COMPONENT[normalizeShipName(row.asset)];
     const atlasPerLp = ratesByDate.get(date);
     const installed = Number(row.installed);
-    const componentPrice = pricesByAsset.get(normalizeShipName(row.asset));
+    const [componentPriceEvidence, solPriceEvidence] = await Promise.all([
+      resolveHistoricalAtlasPrice(row.asset, date), resolveHistoricalAtlasPrice('SOL', date),
+    ]);
+    const componentPrice = componentPriceEvidence.status === 'complete' ? componentPriceEvidence.priceATL : null;
+    if (!componentPricesByDate[date]) componentPricesByDate[date] = {};
+    componentPricesByDate[date][normalizeShipName(row.asset)] = componentPrice;
     const txCostSol = Number(row.txCostSol);
     if (!date || !Number.isFinite(lpPerUnit) || !Number.isFinite(atlasPerLp) || atlasPerLp <= 0 || !Number.isFinite(installed) || installed <= 0) continue;
     const lp = installed * lpPerUnit;
     const revenue = lp * atlasPerLp;
     const componentCost = Number.isFinite(componentPrice) ? installed * componentPrice : null;
-    const transactionCost = Number.isFinite(atlasPerSol) && Number.isFinite(txCostSol) ? txCostSol * atlasPerSol : null;
+    const transactionCost = solPriceEvidence.status === 'complete' && Number.isFinite(txCostSol)
+      ? txCostSol * solPriceEvidence.priceATL : null;
     const current = daily.get(date) || { date, revenue: 0, componentCost: 0, transactionCost: 0, complete: true };
     current.lp = (current.lp || 0) + lp;
     current.revenue += revenue;
@@ -1068,6 +1085,8 @@ async function fetchDailyUpgradingNetAtlas(settings, redemptionRates) {
     transactionCost: row.transactionCost,
   })).filter((row) => Number.isFinite(row.lp) && row.lp > 0);
   result.jobs = Array.isArray(rows.jobs) ? rows.jobs : [];
+  result.componentPricesByDate = componentPricesByDate;
+  result.priceBasis = 'historical_at_or_before_utc_day_start';
   result.priceSnapshotAt = new Date().toISOString();
   return result;
 }
@@ -1084,13 +1103,6 @@ ${scopeFilterFlux}
   |> pivot(rowKey: ["_time", "component"], columnKey: ["_field"], valueColumn: "_value")
   |> keep(columns: ["_time", "component", "neutral_upgrading_hour", "neutral_crew"])
   |> sort(columns: ["_time", "component"])`;
-  const resources = await fetchAephiaResourceData().catch(() => []);
-  const pricesByAsset = new Map();
-  for (const resource of resources) {
-    const name = normalizeShipName(resource?.name);
-    const price = Number(resource?.pricingATL?.priceATL);
-    if (name && Number.isFinite(price) && price > 0) pricesByAsset.set(name, price);
-  }
   const latestByComponentHour = new Map();
   for (const row of parseInfluxCsv(await queryInfluxFlux({ ...settings, influxBucket: settings.influxBucket }, flux))) {
     const time = String(row._time || '');
@@ -1111,13 +1123,20 @@ ${scopeFilterFlux}
     if (!day.has(hour)) day.set(hour, []);
     day.get(hour).push(row);
   }
+  const historicalComponentPrices = new Map();
+  await Promise.all([...new Set([...latestByComponentHour.values()].map((row) => `${row.time.slice(0, 10)}\n${row.component}`))]
+    .map(async (key) => {
+      const [date, component] = key.split('\n');
+      const evidence = await resolveHistoricalAtlasPrice(component, date);
+      historicalComponentPrices.set(key, evidence.status === 'complete' ? evidence.priceATL : null);
+    }));
   const result = [...byDay.entries()].map(([date, hours]) => {
     if (hours.size < 24) return null;
     let lp = 0;
     let componentCost = 0;
     for (const rows of hours.values()) for (const row of rows) {
       const lpPerUnit = UPGRADE_LP_BY_COMPONENT[row.component];
-      const price = pricesByAsset.get(row.component);
+      const price = historicalComponentPrices.get(`${date}\n${row.component}`);
       if (!Number.isFinite(lpPerUnit) || !Number.isFinite(price)) return null;
       lp += row.rate * lpPerUnit;
       componentCost += row.rate * price;
@@ -1125,6 +1144,12 @@ ${scopeFilterFlux}
     return { date, lp, componentCost, hours: hours.size, complete: true };
   }).filter(Boolean);
   result.hourlyAllocations = [...latestByComponentHour.values()].map((row) => ({ time: row.time, component: row.component, neutral_crew: row.neutralCrew }));
+  result.componentPricesByDate = {};
+  for (const [key, price] of historicalComponentPrices) {
+    const [date, component] = key.split('\n');
+    if (!result.componentPricesByDate[date]) result.componentPricesByDate[date] = {};
+    result.componentPricesByDate[date][component] = price;
+  }
   return result;
 }
 
@@ -1262,7 +1287,11 @@ async function fetchUpgradingOptimization(payload = {}) {
     if (Number.isFinite(Date.parse(time)) && Number.isFinite(crew) && crew >= 0) configuredCrewByHour[new Date(time).toISOString().slice(0, 13)] = crew;
   }
   const atlasPerLpByDate = Object.fromEntries(redemptionRates.map((row) => [row.date, row.atlasPerLp]));
-  const selectionUtilizationV1 = calculateUpgradingSelectionUtilization({ jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations, configuredCrewByHour, prices: componentPricesAtl, atlasPerLpByDate, faction, profile: playerProfile, priceSnapshotAt: netAtlasDaily.priceSnapshotAt });
+  const historicalComponentPricesByDate = { ...(neutralUpgradingDaily.componentPricesByDate || {}) };
+  for (const [date, values] of Object.entries(netAtlasDaily.componentPricesByDate || {})) {
+    historicalComponentPricesByDate[date] = { ...(historicalComponentPricesByDate[date] || {}), ...values };
+  }
+  const selectionUtilizationV1 = calculateUpgradingSelectionUtilization({ jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations, configuredCrewByHour, prices: componentPricesAtl, pricesByDate: historicalComponentPricesByDate, atlasPerLpByDate, faction, profile: playerProfile, priceSnapshotAt: netAtlasDaily.priceSnapshotAt });
   return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, neutralUpgradingDaily, selectionUtilizationV1, playerProfile, componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 
@@ -4268,81 +4297,50 @@ async function fetchAephiaResourceData() {
   return aephiaResourceCache.data;
 }
 
-function firstDailySeriesPrices(payload) {
-  const columns = Array.isArray(payload?.columns) ? payload.columns : [];
-  const tsIndex = columns.indexOf('ts');
-  const priceIndex = columns.indexOf('price');
-  if (tsIndex < 0 || priceIndex < 0) return {};
-  const daily = {};
-  const rows = (Array.isArray(payload?.rows) ? payload.rows : [])
-    .map((row) => ({ row, timestamp: Number(row?.[tsIndex]) }))
-    .filter(({ timestamp }) => Number.isFinite(timestamp))
-    .sort((left, right) => left.timestamp - right.timestamp);
-  for (const { row, timestamp } of rows) {
-    const priceATL = Number(row?.[priceIndex]);
-    if (!Number.isFinite(priceATL) || priceATL <= 0) continue;
-    const date = new Date(timestamp).toISOString().slice(0, 10);
-    if (!daily[date]) daily[date] = { priceATL, observedAt: new Date(timestamp).toISOString() };
-  }
-  return daily;
-}
-
 async function fetchAephiaSeries(pathname) {
   const now = Date.now();
   const cached = aephiaPriceSeriesCache.get(pathname);
-  if (cached?.expiresAt > now) return cached.data;
-  const response = await fetch(`${AEPHIA_PRICE_SERIES_URL}/${pathname}?days=36`, { signal: AbortSignal.timeout(10000) });
-  if (!response.ok) throw new Error(`aephia_price_series_${response.status}`);
-  const data = firstDailySeriesPrices(await response.json());
-  aephiaPriceSeriesCache.set(pathname, { data, expiresAt: now + 2 * 60 * 1000 });
-  return data;
-}
-
-async function fetchHistoricalAtlasPrices(asset) {
-  const key = normalizeShipName(asset);
-  if (key === 'sol') {
-    const [sol, atlas] = await Promise.all([fetchAephiaSeries('token/sol'), fetchAephiaSeries('token/atlas')]);
-    const dates = Array.from(new Set([...Object.keys(sol), ...Object.keys(atlas)])).sort();
-    const result = {};
-    let solPrice = null;
-    let atlasPrice = null;
-    for (const date of dates) {
-      solPrice = sol[date]?.priceATL ?? solPrice;
-      atlasPrice = atlas[date]?.priceATL ?? atlasPrice;
-      if (solPrice > 0 && atlasPrice > 0) result[date] = { priceATL: solPrice / atlasPrice };
-    }
-    return result;
-  }
-  const resources = await fetchAephiaResourceData();
-  const resource = resources.find((item) => normalizeShipName(item?.name) === key);
-  if (!resource?.mint) return {};
-  return fetchAephiaSeries(`ATLAS/${encodeURIComponent(resource.mint)}`);
+  if (cached?.expiresAt > now && cached.data) return cached.data;
+  if (cached?.promise) return cached.promise;
+  const promise = (async () => {
+    const response = await fetch(`${AEPHIA_PRICE_SERIES_URL}/${pathname}?days=92`, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error(`aephia_price_series_${response.status}`);
+    const data = parseAephiaPriceSeries(await response.json());
+    aephiaPriceSeriesCache.set(pathname, { data, expiresAt: Date.now() + 2 * 60 * 1000 });
+    return data;
+  })();
+  aephiaPriceSeriesCache.set(pathname, { promise, expiresAt: now + 2 * 60 * 1000 });
+  try { return await promise; }
+  catch (error) { aephiaPriceSeriesCache.delete(pathname); throw error; }
 }
 
 async function resolveHistoricalAtlasPrice(asset, date) {
   const key = normalizeShipName(asset);
-  const daily = await fetchHistoricalAtlasPrices(asset).catch(() => ({}));
-  if (Object.keys(daily).length === 0) {
-    let currentPrice = null;
-    if (key === 'sol') currentPrice = await fetchAtlasPerSol().then((value) => value?.atlasPerSol).catch(() => null);
-    else {
-      const resources = await fetchAephiaResourceData().catch(() => []);
-      currentPrice = Number(resources.find((item) => normalizeShipName(item?.name) === key)?.pricingATL?.priceATL);
+  const timestampMs = valuationTimestampMs(date);
+  if (!key || timestampMs == null) return { status: 'incomplete', priceATL: null, reason: 'valuation_timestamp_invalid' };
+  try {
+    if (key === 'sol') {
+      const [sol, atlas] = await Promise.all([fetchAephiaSeries('token/sol'), fetchAephiaSeries('token/atlas')]);
+      return resolveSolAtlasPriceAtOrBefore(sol, atlas, timestampMs)
+        || { status: 'incomplete', priceATL: null, effectiveTimestamp: new Date(timestampMs).toISOString(), reason: 'prior_token_price_missing' };
     }
-    if (Number.isFinite(currentPrice) && currentPrice > 0) {
-      const today = new Date().toISOString().slice(0, 10);
-      daily[today] = {
-        priceATL: currentPrice,
-        source: 'aephia_current_midpoint_fallback',
-        provenance: `Current Aephia midpoint used because no historical series was available on ${today}`,
-        estimated: true,
-      };
-    }
+    if (key === 'atlas') return {
+      status: 'complete', priceATL: 1, priceATLExact: '1', effectiveTimestamp: new Date(timestampMs).toISOString(),
+      observedAt: new Date(timestampMs).toISOString(), source: 'Native ATLAS denomination', currency: 'ATLAS', estimated: false,
+    };
+    const resources = await fetchAephiaResourceData();
+    const resource = resources.find((item) => normalizeShipName(item?.name) === key);
+    const currency = resource?.atlasMarketId ? 'ATLAS' : resource?.usdcMarketId ? 'USDC' : '';
+    if (!resource?.mint || !currency) return { status: 'incomplete', priceATL: null, reason: 'asset_market_missing' };
+    const [series, atlas] = await Promise.all([
+      fetchAephiaSeries(`${currency}/${encodeURIComponent(resource.mint)}`),
+      currency === 'USDC' ? fetchAephiaSeries('token/atlas') : Promise.resolve(null),
+    ]);
+    return resolveAssetAtlasPriceAtOrBefore(series, timestampMs, { atlasUsdSeries: atlas })
+      || { status: 'incomplete', priceATL: null, effectiveTimestamp: new Date(timestampMs).toISOString(), reason: 'prior_asset_price_missing' };
+  } catch (error) {
+    return { status: 'incomplete', priceATL: null, effectiveTimestamp: new Date(timestampMs).toISOString(), reason: String(error?.message || error) };
   }
-  const historicalByDate = Object.fromEntries(Object.entries(daily).map(([day, value]) => [day, {
-    [key]: { source: 'aephia_historical_first_daily', provenance: `First valid Aephia midpoint observation on ${day}`, ...value },
-  }]));
-  return atlasPriceResolver.resolveAtlasPrice(asset, date, { historicalByDate });
 }
 
 async function fetchAtlasPerSol() {
@@ -5625,7 +5623,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   const influxNewestMs = await fetchNewestMarketplaceTradeMs(settings).catch(() => null);
   const anchorMs = Math.max(checkpointNewestMs, Number.isFinite(influxNewestMs) ? influxNewestMs : 0, startMs);
   const overlapStart = new Date(Math.max(startMs, anchorMs - 60 * 60 * 1000)).toISOString();
-  const needsTradeEnrichment = checkpoint.tradeEnrichmentVersion < 2;
+  const needsTradeEnrichment = checkpoint.tradeEnrichmentVersion < 3;
   const migrationWalletCursors = checkpoint.walletCursors;
   const historicalOrderIds = needsTradeEnrichment ? loadLocalMarketHistoricalOrderIds(faction, startIso) : [];
   const cursorInputSnapshot = marketplaceCursorSnapshot(
@@ -5646,8 +5644,9 @@ async function fetchLocalMarketTrades(settings, connection) {
     maxPages: 1,
     startIso: needsTradeEnrichment ? startIso : overlapStart,
     addressFactory: (value) => new PublicKey(value),
-    atlasPerSol: await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null),
+    atlasPerSol: null,
   });
+  await revalueMarketplaceScanWithHistoricalSol(scanned, resolveHistoricalAtlasPrice);
   const byId = new Map(existing.map((trade) => [trade.id, trade]));
   const publicationRepresentations = Array.from(new Map(
     [...existing, ...scanned.trades].map((trade) => [String(trade.id), trade]),
@@ -5713,7 +5712,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   const marketplaceBackfilledNext = publication.allCurrentComplete && holdsCompleted && !hasActiveTradeHold;
   const tradeEnrichmentVersionNext = marketplaceBackfilledNext
     && scanned.stats.transactionMisses === 0 && publishError === '' && publication.allEnrichableComplete
-    ? 2 : checkpoint.tradeEnrichmentVersion;
+    ? 3 : checkpoint.tradeEnrichmentVersion;
   await writeJsonAtomic(filePath, {
     ...checkpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
     marketplaceBackfilled: marketplaceBackfilledNext,
@@ -5786,7 +5785,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
   const starbasesByKey = Object.fromEntries(STARBASE_REGISTRY.map((starbase) => [starbase.publicKey, {
     name: starbase.name, faction: starbase.faction,
   }]));
-  const atlasPerSol = await fetchAtlasPerSol().then((quote) => quote?.atlasPerSol).catch(() => null);
+  const atlasPerSol = null;
   const cursorInputSnapshot = marketplaceCursorSnapshot(
     checkpoint.walletCursors,
     checkpoint.orderCursors,
@@ -5809,6 +5808,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
       trackedWallets, assetsByMint, starbasesByKey, atlasPerSol,
     }),
   });
+  await revalueMarketplaceScanWithHistoricalSol(scanned, resolveHistoricalAtlasPrice);
   const gmEvents = projectMarketplaceOrderAndExecutionEvents(scanned, 'GM');
   const gmEventSignatures = new Set(gmEvents.map((event) => event.signature));
   const gmEventTransactions = scanned.rawTransactions.filter((transaction) => gmEventSignatures.has(String(
@@ -7558,14 +7558,6 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     fetchShipStatsSot(),
   ]);
   const { sduPriceAtl, ammunitionPriceAtl, foodPriceAtl, fuelPriceAtl, atlasPerSol } = prices;
-  // Freeze the already-loaded current priceATL values once. The resolver owns
-  // date precedence so cargo accounting never embeds temporary pricing rules.
-  await atlasPriceResolver.captureCurrentPriceSeeds({
-    ...(prices.resourcePricesAtlByName || {}),
-    Fuel: fuelPriceAtl,
-    SOL: atlasPerSol,
-  });
-
   const fleetShipsKeys = fleets
     .map((fleet) => {
       try {
@@ -7793,21 +7785,27 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const activeFleetKeys = new Set();
   const activeMappedFleetKeys = new Set();
   let totalSduFound = 0;
-  const rows = scanningRows.map((scanRow) => {
+  const rows = await Promise.all(scanningRows.map(async (scanRow) => {
     const fleet = fleetByLabel.get(normalizeFleetLabel(scanRow.fleet));
     const activeKey = fleet?.key || normalizeFleetLabel(scanRow.fleet);
     activeFleetKeys.add(activeKey);
     totalSduFound += scanRow.sduFound;
     if (fleet) activeMappedFleetKeys.add(fleet.key);
-    const foodCostsAtlas = foodPriceAtl != null ? scanRow.burnedFood * foodPriceAtl : null;
-    const fuelCostsAtlas = fuelPriceAtl != null ? scanRow.burnedFuel * fuelPriceAtl : null;
-    const txsCostsAtlas = atlasPerSol != null ? scanRow.txCostSol * atlasPerSol : null;
+    const [sduPrice, foodPrice, fuelPrice, solPrice] = await Promise.all([
+      resolveHistoricalAtlasPrice('Survey Data Unit', scanRow.isoDate),
+      resolveHistoricalAtlasPrice('Food', scanRow.isoDate),
+      resolveHistoricalAtlasPrice('Fuel', scanRow.isoDate),
+      resolveHistoricalAtlasPrice('SOL', scanRow.isoDate),
+    ]);
+    const foodCostsAtlas = foodPrice.status === 'complete' ? scanRow.burnedFood * foodPrice.priceATL : null;
+    const fuelCostsAtlas = fuelPrice.status === 'complete' ? scanRow.burnedFuel * fuelPrice.priceATL : null;
+    const txsCostsAtlas = solPrice.status === 'complete' ? scanRow.txCostSol * solPrice.priceATL : null;
     const historicalRental = rentalForRow(fleet, scanRow.fleet, scanRow.isoDate);
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
     const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
     const costParts = [foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
-    const revenueAtlasPerDay = sduPriceAtl != null ? scanRow.sduFound * sduPriceAtl : null;
+    const revenueAtlasPerDay = sduPrice.status === 'complete' ? scanRow.sduFound * sduPrice.priceATL : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
       ? revenueAtlasPerDay - totalCostsAtlas
       : null;
@@ -7826,6 +7824,11 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       totalRequiredCrew,
       crewSnapshotSource: historicalRental?.crewSnapshotSource || (fleet?.totalRequiredCrew ? 'current_fleet_composition' : ''),
       revenueAtlasPerDay,
+      sduPriceAtl: sduPrice.priceATL,
+      sduPriceProvenance: sduPrice,
+      foodPriceProvenance: foodPrice,
+      fuelPriceProvenance: fuelPrice,
+      solPriceProvenance: solPrice,
       foodCostsAtlas,
       fuelCostsAtlas,
       txsCostsAtlas,
@@ -7840,7 +7843,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       rentalContract: historicalRental?.rentalContract || null,
       rentalRateAtlasPerDay,
     };
-  });
+  }));
 
   for (const row of rows) {
     row.costsPerUnitAtlas = Number.isFinite(Number(row.totalCostsAtlas)) && Number(row.sduFound) > 0
@@ -7853,18 +7856,25 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   let totalMined = 0;
   let totalMiningRevenueAtlas = 0;
   let totalMiningRevenueCount = 0;
-  const mining = miningRows.map((miningRow) => {
+  const mining = await Promise.all(miningRows.map(async (miningRow) => {
     const fleet = fleetByLabel.get(normalizeFleetLabel(miningRow.fleet));
     const activeKey = fleet?.key || normalizeFleetLabel(miningRow.fleet);
     activeMiningFleetKeys.add(activeKey);
     if (fleet) activeMappedMiningFleetKeys.add(fleet.key);
     totalMined += miningRow.mined;
-    const rawMaterialPriceAtl = getCurrentResourcePriceAtl(prices, miningRow.rawMaterial);
+    const [rawMaterialPrice, ammoPrice, foodPrice, fuelPrice, solPrice] = await Promise.all([
+      resolveHistoricalAtlasPrice(miningRow.rawMaterial, miningRow.isoDate),
+      resolveHistoricalAtlasPrice('Ammunition', miningRow.isoDate),
+      resolveHistoricalAtlasPrice('Food', miningRow.isoDate),
+      resolveHistoricalAtlasPrice('Fuel', miningRow.isoDate),
+      resolveHistoricalAtlasPrice('SOL', miningRow.isoDate),
+    ]);
+    const rawMaterialPriceAtl = rawMaterialPrice.status === 'complete' ? rawMaterialPrice.priceATL : null;
     const revenueAtlasPerDay = rawMaterialPriceAtl != null ? miningRow.mined * rawMaterialPriceAtl : null;
-    const ammoCostsAtlas = ammunitionPriceAtl != null ? miningRow.burnedAmmo * ammunitionPriceAtl : null;
-    const foodCostsAtlas = foodPriceAtl != null ? miningRow.burnedFood * foodPriceAtl : null;
-    const fuelCostsAtlas = fuelPriceAtl != null ? miningRow.burnedFuel * fuelPriceAtl : null;
-    const txsCostsAtlas = atlasPerSol != null ? miningRow.txCostSol * atlasPerSol : null;
+    const ammoCostsAtlas = ammoPrice.status === 'complete' ? miningRow.burnedAmmo * ammoPrice.priceATL : null;
+    const foodCostsAtlas = foodPrice.status === 'complete' ? miningRow.burnedFood * foodPrice.priceATL : null;
+    const fuelCostsAtlas = fuelPrice.status === 'complete' ? miningRow.burnedFuel * fuelPrice.priceATL : null;
+    const txsCostsAtlas = solPrice.status === 'complete' ? miningRow.txCostSol * solPrice.priceATL : null;
     const historicalRental = rentalForRow(fleet, miningRow.fleet, miningRow.isoDate);
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
     const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
@@ -7890,6 +7900,11 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       totalRequiredCrew,
       crewSnapshotSource: historicalRental?.crewSnapshotSource || (fleet?.totalRequiredCrew ? 'current_fleet_composition' : ''),
       rawMaterialPriceAtl,
+      rawMaterialPriceProvenance: rawMaterialPrice,
+      ammunitionPriceProvenance: ammoPrice,
+      foodPriceProvenance: foodPrice,
+      fuelPriceProvenance: fuelPrice,
+      solPriceProvenance: solPrice,
       revenueAtlasPerDay,
       ammoCostsAtlas,
       foodCostsAtlas,
@@ -7906,7 +7921,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       rentalContract: historicalRental?.rentalContract || null,
       rentalRateAtlasPerDay,
     };
-  });
+  }));
 
   const miningCostTotalsByFleetDateAndMaterial = new Map();
   for (const row of mining) {
@@ -7941,10 +7956,11 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const fuelCostsAtlas = fuelCanonical
       ? (cargoRow.fuelValuation?.amountATL ?? null)
       : (['complete', 'provisional'].includes(fuelPrice.status) ? cargoRow.burnedFuel * fuelPrice.priceATL : null);
-    const solValuation = feeCanonical ? cargoRow.solValuation : null;
+    const historicalSolPrice = feeCanonical ? null : await resolveHistoricalAtlasPrice('SOL', cargoRow.isoDate);
+    const solValuation = feeCanonical ? cargoRow.solValuation : historicalSolPrice;
     const txsCostsAtlas = feeCanonical
       ? (solValuation?.amountATL ?? null)
-      : (atlasPerSol != null ? cargoRow.txCostSol * atlasPerSol : null);
+      : (historicalSolPrice?.status === 'complete' ? cargoRow.txCostSol * historicalSolPrice.priceATL : null);
     const historicalRental = rentalForRow(fleet, cargoRow.fleet, cargoRow.isoDate, authoritativeAccount);
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
     const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
@@ -8011,7 +8027,10 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       }] : []),
       ...(row.costSourceSelection?.fee !== 'canonical' && Number(row.txCostSol) > 0 ? [{
         kind: 'transaction_fee', amount: Number(row.txCostSol), currency: 'SOL', timestamp: `${row.isoDate}T00:00:00.000Z`,
-        valuation: Number.isFinite(row.txsCostsAtlas) ? { status: 'complete', amountATL: row.txsCostsAtlas, source: prices.atlasPerSolSource } : { status: 'incomplete', amountATL: null },
+        valuation: Number.isFinite(row.txsCostsAtlas) ? {
+          status: 'complete', amountATL: row.txsCostsAtlas, source: row.solValuation?.source,
+          observedAt: row.solValuation?.observedAt,
+        } : { status: 'incomplete', amountATL: null },
       }] : []),
     ],
   })));
@@ -8080,13 +8099,38 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     return fleetSort || String(a.assignment || '').localeCompare(String(b.assignment || ''));
   });
 
+  const historicalPriceByDateAsset = new Map();
+  const historicalPriceRequests = new Map();
+  const queueHistoricalPrice = (asset, isoDate) => {
+    const key = `${isoDate}\n${normalizeShipName(asset)}`;
+    if (!historicalPriceRequests.has(key)) historicalPriceRequests.set(key, { asset, isoDate });
+  };
+  for (const row of craftingRows) {
+    queueHistoricalPrice(row.output, row.isoDate);
+    queueHistoricalPrice('SOL', row.isoDate);
+    for (const ingredient of row.ingredients || []) queueHistoricalPrice(ingredient.input, row.isoDate);
+  }
+  for (const row of upgradingRows) {
+    queueHistoricalPrice(row.asset, row.isoDate);
+    queueHistoricalPrice('SOL', row.isoDate);
+  }
+  await Promise.all([...historicalPriceRequests.entries()].map(async ([key, request]) => {
+    historicalPriceByDateAsset.set(key, await resolveHistoricalAtlasPrice(request.asset, request.isoDate));
+  }));
+  const historicalPriceFor = (asset, isoDate) => historicalPriceByDateAsset.get(`${isoDate}\n${normalizeShipName(asset)}`) || null;
+  const historicalPriceValue = (asset, isoDate) => {
+    const resolved = historicalPriceFor(asset, isoDate);
+    return resolved?.status === 'complete' ? resolved.priceATL : null;
+  };
+
   // Internal weighted-cost ledger adapter. The UI does not consume this yet;
   // later patches will reconcile this chronological production basis against
   // inventory and add cargo/crafting/market events.
   const ledgerCraftingRows = (craftingRows.ledgerEvents || []).map((row) => ({
     ...row,
     feeCostsAtlas: Number.isFinite(Number(row.feeAmount)) ? Number(row.feeAmount) : null,
-    txsCostsAtlas: atlasPerSol != null && Number.isFinite(Number(row.txCostSol)) ? Number(row.txCostSol) * atlasPerSol : null,
+    txsCostsAtlas: historicalPriceValue('SOL', row.isoDate) != null && Number.isFinite(Number(row.txCostSol))
+      ? Number(row.txCostSol) * historicalPriceValue('SOL', row.isoDate) : null,
   }));
   const ledgerFaction = normalizeFaction(settings.faction);
   const ledgerFactionStarbases = needsInventoryLedger ? await fetchFactionStarbases(settings) : null;
@@ -8266,8 +8310,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const crafting = enrichCraftingEarningsRows({
     craftingRows,
     craftingBasisByDay,
-    resolvePrice: (asset) => getCurrentResourcePriceAtl(prices, asset),
-    atlasPerSol,
+    resolvePrice: historicalPriceValue,
+    resolveSolPrice: (isoDate) => historicalPriceValue('SOL', isoDate),
   });
 
   let redeemedLpByFactionAndDate = {};
@@ -8290,14 +8334,16 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const revenueAtlasPerDay = lpValuePerComponentAtl != null ? row.installed * lpValuePerComponentAtl : null;
     const componentBasis = upgradingBasisByDay.get(`${row.isoDate}\n${row.starbase}\n${row.asset}`);
     const upgradingCostsAtlas = componentBasis && !componentBasis.uncosted ? componentBasis.basis : null;
-    const componentPriceAtl = getCurrentResourcePriceAtl(prices, row.asset);
+    const componentPrice = historicalPriceFor(row.asset, row.isoDate);
+    const componentPriceAtl = componentPrice?.status === 'complete' ? componentPrice.priceATL : null;
     const componentExternalValueAtlas = componentPriceAtl == null ? null : row.installed * componentPriceAtl;
-    const txsCostsAtlas = atlasPerSol != null ? row.txCostSol * atlasPerSol : null;
+    const solPrice = historicalPriceFor('SOL', row.isoDate);
+    const txsCostsAtlas = solPrice?.status === 'complete' ? row.txCostSol * solPrice.priceATL : null;
     const totalCostsAtlas = Number.isFinite(upgradingCostsAtlas) && Number.isFinite(txsCostsAtlas) ? upgradingCostsAtlas + txsCostsAtlas : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas) ? revenueAtlasPerDay - totalCostsAtlas : null;
     const externalTotalCostsAtlas = Number.isFinite(componentExternalValueAtlas) && Number.isFinite(txsCostsAtlas) ? componentExternalValueAtlas + txsCostsAtlas : null;
     const externalNetProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(externalTotalCostsAtlas) ? revenueAtlasPerDay - externalTotalCostsAtlas : null;
-    return { ...row, output: row.asset, assetName: row.asset, factionRedeemedLp: Number.isFinite(factionRedeemedLp) ? factionRedeemedLp : null, lpPerComponent, lpValuePerComponentAtl, revenueAtlasPerDay, upgradingCostsAtlas, componentExternalValueAtlas, txsCostsAtlas, totalCostsAtlas, netProfitAtlas, netProfitPerCrew: Number.isFinite(netProfitAtlas) && row.crew > 0 ? netProfitAtlas / row.crew : null, profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (netProfitAtlas / revenueAtlasPerDay) * 100 : null, externalTotalCostsAtlas, externalNetProfitAtlas, externalNetProfitPerCrew: Number.isFinite(externalNetProfitAtlas) && row.crew > 0 ? externalNetProfitAtlas / row.crew : null, externalProfitMarginPercent: Number.isFinite(externalNetProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (externalNetProfitAtlas / revenueAtlasPerDay) * 100 : null };
+    return { ...row, output: row.asset, assetName: row.asset, factionRedeemedLp: Number.isFinite(factionRedeemedLp) ? factionRedeemedLp : null, lpPerComponent, lpValuePerComponentAtl, revenueAtlasPerDay, upgradingCostsAtlas, componentExternalValueAtlas, componentPriceProvenance: componentPrice, solPriceProvenance: solPrice, txsCostsAtlas, totalCostsAtlas, netProfitAtlas, netProfitPerCrew: Number.isFinite(netProfitAtlas) && row.crew > 0 ? netProfitAtlas / row.crew : null, profitMarginPercent: Number.isFinite(netProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (netProfitAtlas / revenueAtlasPerDay) * 100 : null, externalTotalCostsAtlas, externalNetProfitAtlas, externalNetProfitPerCrew: Number.isFinite(externalNetProfitAtlas) && row.crew > 0 ? externalNetProfitAtlas / row.crew : null, externalProfitMarginPercent: Number.isFinite(externalNetProfitAtlas) && Number.isFinite(revenueAtlasPerDay) && revenueAtlasPerDay !== 0 ? (externalNetProfitAtlas / revenueAtlasPerDay) * 100 : null };
   }).sort((a,b) => String(b.isoDate).localeCompare(String(a.isoDate)) || a.starbase.localeCompare(b.starbase) || a.asset.localeCompare(b.asset));
 
   crafting.sort((a, b) => {

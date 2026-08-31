@@ -39,16 +39,14 @@ function createCargoAllocationProjector(deps) {
         : canonicalFuel && Number(row.allocatedFuelExact) > 0
           ? valueNativeCost({ eventType: 'fuel', timestamp: row.timestamp, fuelQuantity: row.allocatedFuelExact }, fuelPrice)?.amountATL ?? null
           : Number(row.allocatedFuel) * fuelPrice.priceATL;
-      const solPrice = canonicalTx ? requireSameDatePrice(await resolvePrice('SOL', row.isoDate), row.isoDate) : null;
+      const solPrice = requireSameDatePrice(await resolvePrice('SOL', row.isoDate), row.isoDate);
       const txQuantityAvailable = !['invalid', 'unavailable'].includes(row.txAllocationStatus) && row.allocatedTxCostSol != null && Number.isFinite(Number(row.allocatedTxCostSol));
-      const txPriceAvailable = canonicalTx
-        ? ['complete', 'provisional'].includes(solPrice?.status)
-        : prices.atlasPerSol != null && Number.isFinite(Number(prices.atlasPerSol));
+      const txPriceAvailable = ['complete', 'provisional'].includes(solPrice?.status);
       const txsCostsAtlas = !txQuantityAvailable || !txPriceAvailable
         ? null
         : canonicalTx && BigInt(row.allocatedTxFeeLamports || '0') > 0n
           ? valueNativeCost({ eventType: 'sol_fee', timestamp: row.timestamp, txFeeLamports: row.allocatedTxFeeLamports }, solPrice)?.amountATL ?? null
-          : Number(row.allocatedTxCostSol) * Number(prices.atlasPerSol);
+          : Number(row.allocatedTxCostSol) * Number(solPrice.priceATL);
       const fuelCostStatus = Number.isFinite(fuelCostsAtlas) ? 'available' : 'unavailable';
       const txsCostStatus = Number.isFinite(txsCostsAtlas) ? 'available' : 'unavailable';
       const totalCostsAtlas = fuelCostStatus === 'available' && txsCostStatus === 'available' ? fuelCostsAtlas + txsCostsAtlas : null;

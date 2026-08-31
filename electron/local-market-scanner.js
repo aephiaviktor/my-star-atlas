@@ -143,10 +143,14 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { at
     const observedMarketplaceFeeAtlas = Number(logAmounts.marketplaceFeeAtlas || 0);
     const feePayer = keyText(transaction.transaction?.message?.accountKeys?.[0]);
     const executionTxFeeAtlas = tracked.has(feePayer) ? computeTxFeeAtlas(transaction, atlasPerSol) : 0;
+    const executionTxFeeSol = tracked.has(feePayer) ? Number(transaction?.meta?.fee || 0) / 1e9 : 0;
     const originalQuantity = Number(order.originalQuantity);
     const allocatedCreationTxFeeAtlas = Number.isFinite(originalQuantity) && originalQuantity > 0
       ? Number(order.creationTxFeeAtlas || 0) * Math.min(1, quantity / originalQuantity)
       : Number(order.creationTxFeeAtlas || 0);
+    const allocatedCreationTxFeeSol = Number.isFinite(originalQuantity) && originalQuantity > 0
+      ? Number(order.creationTxFeeSol || 0) * Math.min(1, quantity / originalQuantity)
+      : Number(order.creationTxFeeSol || 0);
     const txFeeAtlas = executionTxFeeAtlas + allocatedCreationTxFeeAtlas;
     const { marketplaceFeeAtlas, netAtlas } = calculateExecutionAccounting(
       order.side, grossAtlas, observedMarketplaceFeeAtlas, txFeeAtlas, logAmounts.transferAtlas,
@@ -156,6 +160,7 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { at
       side: order.side, orderId: order.orderId, wallet: order.initializer, starbase: order.starbase, asset: order.asset,
       rawMint: order.rawMint, certificateMint: order.certificateMint, quantity, settledAtlas: netAtlas,
       grossAtlas, marketplaceFeeAtlas, txFeeAtlas, executionTxFeeAtlas, allocatedCreationTxFeeAtlas,
+      executionTxFeeSol, allocatedCreationTxFeeSol, creationTimestamp: order.createdAt,
       creationSignature: order.creationSignature || '', netAtlas, unitPriceAtlas,
     };
   }

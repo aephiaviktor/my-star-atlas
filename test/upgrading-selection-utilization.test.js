@@ -30,6 +30,17 @@ test('matched selection uses completion cohort, equal active crew-time, and acti
   assert.equal(result.price_warning, 'Indicative reconstruction — valued at current component prices');
 });
 
+test('historical component prices are selected by completion date without a current-price warning', () => {
+  const value = input();
+  value.prices = { framework: 999, electronics: 999 };
+  value.pricesByDate = { '2026-08-16': { framework: 2, electronics: 3 } };
+  const result = calculateUpgradingSelectionUtilization(value);
+  assert.equal(result.price_basis, 'historical_at_or_before');
+  assert.equal(result.selection[0].price_basis, 'historical_at_or_before');
+  assert.equal(result.price_warning, null);
+  assert.deepEqual(result.component_prices_used, value.pricesByDate);
+});
+
 test('cross-midnight active intervals stay cohort-scoped while utilization is UTC-calendar scoped', () => {
   const result = calculateUpgradingSelectionUtilization(input());
   assert.deepEqual(result.utilization.map((row) => row.date), ['2026-08-15', '2026-08-16']);

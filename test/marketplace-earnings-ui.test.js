@@ -139,14 +139,14 @@ test('Marketplace reads only clean post-cutover LM and faction GM measurements w
 });
 
 test('Marketplace rescans order history for sell recovery without replaying high-volume wallet history', () => {
-  assert.match(main, /checkpoint\.tradeEnrichmentVersion < 2/);
+  assert.match(main, /checkpoint\.tradeEnrichmentVersion < 3/);
   assert.match(main, /loadLocalMarketHistoricalOrderIds\(faction, startIso\)/);
   assert.match(main, /event\.event === 'FILLED'/);
   assert.match(main, /historicalOrderIds,/);
   assert.match(main, /marketplaceCursorSnapshot\(\s*migrationWalletCursors,\s*needsTradeEnrichment \? \{\} : checkpoint\.orderCursors/);
   assert.match(main, /needsTradeEnrichment \? checkpoint\.orders\.map\(\(order\) => String\(order\.orderId\)\)/);
   assert.match(main, /pendingWalletCursors/);
-  assert.match(main, /tradeEnrichmentVersionNext[\s\S]*\? 2 : checkpoint\.tradeEnrichmentVersion/);
+  assert.match(main, /tradeEnrichmentVersionNext[\s\S]*\? 3 : checkpoint\.tradeEnrichmentVersion/);
   assert.match(main, /prior\.signature === trade\.signature/);
 });
 

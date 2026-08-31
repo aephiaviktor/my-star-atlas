@@ -8138,6 +8138,7 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
       pauseSeconds: Number(row?.pauseSeconds || 0),
       resupplyExcludedSeconds: Number(row?.resupplyExcludedSeconds || 0),
       txCostSol: Number(row?.txCostSol || 0),
+      historicalPrices: row?.historicalPrices && typeof row.historicalPrices === 'object' ? row.historicalPrices : null,
       txSuccess: row?.success === true || String(row?.success).toLowerCase() === 'true',
       scanSuccess: Number(row?.sduFound || 0) > 0,
       cycleHours,
@@ -8206,13 +8207,35 @@ function buildScanningOptimizationAnalytics(rows, selectedExperiment = '__latest
       if(!Number.isFinite(cost) || cost <= 0) continue;
       const signature = String(row?.signature || '').trim();
       const key = signature || `${String(row?.event_type || row?.eventType || '')}:${timeMs}`;
-      txCostsBySignature.set(key, Math.max(txCostsBySignature.get(key) || 0, cost));
+      const previous = txCostsBySignature.get(key);
+      if(!previous || cost > previous.cost) txCostsBySignature.set(key, {
+        cost,
+        price: Number(row?.historicalPrices?.solPriceAtl),
+        historical: Boolean(row?.historicalPrices),
+      });
     }
-    const txCostSol = [...txCostsBySignature.values()].reduce((sum, cost) => sum + cost, 0);
-    const grossRevenueAtlas = pricedCost(totalSdu, prices.sduPriceAtl);
-    const foodCostAtlas = pricedCost(burnedFood, prices.foodPriceAtl);
-    const fuelCostAtlas = pricedCost(burnedFuel, prices.fuelPriceAtl);
-    const txCostAtlas = pricedCost(txCostSol, prices.solPriceAtl);
+    const txEntries = [...txCostsBySignature.values()];
+    const txCostSol = txEntries.reduce((sum, entry) => sum + entry.cost, 0);
+    const historicalSamplePricing = group.samples.some((sample) => sample.historicalPrices);
+    const historicalEventPricing = events.some(({ row }) => row?.historicalPrices);
+    const historicalValue = (items, quantityOf, priceField) => items.every((item) => {
+      const quantity = Number(quantityOf(item));
+      return !(quantity > 0) || Number.isFinite(Number(item?.historicalPrices?.[priceField]));
+    }) ? items.reduce((sum, item) => sum + Number(quantityOf(item) || 0) * Number(item?.historicalPrices?.[priceField] || 0), 0) : null;
+    const grossRevenueAtlas = historicalSamplePricing
+      ? historicalValue(group.samples, (sample) => sample.sdu, 'sduPriceAtl')
+      : pricedCost(totalSdu, prices.sduPriceAtl);
+    const foodCostAtlas = historicalSamplePricing
+      ? historicalValue(group.samples, (sample) => sample.burnedFood, 'foodPriceAtl')
+      : pricedCost(burnedFood, prices.foodPriceAtl);
+    const fuelCostAtlas = historicalEventPricing
+      ? (movementEvents.every(({ row }) => !(Number(row?.burnedFuel) > 0) || Number.isFinite(Number(row?.historicalPrices?.fuelPriceAtl)))
+        ? movementEvents.reduce((sum, { row }) => sum + Number(row?.burnedFuel || 0) * Number(row?.historicalPrices?.fuelPriceAtl || 0), 0) : null)
+      : pricedCost(burnedFuel, prices.fuelPriceAtl);
+    const txCostAtlas = historicalEventPricing
+      ? (txEntries.every((entry) => !(entry.cost > 0) || Number.isFinite(entry.price))
+        ? txEntries.reduce((sum, entry) => sum + entry.cost * entry.price, 0) : null)
+      : pricedCost(txCostSol, prices.solPriceAtl);
     const costs = [foodCostAtlas, fuelCostAtlas, txCostAtlas];
     const totalCostAtlas = costs.every(Number.isFinite) ? costs.reduce((sum, value) => sum + value, 0) : null;
     const netAtlas = Number.isFinite(grossRevenueAtlas) && Number.isFinite(totalCostAtlas) ? grossRevenueAtlas - totalCostAtlas : null;
@@ -8557,7 +8580,7 @@ function renderScanningOptimizationAnalytics() {
     const label = document.createElement('strong');
     label.textContent = 'Net ATLAS audit: ';
     const detail = document.createTextNode(Number.isFinite(totals.netAtlas)
-      ? `${formatAtlas(totals.grossRevenueAtlas, 2)} gross revenue − ${formatAtlas(totals.foodCostAtlas, 2)} food − ${formatAtlas(totals.fuelCostAtlas, 2)} movement fuel − ${formatAtlas(totals.txCostAtlas, 2)} transaction/SOL costs = ${formatAtlas(totals.netAtlas, 2)} net. Current price snapshot: ${checkedAt}; resources: ${prices.resourcePriceSource || 'unavailable'}; SOL/ATLAS: ${prices.atlasPerSolSource || 'unavailable'}.`
+      ? `${formatAtlas(totals.grossRevenueAtlas, 2)} gross revenue − ${formatAtlas(totals.foodCostAtlas, 2)} food − ${formatAtlas(totals.fuelCostAtlas, 2)} movement fuel − ${formatAtlas(totals.txCostAtlas, 2)} transaction/SOL costs = ${formatAtlas(totals.netAtlas, 2)} net. Historical at-or-before valuation checked: ${checkedAt}; source: ${prices.resourcePriceSource || 'unavailable'}.`
       : 'unavailable because one or more current resource or SOL/ATLAS prices could not be loaded.');
     optimizationAnalyticsEconomics.append(label, detail);
   }

@@ -43,6 +43,7 @@ function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsB
   const tracked = new Set(trackedWallets.map(String));
   const tokenMeta = tokenAccountMetadata(transaction);
   const events = [];
+  const txFeeSol = Number(transaction.meta?.fee || 0) / 1e9;
   const txFeeAtlas = Number.isFinite(atlasPerSol) && atlasPerSol > 0 ? (Number(transaction.meta?.fee || 0) / 1e9) * atlasPerSol : 0;
   const instructions = transaction.transaction?.message?.instructions || [];
   instructions.forEach((instruction, index) => {
@@ -68,7 +69,7 @@ function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsB
         type: 'transfer', asset: asset.name || asset.asset || String(asset), rawMint: mint, quantity,
         origin: isDeposit ? `wallet:${wallet}` : starbase,
         destination: isDeposit ? starbase : `wallet:${wallet}`,
-        txFeeAtlas, flow: isDeposit ? 'css-deposit' : 'css-withdraw', faction, starbase,
+        txFeeSol, txFeeAtlas, flow: isDeposit ? 'css-deposit' : 'css-withdraw', faction, starbase,
       });
       return;
     }
@@ -85,11 +86,14 @@ function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsB
       id: `${signature}:${index}:wallet-transfer`, timestamp, signature, type: 'transfer',
       asset: asset.name || asset.asset || String(asset), rawMint: mint, quantity,
       origin: `wallet:${source.owner}`, destination: `wallet:${destination.owner}`,
-      txFeeAtlas, flow: 'wallet-transfer',
+      txFeeSol, txFeeAtlas, flow: 'wallet-transfer',
     });
   });
-  if (events.length > 1 && txFeeAtlas > 0) {
-    for (const event of events) event.txFeeAtlas = txFeeAtlas / events.length;
+  if (events.length > 1) {
+    for (const event of events) {
+      event.txFeeSol = txFeeSol / events.length;
+      event.txFeeAtlas = txFeeAtlas / events.length;
+    }
   }
   return events;
 }

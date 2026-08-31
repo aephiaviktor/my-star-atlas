@@ -138,7 +138,9 @@ test('missing Fuel price only invalidates Fuel and aggregate fields', async () =
 });
 
 test('missing transaction valuation only invalidates TXS and aggregate fields', async () => {
-  const { run, allocation } = projector({ fetchPrices: async () => ({ atlasPerSol: null }) });
+  const { run, allocation } = projector({
+    resolvePrice: async (asset) => asset === 'SOL' ? ({ status: 'incomplete', priceATL: null }) : ({ status: 'complete', priceATL: 3 }),
+  });
   const { rows: [row] } = await run({ faction: 'MUD' }, [allocation], {}, new AbortController().signal);
   assert.equal(row.fuelCostsAtlas, 3); assert.equal(row.fuelCostStatus, 'available');
   assert.equal(row.txsCostsAtlas, null); assert.equal(row.txsCostStatus, 'unavailable');
