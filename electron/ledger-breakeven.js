@@ -42,15 +42,16 @@ function buildLedgerBreakevenRows({ ledgerRows = [], inventoryRows = [], prices 
     const estimatedPercent = coverageDenominator > 0 ? Math.round((1 - knownCoverageRatio) * 100) : null;
     const fullyTracked = inventory > 0 && reconciliationStatus === 'reconciled' && uncostedQuantity <= 1e-9;
     const perUnit = (value) => knownCostQuantity > 0 ? Number(value || 0) / knownCostQuantity : null;
-    const scanningCostPerUnit = perUnit(ledger?.costs?.scanning);
-    const miningCostPerUnit = perUnit(ledger?.costs?.mining);
-    const craftingCostPerUnit = perUnit(ledger?.costs?.crafting);
-    const lmCostPerUnit = perUnit(ledger?.costs?.lm);
-    const gmCostPerUnit = perUnit(ledger?.costs?.gm);
+    const knownCosts = ledger?.knownCosts || ledger?.costs;
+    const scanningCostPerUnit = perUnit(knownCosts?.scanning);
+    const miningCostPerUnit = perUnit(knownCosts?.mining);
+    const craftingCostPerUnit = perUnit(knownCosts?.crafting);
+    const lmCostPerUnit = perUnit(knownCosts?.lm);
+    const gmCostPerUnit = perUnit(knownCosts?.gm);
     const baseCostPerUnit = knownCostQuantity > 0
       ? scanningCostPerUnit + miningCostPerUnit + craftingCostPerUnit + lmCostPerUnit + gmCostPerUnit
       : null;
-    const cargoCostPerUnit = perUnit(ledger?.cargoCost);
+    const cargoCostPerUnit = perUnit(ledger?.knownCargoCost ?? ledger?.cargoCost);
     const landedCostPerUnit = knownCostQuantity > 0 ? baseCostPerUnit + cargoCostPerUnit : null;
     return {
       starbase, asset, inventory,

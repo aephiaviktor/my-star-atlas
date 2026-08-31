@@ -333,7 +333,7 @@ test('earnings snapshot declares the optional Breakeven error before returning i
 test('production Breakeven derives source columns and extrapolated totals from known-cost quantity', () => {
   const ledgerBreakeven = readFileSync(path.join(__dirname, '..', 'electron', 'ledger-breakeven.js'), 'utf8');
   for (const source of ['scanning', 'mining', 'crafting', 'lm', 'gm']) {
-    assert.match(ledgerBreakeven, new RegExp(`const ${source}CostPerUnit = perUnit\\(ledger\\?\\.costs\\?\\.${source}\\)`));
+    assert.match(ledgerBreakeven, new RegExp(`const ${source}CostPerUnit = perUnit\\(knownCosts\\?\\.${source}\\)`));
   }
   assert.match(ledgerBreakeven, /const knownCostQuantity = Math\.max\(0, ledgerQuantity - Number\(ledger\?\.uncostedQuantity \|\| 0\)\);/);
   assert.match(ledgerBreakeven, /const baseCostPerUnit = knownCostQuantity > 0/);
@@ -387,6 +387,7 @@ test('Cost Coverage distinguishes fully tracked, estimated, and unavailable pool
 test('Inventory Ledger exposes Cost Ledger and Inventory Valuation views', () => {
   const htmlSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
   const rendererSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+  const mainSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   assert.match(htmlSource, /data-earnings-subtab="breakeven"[^>]*>Inventory Ledger<\/button>/);
   assert.match(htmlSource, /data-inventory-ledger-view="cost-ledger"[^>]*>Cost Ledger<\/button>/);
   assert.match(htmlSource, /data-inventory-ledger-view="valuation"[^>]*>Inventory Valuation<\/button>/);
@@ -401,6 +402,7 @@ test('Inventory Ledger exposes Cost Ledger and Inventory Valuation views', () =>
   assert.match(costLedgerRenderer, /costLedgerBasisFormatter\.format\(costs\.scanning/);
   assert.match(costLedgerRenderer, /costLedgerBasisFormatter\.format\(totalBasis\)/);
   assert.match(rendererSource, /costLedgerUnitFormatter = new Intl\.NumberFormat\(undefined, \{ minimumFractionDigits: 6, maximumFractionDigits: 6 \}\)/);
-  assert.match(costLedgerRenderer, /costLedgerUnitFormatter\.format\(totalBasis \/ quantity\)/);
+  assert.match(costLedgerRenderer, /costLedgerUnitFormatter\.format\(totalBasis \/ costed\)/);
+  assert.match(mainSource, /inventoryCostLedgerRows: projectInventoryCostLedgerRows\(\{ ledgerRows: inventoryCostLedgerRows, valuationRows: breakevenRows \}\)/);
   assert.doesNotMatch(costLedgerRenderer, /formatAtlas\(/);
 });

@@ -30,7 +30,10 @@ test('foreign withdrawal seeds an exact weighted wallet lot for the destination 
   ledger.applyEvents(result.events);
   assert.deepEqual(ledger.get('ONI-1', 'Framework'), {
     location: 'ONI-1', asset: 'Framework', quantity: 40, uncostedQuantity: 8,
-    costs: { scanning: 0, mining: 4, crafting: 2, lm: 0, gm: 10 }, cargoCost: 7,
+    costs: { scanning: 0, mining: 4, crafting: 2, lm: 0, gm: 10 },
+    uncostedCosts: { scanning: 0, mining: 0.8, crafting: 0.4, lm: 0, gm: 2 },
+    knownCosts: { scanning: 0, mining: 3.2, crafting: 1.6, lm: 0, gm: 8 },
+    cargoCost: 7, uncostedCargoCost: 1.4000000000000001, knownCargoCost: 5.6,
     costPerUnit: { scanning: 0, mining: 0.1, crafting: 0.05, lm: 0, gm: 0.25 },
     baseCostPerUnit: 0.4, cargoCostPerUnit: 0.175, totalCostPerUnit: 0.575,
   });

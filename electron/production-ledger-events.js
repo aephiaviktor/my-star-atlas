@@ -215,6 +215,8 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
           const row = ledger.get(location, asset);
           const snapshot = createInventoryBasisSnapshot({
             ...row,
+            costs: row.knownCosts,
+            cargoCost: row.knownCargoCost,
             faction: inventoryBasisFaction,
             starbase: location,
             timestamp: event.timestamp,

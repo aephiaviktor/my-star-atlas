@@ -7265,14 +7265,15 @@ function renderInventoryCostLedger(result) {
   for (const row of rows) {
     const quantity = Number(row.quantity || 0);
     const uncosted = Number(row.uncostedQuantity || 0);
+    const costed = Number(row.knownCostQuantity ?? Math.max(0, quantity - uncosted));
     const costs = row.costs || {};
     const cargo = Number(row.cargoCost || 0);
     const totalBasis = Object.values(costs).reduce((sum, value) => sum + Number(value || 0), cargo);
     const values = [
-      row.location, row.asset, formatWholeNumber(quantity), formatWholeNumber(Math.max(0, quantity - uncosted)), formatWholeNumber(uncosted),
+      row.location, row.asset, formatWholeNumber(quantity), formatWholeNumber(costed), formatWholeNumber(uncosted),
       costLedgerBasisFormatter.format(costs.scanning || 0), costLedgerBasisFormatter.format(costs.mining || 0), costLedgerBasisFormatter.format(costs.crafting || 0),
       costLedgerBasisFormatter.format(costs.lm || 0), costLedgerBasisFormatter.format(costs.gm || 0), costLedgerBasisFormatter.format(cargo),
-      costLedgerBasisFormatter.format(totalBasis), quantity > 0 ? costLedgerUnitFormatter.format(totalBasis / quantity) : '--',
+      costLedgerBasisFormatter.format(totalBasis), costed > 0 ? costLedgerUnitFormatter.format(totalBasis / costed) : '--',
       quantity <= 0 ? 'Empty' : uncosted > 0 ? 'Partial' : 'Costed',
     ];
     const tr = document.createElement('tr');

@@ -30,7 +30,9 @@ function cloneLot(lot) {
     quantity: lot.quantity,
     uncostedQuantity: lot.uncostedQuantity,
     costs: { ...lot.costs },
+    uncostedCosts: { ...lot.uncostedCosts },
     cargoCost: lot.cargoCost,
+    uncostedCargoCost: lot.uncostedCargoCost,
   };
 }
 
@@ -50,10 +52,17 @@ class InventoryCostLedger {
       if (uncostedQuantity > quantity + EPSILON) throw new Error('uncostedQuantity cannot exceed quantity');
       const costs = emptyCosts();
       for (const source of COST_SOURCES) costs[source] = requireNonNegative(row?.costs?.[source] ?? 0, `${source} cost`);
+      const uncostedCosts = emptyCosts();
+      for (const source of COST_SOURCES) {
+        uncostedCosts[source] = requireNonNegative(row?.uncostedCosts?.[source] ?? 0, `uncosted ${source} cost`);
+        if (uncostedCosts[source] > costs[source] + EPSILON) throw new Error(`uncosted ${source} cost cannot exceed total cost`);
+      }
       const cargoCost = requireNonNegative(row?.cargoCost ?? 0, 'cargoCost');
+      const uncostedCargoCost = requireNonNegative(row?.uncostedCargoCost ?? 0, 'uncostedCargoCost');
+      if (uncostedCargoCost > cargoCost + EPSILON) throw new Error('uncostedCargoCost cannot exceed cargoCost');
       const key = ledger.key(location, asset);
       if (ledger.entries.has(key)) throw new Error(`duplicate ledger row: ${asset} at ${location}`);
-      ledger.entries.set(key, { location, asset, quantity, uncostedQuantity, costs, cargoCost });
+      ledger.entries.set(key, { location, asset, quantity, uncostedQuantity, costs, uncostedCosts, cargoCost, uncostedCargoCost });
     }
     return ledger;
   }
@@ -71,7 +80,9 @@ class InventoryCostLedger {
         quantity: 0,
         uncostedQuantity: 0,
         costs: emptyCosts(),
+        uncostedCosts: emptyCosts(),
         cargoCost: 0,
+        uncostedCargoCost: 0,
       });
     }
     return this.entries.get(key);
@@ -82,17 +93,20 @@ class InventoryCostLedger {
     entry.quantity += lot.quantity;
     entry.uncostedQuantity += lot.uncostedQuantity;
     for (const source of COST_SOURCES) entry.costs[source] += lot.costs[source] || 0;
+    for (const source of COST_SOURCES) entry.uncostedCosts[source] += lot.uncostedCosts?.[source] || 0;
     entry.cargoCost += lot.cargoCost || 0;
+    entry.uncostedCargoCost += lot.uncostedCargoCost || 0;
     return entry;
   }
 
   acquire({ location, asset, quantity, source, totalCost, cargoCost = 0 }) {
     const units = requirePositive(quantity, 'quantity');
     const cargo = requireNonNegative(cargoCost, 'cargoCost');
-    const lot = { quantity: units, uncostedQuantity: 0, costs: emptyCosts(), cargoCost: cargo };
+    const lot = { quantity: units, uncostedQuantity: 0, costs: emptyCosts(), uncostedCosts: emptyCosts(), cargoCost: cargo, uncostedCargoCost: 0 };
     if (totalCost === null || totalCost === undefined) {
       if (source) throw new Error('totalCost is required when source is provided');
       lot.uncostedQuantity = units;
+      lot.uncostedCargoCost = cargo;
     } else {
       if (!COST_SOURCES.includes(source)) throw new Error(`invalid cost source: ${source}`);
       lot.costs[source] = requireNonNegative(totalCost, 'totalCost');
@@ -101,12 +115,19 @@ class InventoryCostLedger {
     return this.get(location, asset);
   }
 
-  acquireLot({ location, asset, quantity, uncostedQuantity = 0, costs = {}, cargoCost = 0 }) {
+  acquireLot({ location, asset, quantity, uncostedQuantity = 0, costs = {}, uncostedCosts = null, cargoCost = 0, uncostedCargoCost = null }) {
     const units = requirePositive(quantity, 'quantity');
     const uncosted = requireNonNegative(uncostedQuantity, 'uncostedQuantity');
     if (uncosted > units + EPSILON) throw new Error('uncostedQuantity cannot exceed quantity');
-    const lot = { quantity: units, uncostedQuantity: uncosted, costs: emptyCosts(), cargoCost: requireNonNegative(cargoCost, 'cargoCost') };
-    for (const source of COST_SOURCES) lot.costs[source] = requireNonNegative(costs?.[source] ?? 0, `${source} cost`);
+    const lot = { quantity: units, uncostedQuantity: uncosted, costs: emptyCosts(), uncostedCosts: emptyCosts(), cargoCost: requireNonNegative(cargoCost, 'cargoCost'), uncostedCargoCost: 0 };
+    const inferredUncostedRatio = units > 0 ? uncosted / units : 0;
+    for (const source of COST_SOURCES) {
+      lot.costs[source] = requireNonNegative(costs?.[source] ?? 0, `${source} cost`);
+      lot.uncostedCosts[source] = requireNonNegative(uncostedCosts?.[source] ?? lot.costs[source] * inferredUncostedRatio, `uncosted ${source} cost`);
+      if (lot.uncostedCosts[source] > lot.costs[source] + EPSILON) throw new Error(`uncosted ${source} cost cannot exceed total cost`);
+    }
+    lot.uncostedCargoCost = requireNonNegative(uncostedCargoCost ?? lot.cargoCost * inferredUncostedRatio, 'uncostedCargoCost');
+    if (lot.uncostedCargoCost > lot.cargoCost + EPSILON) throw new Error('uncostedCargoCost cannot exceed cargoCost');
     this.addLot(location, asset, lot);
     return this.get(location, asset);
   }
@@ -117,25 +138,43 @@ class InventoryCostLedger {
     if (units > entry.quantity + EPSILON) {
       throw new Error(`insufficient inventory for ${entry.asset} at ${entry.location}`);
     }
-    const ratio = entry.quantity > 0 ? Math.min(1, units / entry.quantity) : 0;
+    const uncostedUnits = Math.min(units, entry.uncostedQuantity);
+    const costedUnits = Math.max(0, units - uncostedUnits);
+    const costedQuantity = Math.max(0, entry.quantity - entry.uncostedQuantity);
+    const uncostedRatio = entry.uncostedQuantity > 0 ? uncostedUnits / entry.uncostedQuantity : 0;
+    const costedRatio = costedQuantity > 0 ? costedUnits / costedQuantity : 0;
     const lot = {
       quantity: units,
-      uncostedQuantity: entry.uncostedQuantity * ratio,
+      uncostedQuantity: uncostedUnits,
       costs: emptyCosts(),
-      cargoCost: entry.cargoCost * ratio,
+      uncostedCosts: emptyCosts(),
+      cargoCost: 0,
+      uncostedCargoCost: entry.uncostedCargoCost * uncostedRatio,
     };
-    for (const source of COST_SOURCES) lot.costs[source] = entry.costs[source] * ratio;
+    for (const source of COST_SOURCES) {
+      lot.uncostedCosts[source] = entry.uncostedCosts[source] * uncostedRatio;
+      lot.costs[source] = lot.uncostedCosts[source]
+        + (entry.costs[source] - entry.uncostedCosts[source]) * costedRatio;
+    }
+    lot.cargoCost = lot.uncostedCargoCost
+      + (entry.cargoCost - entry.uncostedCargoCost) * costedRatio;
 
     entry.quantity = Math.max(0, entry.quantity - units);
     entry.uncostedQuantity = Math.max(0, entry.uncostedQuantity - lot.uncostedQuantity);
     entry.cargoCost = Math.max(0, entry.cargoCost - lot.cargoCost);
-    for (const source of COST_SOURCES) entry.costs[source] = Math.max(0, entry.costs[source] - lot.costs[source]);
+    entry.uncostedCargoCost = Math.max(0, entry.uncostedCargoCost - lot.uncostedCargoCost);
+    for (const source of COST_SOURCES) {
+      entry.costs[source] = Math.max(0, entry.costs[source] - lot.costs[source]);
+      entry.uncostedCosts[source] = Math.max(0, entry.uncostedCosts[source] - lot.uncostedCosts[source]);
+    }
     return cloneLot(lot);
   }
 
   transfer({ origin, destination, asset, quantity, cargoCost = 0 }) {
     const lot = this.consume({ location: origin, asset, quantity });
-    lot.cargoCost += requireNonNegative(cargoCost, 'cargoCost');
+    const addedCargoCost = requireNonNegative(cargoCost, 'cargoCost');
+    lot.cargoCost += addedCargoCost;
+    lot.uncostedCargoCost += addedCargoCost * (lot.uncostedQuantity / lot.quantity);
     this.addLot(destination, asset, lot);
     return cloneLot(lot);
   }
@@ -155,7 +194,7 @@ class InventoryCostLedger {
       if (units > available + EPSILON) throw new Error(`insufficient inventory for ${asset} at ${String(location).trim()}`);
     }
 
-    const outputLot = { quantity: outputUnits, uncostedQuantity: 0, costs: emptyCosts(), cargoCost: 0 };
+    const outputLot = { quantity: outputUnits, uncostedQuantity: 0, costs: emptyCosts(), uncostedCosts: emptyCosts(), cargoCost: 0, uncostedCargoCost: 0 };
     let hasUncostedIngredient = false;
     for (const ingredient of ingredients) {
       const consumed = this.consume({ location, asset: ingredient.asset, quantity: ingredient.quantity });
@@ -165,6 +204,10 @@ class InventoryCostLedger {
     }
     outputLot.uncostedQuantity = hasUncostedIngredient ? outputUnits : 0;
     outputLot.costs.crafting += requireNonNegative(craftingCost, 'craftingCost');
+    if (hasUncostedIngredient) {
+      outputLot.uncostedCosts = { ...outputLot.costs };
+      outputLot.uncostedCargoCost = outputLot.cargoCost;
+    }
     this.addLot(location, outputAsset, outputLot);
     return cloneLot(outputLot);
   }
@@ -191,18 +234,28 @@ class InventoryCostLedger {
   get(location, asset) {
     const entry = this.ensure(location, asset);
     const quantity = entry.quantity;
+    const knownQuantity = Math.max(0, quantity - entry.uncostedQuantity);
+    const knownCosts = emptyCosts();
     const costPerUnit = emptyCosts();
-    for (const source of COST_SOURCES) costPerUnit[source] = quantity > 0 ? entry.costs[source] / quantity : 0;
-    const baseTotalCost = COST_SOURCES.reduce((sum, source) => sum + entry.costs[source], 0);
-    const baseCostPerUnit = quantity > 0 ? baseTotalCost / quantity : 0;
-    const cargoCostPerUnit = quantity > 0 ? entry.cargoCost / quantity : 0;
+    for (const source of COST_SOURCES) {
+      knownCosts[source] = Math.max(0, entry.costs[source] - entry.uncostedCosts[source]);
+      costPerUnit[source] = knownQuantity > 0 ? knownCosts[source] / knownQuantity : 0;
+    }
+    const knownCargoCost = Math.max(0, entry.cargoCost - entry.uncostedCargoCost);
+    const baseTotalCost = COST_SOURCES.reduce((sum, source) => sum + knownCosts[source], 0);
+    const baseCostPerUnit = knownQuantity > 0 ? baseTotalCost / knownQuantity : 0;
+    const cargoCostPerUnit = knownQuantity > 0 ? knownCargoCost / knownQuantity : 0;
     return {
       location: entry.location,
       asset: entry.asset,
       quantity,
       uncostedQuantity: entry.uncostedQuantity,
       costs: { ...entry.costs },
+      uncostedCosts: { ...entry.uncostedCosts },
+      knownCosts,
       cargoCost: entry.cargoCost,
+      uncostedCargoCost: entry.uncostedCargoCost,
+      knownCargoCost,
       costPerUnit,
       baseCostPerUnit,
       cargoCostPerUnit,

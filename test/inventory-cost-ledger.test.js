@@ -62,17 +62,49 @@ test('crafting carries upstream source and cargo costs and adds only direct conv
   close(framework.totalCostPerUnit, 0.94);
 });
 
-test('uncosted opening quantity remains explicit and is consumed proportionally', () => {
+test('uncosted opening quantity is consumed before the costed weighted-average pool', () => {
   const ledger = new InventoryCostLedger();
   ledger.acquire({ location: 'ONI-1', asset: 'Iron', quantity: 80 });
   ledger.acquire({ location: 'ONI-1', asset: 'Iron', quantity: 20, source: 'mining', totalCost: 10 });
 
   const consumed = ledger.consume({ location: 'ONI-1', asset: 'Iron', quantity: 50 });
-  close(consumed.uncostedQuantity, 40);
-  close(consumed.costs.mining, 5);
+  close(consumed.uncostedQuantity, 50);
+  close(consumed.costs.mining, 0);
   const remaining = ledger.get('ONI-1', 'Iron');
-  close(remaining.uncostedQuantity, 40);
-  close(remaining.costs.mining, 5);
+  close(remaining.quantity, 50);
+  close(remaining.uncostedQuantity, 30);
+  close(remaining.costs.mining, 10);
+});
+
+test('known-cost inventory grows and stabilizes its weighted average while uncosted stock depletes first', () => {
+  const ledger = new InventoryCostLedger();
+  ledger.acquire({ location: 'MUD-PHANTOM', asset: 'Framework', quantity: 900 });
+  ledger.acquire({ location: 'MUD-PHANTOM', asset: 'Framework', quantity: 100, source: 'crafting', totalCost: 100 });
+  ledger.consume({ location: 'MUD-PHANTOM', asset: 'Framework', quantity: 200 });
+  ledger.acquire({ location: 'MUD-PHANTOM', asset: 'Framework', quantity: 100, source: 'lm', totalCost: 200 });
+
+  const framework = ledger.get('MUD-PHANTOM', 'Framework');
+  assert.equal(framework.quantity, 900);
+  assert.equal(framework.uncostedQuantity, 700);
+  assert.equal(framework.quantity - framework.uncostedQuantity, 200);
+  assert.equal(framework.costs.crafting, 100);
+  assert.equal(framework.costs.lm, 200);
+  close((framework.costs.crafting + framework.costs.lm) / 200, 1.5);
+});
+
+test('partial known costs remain attached to an entirely uncosted lot during depletion', () => {
+  const ledger = new InventoryCostLedger();
+  ledger.acquireLot({
+    location: 'MUD-1', asset: 'Framework', quantity: 10, uncostedQuantity: 10,
+    costs: { crafting: 5 }, cargoCost: 2,
+  });
+  const consumed = ledger.consume({ location: 'MUD-1', asset: 'Framework', quantity: 4 });
+  close(consumed.costs.crafting, 2);
+  close(consumed.uncostedCosts.crafting, 2);
+  close(consumed.cargoCost, 0.8);
+  const remaining = ledger.get('MUD-1', 'Framework');
+  close(remaining.costs.crafting, 3);
+  close(remaining.uncostedCosts.crafting, 3);
 });
 
 test('a crafted batch is fully marked uncosted when any consumed ingredient lacks basis', () => {

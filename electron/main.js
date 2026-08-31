@@ -64,11 +64,14 @@ const {
   applyVerifiedFleetCrew,
 } = require('./rental-history');
 const { buildCostLedgerResult } = require('./production-ledger-events');
+const { reconcileInventoryLedger } = require('./inventory-ledger-reconciliation');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { publishInventoryBasisSnapshots } = require('./inventory-basis-publication');
+const { createInventoryBasisSnapshot } = require('./inventory-basis-snapshot');
 const { readInventoryBasisSnapshots } = require('./inventory-basis-read');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
+const { projectInventoryCostLedgerRows } = require('./inventory-cost-ledger-view');
 const {
   formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
   diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux,
@@ -8139,6 +8142,9 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   });
   const ledgerFaction = normalizeFaction(settings.faction);
   const ledgerFactionStarbases = needsInventoryLedger ? await fetchFactionStarbases(settings) : null;
+  const currentInventoryRows = needsInventoryLedger
+    ? (await fetchCurrentPerStarbaseInventory(settings)).filter((row) => isStarbaseIncluded(row.starbase, ledgerFactionStarbases, ledgerFaction))
+    : [];
   const localMarketResult = needsInventoryLedger
     ? await fetchMarketplaceTradesFromInflux(settings)
     : { trades: [], error: '' };
@@ -8184,6 +8190,22 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   }) : { events: [], appliedEventResults: [], ledger: { snapshot: () => [] }, rejectedEvents: [], seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {}, inventoryBasisSnapshots: [] };
   const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
   const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
+  const inventoryReconciliationEvents = needsInventoryLedger
+    ? reconcileInventoryLedger({ ledger: inventoryCostLedgerResult.ledger, inventoryRows: currentInventoryRows })
+    : [];
+  for (const [index, event] of inventoryReconciliationEvents.entries()) {
+    const row = inventoryCostLedgerResult.ledger.get(event.location, event.asset);
+    const snapshot = createInventoryBasisSnapshot({
+      ...row,
+      costs: row.knownCosts,
+      cargoCost: row.knownCargoCost,
+      faction: ledgerFaction,
+      starbase: event.location,
+      timestamp: event.timestamp,
+      eventId: `inventory-reconciliation:${index}:${event.location}:${event.asset}:${event.quantity}`,
+    });
+    if (snapshot) inventoryCostLedgerResult.inventoryBasisSnapshots.push(snapshot);
+  }
   const inventoryCostLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
   const inventoryCostLedgerRejectedEvents = [
     ...inventoryCostLedgerResult.rejectedEvents,
@@ -8271,10 +8293,9 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     return [];
   });
   try {
-    const inventoryRows = await fetchCurrentPerStarbaseInventory(settings);
     const factionStarbases = ledgerFactionStarbases || await fetchFactionStarbases(settings);
     const faction = ledgerFaction;
-    breakevenRows = buildLedgerBreakevenRows({ ledgerRows: inventoryCostLedgerRows, inventoryRows, prices })
+    breakevenRows = buildLedgerBreakevenRows({ ledgerRows: inventoryCostLedgerRows, inventoryRows: currentInventoryRows, prices })
       .filter((row) => isStarbaseIncluded(row.starbase, factionStarbases, faction));
     const changes = diffBreakevenBasisStates(breakevenRows, persistedBreakevenStates, {
       faction, timestamp: new Date().toISOString(),
@@ -8650,7 +8671,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     localMarketError: localMarketResult.error,
     inventoryCostLedgerEvents,
     inventoryCostLedgerAppliedEventResults,
-    inventoryCostLedgerRows,
+    inventoryReconciliationEvents,
+    inventoryCostLedgerRows: projectInventoryCostLedgerRows({ ledgerRows: inventoryCostLedgerRows, valuationRows: breakevenRows }),
     inventoryCostLedgerRejectedEvents,
     openingInventoryCount: openingInventoryRows.length,
     openingInventoryError,
