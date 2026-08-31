@@ -393,4 +393,13 @@ test('Inventory Ledger exposes Cost Ledger and Inventory Valuation views', () =>
   assert.match(htmlSource, /id="earnings-cost-ledger-table-body"/);
   assert.match(rendererSource, /function renderInventoryCostLedger\(result\)/);
   assert.match(rendererSource, /result\?\.inventoryCostLedgerRows/);
+  assert.match(rendererSource, /function isDisplayableInventoryLedgerRow\(row\)[\s\S]*startsWith\('wallet:'\)/);
+  const costLedgerStart = rendererSource.indexOf('function renderInventoryCostLedger');
+  const costLedgerRenderer = rendererSource.slice(costLedgerStart, rendererSource.indexOf('for (const button of inventoryLedgerViewButtons)', costLedgerStart));
+  assert.match(costLedgerRenderer, /filter\(isDisplayableInventoryLedgerRow\)/);
+  assert.match(costLedgerRenderer, /formatAtlasWhole\(costs\.scanning/);
+  assert.match(costLedgerRenderer, /formatAtlasWhole\(totalBasis\)/);
+  assert.match(rendererSource, /costLedgerUnitFormatter = new Intl\.NumberFormat\(undefined, \{ minimumFractionDigits: 6, maximumFractionDigits: 6 \}\)/);
+  assert.match(costLedgerRenderer, /costLedgerUnitFormatter\.format\(totalBasis \/ quantity\)/);
+  assert.doesNotMatch(costLedgerRenderer, /formatAtlas\(/);
 });

@@ -7235,11 +7235,18 @@ function setInventoryLedgerView(view) {
   for (const panel of inventoryLedgerViewPanels) panel.hidden = panel.dataset.inventoryLedgerViewPanel !== currentInventoryLedgerView;
 }
 
+const costLedgerUnitFormatter = new Intl.NumberFormat(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+
+function isDisplayableInventoryLedgerRow(row) {
+  return !String(row?.location || '').startsWith('wallet:');
+}
+
 function renderInventoryCostLedger(result) {
   if (!earningsCostLedgerTableBody) return;
   earningsCostLedgerTableBody.replaceChildren();
   const filter = earningsFilters.breakeven;
   const rows = (Array.isArray(result?.inventoryCostLedgerRows) ? result.inventoryCostLedgerRows : [])
+    .filter(isDisplayableInventoryLedgerRow)
     .filter((row) => !filter.starbase || String(row.location) === filter.starbase)
     .filter((row) => !filter.asset || String(row.asset) === filter.asset)
     .filter((row) => !filter.hideLowInventory || Number(row.quantity) > 2)
@@ -7262,9 +7269,9 @@ function renderInventoryCostLedger(result) {
     const totalBasis = Object.values(costs).reduce((sum, value) => sum + Number(value || 0), cargo);
     const values = [
       row.location, row.asset, formatWholeNumber(quantity), formatWholeNumber(Math.max(0, quantity - uncosted)), formatWholeNumber(uncosted),
-      formatAtlas(costs.scanning || 0, 4), formatAtlas(costs.mining || 0, 4), formatAtlas(costs.crafting || 0, 4),
-      formatAtlas(costs.lm || 0, 4), formatAtlas(costs.gm || 0, 4), formatAtlas(cargo, 4),
-      formatAtlas(totalBasis, 4), quantity > 0 ? formatAtlas(totalBasis / quantity, 6) : '--',
+      formatAtlasWhole(costs.scanning || 0), formatAtlasWhole(costs.mining || 0), formatAtlasWhole(costs.crafting || 0),
+      formatAtlasWhole(costs.lm || 0), formatAtlasWhole(costs.gm || 0), formatAtlasWhole(cargo),
+      formatAtlasWhole(totalBasis), quantity > 0 ? costLedgerUnitFormatter.format(totalBasis / quantity) : '--',
       quantity <= 0 ? 'Empty' : uncosted > 0 ? 'Partial' : 'Costed',
     ];
     const tr = document.createElement('tr');
@@ -7346,6 +7353,7 @@ function renderEarningsBreakeven(result) {
   const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${baselineStatus}${checkpointStatus}${snapshotError ? ' · ' + snapshotError : ''}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
   const ledgerFilterRows = (Array.isArray(result?.inventoryCostLedgerRows) ? result.inventoryCostLedgerRows : [])
+    .filter(isDisplayableInventoryLedgerRow)
     .map((row) => ({ starbase: row.location, asset: row.asset }));
   populateEarningsFilterOptions('breakeven', [...rows, ...ledgerFilterRows]);
   if (earningsBreakevenHideLowInventory) earningsBreakevenHideLowInventory.checked = earningsFilters.breakeven.hideLowInventory;
