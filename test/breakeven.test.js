@@ -344,7 +344,7 @@ test('production Breakeven derives source columns and extrapolated totals from k
 test('Crafting and Upgrading use consumed ledger basis instead of current GM prices', () => {
   const main = readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   const craftingBasis = readFileSync(path.join(__dirname, '..', 'electron', 'crafting-cost-basis.js'), 'utf8');
-  assert.match(main, /buildCurrentInventoryCraftingBasisByDay\(\{ craftingRows, inventoryRows: inventoryCostLedgerRows \}\)/);
+  assert.match(main, /buildCraftingBasisByDay\(inventoryCostLedgerAppliedEventResults\)/);
   assert.match(craftingBasis, /const craftingBasis = craftingBasisByDay\.get/);
   assert.match(craftingBasis, /craftingBasis && !craftingBasis\.uncosted/);
   assert.match(main, /const componentBasis = upgradingBasisByDay\.get/);
@@ -382,4 +382,15 @@ test('Cost Coverage distinguishes fully tracked, estimated, and unavailable pool
   const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
   assert.match(renderer, /entry\.fullyTracked \? '100% tracked' : entry\.estimatedPercent == null \? '--' : `\$\{formatWholeNumber\(entry\.estimatedPercent\)\}% estimated`/);
   assert.doesNotMatch(renderer, /`0% estimated`/);
+});
+
+test('Inventory Ledger exposes Cost Ledger and Inventory Valuation views', () => {
+  const htmlSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
+  const rendererSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+  assert.match(htmlSource, /data-earnings-subtab="breakeven"[^>]*>Inventory Ledger<\/button>/);
+  assert.match(htmlSource, /data-inventory-ledger-view="cost-ledger"[^>]*>Cost Ledger<\/button>/);
+  assert.match(htmlSource, /data-inventory-ledger-view="valuation"[^>]*>Inventory Valuation<\/button>/);
+  assert.match(htmlSource, /id="earnings-cost-ledger-table-body"/);
+  assert.match(rendererSource, /function renderInventoryCostLedger\(result\)/);
+  assert.match(rendererSource, /result\?\.inventoryCostLedgerRows/);
 });

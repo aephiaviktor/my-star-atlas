@@ -64,7 +64,7 @@ const {
   applyVerifiedFleetCrew,
 } = require('./rental-history');
 const { buildCostLedgerResult } = require('./production-ledger-events');
-const { buildCurrentInventoryCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
+const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { publishInventoryBasisSnapshots } = require('./inventory-basis-publication');
 const { readInventoryBasisSnapshots } = require('./inventory-basis-read');
@@ -8126,12 +8126,17 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   // Internal weighted-cost ledger adapter. The UI does not consume this yet;
   // later patches will reconcile this chronological production basis against
   // inventory and add cargo/crafting/market events.
-  const ledgerCraftingRows = (craftingRows.ledgerEvents || []).map((row) => ({
-    ...row,
-    feeCostsAtlas: Number.isFinite(Number(row.feeAmount)) ? Number(row.feeAmount) : null,
-    txsCostsAtlas: historicalPriceValue('SOL', row.isoDate) != null && Number.isFinite(Number(row.txCostSol))
-      ? Number(row.txCostSol) * historicalPriceValue('SOL', row.isoDate) : null,
-  }));
+  const ledgerCraftingRows = (craftingRows.ledgerEvents || []).map((row) => {
+    const isoDate = String(row.isoDate || row.timestamp || '').slice(0, 10);
+    const solPrice = historicalPriceValue('SOL', isoDate);
+    return {
+      ...row,
+      isoDate,
+      feeCostsAtlas: Number.isFinite(Number(row.feeAmount)) ? Number(row.feeAmount) : null,
+      txsCostsAtlas: solPrice != null && Number.isFinite(Number(row.txCostSol))
+        ? Number(row.txCostSol) * solPrice : null,
+    };
+  });
   const ledgerFaction = normalizeFaction(settings.faction);
   const ledgerFactionStarbases = needsInventoryLedger ? await fetchFactionStarbases(settings) : null;
   const localMarketResult = needsInventoryLedger
@@ -8235,7 +8240,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     }
   }
 
-  const craftingBasisByDay = buildCurrentInventoryCraftingBasisByDay({ craftingRows, inventoryRows: inventoryCostLedgerRows });
+  const craftingBasisByDay = buildCraftingBasisByDay(inventoryCostLedgerAppliedEventResults);
   const upgradingBasisByDay = new Map();
   const totalLotBasis = (lot) => Object.values(lot?.costs || {}).reduce((sum, value) => sum + Number(value || 0), 0) + Number(lot?.cargoCost || 0);
   for (const applied of inventoryCostLedgerAppliedEventResults) {

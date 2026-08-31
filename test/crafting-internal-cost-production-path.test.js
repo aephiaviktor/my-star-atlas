@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { buildCostLedgerResult } = require('../electron/production-ledger-events');
+const { InventoryCostLedger } = require('../electron/inventory-cost-ledger');
 const { buildCraftingBasisByDay, buildCurrentInventoryCraftingBasisByDay, enrichCraftingEarningsRows } = require('../electron/crafting-cost-basis');
 
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
@@ -105,9 +106,42 @@ test('crafting price resolvers receive the historical row date for assets and SO
   assert.equal(row.txsCostsAtlas, 1);
 });
 
+test('chronological WIP combines purchased and immediately crafted ingredients without ending inventory', () => {
+  const ledger = new InventoryCostLedger();
+  ledger.acquire({ location: 'ONI-1', asset: 'Copper Ore', quantity: 10, source: 'mining', totalCost: 20 });
+  ledger.acquire({ location: 'ONI-1', asset: 'Copper', quantity: 2, source: 'lm', totalCost: 6 });
+  const result = buildCostLedgerResult({
+    initialLedger: ledger,
+    craftingRows: [
+      craftRow({ timestamp: '2026-08-08T10:00:00Z', output: 'Copper', crafted: 10, ingredients: [{ input: 'Copper Ore', amount: 10 }], feeCostsAtlas: 2, txsCostsAtlas: 0 }),
+      craftRow({ timestamp: '2026-08-08T11:00:00Z', output: 'Ammunition', crafted: 5, ingredients: [{ input: 'Copper', amount: 12 }], feeCostsAtlas: 1, txsCostsAtlas: 0 }),
+    ],
+  });
+  const basis = buildCraftingBasisByDay(result.appliedEventResults);
+  assert.equal(result.rejectedEvents.length, 0);
+  assert.equal(result.ledger.get('ONI-1', 'Copper').quantity, 0);
+  assert.equal(basis.get('2026-08-08\nONI-1\nAmmunition').basis, 28);
+  assert.equal(result.ledger.get('ONI-1', 'Ammunition').costs.lm, 6);
+  assert.equal(result.ledger.get('ONI-1', 'Ammunition').costs.mining, 20);
+  assert.equal(result.ledger.get('ONI-1', 'Ammunition').costs.crafting, 3);
+});
+
+test('upgrading consumes the carried basis of a component crafted immediately beforehand', () => {
+  const result = buildCostLedgerResult({
+    miningRows: [{ isoDate: '2026-08-07', starbase: 'ONI-1', rawMaterial: 'Carbon', mined: 10, totalCostsAtlas: 20 }],
+    craftingRows: [craftRow({ timestamp: '2026-08-08T10:00:00Z', output: 'Framework', crafted: 1, ingredients: [{ input: 'Carbon', amount: 10 }], feeCostsAtlas: 2, txsCostsAtlas: 0 })],
+    upgradingRows: [{ timestamp: '2026-08-08T11:00:00Z', isoDate: '2026-08-08', starbase: 'ONI-1', asset: 'Framework', installed: 1 }],
+  });
+  const consumed = result.appliedEventResults.find(({ event }) => event.type === 'consume' && event.purpose === 'upgrading');
+  assert.ok(consumed);
+  assert.equal(consumed.result.costs.mining, 20);
+  assert.equal(consumed.result.costs.crafting, 2);
+  assert.equal(consumed.result.uncostedQuantity, 0);
+});
+
 test('automatic prefetch requests ledger-backed Crafting snapshot through IPC and renderer fails margin closed', () => {
   assert.match(renderer, /api\.getEarningsSnapshot\(\{ \.\.\.settings, earningsSubtab: 'crafting' \}\)/);
   assert.match(main, /needsInventoryLedger = \['breakeven', 'crafting', 'upgrading'\]\.includes\(snapshotScope\)/);
-  assert.match(main, /buildCurrentInventoryCraftingBasisByDay\(\{ craftingRows, inventoryRows: inventoryCostLedgerRows \}\)/);
+  assert.match(main, /buildCraftingBasisByDay\(inventoryCostLedgerAppliedEventResults\)/);
   assert.match(renderer, /columnId === 'profitMargin'\) return createTextCell\(entry\.profitMarginPercent == null \? '--'/);
 });

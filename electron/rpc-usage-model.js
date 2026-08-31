@@ -18,7 +18,7 @@
     ].map(([value, label]) => Object.freeze({ value, label }))),
     EA: Object.freeze([
       ['scanning', 'Scanning'], ['mining', 'Mining'], ['marketplace', 'Marketplace'], ['cargo', 'Cargo'],
-      ['crafting', 'Crafting'], ['upgrading', 'Upgrading'], ['breakeven', 'Breakeven Analysis'],
+      ['crafting', 'Crafting'], ['upgrading', 'Upgrading'], ['breakeven', 'Inventory Ledger'],
     ].map(([value, label]) => Object.freeze({ value, label }))),
     OP: Object.freeze([Object.freeze({ value: 'scanning', label: 'Scanning' }), Object.freeze({ value: 'upgrading', label: 'Upgrading' })]),
     other: Object.freeze([Object.freeze({ value: 'unattributed', label: 'Unattributed' })]),

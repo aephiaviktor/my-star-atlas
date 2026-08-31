@@ -1118,6 +1118,12 @@ select:focus {
   font-size: 12px;
 }
 
+.inventory-ledger-view-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .breakeven-inventory-toggle {
   display: inline-flex;
   align-items: center;

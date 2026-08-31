@@ -107,7 +107,7 @@ test('Custom override identity is isolated by profile, faction, and authoritativ
 test('four-basis UI labels, tooltips, chart propagation, and Frontier Limit removal are explicit', () => {
   for (const label of ['External', 'Internal', 'Equal Net', 'Custom']) assert.match(html, new RegExp(`>${label}<`));
   assert.match(renderer, /label: 'External'.*Galactic Marketplace \(GM\) price/);
-  assert.match(renderer, /label: 'Internal'.*Production cost from Earnings → Breakeven Analysis/);
+  assert.match(renderer, /label: 'Internal'.*Production cost from Earnings → Inventory Ledger → Inventory Valuation/);
   assert.match(renderer, /key: 'equalNetPrice', label: 'Equal-Net Price'/);
   assert.match(renderer, /key: 'customPrice', label: 'Custom Price'/);
   assert.match(renderer, /Basis: External · GM Price/);

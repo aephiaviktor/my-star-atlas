@@ -21,7 +21,7 @@ function loadErrorPolicy() {
 test('Breakeven completeness reports the exact failed evidence source', () => {
   const getError = loadErrorPolicy();
   assert.equal(getError({ ok: false, error: 'backend down' }), 'backend down');
-  assert.equal(getError({ ok: true, breakevenError: 'projection failed' }), 'Breakeven projection: projection failed');
+  assert.equal(getError({ ok: true, breakevenError: 'projection failed' }), 'Inventory valuation projection: projection failed');
   assert.equal(getError({ ok: true, openingInventoryError: 'Influx unavailable' }), 'Opening inventory baseline: Influx unavailable');
   assert.equal(getError({ ok: true, cargoAllocationLedgerError: 'cargo unavailable' }), 'Cargo allocation ledger: cargo unavailable');
   assert.equal(getError({ ok: true, cargoError: 'fetch failed' }), 'Cargo earnings: fetch failed');
@@ -40,5 +40,5 @@ test('foreground and background Breakeven loads reject incomplete snapshots', ()
 test('zero-row Breakeven rendering preserves exact source diagnostics', () => {
   const render = renderer.slice(renderer.indexOf('function renderEarningsBreakeven(result)'), renderer.indexOf('// Legacy wiring assertions'));
   assert.match(render, /const snapshotError = getBreakevenSnapshotError\(result\)/);
-  assert.match(render, /renderEarningsBreakevenEmpty\(rows\.length \? 'No breakeven rows match the current filters' : snapshotError \|\| 'No breakeven data available/);
+  assert.match(render, /renderEarningsBreakevenEmpty\(rows\.length \? 'No inventory valuation rows match the current filters' : snapshotError \|\| 'No inventory valuation data available/);
 });

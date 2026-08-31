@@ -186,6 +186,9 @@ const earningsBreakevenSyncStatus = document.querySelector('#earnings-breakeven-
 const earningsBreakevenStarbaseFilter = document.querySelector('#earnings-breakeven-starbase-filter');
 const earningsBreakevenAssetFilter = document.querySelector('#earnings-breakeven-asset-filter');
 const earningsBreakevenHideLowInventory = document.querySelector('#earnings-breakeven-hide-low-inventory');
+const inventoryLedgerViewButtons = [...document.querySelectorAll('[data-inventory-ledger-view]')];
+const inventoryLedgerViewPanels = [...document.querySelectorAll('[data-inventory-ledger-view-panel]')];
+const earningsCostLedgerTableBody = document.querySelector('#earnings-cost-ledger-table-body');
 const earningsMarketplaceSyncStatus = document.querySelector('#earnings-marketplace-sync-status');
 const earningsMarketplaceTableBody = document.querySelector('#earnings-marketplace-table-body');
 const earningsMarketplaceRawStatus = document.querySelector('#earnings-marketplace-raw-status');
@@ -394,6 +397,7 @@ let latestMarketplaceResult = null;
 let latestCargoAllocationResult = null;
 let cargoAllocationRequestSequence = 0;
 let latestBreakevenResult = null;
+let currentInventoryLedgerView = 'cost-ledger';
 let latestUpgradingResult = null;
 let latestOptimizationResult = null;
 let optimizationRows = [];
@@ -416,7 +420,7 @@ const upgradingBreakevenColumns = Object.freeze([
   { key: 'factionLp', label: 'Faction LP redemption', selected: false },
   { key: 'breakevenLp', label: 'Breakeven LP', selected: true },
   { key: 'externalPrice', label: 'External', selected: true, title: 'Galactic Marketplace (GM) price' },
-  { key: 'internalCost', label: 'Internal', selected: true, title: 'Production cost from Earnings → Breakeven Analysis, including applicable Scanning C/U, Mining C/U, and every Crafting C/U in the full production chain' },
+  { key: 'internalCost', label: 'Internal', selected: true, title: 'Production cost from Earnings → Inventory Ledger → Inventory Valuation, including applicable Scanning C/U, Mining C/U, and every Crafting C/U in the full production chain' },
   { key: 'equalNetPrice', label: 'Equal-Net Price', selected: true },
   { key: 'customPrice', label: 'Custom Price', selected: true },
   { key: 'grossAtlasPerSecond', label: 'Gross ATLAS/s', selected: false },
@@ -7221,7 +7225,59 @@ function renderEarningsMarketplaceLoading(message = 'Loading Marketplace data...
   earningsMarketplaceTableBody.appendChild(tr);
 }
 
+function setInventoryLedgerView(view) {
+  currentInventoryLedgerView = view === 'valuation' ? 'valuation' : 'cost-ledger';
+  for (const button of inventoryLedgerViewButtons) {
+    const active = button.dataset.inventoryLedgerView === currentInventoryLedgerView;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  }
+  for (const panel of inventoryLedgerViewPanels) panel.hidden = panel.dataset.inventoryLedgerViewPanel !== currentInventoryLedgerView;
+}
+
+function renderInventoryCostLedger(result) {
+  if (!earningsCostLedgerTableBody) return;
+  earningsCostLedgerTableBody.replaceChildren();
+  const filter = earningsFilters.breakeven;
+  const rows = (Array.isArray(result?.inventoryCostLedgerRows) ? result.inventoryCostLedgerRows : [])
+    .filter((row) => !filter.starbase || String(row.location) === filter.starbase)
+    .filter((row) => !filter.asset || String(row.asset) === filter.asset)
+    .filter((row) => !filter.hideLowInventory || Number(row.quantity) > 2)
+    .sort((left, right) => String(left.location).localeCompare(String(right.location)) || String(left.asset).localeCompare(String(right.asset)));
+  if (!rows.length) {
+    const tr = document.createElement('tr');
+    tr.className = 'empty-row';
+    const td = document.createElement('td');
+    td.colSpan = 14;
+    td.textContent = 'No Cost Ledger rows match the current filters';
+    tr.appendChild(td);
+    earningsCostLedgerTableBody.appendChild(tr);
+    return;
+  }
+  for (const row of rows) {
+    const quantity = Number(row.quantity || 0);
+    const uncosted = Number(row.uncostedQuantity || 0);
+    const costs = row.costs || {};
+    const cargo = Number(row.cargoCost || 0);
+    const totalBasis = Object.values(costs).reduce((sum, value) => sum + Number(value || 0), cargo);
+    const values = [
+      row.location, row.asset, formatWholeNumber(quantity), formatWholeNumber(Math.max(0, quantity - uncosted)), formatWholeNumber(uncosted),
+      formatAtlas(costs.scanning || 0, 4), formatAtlas(costs.mining || 0, 4), formatAtlas(costs.crafting || 0, 4),
+      formatAtlas(costs.lm || 0, 4), formatAtlas(costs.gm || 0, 4), formatAtlas(cargo, 4),
+      formatAtlas(totalBasis, 4), quantity > 0 ? formatAtlas(totalBasis / quantity, 6) : '--',
+      quantity <= 0 ? 'Empty' : uncosted > 0 ? 'Partial' : 'Costed',
+    ];
+    const tr = document.createElement('tr');
+    for (const value of values) tr.appendChild(createTextCell(value));
+    earningsCostLedgerTableBody.appendChild(tr);
+  }
+}
+
+for (const button of inventoryLedgerViewButtons) button.addEventListener('click', () => setInventoryLedgerView(button.dataset.inventoryLedgerView));
+setInventoryLedgerView(currentInventoryLedgerView);
+
 function renderEarningsBreakevenEmpty(message) {
+  renderInventoryCostLedger(null);
   renderEarningsBreakevenHeader();
   setText(earningsBreakevenSyncStatus, message);
   if (!earningsBreakevenTableBody) return;
@@ -7247,9 +7303,9 @@ function renderEarningsBreakevenHeader() {
 }
 
 function getBreakevenSnapshotError(result) {
-  if (!result || result.ok !== true) return String(result?.error || 'Breakeven snapshot failed');
+  if (!result || result.ok !== true) return String(result?.error || 'Inventory Ledger snapshot failed');
   const sources = [
-    ['breakevenError', 'Breakeven projection'],
+    ['breakevenError', 'Inventory valuation projection'],
     ['openingInventoryError', 'Opening inventory baseline'],
     ['ledgerCheckpointError', 'Inventory ledger checkpoint'],
     ['cargoAllocationLedgerError', 'Cargo allocation ledger'],
@@ -7277,6 +7333,7 @@ async function fetchCompleteBreakevenSnapshot(settings) {
 
 function renderEarningsBreakeven(result) {
   const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
+  renderInventoryCostLedger(result);
   const snapshotError = getBreakevenSnapshotError(result);
   const baselineStatus = result?.openingInventoryError
     ? ` · opening baseline unavailable: ${result.openingInventoryError}`
@@ -7288,7 +7345,9 @@ function renderEarningsBreakeven(result) {
     : '';
   const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${baselineStatus}${checkpointStatus}${snapshotError ? ' · ' + snapshotError : ''}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
-  populateEarningsFilterOptions('breakeven', rows);
+  const ledgerFilterRows = (Array.isArray(result?.inventoryCostLedgerRows) ? result.inventoryCostLedgerRows : [])
+    .map((row) => ({ starbase: row.location, asset: row.asset }));
+  populateEarningsFilterOptions('breakeven', [...rows, ...ledgerFilterRows]);
   if (earningsBreakevenHideLowInventory) earningsBreakevenHideLowInventory.checked = earningsFilters.breakeven.hideLowInventory;
   renderEarningsBreakevenHeader();
 
@@ -7297,7 +7356,7 @@ function renderEarningsBreakeven(result) {
   const filteredRows = getFilteredEarningsRows('breakeven', rows);
   const sortedRows = sortEarningsRows('breakeven', filteredRows);
   if (!sortedRows.length) {
-    return renderEarningsBreakevenEmpty(rows.length ? 'No breakeven rows match the current filters' : snapshotError || 'No breakeven data available — check mining, cargo, and inventory telemetry');
+    return renderEarningsBreakevenEmpty(rows.length ? 'No inventory valuation rows match the current filters' : snapshotError || 'No inventory valuation data available — check production, cargo, marketplace, and inventory telemetry');
   }
   const optionalColumns = getVisibleEarningsColumns('breakeven');
   for (const entry of sortedRows) {
@@ -7679,7 +7738,7 @@ async function refreshBreakeven({ force = false } = {}) {
     latestBreakevenResult = displayable;
     renderEarningsBreakeven(displayable);
   } else {
-    renderEarningsBreakevenEmpty('Loading complete Breakeven data...');
+    renderEarningsBreakevenEmpty('Loading complete Inventory Ledger data...');
   }
   const settled = await api.breakevenCache.ensure(input, () => fetchCompleteBreakevenSnapshot(settings));
   if (!isActiveBreakevenContext(settled.key, settled.entry.generation)) return settled;
@@ -7689,7 +7748,7 @@ async function refreshBreakeven({ force = false } = {}) {
     renderEarningsBreakeven(value);
   } else {
     latestBreakevenResult = null;
-    renderEarningsBreakevenEmpty(settled.entry.error?.message || 'Breakeven data unavailable');
+    renderEarningsBreakevenEmpty(settled.entry.error?.message || 'Inventory Ledger data unavailable');
   }
   return settled;
 }

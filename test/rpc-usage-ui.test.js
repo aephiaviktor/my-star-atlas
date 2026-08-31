@@ -33,9 +33,9 @@ test('cascading menu, tab, faction, and method filtering keeps the UTC-day total
 test('RPC Usage tab choices follow the fixed visible menu structure', () => {
   assert.deepEqual(tabsForMenu('MF').map((item) => item.label), ['My Fleets']);
   assert.deepEqual(tabsForMenu('PC').map((item) => item.label), ['Scanning', 'Mining', 'Crafting', 'Production', 'Consumption', 'PCR Charts', 'Inventory']);
-  assert.deepEqual(tabsForMenu('EA').map((item) => item.label), ['Scanning', 'Mining', 'Marketplace', 'Cargo', 'Crafting', 'Upgrading', 'Breakeven Analysis']);
+  assert.deepEqual(tabsForMenu('EA').map((item) => item.label), ['Scanning', 'Mining', 'Marketplace', 'Cargo', 'Crafting', 'Upgrading', 'Inventory Ledger']);
   assert.deepEqual(tabsForMenu('OP').map((item) => item.label), ['Scanning', 'Upgrading']);
-  assert.deepEqual(tabsForMenu('EA', [{ menu: 'EA', tab: 'unattributed' }]).map((item) => item.label), ['Scanning', 'Mining', 'Marketplace', 'Cargo', 'Crafting', 'Upgrading', 'Breakeven Analysis', 'Unattributed']);
+  assert.deepEqual(tabsForMenu('EA', [{ menu: 'EA', tab: 'unattributed' }]).map((item) => item.label), ['Scanning', 'Mining', 'Marketplace', 'Cargo', 'Crafting', 'Upgrading', 'Inventory Ledger', 'Unattributed']);
 });
 
 test('RPC Usage UI moves Settings readiness into the button and exposes one trusted aggregate endpoint', () => {
