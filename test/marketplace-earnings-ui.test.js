@@ -86,6 +86,8 @@ test('Global Ledger and Game Ledger columns participate in the Marketplace sideb
   assert.match(renderer, /header\.hidden = !selected\.has\(ids\[index\]\)/);
   assert.doesNotMatch(renderer, /id: 'gameStarbase'/);
   assert.match(renderer, /marketplace: new Set\(marketplaceEarningsOptionalColumns\.map\(\(column\) => column\.id\)\.filter\(\(id\) => id !== 'starbase'\)\)/);
+  assert.match(renderer, /function appendPhysicalWithdrawalsCell\(row, entry\)/);
+  assert.match(renderer, /`\$\{items\.length\} withdrawals: `/);
 });
 
 test('Marketplace event synchronization supplies decoded LM and GM executions with explicit scope', () => {

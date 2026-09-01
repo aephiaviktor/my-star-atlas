@@ -7228,6 +7228,10 @@ function renderMarketplaceTableFilters(id, tableBody, rows, definitions, state, 
 }
 
 function marketplaceTableColumnValue(entry, columnId) {
+  if (columnId === 'gamePhysicalWithdrawal') {
+    const signatures = (entry?.physicalWithdrawals || []).map((item) => item.signature).filter(Boolean);
+    return signatures.length ? signatures.join(' ') : entry?.physicalWithdrawalSignature || entry?.physicalSignature || '';
+  }
   const fields = {
     timestamp: 'timestamp', side: 'side', marketplace: 'marketplace', faction: 'faction', starbase: 'starbase',
     asset: 'asset', amount: 'quantity', grossAtlas: 'grossAtlas', price: 'unitPriceAtlas',
@@ -7240,8 +7244,7 @@ function marketplaceTableColumnValue(entry, columnId) {
     globalSignature: 'signature', globalStatus: 'status',
     gameTimestamp: 'timestamp', gameAsset: 'asset', gameQuantity: 'quantity', gamePrincipal: 'principalAtlas',
     gameCarriedBasis: 'carriedBasisAtlas', gameMarketplaceFee: 'marketplaceFeeAtlas', gameTxFee: 'transactionFeeAtlas',
-    gameFinalBasis: 'finalBasisAtlas', gameUnitBasis: 'costPerUnitAtlas', gameSignature: 'signature',
-    gamePhysicalWithdrawal: 'physicalWithdrawalSignature', gameStatus: 'status',
+    gameFinalBasis: 'finalBasisAtlas', gameUnitBasis: 'costPerUnitAtlas', gameSignature: 'signature', gameStatus: 'status',
   };
   return entry?.[fields[columnId]] ?? '';
 }
@@ -7313,6 +7316,25 @@ function appendMarketplaceSignatureCell(row, signature) {
     link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = signature;
     cell.appendChild(link);
   } else cell.textContent = '--';
+  row.appendChild(cell);
+}
+
+function appendPhysicalWithdrawalsCell(row, entry) {
+  const items = Array.isArray(entry?.physicalWithdrawals) && entry.physicalWithdrawals.length
+    ? entry.physicalWithdrawals.filter((item) => item?.signature)
+    : [{ signature: entry?.physicalWithdrawalSignature || entry?.physicalSignature }].filter((item) => item.signature);
+  const cell = document.createElement('td');
+  if (!items.length) { cell.textContent = '--'; row.appendChild(cell); return; }
+  if (items.length > 1) cell.appendChild(document.createTextNode(`${items.length} withdrawals: `));
+  items.forEach((item, index) => {
+    if (index) cell.appendChild(document.createTextNode(' · '));
+    const link = document.createElement('a');
+    link.href = `https://solscan.io/tx/${encodeURIComponent(item.signature)}`;
+    link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.textContent = items.length === 1 ? item.signature : String(index + 1);
+    link.title = item.signature;
+    cell.appendChild(link);
+  });
   row.appendChild(cell);
 }
 
@@ -7404,7 +7426,7 @@ function renderMarketplaceGameLedger(result) {
     ];
     for (const value of values) tr.appendChild(createTextCell(value));
     appendMarketplaceSignatureCell(tr, entry.signature);
-    appendMarketplaceSignatureCell(tr, entry.physicalWithdrawalSignature || entry.physicalSignature);
+    appendPhysicalWithdrawalsCell(tr, entry);
     tr.appendChild(createTextCell(entry.status || 'Pending'));
     earningsMarketplaceGameTableBody.appendChild(tr);
   }
