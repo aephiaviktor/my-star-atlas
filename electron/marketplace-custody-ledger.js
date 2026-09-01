@@ -30,17 +30,18 @@ function projectDecodedCustodyRows(events = [], { faction = '' } = {}) {
 }
 
 function observationAtOrBefore(observations, event) {
-  const timestamp = Date.parse(event.timestamp);
-  let selected = null;
-  for (const observation of observations || []) {
-    if (normalizeFaction(observation?.faction) !== normalizeFaction(event.faction)
-      || String(observation?.starbase || '') !== String(event.starbase || '')
-      || String(observation?.asset || '') !== String(event.asset || '')) continue;
-    const observedAt = Date.parse(observation.timestamp);
-    if (!Number.isFinite(observedAt) || observedAt > timestamp) continue;
-    if (!selected || observedAt > Date.parse(selected.timestamp)) selected = observation;
-  }
-  return selected;
+  const eventTime = Date.parse(String(event?.timestamp || ''));
+  const faction = normalizeFaction(event?.faction);
+  const starbase = String(event?.starbase || '');
+  const asset = String(event?.asset || '');
+  const candidates = Array.from(observations || []).filter((row) => String(row?.asset || '') === asset && Number.isFinite(Date.parse(String(row?.timestamp || ''))));
+  const latestAtOrBefore = (rows) => rows.filter((row) => !Number.isFinite(eventTime) || Date.parse(String(row.timestamp)) <= eventTime)
+    .sort((left, right) => Date.parse(String(right.timestamp)) - Date.parse(String(left.timestamp)))[0] || null;
+  return latestAtOrBefore(candidates.filter((row) => normalizeFaction(row?.faction) === faction && String(row?.starbase || '') === starbase))
+    || latestAtOrBefore(candidates.filter((row) => normalizeFaction(row?.faction) === faction))
+    || latestAtOrBefore(candidates)
+    || candidates.sort((left, right) => Math.abs(Date.parse(String(left.timestamp)) - eventTime) - Math.abs(Date.parse(String(right.timestamp)) - eventTime))[0]
+    || null;
 }
 
 function buildValuedCustodyRows(events = [], { faction = '', inventoryBasisObservations = [] } = {}) {
@@ -80,10 +81,13 @@ function buildValuedCustodyRows(events = [], { faction = '', inventoryBasisObser
     if (!existing || (observedAt && Date.parse(observedAt) > Date.parse(existing.observedAt || ''))) {
       const knownQuantity = Math.max(0, Number(observation?.knownQuantity || 0));
       const knownUnitBasis = finiteOrNull(observation?.weightedAveragePriceAtlas);
+    const observedUncostedQuantity = Math.max(0, Number(observation?.uncostedQuantity || 0));
       sourcePools.set(key, {
         observedAt,
-        uncostedQuantity: Math.max(0, Number(observation?.uncostedQuantity || 0)), uncostedBasisAtlas: 0,
-        costedQuantity: knownQuantity, costedBasisAtlas: knownUnitBasis == null ? 0 : knownQuantity * knownUnitBasis,
+        uncostedQuantity: knownUnitBasis != null ? 0 : observedUncostedQuantity,
+        uncostedBasisAtlas: 0,
+        costedQuantity: knownUnitBasis != null ? knownQuantity + observedUncostedQuantity : knownQuantity,
+        costedBasisAtlas: knownUnitBasis != null ? (knownQuantity + observedUncostedQuantity) * knownUnitBasis : 0,
         observationAvailable: Boolean(observation),
       });
     }
@@ -103,6 +107,21 @@ function buildValuedCustodyRows(events = [], { faction = '', inventoryBasisObser
     next.costedBasisAtlas += fee * (next.costedQuantity / quantity);
     return next;
   };
+  const estimateUnmatched = (lot, event) => {
+    if (!(lot.unmatchedQuantity > 0)) return lot;
+    const observation = observationAtOrBefore(inventoryBasisObservations, event);
+    const unitBasis = finiteOrNull(observation?.weightedAveragePriceAtlas);
+    if (!(unitBasis > 0)) return lot;
+    const quantity = lot.unmatchedQuantity;
+    return {
+      ...lot,
+      uncostedQuantity: Math.max(0, lot.uncostedQuantity - quantity),
+      costedQuantity: lot.costedQuantity + quantity,
+      costedBasisAtlas: lot.costedBasisAtlas + quantity * unitBasis,
+      unmatchedQuantity: 0,
+      estimated: true,
+    };
+  };
   const rows = [];
   const ordered = [...(events || [])].sort((left, right) => String(left?.timestamp || '').localeCompare(String(right?.timestamp || '')) || String(left?.eventId || '').localeCompare(String(right?.eventId || '')));
   for (const event of ordered) {
@@ -119,10 +138,11 @@ function buildValuedCustodyRows(events = [], { faction = '', inventoryBasisObser
       const source = sourcePool(event);
       lot = takeFromPool(source, quantity);
       if (!source.observationAvailable) lot.unmatchedQuantity = quantity;
+      lot = estimateUnmatched(lot, event);
       lot = addFee(lot, transactionFeeAtlas, quantity);
       addLot(to, asset, lot);
     } else {
-      lot = addFee(takeLot(from, asset, quantity), transactionFeeAtlas, quantity);
+      lot = addFee(estimateUnmatched(takeLot(from, asset, quantity), event), transactionFeeAtlas, quantity);
       if (direction === 'transfer') {
         addLot(to, asset, lot);
         continue;
@@ -133,8 +153,10 @@ function buildValuedCustodyRows(events = [], { faction = '', inventoryBasisObser
     const fee = Number(transactionFeeAtlas || 0);
     const finalBasisAtlas = lot.costedBasisAtlas + lot.uncostedBasisAtlas;
     const carriedBasisAtlas = Math.max(0, finalBasisAtlas - fee);
-    const status = lot.unmatchedQuantity > 0
-      ? 'Review'
+    const status = lot.estimated
+      ? 'Estimated'
+      : lot.unmatchedQuantity > 0
+      ? 'Estimated'
       : lot.uncostedQuantity > 0
         ? (lot.costedQuantity > 0 ? 'Partial' : 'Unvalued')
         : transactionFeeAtlas == null ? 'Partial' : 'Complete';
