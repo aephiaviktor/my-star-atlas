@@ -53,7 +53,10 @@ function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [] } = {}) {
       for (const scope of cssScopes) {
         events.push(...classifyCssCargoEvents(transaction, {
           sageProgramId: scope.sageProgramId, cssStarbasePlayer: scope.address,
-        }).map((event) => ({ ...event, eventType: event.stream, action: event.type })));
+        }).map((event) => ({
+          ...event, eventType: event.stream, action: event.type,
+          faction: String(scope.faction || ''), starbase: String(scope.starbase || ''),
+        })));
       }
     }
     if (sources.has('token_account') || sources.has('multiple')) {

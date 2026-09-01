@@ -10,20 +10,13 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.ht
 const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 
-test('Marketplace earnings tab sits between Mining and Cargo with a BUY/SELL switch and side-specific unit column', () => {
+test('Marketplace Trades is a global combined BUY and SELL list without a side switch', () => {
   assert.match(html, /data-earnings-subtab="mining"[\s\S]*data-earnings-subtab="marketplace"[\s\S]*data-earnings-subtab="cargo"/);
-  assert.match(html, /id="earnings-marketplace-side-switch"[\s\S]*data-marketplace-side="buy"[^>]*>BUY<[\s\S]*data-marketplace-side="sell"[^>]*>SELL</);
-  assert.doesNotMatch(html, /data-marketplace-side="(?:buy|sell)"[^>]*>\s*(?:BUY|SELL)\s*\(/);
+  assert.doesNotMatch(html, /id="earnings-marketplace-side-switch"|data-marketplace-side=/);
   const panel = html.match(/data-earnings-panel="marketplace"[\s\S]*?<\/div>\s*<div class="earnings-panel" data-earnings-panel="cargo"/)?.[0] || '';
-  for (const label of ['Timestamp \\(UTC\\)', 'Deposit Cargo to Game Signature', 'Marketplace', 'Starbase', 'Asset', 'Amount', 'Purchase Value', 'Price', 'Marketplace Fee', 'Txs Fee', 'ATLAS Paid', 'Cost / Unit', 'GM Trading Signatures']) {
-    assert.match(panel, new RegExp(label));
-  }
-  const calculationsPanel = panel.match(/data-marketplace-panel="calculations"[\s\S]*?<\/section>/)?.[0] || '';
-  assert.doesNotMatch(calculationsPanel, /<th>Side<\/th>|<th>Order ID<\/th>/);
-  assert.match(panel, /id="earnings-marketplace-unit-header"/);
-  assert.ok(panel.indexOf('ATLAS Paid') < panel.indexOf('Cost / Unit'));
-  assert.ok(panel.indexOf('Cost / Unit') < panel.indexOf('Deposit Cargo to Game Signature'));
-  assert.ok(panel.indexOf('Deposit Cargo to Game Signature') < panel.indexOf('GM Trading Signatures'));
+  const tradesPanel = panel.match(/data-marketplace-panel="trades"[\s\S]*?<\/section>/)?.[0] || '';
+  for (const label of ['Timestamp \\(UTC\\)', 'Side', 'Marketplace', 'Faction', 'Asset', 'Amount', 'Gross Value', 'Unit Price', 'Marketplace Fee', 'Tx Fee', 'Net Paid / Received', 'Net / Unit', 'Signature', 'Status']) assert.match(tradesPanel, new RegExp(label));
+  assert.match(tradesPanel, /ALL FACTIONS/);
 });
 
 test('Marketplace exposes every table column in the persistent Earnings sidebar selector', () => {
@@ -36,35 +29,29 @@ test('Marketplace exposes every table column in the persistent Earnings sidebar 
   assert.match(renderer, /subtab === 'marketplace'[\s\S]*renderEarningsMarketplace\(latestMarketplaceResult\)/);
 });
 
-test('Marketplace renderer uses side-specific value labels and buyer-paid accounting', () => {
-  assert.match(renderer, /let earningsMarketplaceSide = 'buy'/);
-  assert.match(renderer, /entry\.side === earningsMarketplaceSide/);
-  assert.match(renderer, /function getMarketplaceCalculationColumnLabel\(column\)/);
-  assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Purchase Value' : 'Sale Value'/);
-  assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'ATLAS Paid' : 'ATLAS Received'/);
-  assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Cost \/ Unit' : 'Income \/ Unit'/);
-  assert.match(renderer, /subtab === 'marketplace' \? getMarketplaceCalculationColumnLabel\(column\) : column\.label/);
-  assert.match(renderer, /earningsMarketplaceSide = button\.dataset\.marketplaceSide[\s\S]*renderEarningsColumnControls\(\)/);
-  assert.match(renderer, /earningsMarketplaceSide === 'buy'[\s\S]*gross \+ txFee[\s\S]*\(gross \+ txFee\) \/ quantity[\s\S]*net \/ quantity/);
-  assert.match(renderer, /earningsMarketplaceSide === 'buy' \? 'Seller-paid'/);
-  assert.match(renderer, /earningsMarketplaceSide !== 'sell'[\s\S]*reordered\.splice\(custodyIndex, 0, trading\)/);
+test('Marketplace renderer uses the deterministic global Trades projection', () => {
+  assert.match(main, /projectDecodedMarketplaceTrades\(marketplaceEvents\)/);
+  assert.match(main, /marketplaceTrades,/);
+  assert.match(renderer, /result\?\.marketplaceTrades/);
+  assert.match(renderer, /ALL FACTIONS ·.*trades/);
+  assert.match(renderer, /entry\.side === 'buy' \? 'Seller-paid'/);
   assert.match(renderer, /formatMarketplaceAtlas\(calculated\.txFee, 2\)/);
   assert.match(renderer, /formatMarketplaceAtlas\(calculated\.net, 2\)/);
+  assert.doesNotMatch(renderer, /earningsMarketplaceSide|dataset\.marketplaceSide/);
 });
 
-test('Update shares a row with Refresh data while the BUY SELL switch stays below', () => {
-  assert.match(html, /class="update-action-stack"[\s\S]*class="top-action-row"[\s\S]*id="refresh-data-btn"[\s\S]*id="update-btn"[\s\S]*id="earnings-marketplace-side-switch"/);
+test('Update shares one compact row with Refresh data and no Marketplace side switch', () => {
+  assert.match(html, /class="update-action-stack"[\s\S]*class="top-action-row"[\s\S]*id="refresh-data-btn"[\s\S]*id="update-btn"/);
+  assert.doesNotMatch(html, /id="earnings-marketplace-side-switch"/);
 });
 
-test('Marketplace renderer exposes LM scan errors and links custody plus GM trading signatures', () => {
+test('Marketplace Trades exposes Decoded Events errors and links execution signatures', () => {
   assert.match(renderer, /function renderEarningsMarketplace\(/);
-  assert.match(renderer, /localMarketError/);
-  assert.match(renderer, /entry\.custodySignatures \|\| \[\]/);
-  assert.match(renderer, /entry\.executionSignatures \|\| \[\]/);
-  assert.doesNotMatch(renderer, /entry\.executionSignatures\?\.length \? entry\.executionSignatures : \[entry\.signature\]/);
+  assert.match(renderer, /marketplaceEventsError/);
+  assert.match(renderer, /String\(entry\.signature \|\| ''\)\.trim\(\)/);
   assert.match(renderer, /https:\/\/solscan\.io\/tx\/\$\{encodeURIComponent\(transactionSignature\)\}/);
   assert.match(renderer, /signatures\.length === 1 \? transactionSignature : String\(index \+ 1\)/);
-  assert.match(main, /localMarketTrades: localMarketResult\.trades/);
+  assert.match(main, /marketplaceTrades: projectDecodedMarketplaceTrades|const marketplaceTrades = projectDecodedMarketplaceTrades/);
   assert.match(renderer, /'en-US'/);
   assert.match(renderer, /toISOString/);
 });

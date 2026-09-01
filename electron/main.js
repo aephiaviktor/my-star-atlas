@@ -118,6 +118,8 @@ const {
   dedupeMarketplaceRows,
 } = require('./marketplace-trade-compat');
 const { deriveMarketplaceTradeId } = require('./marketplace-v2-point');
+const { projectDecodedMarketplaceTrades } = require('./marketplace-trade-ledger');
+const { buildValuedCustodyRows } = require('./marketplace-custody-ledger');
 const {
   loadMarketplacePublicationHolds,
   recordMarketplacePublicationHold,
@@ -4872,6 +4874,7 @@ async function syncMarketplaceEventsFromRawData(settings) {
     const css = STARBASE_REGISTRY.find((entry) => entry.name === CSS_STARBASE_NAMES[faction]);
     if (!css) throw new Error(`marketplace_events_css_missing_${faction}`);
     return {
+      faction, starbase: css.name,
       sageProgramId: SAGE_PROGRAM_ID.toBase58(),
       address: deriveCssStarbasePlayer({
         sageProgramId: SAGE_PROGRAM_ID.toBase58(), gameId: SAGE_GAME_ID.toBase58(),
@@ -6052,6 +6055,10 @@ async function fetchMarketplaceSnapshot(payload) {
   const trades = enrichGmTradesWithInventoryBasis(result.trades, accounting.appliedEventResults, { inventoryBasisObservations });
   const rawSignatures = new Set(rawData.rows.map((row) => row.signature));
   const marketplaceEvents = decodedEvents.rows.filter((event) => rawSignatures.has(event.signature));
+  const marketplaceTrades = projectDecodedMarketplaceTrades(marketplaceEvents);
+  const marketplaceCustodyRows = buildValuedCustodyRows(marketplaceEvents, {
+    faction: settings.faction, inventoryBasisObservations,
+  });
   return {
     ok: !result.error,
     marketplaceRawData: rawData.rows,
@@ -6060,6 +6067,10 @@ async function fetchMarketplaceSnapshot(payload) {
     marketplaceRawDataCoverage: rawDataCoverage,
     marketplaceEvents,
     marketplaceEventCount: marketplaceEvents.length,
+    marketplaceTrades,
+    marketplaceTradeCount: marketplaceTrades.length,
+    marketplaceCustodyRows,
+    marketplaceCustodyCount: marketplaceCustodyRows.length,
     marketplaceEventsError: decodedEvents.error,
     localMarketTrades: trades,
     localMarketTradeCount: trades.length,

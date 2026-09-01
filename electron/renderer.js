@@ -209,9 +209,9 @@ const earningsMarketplaceEventsTo = document.querySelector('#earnings-marketplac
 const earningsMarketplaceEventsType = document.querySelector('#earnings-marketplace-events-type');
 const earningsMarketplaceSubtabButtons = Array.from(document.querySelectorAll('[data-marketplace-subtab]'));
 const earningsMarketplacePanels = Array.from(document.querySelectorAll('[data-marketplace-panel]'));
-const earningsMarketplaceSideSwitch = document.querySelector('#earnings-marketplace-side-switch');
-const earningsMarketplaceSideButtons = Array.from(document.querySelectorAll('[data-marketplace-side]'));
-const earningsMarketplaceUnitHeader = document.querySelector('#earnings-marketplace-unit-header');
+const earningsMarketplaceCustodyStatus = document.querySelector('#earnings-marketplace-custody-status');
+const earningsMarketplaceCustodyTableBody = document.querySelector('#earnings-marketplace-custody-table-body');
+const earningsMarketplaceCustodyDirectionButtons = Array.from(document.querySelectorAll('[data-marketplace-custody-direction]'));
 const earningsScanningDateFilter = document.querySelector('#earnings-scanning-date-filter');
 const earningsScanningFleetFilter = document.querySelector('#earnings-scanning-fleet-filter');
 const earningsMiningDateFilter = document.querySelector('#earnings-mining-date-filter');
@@ -384,8 +384,8 @@ const factionButtons = Array.from(document.querySelectorAll('.faction-button'));
 let currentSection = 'production';
 let currentSubtab = 'scanning';
 let currentEarningsSubtab = 'scanning';
-let earningsMarketplaceSide = 'buy';
 let currentMarketplaceSubtab = 'raw';
+let marketplaceCustodyDirection = 'deposit';
 let marketplaceRawSort = { column: 'timestamp', direction: 'desc' };
 let marketplaceEventsSort = { column: 'timestamp', direction: 'desc' };
 let marketplaceLinkedSignature = '';
@@ -810,18 +810,19 @@ const breakevenEarningsOptionalColumns = Object.freeze([]);
 
 const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'timestamp', label: 'Timestamp (UTC)' }),
+  Object.freeze({ id: 'side', label: 'Side' }),
   Object.freeze({ id: 'marketplace', label: 'Marketplace' }),
-  Object.freeze({ id: 'starbase', label: 'Starbase' }),
+  Object.freeze({ id: 'faction', label: 'Faction' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
   Object.freeze({ id: 'amount', label: 'Amount' }),
-  Object.freeze({ id: 'grossAtlas', label: 'Purchase Value' }),
-  Object.freeze({ id: 'price', label: 'Price' }),
+  Object.freeze({ id: 'grossAtlas', label: 'Gross Value' }),
+  Object.freeze({ id: 'price', label: 'Unit Price' }),
   Object.freeze({ id: 'marketplaceFee', label: 'Marketplace Fee' }),
-  Object.freeze({ id: 'txsFee', label: 'Txs Fee' }),
-  Object.freeze({ id: 'netAtlas', label: 'ATLAS Paid' }),
-  Object.freeze({ id: 'unitMetric', label: 'Cost / Unit' }),
-  Object.freeze({ id: 'custodySignatures', label: 'Deposit Cargo to Game Signature' }),
-  Object.freeze({ id: 'tradingSignatures', label: 'GM Trading Signatures' }),
+  Object.freeze({ id: 'txsFee', label: 'Tx Fee' }),
+  Object.freeze({ id: 'netAtlas', label: 'Net Paid / Received' }),
+  Object.freeze({ id: 'unitMetric', label: 'Net / Unit' }),
+  Object.freeze({ id: 'tradingSignatures', label: 'Signature' }),
+  Object.freeze({ id: 'status', label: 'Status' }),
 ]);
 
 const marketplaceRawColumns = Object.freeze([
@@ -885,9 +886,10 @@ function restoreEarningsColumnState() {
     const saved = JSON.parse(localStorage.getItem(EARNINGS_COLUMN_STORAGE_KEY) || '{}');
     for (const subtab of Object.keys(earningsColumnState)) {
       if (!Array.isArray(saved[subtab])) continue;
-      const restoredIds = subtab === 'marketplace' && saved[subtab].includes('signature')
-        ? [...saved[subtab], 'custodySignatures', 'tradingSignatures']
-        : saved[subtab];
+      let restoredIds = subtab === 'marketplace' && saved[subtab].includes('signature')
+        ? [...saved[subtab], 'tradingSignatures']
+        : [...saved[subtab]];
+      if (subtab === 'marketplace' && Number(saved.schemaVersion || 1) < 2) restoredIds.push('side', 'faction', 'status');
       const validIds = new Set(getEarningsColumns(subtab).map((column) => column.id));
       earningsColumnState[subtab] = new Set(restoredIds.filter((id) => validIds.has(id)));
     }
@@ -898,9 +900,10 @@ function restoreEarningsColumnState() {
 
 function persistEarningsColumnState() {
   try {
-    const serialized = Object.fromEntries(
-      Object.entries(earningsColumnState).map(([subtab, selected]) => [subtab, Array.from(selected)]),
-    );
+    const serialized = {
+      schemaVersion: 2,
+      ...Object.fromEntries(Object.entries(earningsColumnState).map(([subtab, selected]) => [subtab, Array.from(selected)])),
+    };
     localStorage.setItem(EARNINGS_COLUMN_STORAGE_KEY, JSON.stringify(serialized));
   } catch (_error) {
     // Column controls remain functional when local storage is unavailable.
@@ -5884,12 +5887,7 @@ function getVisibleEarningsColumns(subtab = currentEarningsSubtab) {
   return getEarningsColumns(subtab).filter((column) => selected.has(column.id));
 }
 
-function getMarketplaceCalculationColumnLabel(column) {
-  if (column.id === 'grossAtlas') return earningsMarketplaceSide === 'buy' ? 'Purchase Value' : 'Sale Value';
-  if (column.id === 'netAtlas') return earningsMarketplaceSide === 'buy' ? 'ATLAS Paid' : 'ATLAS Received';
-  if (column.id === 'unitMetric') return earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit';
-  if (column.id === 'custodySignatures') return earningsMarketplaceSide === 'buy' ? 'Deposit Cargo to Game Signature' : 'Withdraw Cargo from Game Signatures';
-  if (column.id === 'tradingSignatures') return earningsMarketplaceSide === 'buy' ? 'GM Trading Signatures' : 'GM Trading Signature';
+function getMarketplaceTradeColumnLabel(column) {
   return column.label;
 }
 
@@ -5983,7 +5981,7 @@ function renderEarningsColumnControls() {
       }
     });
     label.appendChild(input);
-    label.append(` ${subtab === 'marketplace' ? getMarketplaceCalculationColumnLabel(column) : column.label}`);
+    label.append(` ${subtab === 'marketplace' ? getMarketplaceTradeColumnLabel(column) : column.label}`);
     earningsColumnControlsContainer.appendChild(label);
   }
   earningsColumnControls = Array.from(earningsColumnControlsContainer.querySelectorAll('[data-earnings-column]'));
@@ -6867,15 +6865,7 @@ function renderEarningsCrafting(result) {
 }
 
 function getVisibleMarketplaceColumns() {
-  const columns = getVisibleEarningsColumns('marketplace');
-  if (earningsMarketplaceSide !== 'sell') return columns;
-  const custodyIndex = columns.findIndex((column) => column.id === 'custodySignatures');
-  const tradingIndex = columns.findIndex((column) => column.id === 'tradingSignatures');
-  if (custodyIndex < 0 || tradingIndex < 0 || tradingIndex < custodyIndex) return columns;
-  const reordered = [...columns];
-  const [trading] = reordered.splice(tradingIndex, 1);
-  reordered.splice(custodyIndex, 0, trading);
-  return reordered;
+  return getVisibleEarningsColumns('marketplace');
 }
 
 function updateMarketplaceSubtab() {
@@ -6885,7 +6875,6 @@ function updateMarketplaceSubtab() {
     button.setAttribute('aria-selected', String(active));
   });
   earningsMarketplacePanels.forEach((panel) => { panel.hidden = panel.dataset.marketplacePanel !== currentMarketplaceSubtab; });
-  if (earningsMarketplaceSideSwitch) earningsMarketplaceSideSwitch.hidden = currentMarketplaceSubtab !== 'calculations';
 }
 
 function updateMarketplaceRawFilterOptions(select, values) {
@@ -7025,7 +7014,7 @@ function renderMarketplaceRawData(result) {
       earningsMarketplaceRawCoverage.appendChild(row);
     }
   }
-  setText(earningsMarketplaceRawStatus, `${formatMarketplaceWhole(filtered.length)} of ${formatMarketplaceWhole(rows.length)} raw transactions at ${formatCheckedAt(result?.checkedAt)}${error ? ` · ${error}` : ''}`);
+  setText(earningsMarketplaceRawStatus, `ALL FACTIONS · ${formatMarketplaceWhole(filtered.length)} of ${formatMarketplaceWhole(rows.length)} raw transactions at ${formatCheckedAt(result?.checkedAt)}${error ? ` · ${error}` : ''}`);
   if (!earningsMarketplaceRawTableBody) return;
   earningsMarketplaceRawTableBody.textContent = '';
   if (!filtered.length) {
@@ -7109,7 +7098,7 @@ function renderMarketplaceDecodedEvents(result) {
     || String(a.signature || '').localeCompare(String(b.signature || ''))
     || String(a.eventId || '').localeCompare(String(b.eventId || '')));
   const error = String(result?.marketplaceEventsError || '');
-  setText(earningsMarketplaceEventsStatus, `${formatMarketplaceWhole(filtered.length)} of ${formatMarketplaceWhole(rows.length)} decoded events at ${formatCheckedAt(result?.checkedAt)}${error ? ` · ${error}` : ''}`);
+  setText(earningsMarketplaceEventsStatus, `ALL FACTIONS · ${formatMarketplaceWhole(filtered.length)} of ${formatMarketplaceWhole(rows.length)} decoded events at ${formatCheckedAt(result?.checkedAt)}${error ? ` · ${error}` : ''}`);
   if (!earningsMarketplaceEventsTableBody) return;
   earningsMarketplaceEventsTableBody.textContent = '';
   if (!filtered.length) {
@@ -7125,46 +7114,72 @@ function renderMarketplaceDecodedEvents(result) {
   }
 }
 
-function renderEarningsMarketplace(result) {
-  renderMarketplaceRawData(result);
-  renderMarketplaceDecodedEvents(result);
-  updateMarketplaceSubtab();
-  const rows = Array.isArray(result?.localMarketTrades) ? result.localMarketTrades : [];
-  const visibleRows = rows.filter((entry) => entry.side === earningsMarketplaceSide);
-  const errorSuffix = result?.localMarketError ? ` · Influx read failed: ${result.localMarketError}` : '';
-  setText(earningsMarketplaceSyncStatus, `${formatMarketplaceWhole(visibleRows.length)} LM ${earningsMarketplaceSide} executions at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
-  setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
-  earningsMarketplaceSideButtons.forEach((button) => {
-    const active = button.dataset.marketplaceSide === earningsMarketplaceSide;
+function renderMarketplaceCustodyLedger(result) {
+  const rows = (Array.isArray(result?.marketplaceCustodyRows) ? result.marketplaceCustodyRows : [])
+    .filter((row) => row.direction === marketplaceCustodyDirection);
+  setText(earningsMarketplaceCustodyStatus, `${formatMarketplaceWhole(rows.length)} ${marketplaceCustodyDirection === 'deposit' ? 'deposits' : 'withdrawals'} at ${formatCheckedAt(result?.checkedAt)}`);
+  earningsMarketplaceCustodyDirectionButtons.forEach((button) => {
+    const active = button.dataset.marketplaceCustodyDirection === marketplaceCustodyDirection;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
+  if (!earningsMarketplaceCustodyTableBody) return;
+  earningsMarketplaceCustodyTableBody.replaceChildren();
+  if (!rows.length) {
+    const tr = document.createElement('tr'); tr.className = 'empty-row';
+    const td = createTextCell(`No ${marketplaceCustodyDirection === 'deposit' ? 'deposits' : 'withdrawals'} found`); td.colSpan = 11;
+    tr.appendChild(td); earningsMarketplaceCustodyTableBody.appendChild(tr); return;
+  }
+  for (const entry of rows) {
+    const tr = document.createElement('tr');
+    const route = [entry.from, entry.to].filter(Boolean).join(' → ') || '--';
+    const values = [
+      formatMarketplaceTimestamp(entry.timestamp), route, entry.starbase || '--', entry.asset || '--',
+      entry.quantity == null ? '--' : formatMarketplaceWhole(entry.quantity),
+      entry.carriedBasisAtlas == null ? '--' : formatMarketplaceAtlas(entry.carriedBasisAtlas, 2),
+      entry.transactionFeeAtlas == null ? '--' : formatMarketplaceAtlas(entry.transactionFeeAtlas, 2),
+      entry.finalBasisAtlas == null ? '--' : formatMarketplaceAtlas(entry.finalBasisAtlas, 2),
+      entry.costPerUnitAtlas == null ? '--' : formatMarketplaceAtlas(entry.costPerUnitAtlas, 8),
+    ];
+    for (const value of values) tr.appendChild(createTextCell(value));
+    const signatureCell = document.createElement('td');
+    if (entry.signature) {
+      const link = document.createElement('a'); link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
+      link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = entry.signature; signatureCell.appendChild(link);
+    } else signatureCell.textContent = '--';
+    tr.append(signatureCell, createTextCell(entry.status || 'Unvalued'));
+    earningsMarketplaceCustodyTableBody.appendChild(tr);
+  }
+}
+
+function renderEarningsMarketplace(result) {
+  renderMarketplaceRawData(result);
+  renderMarketplaceDecodedEvents(result);
+  renderMarketplaceCustodyLedger(result);
+  updateMarketplaceSubtab();
+  const rows = Array.isArray(result?.marketplaceTrades) ? result.marketplaceTrades : [];
+  const errorSuffix = result?.marketplaceEventsError ? ` · Decoded Events read failed: ${result.marketplaceEventsError}` : '';
+  setText(earningsMarketplaceSyncStatus, `ALL FACTIONS · ${formatMarketplaceWhole(rows.length)} trades at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
   if (!earningsMarketplaceTableBody) return;
   const visibleColumns = getVisibleMarketplaceColumns();
   renderMarketplaceHeader(visibleColumns);
   earningsMarketplaceTableBody.textContent = '';
-  if (!visibleRows.length) {
+  if (!rows.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
-    const td = createTextCell(result?.localMarketError ? `Marketplace Influx read failed: ${result.localMarketError}` : `No Marketplace ${earningsMarketplaceSide} executions found`);
+    const td = createTextCell(result?.marketplaceEventsError ? `Decoded Events read failed: ${result.marketplaceEventsError}` : 'No Marketplace trades found');
     td.colSpan = Math.max(1, visibleColumns.length);
     tr.appendChild(td);
     earningsMarketplaceTableBody.appendChild(tr);
     return;
   }
-  for (const entry of [...visibleRows].sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')))) {
+  for (const entry of rows) {
     const tr = document.createElement('tr');
     const quantity = Number(entry.quantity) || 0;
-    const basisAvailable = entry.basisAvailable !== false;
-    const gross = basisAvailable ? (Number(entry.grossAtlas) || 0) : null;
-    const txFee = Number(entry.txFeeAtlas) || 0;
-    const marketplaceFee = earningsMarketplaceSide === 'sell' ? Number(entry.marketplaceFeeAtlas) || 0 : 0;
-    const net = earningsMarketplaceSide === 'buy'
-      ? (gross == null ? null : gross + txFee)
-      : (gross == null ? null : Math.max(0, gross - marketplaceFee - txFee));
-    const unitMetric = quantity > 0
-      ? (earningsMarketplaceSide === 'buy' ? (basisAvailable ? (gross + txFee) / quantity : null) : (net == null ? null : net / quantity))
-      : null;
+    const gross = entry.grossAtlas == null ? null : Number(entry.grossAtlas);
+    const txFee = entry.transactionFeeAtlas == null ? null : Number(entry.transactionFeeAtlas);
+    const net = entry.netAtlas == null ? null : Number(entry.netAtlas);
+    const unitMetric = entry.netUnitValueAtlas == null ? null : Number(entry.netUnitValueAtlas);
     for (const column of visibleColumns) tr.appendChild(createMarketplaceEarningsCell(entry, column.id, { quantity, gross, txFee, net, unitMetric }));
     earningsMarketplaceTableBody.appendChild(tr);
   }
@@ -7176,26 +7191,25 @@ function renderMarketplaceHeader(visibleColumns) {
   row.textContent = '';
   for (const column of visibleColumns) {
     const th = document.createElement('th');
-    th.textContent = getMarketplaceCalculationColumnLabel(column);
+    th.textContent = getMarketplaceTradeColumnLabel(column);
     row.appendChild(th);
   }
 }
 
 function createMarketplaceEarningsCell(entry, columnId, calculated) {
   const values = {
-    timestamp: formatMarketplaceTimestamp(entry.timestamp), marketplace: entry.marketplace || 'LM',
-    starbase: entry.starbase || '--', asset: entry.asset || '--', amount: formatMarketplaceWhole(calculated.quantity),
+    timestamp: formatMarketplaceTimestamp(entry.timestamp), side: String(entry.side || '').toUpperCase(), marketplace: entry.marketplace || '--',
+    faction: entry.faction || '--', asset: entry.asset || '--', amount: formatMarketplaceWhole(calculated.quantity),
     grossAtlas: calculated.gross == null ? '--' : formatMarketplaceAtlas(calculated.gross, 2),
-    price: entry.basisAvailable === false ? '--' : formatMarketplaceAtlas(entry.unitPriceAtlas || 0, 8),
-    marketplaceFee: earningsMarketplaceSide === 'buy' ? 'Seller-paid' : formatMarketplaceAtlas(entry.marketplaceFeeAtlas || 0, 6),
-    txsFee: formatMarketplaceAtlas(calculated.txFee, 2),
-    netAtlas: calculated.net == null ? '--' : formatMarketplaceAtlas(calculated.net, 2), unitMetric: calculated.unitMetric == null ? '--' : formatMarketplaceAtlas(calculated.unitMetric, 8),
+    price: entry.unitPriceAtlas == null ? '--' : formatMarketplaceAtlas(entry.unitPriceAtlas, 8),
+    marketplaceFee: entry.side === 'buy' ? 'Seller-paid' : entry.marketplaceFeeAtlas == null ? '--' : formatMarketplaceAtlas(entry.marketplaceFeeAtlas, 6),
+    txsFee: calculated.txFee == null ? '--' : formatMarketplaceAtlas(calculated.txFee, 2),
+    netAtlas: calculated.net == null ? '--' : formatMarketplaceAtlas(calculated.net, 2),
+    unitMetric: calculated.unitMetric == null ? '--' : formatMarketplaceAtlas(calculated.unitMetric, 8),
+    status: entry.status || 'Partial',
   };
-  if (!['custodySignatures', 'tradingSignatures'].includes(columnId)) return createTextCell(values[columnId] ?? '--');
-  const rawSignatures = columnId === 'custodySignatures'
-    ? (entry.custodySignatures || [])
-    : (entry.executionSignatures || []);
-  const signatures = Array.from(new Set(rawSignatures.map((value) => String(value || '').trim().split(':')[0]).filter(Boolean)));
+  if (columnId !== 'tradingSignatures') return createTextCell(values[columnId] ?? '--');
+  const signatures = [String(entry.signature || '').trim()].filter(Boolean);
   const cell = document.createElement('td');
   if (!signatures.length) { cell.textContent = '--'; return cell; }
   signatures.forEach((transactionSignature, index) => {
@@ -7211,8 +7225,7 @@ function createMarketplaceEarningsCell(entry, columnId, calculated) {
 }
 
 function renderEarningsMarketplaceLoading(message = 'Loading Marketplace data...') {
-  setText(earningsMarketplaceSyncStatus, message);
-  setText(earningsMarketplaceUnitHeader, earningsMarketplaceSide === 'buy' ? 'Cost / Unit' : 'Income / Unit');
+  setText(earningsMarketplaceSyncStatus, `ALL FACTIONS · ${message}`);
   if (!earningsMarketplaceTableBody) return;
   const visibleColumns = getVisibleMarketplaceColumns();
   renderMarketplaceHeader(visibleColumns);
@@ -7627,6 +7640,10 @@ async function refreshMarketplace({ sync = false } = {}) {
           ...(eventsReadFailed ? {
             marketplaceEvents: prior.marketplaceEvents,
             marketplaceEventCount: prior.marketplaceEventCount,
+            marketplaceTrades: prior.marketplaceTrades,
+            marketplaceTradeCount: prior.marketplaceTradeCount,
+            marketplaceCustodyRows: prior.marketplaceCustodyRows,
+            marketplaceCustodyCount: prior.marketplaceCustodyCount,
           } : {}),
         }
       : result;
@@ -9463,15 +9480,8 @@ function setActiveOptimizationView(view) {
   setActiveOptimizationSubtab(currentOptimizationSubtab);
 }
 
-function updateMarketplaceSideSwitchVisibility() {
-  if (earningsMarketplaceSideSwitch) {
-    earningsMarketplaceSideSwitch.hidden = !(currentSection === 'earnings' && currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'calculations');
-  }
-}
-
 function setActiveSection(section) {
   currentSection = section;
-  updateMarketplaceSideSwitchVisibility();
   appShell?.classList.toggle('earnings-active', section === 'earnings');
   appShell?.classList.toggle('optimization-active', section === 'optimization');
   document.querySelectorAll('.nav-button').forEach((button) => {
@@ -9634,7 +9644,6 @@ function setActiveSubtab(subtab) {
 
 function setActiveEarningsSubtab(subtab) {
   currentEarningsSubtab = subtab;
-  updateMarketplaceSideSwitchVisibility();
   document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
     const active = button.dataset.earningsSubtab === subtab;
     button.classList.toggle('active', active);
@@ -9703,10 +9712,17 @@ document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
 
 earningsMarketplaceSubtabButtons.forEach((button) => {
   button.addEventListener('click', () => {
-    currentMarketplaceSubtab = ['raw', 'events', 'calculations'].includes(button.dataset.marketplaceSubtab)
+    currentMarketplaceSubtab = ['raw', 'events', 'trades', 'custody'].includes(button.dataset.marketplaceSubtab)
       ? button.dataset.marketplaceSubtab : 'raw';
     updateMarketplaceSubtab();
     renderEarningsColumnControls();
+  });
+});
+
+earningsMarketplaceCustodyDirectionButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    marketplaceCustodyDirection = button.dataset.marketplaceCustodyDirection === 'withdraw' ? 'withdraw' : 'deposit';
+    if (latestMarketplaceResult) renderMarketplaceCustodyLedger(latestMarketplaceResult);
   });
 });
 
@@ -9740,14 +9756,6 @@ earningsMarketplaceEventsTableHead?.addEventListener('click', (event) => {
     ? { column, direction: marketplaceEventsSort.direction === 'asc' ? 'desc' : 'asc' }
     : { column, direction: 'asc' };
   if (latestMarketplaceResult) renderMarketplaceDecodedEvents(latestMarketplaceResult);
-});
-
-earningsMarketplaceSideButtons.forEach((button) => {
-  button.addEventListener('click', () => {
-    earningsMarketplaceSide = button.dataset.marketplaceSide === 'sell' ? 'sell' : 'buy';
-    renderEarningsColumnControls();
-    if (latestMarketplaceResult) renderEarningsMarketplace(latestMarketplaceResult);
-  });
 });
 
 document.querySelectorAll('.optimization-subtab-button').forEach((button) => {

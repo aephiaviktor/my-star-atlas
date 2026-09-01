@@ -27,16 +27,22 @@ test('Marketplace Raw Data exposes only transaction filters, sortable facts, and
   assert.match(renderer, /className = 'marketplace-raw-payload'/);
 });
 
-test('Marketplace shows only the table belonging to the active Raw Data or Calculations subtab', () => {
+test('Marketplace shows only the table belonging to the active global data or Trades subtab', () => {
   assert.match(html, /data-marketplace-panel="raw"/);
   assert.match(html, /data-marketplace-panel="events" hidden/);
-  assert.match(html, /data-marketplace-panel="calculations" hidden/);
+  assert.match(html, /data-marketplace-panel="trades" hidden/);
+  assert.match(html, /data-marketplace-subtab="trades"[^>]*>Trades</);
+  assert.doesNotMatch(html, /data-marketplace-subtab="calculations"|>Calculations</);
   assert.match(renderer, /panel\.hidden = panel\.dataset\.marketplacePanel !== currentMarketplaceSubtab/);
   assert.match(css, /\[data-marketplace-panel\]\[hidden\]\s*\{\s*display:\s*none/);
 });
 
 test('Marketplace Decoded Events is a separate persisted event view linked to raw signatures', () => {
   assert.match(html, /data-marketplace-subtab="events"[^>]*>Decoded Events</);
+  assert.match(html, /id="earnings-marketplace-raw-status"[^>]*>ALL FACTIONS/);
+  assert.match(html, /id="earnings-marketplace-events-status"[^>]*>ALL FACTIONS/);
+  assert.match(renderer, /ALL FACTIONS ·.*raw transactions/);
+  assert.match(renderer, /ALL FACTIONS ·.*decoded events/);
   assert.match(html, /id="earnings-marketplace-events-table-body"/);
   assert.match(main, /r\._measurement == "marketplace_events"/);
   assert.match(main, /decodedEvents\.rows\.filter\(\(event\) => rawSignatures\.has\(event\.signature\)\)/);
@@ -59,6 +65,18 @@ test('Marketplace Decoded Events is a separate persisted event view linked to ra
     assert.match(renderer, new RegExp(`id: '${id}'`));
   }
   assert.doesNotMatch(renderer, /id: 'transactionFeeLamports'/);
+});
+
+test('Custody Ledger is faction-specific with a Deposits and Withdrawals switch', () => {
+  assert.match(html, /data-marketplace-subtab="custody"[^>]*>Custody Ledger</);
+  assert.match(html, /data-marketplace-panel="custody" hidden/);
+  assert.match(html, /data-marketplace-custody-direction="deposit"[^>]*>DEPOSITS</);
+  assert.match(html, /data-marketplace-custody-direction="withdraw"[^>]*>WITHDRAWALS</);
+  assert.doesNotMatch(html.match(/data-marketplace-panel="custody"[\s\S]*?<\/section>/)?.[0] || '', /ALL FACTIONS|Faction:/);
+  assert.match(renderer, /function renderMarketplaceCustodyLedger\(result\)/);
+  assert.match(renderer, /result\?\.marketplaceCustodyRows/);
+  assert.match(renderer, /marketplaceCustodyDirection = button\.dataset\.marketplaceCustodyDirection/);
+  assert.match(main, /buildValuedCustodyRows\(marketplaceEvents, \{[\s\S]*faction: settings\.faction, inventoryBasisObservations/);
 });
 
 test('Raw Data and Decoded Events share one reversible signature selector', () => {

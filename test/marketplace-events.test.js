@@ -72,9 +72,9 @@ test('existing Raw Data CSS rows backfill deposit and withdrawal events without 
     } },
     meta: { err: null, innerInstructions: [], preTokenBalances: [], postTokenBalances: [] },
   };
-  assert.deepEqual(deriveCustodyEventsFromRawRows([
+  const events = deriveCustodyEventsFromRawRows([
     { signature: rawSignature, discoverySource: 'css_account', payload },
-  ], { cssScopes: [{ sageProgramId, address: cssStarbasePlayer }] }).map((event) => event.eventType), [
-    'deposit', 'withdraw',
-  ]);
+  ], { cssScopes: [{ faction: 'MUD', starbase: 'MUD-1', sageProgramId, address: cssStarbasePlayer }] });
+  assert.deepEqual(events.map((event) => event.eventType), ['deposit', 'withdraw']);
+  assert.ok(events.every((event) => event.faction === 'MUD' && event.starbase === 'MUD-1'));
 });
