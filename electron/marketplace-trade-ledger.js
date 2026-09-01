@@ -16,7 +16,7 @@ function projectDecodedMarketplaceTrades(events = []) {
       const grossAtlas = finiteOrNull(event.grossAtlas)
         ?? (quantity != null && unitPriceAtlas != null ? quantity * unitPriceAtlas : null);
       const marketplaceFeeAtlas = finiteOrNull(event.marketplaceFeeAtlas);
-      const transactionFeeAtlas = finiteOrNull(event.transactionFeeAtlas ?? event.txFeeAtlas);
+      const transactionFeeAtlas = finiteOrNull(event.txFeeAtlas ?? event.transactionFeeAtlas);
       const complete = quantity != null && quantity > 0 && grossAtlas != null
         && transactionFeeAtlas != null && (side === 'buy' || marketplaceFeeAtlas != null);
       const netAtlas = grossAtlas == null || transactionFeeAtlas == null || (side === 'sell' && marketplaceFeeAtlas == null)

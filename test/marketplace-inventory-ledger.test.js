@@ -118,7 +118,7 @@ test('game deposits fund later withdrawals and sells with the carried principal'
   const [gameWithdrawal] = projectGameLedgerRows(ledger.rows, { faction: 'USTUR' })
     .filter((row) => row.direction === 'withdraw');
   assert.ok(Math.abs(gameWithdrawal.principalAtlas - 400.98) < 1e-9);
-  assert.ok(gameWithdrawal.finalBasisAtlas > 400.98);
+  assert.ok(Math.abs(gameWithdrawal.finalBasisAtlas - 400.98) < 1e-9);
 });
 
 test('ledger is deterministic, idempotent, and holds unresolved sells pending instead of inventing cost', () => {
@@ -200,7 +200,7 @@ test('Game Ledger aggregates one sale signature and rebases its complete weighte
       asset: 'Iron Ore', quantity: 7339436, fromWallet: 'HHD', toWallet: 'GQAC' },
     { movementId: 'sell-event', kind: 'sell', status: 'applied', timestamp: '2026-09-01T12:10:23Z',
       signature: 'sell-signature', asset: 'Iron Ore', quantity: 7339437, fromWallet: 'GQAC', basisMovedAtlas: 4127.33,
-      marketplaceFeeAtlas: 391.03, saleTransactionFeeAtlas: 3.78, grossAtlas: 8689.53, netProceedsAtlas: 8294.72,
+      marketplaceFeeAtlas: 391.03, saleTransactionFeeAtlas: 7.62, grossAtlas: 8689.53, netProceedsAtlas: 8290.88,
       gameOrigins: [
         { movementId: 'physical-1', signature: 'withdraw-1', faction: 'USTUR', starbase: 'UST-1',
           quantity: 1088291, principalAtlas: 471.32, transactionFeeAtlas: 1.2 },
@@ -213,10 +213,10 @@ test('Game Ledger aggregates one sale signature and rebases its complete weighte
   assert.equal(rows[0].principalAtlas, 4127.33);
   assert.equal(rows[0].carriedBasisAtlas, 4127.33);
   assert.equal(rows[0].marketplaceFeeAtlas, 391.03);
-  assert.equal(rows[0].transactionFeeAtlas, 3.78);
-  assert.ok(Math.abs(rows[0].finalBasisAtlas - 4522.14) < 1e-9);
-  assert.ok(Math.abs(rows[0].receivedPerUnitAtlas - (8294.72 / 7339437)) < 1e-12);
-  assert.ok(Math.abs(rows[0].netProfitPerUnitAtlas - ((8294.72 - 4522.14) / 7339437)) < 1e-12);
+  assert.equal(rows[0].transactionFeeAtlas, 7.62);
+  assert.equal(rows[0].finalBasisAtlas, 4127.33, 'selling fees must not inflate inventory basis');
+  assert.ok(Math.abs(rows[0].receivedPerUnitAtlas - (8290.88 / 7339437)) < 1e-12);
+  assert.ok(Math.abs(rows[0].netProfitPerUnitAtlas - ((8290.88 - 4127.33) / 7339437)) < 1e-12);
   assert.deepEqual(rows[0].physicalWithdrawals, [
     { movementId: 'physical-2', signature: 'withdraw-2', timestamp: '2026-09-01T06:27:39Z', quantity: 7339436 },
   ]);
@@ -236,6 +236,18 @@ test('Global Ledger renders wallet transfers as balanced withdrawal and deposit 
   ]);
   assert.equal(transferRows.find((row) => row.direction === 'withdraw').finalBasisAtlas, 101);
   assert.equal(transferRows.find((row) => row.direction === 'deposit').finalBasisAtlas, 101.5);
+});
+
+test('Global sale keeps cumulative fees visible without adding selling fees to inventory basis', () => {
+  const [row] = projectGlobalLedgerRows([{
+    movementId: 'sell', kind: 'sell', status: 'applied', timestamp: '2026-09-01T12:10:23Z',
+    signature: 'sell-signature', asset: 'Iron Ore', quantity: 7339437, fromWallet: 'GQAC',
+    principalAtlas: 3985.56, transactionFeeAtlas: 3.64, basisMovedAtlas: 3989.2,
+    marketplaceFeeAtlas: 391.03, saleTransactionFeeAtlas: 7.62,
+  }]);
+  assert.equal(row.transactionFeeAtlas, 11.26);
+  assert.equal(row.marketplaceFeeAtlas, 391.03);
+  assert.equal(row.finalBasisAtlas, 3989.2);
 });
 
 test('ledger ordering uses slot and instruction position before lexical event identity', () => {

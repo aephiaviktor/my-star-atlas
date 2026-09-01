@@ -30,9 +30,10 @@ test('decoded LM execution retains its faction while GM is always global', () =>
 });
 
 test('decoded sell execution subtracts seller-paid marketplace and transaction fees', () => {
-  const [row] = projectDecodedMarketplaceTrades([{ ...base, side: 'sell', marketplaceFeeAtlas: 1 }]);
-  assert.equal(row.netAtlas, 18.5);
-  assert.equal(row.netUnitValueAtlas, 1.85);
+  const [row] = projectDecodedMarketplaceTrades([{ ...base, side: 'sell', marketplaceFeeAtlas: 1, txFeeAtlas: 0.8 }]);
+  assert.equal(row.transactionFeeAtlas, 0.8, 'trade must include execution plus allocated order-creation fees');
+  assert.equal(row.netAtlas, 18.2);
+  assert.ok(Math.abs(row.netUnitValueAtlas - 1.82) < 1e-12);
   assert.equal(row.status, 'Complete');
 });
 

@@ -435,8 +435,9 @@ function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {
     }
   }
   for (const group of saleGroups.values()) {
-    group.finalBasisAtlas = group.principalAtlas + group.marketplaceFeeAtlas + group.transactionFeeAtlas;
-    group.costPerUnitAtlas = group.quantity > 0 ? group.finalBasisAtlas / group.quantity : null;
+    // Selling fees reduce net proceeds; they never inflate weighted inventory basis.
+    group.finalBasisAtlas = group.carriedBasisAtlas;
+    group.costPerUnitAtlas = group.quantity > 0 ? group.carriedBasisAtlas / group.quantity : null;
     group.receivedPerUnitAtlas = group.quantity > 0 ? group.netProceedsAtlas / group.quantity : null;
     group.netProfitPerUnitAtlas = group.quantity > 0
       ? (group.netProceedsAtlas - group.finalBasisAtlas) / group.quantity : null;
@@ -488,7 +489,7 @@ function projectGlobalLedgerRows(ledgerRows = []) {
       principalAtlas: row.principalAtlas,
       marketplaceFeeAtlas: row.marketplaceFeeAtlas,
       transactionFeeAtlas: Number(row.transactionFeeAtlas || 0) + Number(row.saleTransactionFeeAtlas || 0),
-      finalBasisAtlas: Number(row.basisMovedAtlas || 0) + Number(row.marketplaceFeeAtlas || 0) + Number(row.saleTransactionFeeAtlas || 0),
+      finalBasisAtlas: Number(row.basisMovedAtlas || 0),
     });
   }
   return rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
