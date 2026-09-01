@@ -117,8 +117,8 @@ test('game deposits fund later withdrawals and sells with the carried principal'
   assert.ok(Math.abs(sell.basisMovedAtlas - 400.98) < 1e-9);
   const [gameWithdrawal] = projectGameLedgerRows(ledger.rows, { faction: 'USTUR' })
     .filter((row) => row.direction === 'withdraw');
-  assert.equal(gameWithdrawal.principalAtlas, 400);
-  assert.ok(gameWithdrawal.finalBasisAtlas > 400);
+  assert.ok(Math.abs(gameWithdrawal.principalAtlas - 400.98) < 1e-9);
+  assert.ok(gameWithdrawal.finalBasisAtlas > 400.98);
 });
 
 test('ledger is deterministic, idempotent, and holds unresolved sells pending instead of inventing cost', () => {
@@ -188,6 +188,33 @@ test('Game Ledger is asymmetric: deposits use game time while withdrawals use se
   ]);
   assert.ok(withdrawals.every((row) => row.physicalWithdrawalTimestamp === '2026-08-30T12:00:00.000Z'));
   assert.ok(withdrawals.every((row) => row.physicalWithdrawalSignature === 'withdraw-signature'));
+});
+
+test('Game Ledger aggregates one sale signature and rebases its complete weighted sell lot', () => {
+  const rows = projectGameLedgerRows([
+    { movementId: 'physical-1', kind: 'withdraw', timestamp: '2026-08-30T13:15:19Z' },
+    { movementId: 'physical-2', kind: 'withdraw', timestamp: '2026-09-01T06:27:39Z' },
+    { movementId: 'sell-event', kind: 'sell', status: 'applied', timestamp: '2026-09-01T12:10:23Z',
+      signature: 'sell-signature', asset: 'Iron Ore', quantity: 7339437, basisMovedAtlas: 4127.33,
+      marketplaceFeeAtlas: 391.03, saleTransactionFeeAtlas: 3.78, grossAtlas: 8689.53, netProceedsAtlas: 8294.72,
+      gameOrigins: [
+        { movementId: 'physical-1', signature: 'withdraw-1', faction: 'USTUR', starbase: 'UST-1',
+          quantity: 1088291, principalAtlas: 471.32, transactionFeeAtlas: 1.2 },
+        { movementId: 'physical-2', signature: 'withdraw-2', faction: 'USTUR', starbase: 'UST-1',
+          quantity: 6251146, principalAtlas: 3514.25, transactionFeeAtlas: 2.4 },
+      ] },
+  ], { faction: 'USTUR' });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].quantity, 7339437);
+  assert.equal(rows[0].principalAtlas, 4127.33);
+  assert.equal(rows[0].carriedBasisAtlas, 4127.33);
+  assert.equal(rows[0].marketplaceFeeAtlas, 391.03);
+  assert.equal(rows[0].transactionFeeAtlas, 3.78);
+  assert.ok(Math.abs(rows[0].finalBasisAtlas - 4522.14) < 1e-9);
+  assert.deepEqual(rows[0].physicalWithdrawals, [
+    { movementId: 'physical-1', signature: 'withdraw-1', timestamp: '2026-08-30T13:15:19Z', quantity: 1088291 },
+    { movementId: 'physical-2', signature: 'withdraw-2', timestamp: '2026-09-01T06:27:39Z', quantity: 6251146 },
+  ]);
 });
 
 test('Global Ledger renders wallet transfers as balanced withdrawal and deposit rows', () => {

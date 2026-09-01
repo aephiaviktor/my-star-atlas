@@ -343,7 +343,10 @@ function buildMarketplaceInventoryMovements(events = [], {
 
 function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {
   const selectedFaction = text(faction).toUpperCase().replace(/^UST$/, 'USTUR');
+  const physicalTimes = new Map((ledgerRows || []).filter((row) => row.kind === 'withdraw')
+    .map((row) => [text(row.movementId), text(row.timestamp)]));
   const rows = [];
+  const saleGroups = new Map();
   for (const row of ledgerRows || []) {
     if (row?.status !== 'applied') continue;
     if (row.kind === 'deposit' && text(row.faction).toUpperCase().replace(/^UST$/, 'USTUR') === selectedFaction) {
@@ -358,30 +361,56 @@ function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {
       continue;
     }
     if (row.kind !== 'sell' || !(row.quantity > 0)) continue;
-    for (const origin of row.gameOrigins || []) {
-      if (text(origin.faction).toUpperCase().replace(/^UST$/, 'USTUR') !== selectedFaction || !(origin.quantity > 0)) continue;
-      const ratio = origin.quantity / row.quantity;
-      const carriedBasis = basisAtlas(origin);
-      const marketplaceFee = Number(row.marketplaceFeeAtlas || 0) * ratio;
-      const saleTransactionFee = Number(row.saleTransactionFeeAtlas || 0) * ratio;
-      const finalBasis = carriedBasis + marketplaceFee + saleTransactionFee;
-      rows.push({
-        gameLedgerId: `${row.movementId}:${origin.movementId}`, direction: 'withdraw', timestamp: row.timestamp,
-        physicalWithdrawalTimestamp: '', faction: selectedFaction, starbase: text(origin.starbase), asset: row.asset,
-        quantity: origin.quantity, principalAtlas: origin.principalAtlas, carriedBasisAtlas: carriedBasis,
-        marketplaceFeeAtlas: marketplaceFee,
-        transactionFeeAtlas: Number(origin.transactionFeeAtlas || 0) + saleTransactionFee,
-        finalBasisAtlas: finalBasis, costPerUnitAtlas: origin.quantity > 0 ? finalBasis / origin.quantity : null,
-        grossAtlas: Number(row.grossAtlas || 0) * ratio, netProceedsAtlas: Number(row.netProceedsAtlas || 0) * ratio,
-        signature: row.signature, physicalWithdrawalSignature: text(origin.signature),
-        physicalWithdrawalId: text(origin.movementId), status: 'Complete',
-      });
+    const origins = (row.gameOrigins || []).filter((origin) =>
+      text(origin.faction).toUpperCase().replace(/^UST$/, 'USTUR') === selectedFaction && Number(origin.quantity) > 0);
+    const originQuantity = origins.reduce((sum, origin) => sum + Number(origin.quantity || 0), 0);
+    if (!(originQuantity > 0)) continue;
+    const tolerance = Math.max(1e-6, Number(row.quantity) * 1e-12);
+    const quantity = Math.abs(originQuantity - Number(row.quantity)) <= tolerance ? Number(row.quantity) : originQuantity;
+    const ratio = quantity / Number(row.quantity);
+    const signature = text(row.signature);
+    const key = `${signature || text(row.movementId)}\n${text(row.asset)}\n${selectedFaction}`;
+    if (!saleGroups.has(key)) saleGroups.set(key, {
+      gameLedgerId: `${signature || text(row.movementId)}:${text(row.asset)}:${selectedFaction}`,
+      direction: 'withdraw', timestamp: row.timestamp, faction: selectedFaction,
+      starbase: text(origins[0]?.starbase), asset: row.asset, quantity: 0,
+      principalAtlas: 0, carriedBasisAtlas: 0, marketplaceFeeAtlas: 0, transactionFeeAtlas: 0,
+      grossAtlas: 0, netProceedsAtlas: 0, signature, status: 'Complete', physicalWithdrawals: new Map(),
+    });
+    const group = saleGroups.get(key);
+    if (String(row.timestamp) > String(group.timestamp)) group.timestamp = row.timestamp;
+    const carriedBasis = Number(row.basisMovedAtlas || 0) * ratio;
+    group.quantity += quantity;
+    // A completed weighted wallet lot becomes the Game principal. Historical
+    // withdrawal origins remain provenance only and must not fragment economics.
+    group.principalAtlas += carriedBasis;
+    group.carriedBasisAtlas += carriedBasis;
+    group.marketplaceFeeAtlas += Number(row.marketplaceFeeAtlas || 0) * ratio;
+    group.transactionFeeAtlas += Number(row.saleTransactionFeeAtlas || 0) * ratio;
+    group.grossAtlas += Number(row.grossAtlas || 0) * ratio;
+    group.netProceedsAtlas += Number(row.netProceedsAtlas || 0) * ratio;
+    for (const origin of origins) {
+      const movementId = text(origin.movementId);
+      const current = group.physicalWithdrawals.get(movementId) || {
+        movementId, signature: text(origin.signature), timestamp: physicalTimes.get(movementId) || '', quantity: 0,
+      };
+      current.quantity += Number(origin.quantity || 0);
+      group.physicalWithdrawals.set(movementId, current);
     }
   }
-  const physicalTimes = new Map((ledgerRows || []).filter((row) => row.kind === 'withdraw')
-    .map((row) => [text(row.movementId), text(row.timestamp)]));
-  for (const row of rows) {
-    if (row.direction === 'withdraw') row.physicalWithdrawalTimestamp = physicalTimes.get(row.physicalWithdrawalId) || '';
+  for (const group of saleGroups.values()) {
+    group.finalBasisAtlas = group.principalAtlas + group.marketplaceFeeAtlas + group.transactionFeeAtlas;
+    group.costPerUnitAtlas = group.quantity > 0 ? group.finalBasisAtlas / group.quantity : null;
+    group.physicalWithdrawals = [...group.physicalWithdrawals.values()]
+      .sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
+        || left.movementId.localeCompare(right.movementId));
+    if (group.physicalWithdrawals.length === 1) {
+      const [physical] = group.physicalWithdrawals;
+      group.physicalWithdrawalId = physical.movementId;
+      group.physicalWithdrawalSignature = physical.signature;
+      group.physicalWithdrawalTimestamp = physical.timestamp;
+    }
+    rows.push(group);
   }
   return rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
     || left.gameLedgerId.localeCompare(right.gameLedgerId));
