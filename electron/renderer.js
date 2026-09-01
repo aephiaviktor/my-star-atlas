@@ -390,6 +390,9 @@ let currentMarketplaceSubtab = 'raw';
 let marketplaceGameDirection = 'deposit';
 let marketplaceRawSort = { column: 'timestamp', direction: 'desc' };
 let marketplaceEventsSort = { column: 'timestamp', direction: 'desc' };
+let marketplaceTradeSort = { column: 'timestamp', direction: 'desc' };
+let marketplaceGlobalSort = { column: 'globalTimestamp', direction: 'desc' };
+let marketplaceGameSort = { column: 'gameTimestamp', direction: 'desc' };
 let marketplaceLinkedSignature = '';
 let activeCargoTable = 'fleet';
 let latestSettings = null;
@@ -7224,6 +7227,66 @@ function renderMarketplaceTableFilters(id, tableBody, rows, definitions, state, 
   }
 }
 
+function marketplaceTableColumnValue(entry, columnId) {
+  const fields = {
+    timestamp: 'timestamp', side: 'side', marketplace: 'marketplace', faction: 'faction', starbase: 'starbase',
+    asset: 'asset', amount: 'quantity', grossAtlas: 'grossAtlas', price: 'unitPriceAtlas',
+    marketplaceFee: 'marketplaceFeeAtlas', txsFee: 'transactionFeeAtlas', netAtlas: 'netAtlas',
+    unitMetric: 'netUnitValueAtlas', tradingSignatures: 'signature',
+    globalTimestamp: 'timestamp', globalDirection: 'direction', globalWallet: 'wallet',
+    globalCounterparty: 'counterparty', globalMovement: 'movementType', globalAsset: 'asset',
+    globalQuantity: 'quantity', globalPrincipal: 'principalAtlas', globalMarketplaceFee: 'marketplaceFeeAtlas',
+    globalTxFee: 'transactionFeeAtlas', globalFinalBasis: 'finalBasisAtlas', globalUnitBasis: 'costPerUnitAtlas',
+    globalSignature: 'signature', globalStatus: 'status',
+    gameTimestamp: 'timestamp', gameAsset: 'asset', gameQuantity: 'quantity', gamePrincipal: 'principalAtlas',
+    gameCarriedBasis: 'carriedBasisAtlas', gameMarketplaceFee: 'marketplaceFeeAtlas', gameTxFee: 'transactionFeeAtlas',
+    gameFinalBasis: 'finalBasisAtlas', gameUnitBasis: 'costPerUnitAtlas', gameSignature: 'signature',
+    gamePhysicalWithdrawal: 'physicalWithdrawalSignature', gameStatus: 'status',
+  };
+  return entry?.[fields[columnId]] ?? '';
+}
+
+function compareMarketplaceTableValues(left, right, columnId) {
+  const leftValue = marketplaceTableColumnValue(left, columnId);
+  const rightValue = marketplaceTableColumnValue(right, columnId);
+  if (['timestamp', 'globalTimestamp', 'gameTimestamp'].includes(columnId)) {
+    return (Date.parse(leftValue) || 0) - (Date.parse(rightValue) || 0);
+  }
+  const numericColumns = new Set([
+    'amount', 'grossAtlas', 'price', 'marketplaceFee', 'txsFee', 'netAtlas', 'unitMetric',
+    'globalQuantity', 'globalPrincipal', 'globalMarketplaceFee', 'globalTxFee', 'globalFinalBasis', 'globalUnitBasis',
+    'gameQuantity', 'gamePrincipal', 'gameCarriedBasis', 'gameMarketplaceFee', 'gameTxFee', 'gameFinalBasis', 'gameUnitBasis',
+  ]);
+  if (numericColumns.has(columnId)) return (Number(leftValue) || 0) - (Number(rightValue) || 0);
+  return String(leftValue).localeCompare(String(rightValue), undefined, { sensitivity: 'base', numeric: true });
+}
+
+function sortMarketplaceTableRows(rows, sortState) {
+  const direction = sortState.direction === 'asc' ? 1 : -1;
+  rows.sort((left, right) => direction * compareMarketplaceTableValues(left, right, sortState.column)
+    || String(left?.tradeId || left?.globalLedgerId || left?.gameLedgerId || '').localeCompare(
+      String(right?.tradeId || right?.globalLedgerId || right?.gameLedgerId || '')
+    ));
+  return rows;
+}
+
+function renderMarketplaceSortableHeader(tableBody, columns, sortState, tableId) {
+  const row = tableBody?.closest('table')?.querySelector('thead tr');
+  if (!row) return;
+  row.replaceChildren();
+  for (const column of columns) {
+    const cell = document.createElement('th');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.marketplaceTableSort = `${tableId}:${column.id}`;
+    const active = sortState.column === column.id;
+    button.textContent = `${column.label}${active ? (sortState.direction === 'asc' ? ' ▲' : ' ▼') : ''}`;
+    cell.setAttribute('aria-sort', active ? (sortState.direction === 'asc' ? 'ascending' : 'descending') : 'none');
+    cell.appendChild(button);
+    row.appendChild(cell);
+  }
+}
+
 function applyMarketplaceLedgerColumnVisibility(tableBody, subtab, columns) {
   const ids = columns.map((column) => column.id);
   const selected = earningsColumnState[subtab] || new Set(ids);
@@ -7265,7 +7328,8 @@ function renderMarketplaceGlobalLedger(result) {
     { key: 'asset', label: 'Asset' },
     { key: 'status', label: 'Status' },
   ], marketplaceGlobalFilters, () => renderMarketplaceGlobalLedger(sourceResult));
-  const rows = filterMarketplaceRows(sourceRows, marketplaceGlobalFilters);
+  const rows = sortMarketplaceTableRows(filterMarketplaceRows(sourceRows, marketplaceGlobalFilters), marketplaceGlobalSort);
+  renderMarketplaceSortableHeader(earningsMarketplaceGlobalTableBody, marketplaceGlobalColumns, marketplaceGlobalSort, 'global');
   setText(earningsMarketplaceGlobalStatus, `ALL WALLETS · ${formatMarketplaceWhole(rows.length)} movements at ${formatCheckedAt(result?.checkedAt)}`);
   if (!earningsMarketplaceGlobalTableBody) return;
   earningsMarketplaceGlobalTableBody.replaceChildren();
@@ -7309,6 +7373,8 @@ function renderMarketplaceGameLedger(result) {
 
   const rows = (Array.isArray(result?.marketplaceGameLedgerRows) ? result.marketplaceGameLedgerRows : [])
     .filter((row) => row.direction === marketplaceGameDirection);
+  sortMarketplaceTableRows(rows, marketplaceGameSort);
+  renderMarketplaceSortableHeader(earningsMarketplaceGameTableBody, marketplaceGameColumns, marketplaceGameSort, 'game');
   setText(earningsMarketplaceGameStatus, `${formatMarketplaceWhole(rows.length)} ${marketplaceGameDirection === 'deposit' ? 'deposits' : 'withdrawals'} at ${formatCheckedAt(result?.checkedAt)}`);
   earningsMarketplaceGameDirectionButtons.forEach((button) => {
     const active = button.dataset.marketplaceGameDirection === marketplaceGameDirection;
@@ -7364,7 +7430,7 @@ function renderEarningsMarketplace(result) {
   renderMarketplaceGlobalLedger(result);
   renderMarketplaceGameLedger(result);
   updateMarketplaceSubtab();
-  const rows = Array.isArray(result?.marketplaceTrades) ? result.marketplaceTrades : [];
+  const rows = sortMarketplaceTableRows(Array.isArray(result?.marketplaceTrades) ? result.marketplaceTrades : [], marketplaceTradeSort);
   const errorSuffix = result?.marketplaceEventsError ? ` · Decoded Events read failed: ${result.marketplaceEventsError}` : '';
   setText(earningsMarketplaceSyncStatus, `ALL FACTIONS · ${formatMarketplaceWhole(rows.length)} trades at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
   if (!earningsMarketplaceTableBody) return;
@@ -7393,14 +7459,7 @@ function renderEarningsMarketplace(result) {
 }
 
 function renderMarketplaceHeader(visibleColumns) {
-  const row = earningsMarketplaceTableBody?.closest('table')?.querySelector('thead tr');
-  if (!row) return;
-  row.textContent = '';
-  for (const column of visibleColumns) {
-    const th = document.createElement('th');
-    th.textContent = getMarketplaceTradeColumnLabel(column);
-    row.appendChild(th);
-  }
+  renderMarketplaceSortableHeader(earningsMarketplaceTableBody, visibleColumns, marketplaceTradeSort, 'trades');
 }
 
 function createMarketplaceEarningsCell(entry, columnId, calculated) {
@@ -9964,6 +10023,24 @@ earningsMarketplaceEventsTableHead?.addEventListener('click', (event) => {
     ? { column, direction: marketplaceEventsSort.direction === 'asc' ? 'desc' : 'asc' }
     : { column, direction: 'asc' };
   if (latestMarketplaceResult) renderMarketplaceDecodedEvents(latestMarketplaceResult);
+});
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-marketplace-table-sort]');
+  if (!button) return;
+  const [tableId, column] = String(button.dataset.marketplaceTableSort || '').split(':');
+  if (!tableId || !column) return;
+  const toggle = (current) => current.column === column
+    ? { column, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+    : { column, direction: 'asc' };
+  if (tableId === 'trades') marketplaceTradeSort = toggle(marketplaceTradeSort);
+  else if (tableId === 'global') marketplaceGlobalSort = toggle(marketplaceGlobalSort);
+  else if (tableId === 'game') marketplaceGameSort = toggle(marketplaceGameSort);
+  else return;
+  if (!latestMarketplaceResult) return;
+  if (tableId === 'trades') renderEarningsMarketplace(latestMarketplaceResult);
+  else if (tableId === 'global') renderMarketplaceGlobalLedger(latestMarketplaceResult);
+  else renderMarketplaceGameLedger(latestMarketplaceResult);
 });
 
 document.querySelectorAll('.optimization-subtab-button').forEach((button) => {

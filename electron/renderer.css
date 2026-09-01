@@ -2977,3 +2977,15 @@ label {
   color: var(--text);
   font: inherit;
 }
+[data-marketplace-table-sort] {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-weight: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+th[aria-sort="ascending"] [data-marketplace-table-sort],
+th[aria-sort="descending"] [data-marketplace-table-sort] { color: #67b7ff; }

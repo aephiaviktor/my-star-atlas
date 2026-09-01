@@ -57,6 +57,18 @@ test('Marketplace Trades, Global Ledger, and Game Ledger expose persistent table
   assert.doesNotMatch(renderer, /host\.insertBefore\(controls, table\)/);
 });
 
+test('Trades and both ledgers sort every column with timestamp descending by default', () => {
+  assert.match(renderer, /let marketplaceTradeSort = \{ column: 'timestamp', direction: 'desc' \}/);
+  assert.match(renderer, /let marketplaceGlobalSort = \{ column: 'globalTimestamp', direction: 'desc' \}/);
+  assert.match(renderer, /let marketplaceGameSort = \{ column: 'gameTimestamp', direction: 'desc' \}/);
+  assert.match(renderer, /button\.dataset\.marketplaceTableSort = `\$\{tableId\}:\$\{column\.id\}`/);
+  assert.match(renderer, /renderMarketplaceSortableHeader\(earningsMarketplaceGlobalTableBody/);
+  assert.match(renderer, /renderMarketplaceSortableHeader\(earningsMarketplaceGameTableBody/);
+  assert.match(renderer, /renderMarketplaceSortableHeader\(earningsMarketplaceTableBody/);
+  assert.match(renderer, /compareMarketplaceTableValues/);
+  assert.match(renderer, /data-marketplace-table-sort/);
+});
+
 test('Global Ledger and Game Ledger columns participate in the Marketplace sidebar selection', () => {
   for (const id of ['globalTimestamp', 'globalWallet', 'globalCounterparty', 'globalAsset', 'globalQuantity',
     'globalPrincipal', 'globalMarketplaceFee', 'globalTxFee', 'globalFinalBasis', 'globalUnitBasis', 'globalSignature', 'globalStatus',
