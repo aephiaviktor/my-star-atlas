@@ -176,4 +176,130 @@ function replayMarketplaceInventoryLedger(movements = []) {
   };
 }
 
-module.exports = { poolKey, replayMarketplaceInventoryLedger };
+function eventQuantity(event) {
+  const raw = number(event?.quantity ?? event?.quantityRaw);
+  const decimals = Number(event?.decimals || 0);
+  return raw != null && raw > 0 && Number.isInteger(decimals) && decimals > 0 ? raw / (10 ** decimals) : raw;
+}
+
+function inventoryBasisAtOrBefore(observations, event) {
+  const timestamp = Date.parse(event?.timestamp);
+  const faction = text(event?.faction).toUpperCase().replace(/^UST$/, 'USTUR');
+  const starbase = text(event?.starbase);
+  const asset = text(event?.asset);
+  const candidates = (observations || []).filter((row) => text(row?.asset) === asset
+    && Number.isFinite(Date.parse(row?.timestamp)) && Date.parse(row.timestamp) <= timestamp);
+  const latest = (rows) => [...rows].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] || null;
+  return latest(candidates.filter((row) => text(row?.faction).toUpperCase().replace(/^UST$/, 'USTUR') === faction
+      && text(row?.starbase) === starbase))
+    || latest(candidates.filter((row) => text(row?.faction).toUpperCase().replace(/^UST$/, 'USTUR') === faction))
+    || latest(candidates);
+}
+
+function buildMarketplaceInventoryMovements(events = [], { inventoryBasisObservations = [] } = {}) {
+  const rows = Array.from(events || []);
+  const primarySignatures = new Set(rows.filter((event) => event?.action === 'execution'
+      || ['deposit', 'withdraw'].includes(text(event?.eventType).toLowerCase()))
+    .map((event) => text(event?.signature)).filter(Boolean));
+  return rows.flatMap((event) => {
+    const movementId = text(event?.eventId);
+    const timestamp = text(event?.timestamp);
+    const signature = text(event?.signature);
+    const eventType = text(event?.eventType).toLowerCase();
+    const quantity = eventQuantity(event);
+    const asset = text(event?.asset);
+    if (!movementId || !timestamp || !signature || !asset || !(quantity > 0)) return [];
+    const common = { movementId, timestamp, signature, asset, quantity };
+    if (event?.action === 'execution' && ['gm', 'lm'].includes(eventType)) {
+      const wallet = text(event?.fromWallet);
+      const transactionFeeAtlas = Math.max(0, number(event?.txFeeAtlas ?? event?.transactionFeeAtlas) || 0);
+      if (!wallet) return [];
+      if (event?.side === 'sell') return [{ ...common, kind: 'sell', fromWallet: wallet,
+        grossAtlas: number(event?.grossAtlas), marketplaceFeeAtlas: Math.max(0, number(event?.marketplaceFeeAtlas) || 0),
+        transactionFeeAtlas, marketplace: text(event?.market || eventType).toUpperCase(), faction: text(event?.faction) }];
+      return [{ ...common, kind: 'buy', toWallet: wallet, principalAtlas: number(event?.grossAtlas),
+        marketplaceFeeAtlas: 0, transactionFeeAtlas,
+        marketplace: text(event?.market || eventType).toUpperCase(), faction: text(event?.faction) }];
+    }
+    if (eventType === 'transfer') {
+      if (primarySignatures.has(signature)) return [];
+      const fromWallet = text(event?.fromWallet);
+      const toWallet = text(event?.toWallet);
+      if (!fromWallet || !toWallet || fromWallet === toWallet) return [];
+      return [{ ...common, kind: 'transfer', fromWallet, toWallet,
+        transactionFeeAtlas: Math.max(0, number(event?.transactionFeeAtlas) || 0),
+        transactionFeePayer: text(event?.transactionFeePayer) }];
+    }
+    if (eventType === 'deposit') {
+      const fromWallet = text(event?.fromWallet);
+      if (!fromWallet) return [];
+      return [{ ...common, kind: 'deposit', fromWallet, destination: `${text(event?.faction)}:${text(event?.starbase)}`,
+        faction: text(event?.faction), starbase: text(event?.starbase),
+        transactionFeeAtlas: Math.max(0, number(event?.transactionFeeAtlas) || 0),
+        transactionFeePayer: text(event?.transactionFeePayer) }];
+    }
+    if (eventType === 'withdraw') {
+      const toWallet = text(event?.toWallet);
+      if (!toWallet) return [];
+      const observation = inventoryBasisAtOrBefore(inventoryBasisObservations, event);
+      const unitBasisAtlas = number(observation?.weightedAveragePriceAtlas);
+      return [{ ...common, kind: 'withdraw', toWallet, unitBasisAtlas,
+        basisSource: observation ? 'inventory_basis_snapshot' : 'unavailable',
+        faction: text(event?.faction), starbase: text(event?.starbase),
+        transactionFeeAtlas: Math.max(0, number(event?.transactionFeeAtlas) || 0),
+        transactionFeePayer: text(event?.transactionFeePayer) }];
+    }
+    return [];
+  }).sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp)
+    || left.movementId.localeCompare(right.movementId));
+}
+
+function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {
+  const selectedFaction = text(faction).toUpperCase().replace(/^UST$/, 'USTUR');
+  const rows = [];
+  for (const row of ledgerRows || []) {
+    if (row?.status !== 'applied') continue;
+    if (row.kind === 'deposit' && text(row.faction).toUpperCase().replace(/^UST$/, 'USTUR') === selectedFaction) {
+      rows.push({
+        gameLedgerId: row.movementId, direction: 'deposit', timestamp: row.timestamp,
+        physicalTimestamp: row.timestamp, faction: selectedFaction, starbase: text(row.starbase), asset: row.asset,
+        quantity: row.quantity, principalAtlas: row.principalAtlas, carriedBasisAtlas: row.basisMovedAtlas,
+        marketplaceFeeAtlas: row.marketplaceFeeAtlas, transactionFeeAtlas: row.transactionFeeAtlas,
+        finalBasisAtlas: row.basisMovedAtlas, costPerUnitAtlas: row.quantity > 0 ? row.basisMovedAtlas / row.quantity : null,
+        signature: row.signature, physicalSignature: row.signature, status: 'Complete',
+      });
+      continue;
+    }
+    if (row.kind !== 'sell' || !(row.quantity > 0)) continue;
+    for (const origin of row.gameOrigins || []) {
+      if (text(origin.faction).toUpperCase().replace(/^UST$/, 'USTUR') !== selectedFaction || !(origin.quantity > 0)) continue;
+      const ratio = origin.quantity / row.quantity;
+      const carriedBasis = basisAtlas(origin);
+      const marketplaceFee = Number(row.marketplaceFeeAtlas || 0) * ratio;
+      const saleTransactionFee = Number(row.saleTransactionFeeAtlas || 0) * ratio;
+      const finalBasis = carriedBasis + marketplaceFee + saleTransactionFee;
+      rows.push({
+        gameLedgerId: `${row.movementId}:${origin.movementId}`, direction: 'withdraw', timestamp: row.timestamp,
+        physicalWithdrawalTimestamp: '', faction: selectedFaction, starbase: text(origin.starbase), asset: row.asset,
+        quantity: origin.quantity, principalAtlas: origin.principalAtlas, carriedBasisAtlas: carriedBasis,
+        marketplaceFeeAtlas: marketplaceFee,
+        transactionFeeAtlas: Number(origin.transactionFeeAtlas || 0) + saleTransactionFee,
+        finalBasisAtlas: finalBasis, costPerUnitAtlas: origin.quantity > 0 ? finalBasis / origin.quantity : null,
+        grossAtlas: Number(row.grossAtlas || 0) * ratio, netProceedsAtlas: Number(row.netProceedsAtlas || 0) * ratio,
+        signature: row.signature, physicalWithdrawalSignature: text(origin.signature),
+        physicalWithdrawalId: text(origin.movementId), status: 'Complete',
+      });
+    }
+  }
+  const physicalTimes = new Map((ledgerRows || []).filter((row) => row.kind === 'withdraw')
+    .map((row) => [text(row.movementId), text(row.timestamp)]));
+  for (const row of rows) {
+    if (row.direction === 'withdraw') row.physicalWithdrawalTimestamp = physicalTimes.get(row.physicalWithdrawalId) || '';
+  }
+  return rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
+    || left.gameLedgerId.localeCompare(right.gameLedgerId));
+}
+
+module.exports = {
+  poolKey, buildMarketplaceInventoryMovements, replayMarketplaceInventoryLedger, projectGameLedgerRows,
+};
