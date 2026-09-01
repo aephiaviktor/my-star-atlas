@@ -3,6 +3,19 @@
 function text(value) { return String(value || '').trim(); }
 function number(value) { const result = Number(value); return Number.isFinite(result) ? result : null; }
 function poolKey(wallet, asset) { return `${text(wallet)}\n${text(asset)}`; }
+function ledgerOrder(left, right) {
+  const leftSlot = number(left?.slot);
+  const rightSlot = number(right?.slot);
+  if (leftSlot != null && rightSlot != null && leftSlot !== rightSlot) return leftSlot - rightSlot;
+  const timeOrder = Date.parse(left?.timestamp) - Date.parse(right?.timestamp);
+  if (timeOrder) return timeOrder;
+  for (const field of ['outerIndex', 'innerIndex']) {
+    const leftIndex = number(left?.[field]);
+    const rightIndex = number(right?.[field]);
+    if (leftIndex != null && rightIndex != null && leftIndex !== rightIndex) return leftIndex - rightIndex;
+  }
+  return text(left?.movementId).localeCompare(text(right?.movementId));
+}
 function emptyLot(quantity = 0) {
   return { quantity, principalAtlas: 0, marketplaceFeeAtlas: 0, transactionFeeAtlas: 0, gameOrigins: new Map() };
 }
@@ -51,8 +64,7 @@ function replayMarketplaceInventoryLedger(movements = []) {
   const pools = new Map();
   const rows = [];
   const seen = new Set();
-  const ordered = [...movements].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)
-    || text(a.movementId).localeCompare(text(b.movementId)));
+  const ordered = [...movements].sort(ledgerOrder);
 
   const getPool = (wallet, asset) => {
     const key = poolKey(wallet, asset);
@@ -105,7 +117,8 @@ function replayMarketplaceInventoryLedger(movements = []) {
     const parsedTimestamp = new Date(movement.timestamp);
     if (!movementId || seen.has(movementId) || !kind || !asset || !(quantity > 0) || Number.isNaN(parsedTimestamp.getTime())) continue;
     seen.add(movementId);
-    const common = { movementId, timestamp: parsedTimestamp.toISOString(), kind, asset, quantity,
+    const common = { movementId, timestamp: parsedTimestamp.toISOString(), slot: number(movement.slot),
+      outerIndex: number(movement.outerIndex), innerIndex: number(movement.innerIndex), kind, asset, quantity,
       signature: text(movement.signature), status: 'applied' };
     if (kind === 'buy') {
       const wallet = text(movement.toWallet);
@@ -215,7 +228,8 @@ function buildMarketplaceInventoryMovements(events = [], { inventoryBasisObserva
     const quantity = eventQuantity(event);
     const asset = text(event?.asset);
     if (!movementId || !timestamp || !signature || !asset || !(quantity > 0)) return [];
-    const common = { movementId, timestamp, signature, asset, quantity };
+    const common = { movementId, timestamp, signature, slot: number(event?.slot),
+      outerIndex: number(event?.outerIndex), innerIndex: number(event?.innerIndex), asset, quantity };
     if (event?.action === 'execution' && ['gm', 'lm'].includes(eventType)) {
       const wallet = text(event?.fromWallet);
       const transactionFeeAtlas = Math.max(0, number(event?.txFeeAtlas ?? event?.transactionFeeAtlas) || 0);
@@ -256,8 +270,7 @@ function buildMarketplaceInventoryMovements(events = [], { inventoryBasisObserva
         transactionFeePayer: text(event?.transactionFeePayer) }];
     }
     return [];
-  }).sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp)
-    || left.movementId.localeCompare(right.movementId));
+  }).sort(ledgerOrder);
 }
 
 function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {

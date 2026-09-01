@@ -23,7 +23,7 @@ test('Marketplace event lines preserve deterministic identity and source transac
 
 test('transaction fees use independently forward-filled historical SOL/USD and ATLAS/USD prices', () => {
   const transaction = {
-    signature: 'fee-signature', blockTime: 1788091200,
+    signature: 'fee-signature', blockTime: 1788091200, slot: 443094410,
     transaction: { signatures: ['fee-signature'], message: { accountKeys: [{ pubkey: 'fee-payer' }] } },
     meta: { fee: 5000 },
   };
@@ -34,6 +34,7 @@ test('transaction fees use independently forward-filled historical SOL/USD and A
     atlas: [[1788089400000, 0.0015], [1788090600000, 0.002], [1788091800000, 9]],
   });
   assert.equal(event.transactionFeeSol, 0.000005);
+  assert.equal(event.slot, 443094410);
   assert.equal(event.transactionFeeAtlas, 0.375);
   assert.equal(event.transactionFeePayer, 'fee-payer');
   assert.equal(event.transactionFeeConversionSource, 'Aephia token price series');

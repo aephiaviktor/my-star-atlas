@@ -157,3 +157,15 @@ test('Global Ledger renders wallet transfers as balanced withdrawal and deposit 
   assert.equal(transferRows.find((row) => row.direction === 'withdraw').finalBasisAtlas, 101);
   assert.equal(transferRows.find((row) => row.direction === 'deposit').finalBasisAtlas, 101.5);
 });
+
+test('ledger ordering uses slot and instruction position before lexical event identity', () => {
+  const result = replayMarketplaceInventoryLedger([
+    { movementId: 'a-transfer', timestamp: '2026-08-30T10:00:00Z', slot: 2, outerIndex: 0, kind: 'transfer',
+      asset: 'Carbon', quantity: 10, fromWallet: 'gm', toWallet: 'player' },
+    { movementId: 'z-buy', timestamp: '2026-08-30T10:00:00Z', slot: 1, outerIndex: 1, kind: 'buy',
+      asset: 'Carbon', quantity: 10, toWallet: 'gm', principalAtlas: 100 },
+  ]);
+  assert.deepEqual(result.rows.map((row) => [row.movementId, row.status]), [
+    ['z-buy', 'applied'], ['a-transfer', 'applied'],
+  ]);
+});

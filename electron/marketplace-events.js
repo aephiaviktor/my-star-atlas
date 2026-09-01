@@ -110,6 +110,7 @@ function enrichMarketplaceEventsWithTransactionFees(events, transactions, priceS
       : null;
     return {
       ...event,
+      slot: Number.isSafeInteger(Number(transaction?.slot)) ? Number(transaction.slot) : (event?.slot ?? null),
       transactionFeeSol,
       transactionFeeAtlas,
       transactionFeePayer: transactionFeePayer(transaction),
