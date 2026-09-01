@@ -2940,3 +2940,31 @@ label {
   font-size: 10px;
   text-align: left;
 }
+
+.marketplace-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: end;
+  padding: 8px 0 10px;
+}
+.marketplace-filter-control {
+  display: grid;
+  gap: 3px;
+  min-width: 120px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.marketplace-filter-control select {
+  min-width: 120px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-transform: none;
+}

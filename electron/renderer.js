@@ -823,7 +823,22 @@ const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'unitMetric', label: 'Net / Unit' }),
   Object.freeze({ id: 'tradingSignatures', label: 'Signature' }),
   Object.freeze({ id: 'status', label: 'Status' }),
+
 ]);
+const marketplaceCustodyColumns = Object.freeze([
+  Object.freeze({ id: 'custodyTimestamp', label: 'Custody Timestamp' }),
+  Object.freeze({ id: 'custodyRoute', label: 'Custody From → To' }),
+  Object.freeze({ id: 'custodyStarbase', label: 'Custody Starbase' }),
+  Object.freeze({ id: 'custodyAsset', label: 'Custody Asset' }),
+  Object.freeze({ id: 'custodyQuantity', label: 'Custody Quantity' }),
+  Object.freeze({ id: 'custodyCarriedBasis', label: 'Custody Carried Basis' }),
+  Object.freeze({ id: 'custodyTxFee', label: 'Custody Tx Fee' }),
+  Object.freeze({ id: 'custodyFinalBasis', label: 'Custody Final Basis' }),
+  Object.freeze({ id: 'custodyUnitBasis', label: 'Custody Cost / Unit' }),
+  Object.freeze({ id: 'custodySignature', label: 'Custody Signature' }),
+  Object.freeze({ id: 'custodyStatus', label: 'Custody Status' }),
+]);
+
 
 const marketplaceRawColumns = Object.freeze([
   Object.freeze({ id: 'timestamp', label: 'Timestamp (UTC)', sortable: true }),
@@ -862,6 +877,7 @@ const earningsColumnsBySubtab = Object.freeze({
   upgrading: upgradingEarningsOptionalColumns,
   breakeven: breakevenEarningsOptionalColumns,
   marketplace: marketplaceEarningsOptionalColumns,
+  marketplaceCustody: marketplaceCustodyColumns,
   marketplaceRaw: marketplaceRawColumns,
   marketplaceEvents: marketplaceEventColumns,
 });
@@ -875,6 +891,7 @@ const earningsColumnState = {
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   breakeven: new Set(),
   marketplace: new Set(marketplaceEarningsOptionalColumns.map((column) => column.id)),
+  marketplaceCustody: new Set(marketplaceCustodyColumns.map((column) => column.id)),
   marketplaceRaw: new Set(marketplaceRawColumns.map((column) => column.id)),
   marketplaceEvents: new Set(marketplaceEventColumns.map((column) => column.id)),
 };
@@ -5876,6 +5893,7 @@ function getActiveEarningsColumnsSubtab() {
   if (currentEarningsSubtab === 'cargo' && activeCargoTable === 'allocation') return 'cargoAllocation';
   if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'raw') return 'marketplaceRaw';
   if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'events') return 'marketplaceEvents';
+  if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'custody') return 'marketplaceCustody';
   return currentEarningsSubtab;
 }
 
@@ -5974,6 +5992,8 @@ function renderEarningsColumnControls() {
         renderMarketplaceRawData(latestMarketplaceResult);
       } else if (subtab === 'marketplaceEvents') {
         renderMarketplaceDecodedEvents(latestMarketplaceResult);
+      } else if (subtab === 'marketplaceCustody') {
+        renderMarketplaceCustodyLedger(latestMarketplaceResult);
       } else if (latestEarningsResult) {
         renderEarnings(latestEarningsResult);
       } else {
@@ -7114,7 +7134,84 @@ function renderMarketplaceDecodedEvents(result) {
   }
 }
 
+const marketplaceTradeFilters = { marketplace: '', faction: '', side: '', asset: '', status: '' };
+const marketplaceCustodyFilters = { starbase: '', asset: '', status: '' };
+
+function filterMarketplaceRows(rows, state) {
+  return Array.from(rows || []).filter((row) => Object.entries(state).every(([key, selected]) => {
+    if (!selected) return true;
+    return String(row?.[key] || '').trim().toUpperCase() === selected;
+  }));
+}
+
+function renderMarketplaceTableFilters(id, tableBody, rows, definitions, state, onChange) {
+  const table = tableBody?.closest('table');
+  const host = table?.parentElement;
+  if (!host || !table) return;
+  let controls = document.getElementById(id);
+  if (!controls) {
+    controls = document.createElement('div');
+    controls.id = id;
+    controls.className = 'marketplace-filter-row';
+    host.insertBefore(controls, table);
+  }
+  controls.replaceChildren();
+  for (const definition of definitions) {
+    const label = document.createElement('label');
+    label.className = 'marketplace-filter-control';
+    const text = document.createElement('span');
+    text.textContent = definition.label;
+    const select = document.createElement('select');
+    const all = document.createElement('option');
+    all.value = '';
+    all.textContent = 'All';
+    select.appendChild(all);
+    const values = Array.from(new Set(Array.from(rows || []).map((row) => String(row?.[definition.key] || '').trim().toUpperCase()).filter(Boolean))).sort();
+    for (const value of values) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
+    }
+    if (state[definition.key] && values.includes(state[definition.key])) select.value = state[definition.key];
+    else state[definition.key] = '';
+    select.addEventListener('change', () => {
+      state[definition.key] = select.value;
+      onChange();
+    });
+    label.append(text, select);
+    controls.appendChild(label);
+  }
+}
+
+function applyMarketplaceCustodyColumnVisibility() {
+  const ids = ['custodyTimestamp', 'custodyRoute', 'custodyStarbase', 'custodyAsset', 'custodyQuantity', 'custodyCarriedBasis', 'custodyTxFee', 'custodyFinalBasis', 'custodyUnitBasis', 'custodySignature', 'custodyStatus'];
+  const selected = earningsColumnState.marketplaceCustody || new Set(marketplaceCustodyColumns.map((column) => column.id));
+  const table = earningsMarketplaceCustodyTableBody?.closest('table');
+  if (!table) return;
+  const headers = Array.from(table.querySelectorAll('thead th'));
+  headers.forEach((header, index) => { header.hidden = !selected.has(ids[index]); });
+  for (const row of table.querySelectorAll('tbody tr')) {
+    const cells = Array.from(row.children);
+    if (cells.length === 1 && cells[0].hasAttribute('colspan')) {
+      cells[0].hidden = false;
+      cells[0].colSpan = Math.max(1, ids.filter((id) => selected.has(id)).length);
+      continue;
+    }
+    cells.forEach((cell, index) => { cell.hidden = !selected.has(ids[index]); });
+  }
+}
+
 function renderMarketplaceCustodyLedger(result) {
+  const sourceCustodyResult = result;
+  const sourceRows = Array.from(result?.marketplaceCustodyRows || []);
+  renderMarketplaceTableFilters('earnings-marketplace-custody-filters', earningsMarketplaceCustodyTableBody, sourceRows, [
+    { key: 'starbase', label: 'Starbase' },
+    { key: 'asset', label: 'Asset' },
+    { key: 'status', label: 'Status' },
+  ], marketplaceCustodyFilters, () => renderMarketplaceCustodyLedger(sourceCustodyResult));
+  result = { ...result, marketplaceCustodyRows: filterMarketplaceRows(sourceRows, marketplaceCustodyFilters) };
+
   const rows = (Array.isArray(result?.marketplaceCustodyRows) ? result.marketplaceCustodyRows : [])
     .filter((row) => row.direction === marketplaceCustodyDirection);
   setText(earningsMarketplaceCustodyStatus, `${formatMarketplaceWhole(rows.length)} ${marketplaceCustodyDirection === 'deposit' ? 'deposits' : 'withdrawals'} at ${formatCheckedAt(result?.checkedAt)}`);
@@ -7128,7 +7225,9 @@ function renderMarketplaceCustodyLedger(result) {
   if (!rows.length) {
     const tr = document.createElement('tr'); tr.className = 'empty-row';
     const td = createTextCell(`No ${marketplaceCustodyDirection === 'deposit' ? 'deposits' : 'withdrawals'} found`); td.colSpan = 11;
-    tr.appendChild(td); earningsMarketplaceCustodyTableBody.appendChild(tr); return;
+    tr.appendChild(td); earningsMarketplaceCustodyTableBody.appendChild(tr);
+    applyMarketplaceCustodyColumnVisibility();
+    return;
   }
   for (const entry of rows) {
     const tr = document.createElement('tr');
@@ -7150,9 +7249,21 @@ function renderMarketplaceCustodyLedger(result) {
     tr.append(signatureCell, createTextCell(entry.status || 'Unvalued'));
     earningsMarketplaceCustodyTableBody.appendChild(tr);
   }
+  applyMarketplaceCustodyColumnVisibility();
 }
 
 function renderEarningsMarketplace(result) {
+  const sourceTradeResult = result;
+  const sourceTradeRows = Array.from(result?.marketplaceTrades || []);
+  renderMarketplaceTableFilters('earnings-marketplace-trades-filters', earningsMarketplaceTableBody, sourceTradeRows, [
+    { key: 'marketplace', label: 'Marketplace' },
+    { key: 'faction', label: 'Faction' },
+    { key: 'side', label: 'Side' },
+    { key: 'asset', label: 'Asset' },
+    { key: 'status', label: 'Status' },
+  ], marketplaceTradeFilters, () => renderEarningsMarketplace(sourceTradeResult));
+  result = { ...result, marketplaceTrades: filterMarketplaceRows(sourceTradeRows, marketplaceTradeFilters) };
+
   renderMarketplaceRawData(result);
   renderMarketplaceDecodedEvents(result);
   renderMarketplaceCustodyLedger(result);

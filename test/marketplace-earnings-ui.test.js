@@ -40,6 +40,28 @@ test('Marketplace renderer uses the deterministic global Trades projection', () 
   assert.doesNotMatch(renderer, /earningsMarketplaceSide|dataset\.marketplaceSide/);
 });
 
+test('Marketplace Trades and Custody Ledger expose persistent table filters', () => {
+  assert.match(renderer, /earnings-marketplace-trades-filters/);
+  assert.match(renderer, /marketplaceTradeFilters/);
+  assert.match(renderer, /\{ key: 'marketplace', label: 'Marketplace' \}/);
+  assert.match(renderer, /earnings-marketplace-custody-filters/);
+  assert.match(renderer, /marketplaceCustodyFilters/);
+  assert.match(renderer, /\{ key: 'starbase', label: 'Starbase' \}/);
+  assert.match(renderer, /filterMarketplaceRows/);
+});
+
+test('Custody Ledger columns participate in the Marketplace sidebar selection', () => {
+  for (const id of ['custodyTimestamp', 'custodyRoute', 'custodyStarbase', 'custodyAsset', 'custodyQuantity',
+    'custodyCarriedBasis', 'custodyTxFee', 'custodyFinalBasis', 'custodyUnitBasis', 'custodySignature', 'custodyStatus']) {
+    assert.match(renderer, new RegExp(`id: '${id}'`));
+  }
+  assert.match(renderer, /marketplaceCustody: marketplaceCustodyColumns/);
+  assert.match(renderer, /currentMarketplaceSubtab === 'custody'\) return 'marketplaceCustody'/);
+  assert.match(renderer, /subtab === 'marketplaceCustody'[\s\S]*renderMarketplaceCustodyLedger/);
+  assert.match(renderer, /applyMarketplaceCustodyColumnVisibility/);
+  assert.match(renderer, /header\.hidden = !selected\.has\(ids\[index\]\)/);
+});
+
 test('Marketplace event synchronization supplies decoded LM and GM executions with explicit scope', () => {
   assert.match(main, /syncMarketplaceEventsFromRawData\(settings, \{[\s\S]*localTrades: local\.trades,[\s\S]*globalTrades: global\.trades/);
   assert.match(main, /projectMarketplaceOrderAndExecutionEvents\(\{ trades: localTrades \}, 'LM', \{ faction: settings\.faction \}\)/);
