@@ -69,6 +69,9 @@ function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [], assetsByMint 
       ].map((balance) => String(balance?.owner || '')).filter(Boolean))];
       events.push(...playerTransferEvents(transaction, balanceOwners).map((event) => ({
         ...event, eventType: 'transfer', action: 'transfer',
+        asset: String(assetsByMint[String(event.mint || '')]?.name
+          || assetsByMint[String(event.mint || '')]?.asset
+          || assetsByMint[String(event.mint || '')] || ''),
       })));
     }
   }

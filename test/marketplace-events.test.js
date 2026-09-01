@@ -89,3 +89,32 @@ test('existing Raw Data CSS rows backfill deposit and withdrawal events without 
   assert.ok(events.every((event) => event.asset === 'Fuel'));
   assert.ok(events.every((event) => event.quantityRaw === '10'));
 });
+
+test('decoded wallet transfers carry the registered asset name into the ledger', () => {
+  const transaction = {
+    blockTime: 1788091200,
+    transaction: { signatures: ['wallet-transfer'], message: {
+      accountKeys: ['source-token', 'destination-token'],
+      instructions: [{ parsed: { type: 'transferChecked', info: {
+        source: 'source-token', destination: 'destination-token', mint: 'carbon-mint',
+        tokenAmount: { amount: '125', decimals: 0 },
+      } } }],
+    } },
+    meta: {
+      err: null, innerInstructions: [],
+      preTokenBalances: [
+        { accountIndex: 0, owner: 'gm-wallet', mint: 'carbon-mint' },
+        { accountIndex: 1, owner: 'player-wallet', mint: 'carbon-mint' },
+      ],
+      postTokenBalances: [
+        { accountIndex: 0, owner: 'gm-wallet', mint: 'carbon-mint' },
+        { accountIndex: 1, owner: 'player-wallet', mint: 'carbon-mint' },
+      ],
+    },
+  };
+  const [event] = deriveCustodyEventsFromRawRows([
+    { signature: 'wallet-transfer', discoverySource: 'token_account', payload: transaction },
+  ], { assetsByMint: { 'carbon-mint': { name: 'Carbon' } } });
+  assert.equal(event.eventType, 'transfer');
+  assert.equal(event.asset, 'Carbon');
+});
