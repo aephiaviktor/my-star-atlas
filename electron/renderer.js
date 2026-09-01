@@ -7157,13 +7157,16 @@ function renderMarketplaceDecodedEvents(result) {
   }
 }
 
-const marketplaceTradeFilters = { marketplace: '', faction: '', starbase: '', side: '', asset: '' };
-const marketplaceGlobalFilters = { wallet: '', direction: '', movementType: '', asset: '', status: '' };
-const marketplaceGameFilters = { asset: '', status: '' };
+const marketplaceTradeFilters = { from: '', to: '', marketplace: '', faction: '', starbase: '', side: '', asset: '' };
+const marketplaceGlobalFilters = { from: '', to: '', wallet: '', direction: '', movementType: '', asset: '', status: '' };
+const marketplaceGameFilters = { from: '', to: '', asset: '', status: '' };
 
 function filterMarketplaceRows(rows, state) {
   return Array.from(rows || []).filter((row) => Object.entries(state).every(([key, selected]) => {
     if (!selected) return true;
+    const day = String(row?.timestamp || '').slice(0, 10);
+    if (key === 'from') return day >= selected;
+    if (key === 'to') return day <= selected;
     return String(row?.[key] || '').trim().toUpperCase() === selected;
   }));
 }
@@ -7171,13 +7174,14 @@ function filterMarketplaceRows(rows, state) {
 function renderMarketplaceTableFilters(id, tableBody, rows, definitions, state, onChange) {
   const table = tableBody?.closest('table');
   const host = table?.parentElement;
-  if (!host || !table) return;
+  const panel = host?.parentElement;
+  if (!host || !panel || !table) return;
   let controls = document.getElementById(id);
   if (!controls) {
     controls = document.createElement('div');
     controls.id = id;
     controls.className = 'marketplace-filter-row';
-    host.insertBefore(controls, table);
+    panel.insertBefore(controls, host);
   }
   controls.replaceChildren();
   for (const definition of definitions) {
@@ -7185,6 +7189,18 @@ function renderMarketplaceTableFilters(id, tableBody, rows, definitions, state, 
     label.className = 'marketplace-filter-control';
     const text = document.createElement('span');
     text.textContent = definition.label;
+    if (definition.type === 'date') {
+      const input = document.createElement('input');
+      input.type = 'date';
+      input.value = state[definition.key] || '';
+      input.addEventListener('change', () => {
+        state[definition.key] = input.value;
+        onChange();
+      });
+      label.append(text, input);
+      controls.appendChild(label);
+      continue;
+    }
     const select = document.createElement('select');
     const all = document.createElement('option');
     all.value = '';
@@ -7241,6 +7257,8 @@ function renderMarketplaceGlobalLedger(result) {
   const sourceResult = result;
   const sourceRows = Array.from(result?.marketplaceGlobalLedgerRows || []);
   renderMarketplaceTableFilters('earnings-marketplace-global-filters', earningsMarketplaceGlobalTableBody, sourceRows, [
+    { key: 'from', label: 'From', type: 'date' },
+    { key: 'to', label: 'To', type: 'date' },
     { key: 'wallet', label: 'Wallet' },
     { key: 'direction', label: 'Direction' },
     { key: 'movementType', label: 'Movement' },
@@ -7282,6 +7300,8 @@ function renderMarketplaceGameLedger(result) {
   const sourceGameResult = result;
   const sourceRows = Array.from(result?.marketplaceGameLedgerRows || []);
   renderMarketplaceTableFilters('earnings-marketplace-game-filters', earningsMarketplaceGameTableBody, sourceRows, [
+    { key: 'from', label: 'From', type: 'date' },
+    { key: 'to', label: 'To', type: 'date' },
     { key: 'asset', label: 'Asset' },
     { key: 'status', label: 'Status' },
   ], marketplaceGameFilters, () => renderMarketplaceGameLedger(sourceGameResult));
@@ -7329,6 +7349,8 @@ function renderEarningsMarketplace(result) {
   const sourceTradeResult = result;
   const sourceTradeRows = Array.from(result?.marketplaceTrades || []);
   renderMarketplaceTableFilters('earnings-marketplace-trades-filters', earningsMarketplaceTableBody, sourceTradeRows, [
+    { key: 'from', label: 'From', type: 'date' },
+    { key: 'to', label: 'To', type: 'date' },
     { key: 'marketplace', label: 'Marketplace' },
     { key: 'faction', label: 'Faction' },
     { key: 'starbase', label: 'Starbase' },

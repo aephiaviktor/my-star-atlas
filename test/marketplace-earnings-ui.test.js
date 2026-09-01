@@ -51,6 +51,10 @@ test('Marketplace Trades, Global Ledger, and Game Ledger expose persistent table
   assert.match(renderer, /marketplaceGameFilters/);
   assert.match(renderer, /\{ key: 'starbase', label: 'Starbase' \}/);
   assert.match(renderer, /filterMarketplaceRows/);
+  assert.match(renderer, /\{ key: 'from', label: 'From', type: 'date' \},[\s\S]*\{ key: 'to', label: 'To', type: 'date' \}/);
+  assert.match(renderer, /input\.type = 'date'/);
+  assert.match(renderer, /panel\.insertBefore\(controls, host\)/);
+  assert.doesNotMatch(renderer, /host\.insertBefore\(controls, table\)/);
 });
 
 test('Global Ledger and Game Ledger columns participate in the Marketplace sidebar selection', () => {
