@@ -161,7 +161,7 @@ function replayMarketplaceInventoryLedger(movements = []) {
       const after = add(wallet, asset, lot);
       rows.push({ ...common, toWallet: wallet, ...lotFields(lot),
         unitBasisAtlas: quantity > 0 ? basisAtlas(lot) / quantity : null,
-        basisSource, after: copyPool(after) });
+        basisSource, faction: text(movement.faction), starbase: text(movement.starbase), after: copyPool(after) });
       continue;
     }
     if (kind === 'transfer') {
@@ -341,10 +341,51 @@ function buildMarketplaceInventoryMovements(events = [], {
   return movements;
 }
 
+function quantitiesDescribeSamePhysicalLot(left, right) {
+  const leftQuantity = Number(left);
+  const rightQuantity = Number(right);
+  if (!(leftQuantity > 0) || !(rightQuantity > 0)) return false;
+  return Math.abs(leftQuantity - rightQuantity) <= Math.max(1, Math.max(leftQuantity, rightQuantity) * 1e-9);
+}
+
+function directPhysicalWithdrawalsForSale(ledgerRows, sale, selectedFaction) {
+  const ordered = [...(ledgerRows || [])].sort(ledgerOrder);
+  let cursor = ordered.indexOf(sale);
+  let wallet = text(sale?.fromWallet);
+  let quantity = Number(sale?.quantity);
+  for (let depth = 0; cursor > 0 && wallet && quantity > 0 && depth < 16; depth += 1) {
+    let inbound = null;
+    for (let index = cursor - 1; index >= 0; index -= 1) {
+      const candidate = ordered[index];
+      if (text(candidate?.asset) !== text(sale?.asset) || !quantitiesDescribeSamePhysicalLot(candidate?.quantity, quantity)) continue;
+      const destination = candidate?.kind === 'buy' || candidate?.kind === 'withdraw'
+        ? text(candidate?.toWallet) : candidate?.kind === 'transfer' ? text(candidate?.toWallet) : '';
+      if (destination !== wallet) continue;
+      inbound = { candidate, index };
+      break;
+    }
+    if (!inbound) break;
+    const { candidate, index } = inbound;
+    if (candidate.kind === 'withdraw'
+      && text(candidate.faction).toUpperCase().replace(/^UST$/, 'USTUR') === selectedFaction) {
+      return [{ movementId: text(candidate.movementId), signature: text(candidate.signature),
+        timestamp: text(candidate.timestamp), quantity: Number(candidate.quantity) }];
+    }
+    if (candidate.kind !== 'transfer') break;
+    wallet = text(candidate.fromWallet);
+    quantity = Number(candidate.quantity);
+    cursor = index;
+  }
+  const origins = sale?.gameOrigins || [];
+  const ids = [...new Set(origins.map((origin) => text(origin.movementId)).filter(Boolean))];
+  if (ids.length !== 1) return [];
+  const withdrawal = ordered.find((row) => row.kind === 'withdraw' && text(row.movementId) === ids[0]);
+  return withdrawal ? [{ movementId: text(withdrawal.movementId), signature: text(withdrawal.signature),
+    timestamp: text(withdrawal.timestamp), quantity: Number(withdrawal.quantity) }] : [];
+}
+
 function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {
   const selectedFaction = text(faction).toUpperCase().replace(/^UST$/, 'USTUR');
-  const physicalTimes = new Map((ledgerRows || []).filter((row) => row.kind === 'withdraw')
-    .map((row) => [text(row.movementId), text(row.timestamp)]));
   const rows = [];
   const saleGroups = new Map();
   for (const row of ledgerRows || []) {
@@ -389,13 +430,8 @@ function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {
     group.transactionFeeAtlas += Number(row.saleTransactionFeeAtlas || 0) * ratio;
     group.grossAtlas += Number(row.grossAtlas || 0) * ratio;
     group.netProceedsAtlas += Number(row.netProceedsAtlas || 0) * ratio;
-    for (const origin of origins) {
-      const movementId = text(origin.movementId);
-      const current = group.physicalWithdrawals.get(movementId) || {
-        movementId, signature: text(origin.signature), timestamp: physicalTimes.get(movementId) || '', quantity: 0,
-      };
-      current.quantity += Number(origin.quantity || 0);
-      group.physicalWithdrawals.set(movementId, current);
+    for (const physical of directPhysicalWithdrawalsForSale(ledgerRows, row, selectedFaction)) {
+      group.physicalWithdrawals.set(physical.movementId, physical);
     }
   }
   for (const group of saleGroups.values()) {
