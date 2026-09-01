@@ -4797,8 +4797,9 @@ async function writeMarketplaceEvents(settings, events, transactions = []) {
   return { written: lines.length };
 }
 
-function projectMarketplaceOrderAndExecutionEvents(scanned, market) {
+function projectMarketplaceOrderAndExecutionEvents(scanned, market, { faction = '' } = {}) {
   const eventType = String(market || '').toLowerCase();
+  const eventFaction = eventType === 'gm' ? 'GLOBAL' : normalizeFaction(faction);
   const events = [];
   for (const order of scanned?.orders || []) {
     const signature = String(order.creationSignature || '');
@@ -4806,6 +4807,7 @@ function projectMarketplaceOrderAndExecutionEvents(scanned, market) {
     events.push({
       eventId: `${signature}:${eventType}:order:${order.orderId}`, signature, eventType,
       action: 'order_created', market: String(market || '').toUpperCase(), orderId: String(order.orderId),
+      faction: eventFaction,
       side: String(order.side || ''), fromWallet: String(order.initializer || ''), asset: String(order.asset || ''),
       mint: String(order.rawMint || order.certificateMint || ''), quantityRaw: String(order.originalQuantity ?? ''),
       unitPriceAtlas: Number(order.priceAtlas),
@@ -4817,6 +4819,7 @@ function projectMarketplaceOrderAndExecutionEvents(scanned, market) {
     events.push({
       eventId: `${signature}:${eventType}:execution:${trade.id}`, signature, eventType,
       action: 'execution', market: String(market || '').toUpperCase(), orderId: String(trade.orderId || ''),
+      faction: eventFaction,
       side: String(trade.side || ''), fromWallet: String(trade.wallet || ''), asset: String(trade.asset || ''),
       mint: String(trade.rawMint || trade.certificateMint || ''), quantityRaw: String(trade.quantity ?? ''),
       unitPriceAtlas: Number(trade.unitPriceAtlas ?? trade.priceAtlas), grossAtlas: Number(trade.grossAtlas),
@@ -4828,7 +4831,7 @@ function projectMarketplaceOrderAndExecutionEvents(scanned, market) {
     const cancellations = (transaction?.meta?.logMessages || []).filter((line) => String(line).includes('Instruction: ProcessCancel'));
     cancellations.forEach((_line, index) => events.push({
       eventId: `${signature}:${eventType}:cancel:${index}`, signature, eventType,
-      action: 'order_cancelled', market: String(market || '').toUpperCase(),
+      action: 'order_cancelled', market: String(market || '').toUpperCase(), faction: eventFaction,
     }));
   }
   return events;
@@ -4865,7 +4868,7 @@ function projectMarketplaceEventsFromRawRows(rawRows, market) {
   }, market);
 }
 
-async function syncMarketplaceEventsFromRawData(settings) {
+async function syncMarketplaceEventsFromRawData(settings, { localTrades = [], globalTrades = [] } = {}) {
   const rawData = await fetchMarketplaceRawDataFromInflux(settings);
   if (rawData.error) throw new Error(rawData.error);
   const cssScopes = ['MUD', 'ONI', 'USTUR'].map((faction) => ({
@@ -4890,8 +4893,11 @@ async function syncMarketplaceEventsFromRawData(settings) {
     fetchAephiaTokenPriceSeries('sol', fromMs, toMs).catch(() => []),
     fetchAephiaTokenPriceSeries('atlas', fromMs, toMs).catch(() => []),
   ]) : [[], []];
+  const assetsByMint = Object.fromEntries(ASSET_REGISTRY.map((asset) => [asset.mint, asset]));
   const events = enrichMarketplaceEventsWithTransactionFees([
-    ...deriveCustodyEventsFromRawRows(rawData.rows, { cssScopes }),
+    ...projectMarketplaceOrderAndExecutionEvents({ trades: localTrades }, 'LM', { faction: settings.faction }),
+    ...projectMarketplaceOrderAndExecutionEvents({ trades: globalTrades }, 'GM', { faction: 'GLOBAL' }),
+    ...deriveCustodyEventsFromRawRows(rawData.rows, { cssScopes, assetsByMint }),
     ...projectMarketplaceEventsFromRawRows(rawData.rows, 'LM'),
     ...projectMarketplaceEventsFromRawRows(rawData.rows, 'GM'),
   ], transactions, { sol, atlas });
@@ -5630,8 +5636,18 @@ async function fetchLocalMarketTrades(settings, connection) {
   const anchorMs = Math.max(checkpointNewestMs, Number.isFinite(influxNewestMs) ? influxNewestMs : 0, startMs);
   const overlapStart = new Date(Math.max(startMs, anchorMs - 60 * 60 * 1000)).toISOString();
   const needsTradeEnrichment = checkpoint.tradeEnrichmentVersion < 3;
+  const needsRawDataBackfill = checkpoint.rawDataBackfilled !== true;
   const migrationWalletCursors = checkpoint.walletCursors;
-  const historicalOrderIds = needsTradeEnrichment ? loadLocalMarketHistoricalOrderIds(faction, startIso) : [];
+  const historicalOrderIds = needsTradeEnrichment || needsRawDataBackfill
+    ? Array.from(new Set([
+      ...loadLocalMarketHistoricalOrderIds(faction, startIso),
+      ...existing.map((trade) => String(trade.orderId || '')).filter(Boolean),
+    ]))
+    : [];
+  const rawBackfillSignatures = needsRawDataBackfill ? Array.from(new Set([
+    ...checkpoint.orders.map((order) => String(order.creationSignature || '')),
+    ...existing.flatMap((trade) => [String(trade.signature || ''), String(trade.creationSignature || '')]),
+  ].filter(Boolean))) : [];
   const cursorInputSnapshot = marketplaceCursorSnapshot(
     migrationWalletCursors,
     needsTradeEnrichment ? {} : checkpoint.orderCursors,
@@ -5646,6 +5662,7 @@ async function fetchLocalMarketTrades(settings, connection) {
     ...cursorInputSnapshot,
     openOrderIds: openOrders.orderIds,
     historicalOrderIds,
+    rawBackfillSignatures,
     transactionBatchSize: 5,
     maxPages: 1,
     startIso: needsTradeEnrichment ? startIso : overlapStart,
@@ -5670,6 +5687,8 @@ async function fetchLocalMarketTrades(settings, connection) {
   const trades = Array.from(byId.values()).filter((trade) => Date.parse(trade.timestamp) >= startMs)
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
   const lmRawRecords = buildLmRawRecords({ transactions: scanned.rawTransactions });
+  const persistedRawSignatures = new Set(lmRawRecords.map((record) => String(record.signature || '')).filter(Boolean));
+  const rawBackfillComplete = rawBackfillSignatures.every((signature) => persistedRawSignatures.has(signature));
   try {
     await writeMarketplaceRawRecords(settings, lmRawRecords);
   } catch (error) {
@@ -5691,7 +5710,9 @@ async function fetchLocalMarketTrades(settings, connection) {
     schemaVersion: 2, faction, profile, savedAt: new Date().toISOString(),
     orders: scanned.orders, trades, ...cursorOutputSnapshot,
     publishedTradeIds: Array.from(checkpoint.publishedTradeIds).sort(),
-    marketplaceBackfilled: false, tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
+    marketplaceBackfilled: false,
+    rawDataBackfilled: checkpoint.rawDataBackfilled === true,
+    tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
   };
   const publication = await publishMarketplaceCandidateSet(
     settings,
@@ -5719,9 +5740,11 @@ async function fetchLocalMarketTrades(settings, connection) {
   const tradeEnrichmentVersionNext = marketplaceBackfilledNext
     && scanned.stats.transactionMisses === 0 && publishError === '' && publication.allEnrichableComplete
     ? 3 : checkpoint.tradeEnrichmentVersion;
+  const rawDataBackfilledNext = rawBackfillComplete && scanned.stats.transactionMisses === 0 && !scanned.exhaustion;
   await writeJsonAtomic(filePath, {
     ...checkpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
     marketplaceBackfilled: marketplaceBackfilledNext,
+    rawDataBackfilled: rawDataBackfilledNext,
     tradeEnrichmentVersion: tradeEnrichmentVersionNext,
   });
   return {
@@ -5976,7 +5999,10 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
       const local = await fetchLocalMarketTrades(settings, localConnection);
       const global = await fetchGlobalMarketTrades(settings, globalConnection);
       const marketplaceEventsWrite = typeof syncMarketplaceEventsFromRawData === 'function'
-        ? await syncMarketplaceEventsFromRawData(settings)
+        ? await syncMarketplaceEventsFromRawData(settings, {
+          localTrades: local.trades,
+          globalTrades: global.trades,
+        })
           .catch((error) => ({ written: 0, error: String(error?.message || error || 'marketplace_events_sync_failed') }))
         : { written: 0, error: '' };
       const exhaustions = [local.exhaustion, global.exhaustion].filter(Boolean);

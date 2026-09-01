@@ -43,7 +43,7 @@ function rawRowSources(row) {
   return new Set(String(row?.discoverySource || '').split(',').map((value) => value.trim()).filter(Boolean));
 }
 
-function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [] } = {}) {
+function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [], assetsByMint = {} } = {}) {
   const events = [];
   for (const row of rawRows || []) {
     const transaction = row?.payload;
@@ -53,10 +53,14 @@ function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [] } = {}) {
       for (const scope of cssScopes) {
         events.push(...classifyCssCargoEvents(transaction, {
           sageProgramId: scope.sageProgramId, cssStarbasePlayer: scope.address,
-        }).map((event) => ({
-          ...event, eventType: event.stream, action: event.type,
-          faction: String(scope.faction || ''), starbase: String(scope.starbase || ''),
-        })));
+        }).map((event) => {
+          const asset = assetsByMint[String(event.mint || '')];
+          return {
+            ...event, eventType: event.stream, action: event.type,
+            faction: String(scope.faction || ''), starbase: String(scope.starbase || ''),
+            asset: String(asset?.name || asset?.asset || asset || ''),
+          };
+        }));
       }
     }
     if (sources.has('token_account') || sources.has('multiple')) {

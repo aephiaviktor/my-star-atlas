@@ -10,6 +10,7 @@ function projectDecodedMarketplaceTrades(events = []) {
       && event?.action === 'execution')
     .map((event) => {
       const side = event.side === 'sell' ? 'sell' : 'buy';
+      const marketplace = String(event.market || event.eventType || '').toUpperCase();
       const quantity = finiteOrNull(event.quantity ?? event.quantityRaw);
       const unitPriceAtlas = finiteOrNull(event.unitPriceAtlas);
       const grossAtlas = finiteOrNull(event.grossAtlas)
@@ -25,7 +26,7 @@ function projectDecodedMarketplaceTrades(events = []) {
           : grossAtlas - marketplaceFeeAtlas - transactionFeeAtlas;
       return {
         tradeId: String(event.eventId || ''), timestamp: String(event.timestamp || ''), side,
-        marketplace: String(event.market || event.eventType || '').toUpperCase(), faction: String(event.faction || '').toUpperCase(),
+        marketplace, faction: marketplace === 'GM' ? 'GLOBAL' : String(event.faction || '').toUpperCase(),
         asset: String(event.asset || ''), quantity, unitPriceAtlas, grossAtlas,
         marketplaceFeeAtlas: side === 'buy' ? 0 : marketplaceFeeAtlas,
         transactionFeeAtlas, netAtlas,
