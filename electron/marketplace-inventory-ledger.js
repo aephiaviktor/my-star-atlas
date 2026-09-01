@@ -250,7 +250,7 @@ function buildMarketplaceInventoryMovements(events = [], { inventoryBasisObserva
     }
   }
   for (const wallet of ownedSeeds) ownedWallets.add(wallet);
-  return rows.flatMap((event) => {
+  const movements = rows.flatMap((event) => {
     const movementId = text(event?.eventId);
     const timestamp = text(event?.timestamp);
     const signature = text(event?.signature);
@@ -301,6 +301,17 @@ function buildMarketplaceInventoryMovements(events = [], { inventoryBasisObserva
     }
     return [];
   }).sort(ledgerOrder);
+  const feeGroups = new Map();
+  for (const movement of movements.filter((row) => ['transfer', 'deposit', 'withdraw'].includes(row.kind))) {
+    if (!feeGroups.has(movement.signature)) feeGroups.set(movement.signature, []);
+    feeGroups.get(movement.signature).push(movement);
+  }
+  for (const group of feeGroups.values()) {
+    if (group.length <= 1) continue;
+    const totalTransactionFee = Math.max(...group.map((movement) => Number(movement.transactionFeeAtlas || 0)));
+    for (const movement of group) movement.transactionFeeAtlas = totalTransactionFee / group.length;
+  }
+  return movements;
 }
 
 function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {

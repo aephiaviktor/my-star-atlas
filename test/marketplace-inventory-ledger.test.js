@@ -172,3 +172,20 @@ test('ledger ordering uses slot and instruction position before lexical event id
     ['z-buy', 'applied'], ['a-transfer', 'applied'],
   ]);
 });
+
+test('one wallet-transfer transaction fee is divided across its decoded asset movements', () => {
+  const movements = buildMarketplaceInventoryMovements([
+    { eventId: 'buy', eventType: 'gm', action: 'execution', side: 'buy', timestamp: '2026-08-30T10:00:00Z',
+      signature: 'buy', fromWallet: 'gm', asset: 'Carbon', quantityRaw: '10', grossAtlas: 100 },
+    { eventId: 'carbon-transfer', eventType: 'transfer', action: 'transfer', timestamp: '2026-08-30T10:05:00Z',
+      signature: 'transfer', fromWallet: 'gm', toWallet: 'player', asset: 'Carbon', quantityRaw: '10',
+      transactionFeeAtlas: 1, transactionFeePayer: 'gm' },
+    { eventId: 'food-transfer', eventType: 'transfer', action: 'transfer', timestamp: '2026-08-30T10:05:00Z',
+      signature: 'transfer', fromWallet: 'gm', toWallet: 'player', asset: 'Food', quantityRaw: '5',
+      transactionFeeAtlas: 1, transactionFeePayer: 'gm' },
+    { eventId: 'deposit', eventType: 'deposit', action: 'deposit_cargo_to_game', timestamp: '2026-08-30T10:10:00Z',
+      signature: 'deposit', fromWallet: 'player', faction: 'USTUR', starbase: 'UST-1', asset: 'Carbon', quantityRaw: '10' },
+  ]);
+  const transfers = movements.filter((movement) => movement.kind === 'transfer');
+  assert.deepEqual(transfers.map((movement) => movement.transactionFeeAtlas), [0.5, 0.5]);
+});
