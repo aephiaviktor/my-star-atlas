@@ -183,13 +183,14 @@ function replayMarketplaceInventoryLedger(movements = []) {
     }
     if (kind === 'deposit') {
       const fromWallet = text(movement.fromWallet);
+      const destination = text(movement.destination) || `${text(movement.faction)}:${text(movement.starbase)}`;
+      const depositContext = { fromWallet, destination, faction: text(movement.faction), starbase: text(movement.starbase) };
       const lot = consume(fromWallet, asset, quantity);
-      if (!fromWallet || lot == null) { rows.push({ ...common, fromWallet, status: 'pending_inventory' }); continue; }
+      if (!fromWallet || lot == null) { rows.push({ ...common, ...depositContext, status: 'pending_inventory' }); continue; }
       if (text(movement.transactionFeePayer) === fromWallet) addFeeToLot(lot, movement.transactionFeeAtlas);
-      const gameLocation = text(movement.destination) || `${text(movement.faction)}:${text(movement.starbase)}`;
+      const gameLocation = destination;
       const gameAfter = addGame(gameLocation, asset, lot);
-      rows.push({ ...common, fromWallet, ...lotFields(lot), unitBasisAtlas: basisAtlas(lot) / quantity,
-        destination: text(movement.destination), faction: text(movement.faction), starbase: text(movement.starbase),
+      rows.push({ ...common, ...depositContext, ...lotFields(lot), unitBasisAtlas: basisAtlas(lot) / quantity,
         basisHandoff: 'game', gameAfter: copyPool(gameAfter) });
       continue;
     }
@@ -484,7 +485,10 @@ function projectGlobalLedgerRows(ledgerRows = []) {
         finalBasisAtlas: row.sourceBasisMovedAtlas,
       });
       add(row, 'deposit', row.toWallet, row.fromWallet);
-    } else if (row.kind === 'deposit') add(row, 'withdraw', row.fromWallet, row.destination);
+    } else if (row.kind === 'deposit') {
+      const starbase = text(row.starbase) || text(row.destination).split(':').filter(Boolean).at(-1);
+      add(row, 'withdraw', row.fromWallet, starbase);
+    }
     else if (row.kind === 'sell') add(row, 'withdraw', row.fromWallet, row.marketplace || 'Market', {
       principalAtlas: row.principalAtlas,
       marketplaceFeeAtlas: row.marketplaceFeeAtlas,

@@ -238,6 +238,16 @@ test('Global Ledger renders wallet transfers as balanced withdrawal and deposit 
   assert.equal(transferRows.find((row) => row.direction === 'deposit').finalBasisAtlas, 101.5);
 });
 
+test('Global pending game deposits retain their faction starbase counterparty', () => {
+  const ledger = replayMarketplaceInventoryLedger([{
+    movementId: 'deposit', timestamp: '2026-09-01T18:35:43Z', kind: 'deposit', asset: 'Framework', quantity: 3000000,
+    fromWallet: 'player', destination: 'USTUR:UST-1', faction: 'USTUR', starbase: 'UST-1', signature: 'deposit-signature',
+  }]);
+  const [row] = projectGlobalLedgerRows(ledger.rows);
+  assert.equal(row.status, 'pending_inventory');
+  assert.equal(row.counterparty, 'UST-1');
+});
+
 test('Global sale keeps cumulative fees visible without adding selling fees to inventory basis', () => {
   const [row] = projectGlobalLedgerRows([{
     movementId: 'sell', kind: 'sell', status: 'applied', timestamp: '2026-09-01T12:10:23Z',
