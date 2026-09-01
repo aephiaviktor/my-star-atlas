@@ -92,6 +92,10 @@ test('Global Ledger and Game Ledger columns participate in the Marketplace sideb
   assert.match(renderer, /formatMarketplaceAtlas\(entry\.receivedPerUnitAtlas, 8\)/);
   assert.match(renderer, /formatMarketplaceAtlas\(entry\.netProfitPerUnitAtlas, 8\)/);
   assert.match(renderer, /subtab === 'marketplaceGame' && Number\(saved\.schemaVersion \|\| 1\) < 3/);
+  assert.match(renderer, /id: 'globalTxFee', label: 'Cumulative Tx Fees'/);
+  assert.match(renderer, /id: 'gameMarketplaceFee', label: 'Selling Marketplace Fee'/);
+  assert.match(renderer, /id: 'gameTxFee', label: 'Selling Tx Fees'/);
+  assert.match(renderer, /id: 'gameFinalBasis', label: 'Inventory Basis'/);
 });
 
 test('Marketplace event synchronization supplies decoded LM and GM executions with explicit scope', () => {

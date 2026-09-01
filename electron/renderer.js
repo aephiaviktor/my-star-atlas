@@ -824,7 +824,7 @@ const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'grossAtlas', label: 'Gross Value' }),
   Object.freeze({ id: 'price', label: 'Unit Price' }),
   Object.freeze({ id: 'marketplaceFee', label: 'Marketplace Fee' }),
-  Object.freeze({ id: 'txsFee', label: 'Tx Fee' }),
+  Object.freeze({ id: 'txsFee', label: 'Tx Fees', description: 'All transaction fees assigned to this trade, including execution and allocated order-creation fees.' }),
   Object.freeze({ id: 'netAtlas', label: 'Net Paid / Received' }),
   Object.freeze({ id: 'unitMetric', label: 'Net / Unit' }),
   Object.freeze({ id: 'tradingSignatures', label: 'Signature' }),
@@ -838,8 +838,8 @@ const marketplaceGlobalColumns = Object.freeze([
   Object.freeze({ id: 'globalAsset', label: 'Asset' }),
   Object.freeze({ id: 'globalQuantity', label: 'Quantity' }),
   Object.freeze({ id: 'globalPrincipal', label: 'Principal' }),
-  Object.freeze({ id: 'globalMarketplaceFee', label: 'Marketplace Fee' }),
-  Object.freeze({ id: 'globalTxFee', label: 'Tx Fees' }),
+  Object.freeze({ id: 'globalMarketplaceFee', label: 'Selling Marketplace Fee' }),
+  Object.freeze({ id: 'globalTxFee', label: 'Cumulative Tx Fees', description: 'All transaction fees accumulated through this movement, including prior owned-wallet custody movements.' }),
   Object.freeze({ id: 'globalFinalBasis', label: 'Final Basis' }),
   Object.freeze({ id: 'globalUnitBasis', label: 'Cost / Unit' }),
   Object.freeze({ id: 'globalSignature', label: 'Signature' }),
@@ -851,9 +851,9 @@ const marketplaceGameColumns = Object.freeze([
   Object.freeze({ id: 'gameQuantity', label: 'Game Quantity' }),
   Object.freeze({ id: 'gamePrincipal', label: 'Game Principal' }),
   Object.freeze({ id: 'gameCarriedBasis', label: 'Game Carried Basis' }),
-  Object.freeze({ id: 'gameMarketplaceFee', label: 'Game Marketplace Fee' }),
-  Object.freeze({ id: 'gameTxFee', label: 'Game Tx Fees' }),
-  Object.freeze({ id: 'gameFinalBasis', label: 'Game Final Basis' }),
+  Object.freeze({ id: 'gameMarketplaceFee', label: 'Selling Marketplace Fee' }),
+  Object.freeze({ id: 'gameTxFee', label: 'Selling Tx Fees', description: 'Transaction fees assigned to the sale; these reduce proceeds and are not added to inventory basis.' }),
+  Object.freeze({ id: 'gameFinalBasis', label: 'Inventory Basis' }),
   Object.freeze({ id: 'gameUnitBasis', label: 'Game Cost / Unit' }),
   Object.freeze({ id: 'gameReceivedUnit', label: 'Received / Unit' }),
   Object.freeze({ id: 'gameNetProfitUnit', label: 'Net Profit / Unit' }),
@@ -7291,6 +7291,7 @@ function renderMarketplaceSortableHeader(tableBody, columns, sortState, tableId)
     button.dataset.marketplaceTableSort = `${tableId}:${column.id}`;
     const active = sortState.column === column.id;
     button.textContent = `${column.label}${active ? (sortState.direction === 'asc' ? ' ▲' : ' ▼') : ''}`;
+    if (column.description) button.title = column.description;
     cell.setAttribute('aria-sort', active ? (sortState.direction === 'asc' ? 'ascending' : 'descending') : 'none');
     cell.appendChild(button);
     row.appendChild(cell);
