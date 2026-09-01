@@ -46,6 +46,34 @@ test('ledger carries GM buy basis into game and production basis back out to rea
   assert.equal(result.pools.find((pool) => pool.wallet === 'gm').quantity, 0);
 });
 
+test('wallet pools carry weighted basis components and game-withdrawal provenance through transfers', () => {
+  const result = replayMarketplaceInventoryLedger([
+    { movementId: 'buy', timestamp: '2026-08-30T10:00:00Z', kind: 'buy', asset: 'Carbon', quantity: 100,
+      toWallet: 'gm', principalAtlas: 1000, marketplaceFeeAtlas: 50, transactionFeeAtlas: 1 },
+    { movementId: 'deposit-transfer', timestamp: '2026-08-30T10:05:00Z', kind: 'transfer', asset: 'Carbon', quantity: 100,
+      fromWallet: 'gm', toWallet: 'player', transactionFeeAtlas: 0.5, transactionFeePayer: 'gm' },
+    { movementId: 'game-deposit', timestamp: '2026-08-30T10:10:00Z', kind: 'deposit', asset: 'Carbon', quantity: 100,
+      fromWallet: 'player', destination: 'USTUR:UST-1', transactionFeeAtlas: 0.2, transactionFeePayer: 'player' },
+    { movementId: 'game-withdraw', timestamp: '2026-08-30T12:00:00Z', kind: 'withdraw', asset: 'Carbon', quantity: 40,
+      toWallet: 'player', unitBasisAtlas: 6, transactionFeeAtlas: 0.2, transactionFeePayer: 'player',
+      faction: 'USTUR', starbase: 'UST-1', signature: 'withdraw-signature' },
+    { movementId: 'sell-transfer', timestamp: '2026-08-30T12:05:00Z', kind: 'transfer', asset: 'Carbon', quantity: 40,
+      fromWallet: 'player', toWallet: 'gm', transactionFeeAtlas: 0.1, transactionFeePayer: 'player' },
+    { movementId: 'sell', timestamp: '2026-08-30T13:00:00Z', kind: 'sell', asset: 'Carbon', quantity: 15,
+      fromWallet: 'gm', grossAtlas: 150, marketplaceFeeAtlas: 5, transactionFeeAtlas: 1 },
+  ]);
+  const deposit = result.rows.find((row) => row.movementId === 'game-deposit');
+  const sell = result.rows.find((row) => row.movementId === 'sell');
+  assert.equal(deposit.principalAtlas, 1000);
+  assert.equal(deposit.marketplaceFeeAtlas, 0, 'buyer must not inherit the seller-paid marketplace fee');
+  assert.equal(deposit.transactionFeeAtlas, 1.7);
+  assert.equal(deposit.basisMovedAtlas, 1001.7);
+  assert.ok(Math.abs(sell.basisMovedAtlas - 90.1125) < 1e-9);
+  assert.deepEqual(sell.gameOrigins.map((origin) => ({
+    movementId: origin.movementId, faction: origin.faction, starbase: origin.starbase, quantity: origin.quantity,
+  })), [{ movementId: 'game-withdraw', faction: 'USTUR', starbase: 'UST-1', quantity: 15 }]);
+});
+
 test('ledger is deterministic, idempotent, and holds unresolved sells pending instead of inventing cost', () => {
   const movements = [
     { movementId: 'sell', timestamp: '2026-08-30T12:00:00Z', kind: 'sell', asset: 'Carbon', quantity: 10,
