@@ -1247,7 +1247,8 @@
               <button class="subtab-button active" type="button" data-marketplace-subtab="raw" aria-selected="true">Raw Data</button>
               <button class="subtab-button" type="button" data-marketplace-subtab="events" aria-selected="false">Decoded Events</button>
               <button class="subtab-button" type="button" data-marketplace-subtab="trades" aria-selected="false">Trades</button>
-              <button class="subtab-button" type="button" data-marketplace-subtab="custody" aria-selected="false">Custody Ledger</button>
+              <button class="subtab-button" type="button" data-marketplace-subtab="global" aria-selected="false">Global Ledger</button>
+              <button class="subtab-button" type="button" data-marketplace-subtab="game" aria-selected="false">Game Ledger</button>
             </div>
             <section class="work-surface earnings-surface" data-marketplace-panel="raw">
               <div id="earnings-marketplace-raw-status" class="fleet-sync-status" role="status">ALL FACTIONS · Awaiting Marketplace raw data</div>
@@ -1300,18 +1301,27 @@
                 </table>
               </div>
             </section>
-            <section class="work-surface earnings-surface" data-marketplace-panel="custody" hidden>
-              <div class="marketplace-custody-header">
-                <div id="earnings-marketplace-custody-status" class="fleet-sync-status" role="status">Awaiting custody events</div>
-                <div id="earnings-marketplace-custody-direction-switch" class="marketplace-side-switch" role="group" aria-label="Custody direction">
-                  <button class="marketplace-side-button marketplace-side-buy active" type="button" data-marketplace-custody-direction="deposit" aria-pressed="true">DEPOSITS</button>
-                  <button class="marketplace-side-button marketplace-side-sell" type="button" data-marketplace-custody-direction="withdraw" aria-pressed="false">WITHDRAWALS</button>
+            <section class="work-surface earnings-surface" data-marketplace-panel="global" hidden>
+              <div id="earnings-marketplace-global-status" class="fleet-sync-status" role="status">ALL WALLETS · Awaiting global ledger events</div>
+              <div class="fleet-table-wrap">
+                <table class="fleet-table earnings-table">
+                  <thead><tr><th>Timestamp (UTC)</th><th>Direction</th><th>Wallet</th><th>Counterparty</th><th>Movement</th><th>Asset</th><th>Quantity</th><th>Principal</th><th>Marketplace Fee</th><th>Tx Fees</th><th>Final Basis</th><th>Cost / Unit</th><th>Signature</th><th>Status</th></tr></thead>
+                  <tbody id="earnings-marketplace-global-table-body"><tr class="empty-row"><td colspan="14">No global ledger events loaded</td></tr></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="work-surface earnings-surface" data-marketplace-panel="game" hidden>
+              <div class="marketplace-game-header">
+                <div id="earnings-marketplace-game-status" class="fleet-sync-status" role="status">Awaiting game ledger events</div>
+                <div id="earnings-marketplace-game-direction-switch" class="marketplace-side-switch" role="group" aria-label="Game Ledger direction">
+                  <button class="marketplace-side-button marketplace-side-buy active" type="button" data-marketplace-game-direction="deposit" aria-pressed="true">DEPOSITS</button>
+                  <button class="marketplace-side-button marketplace-side-sell" type="button" data-marketplace-game-direction="withdraw" aria-pressed="false">WITHDRAWALS</button>
                 </div>
               </div>
               <div class="fleet-table-wrap">
                 <table class="fleet-table earnings-table">
-                  <thead><tr><th>Timestamp (UTC)</th><th>From → To</th><th>Starbase</th><th>Asset</th><th>Quantity</th><th>Carried Basis</th><th>Tx Fee</th><th>Final Basis</th><th>Cost / Unit</th><th>Signature</th><th>Status</th></tr></thead>
-                  <tbody id="earnings-marketplace-custody-table-body"><tr class="empty-row"><td colspan="11">No custody events loaded</td></tr></tbody>
+                  <thead><tr><th>Timestamp (UTC)</th><th>Starbase</th><th>Asset</th><th>Quantity</th><th>Principal</th><th>Carried Basis</th><th>Marketplace Fee</th><th>Tx Fees</th><th>Final Basis</th><th>Cost / Unit</th><th>Signature</th><th>Physical Withdrawal</th><th>Status</th></tr></thead>
+                  <tbody id="earnings-marketplace-game-table-body"><tr class="empty-row"><td colspan="13">No game ledger events loaded</td></tr></tbody>
                 </table>
               </div>
             </section>

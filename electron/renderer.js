@@ -209,9 +209,11 @@ const earningsMarketplaceEventsTo = document.querySelector('#earnings-marketplac
 const earningsMarketplaceEventsType = document.querySelector('#earnings-marketplace-events-type');
 const earningsMarketplaceSubtabButtons = Array.from(document.querySelectorAll('[data-marketplace-subtab]'));
 const earningsMarketplacePanels = Array.from(document.querySelectorAll('[data-marketplace-panel]'));
-const earningsMarketplaceCustodyStatus = document.querySelector('#earnings-marketplace-custody-status');
-const earningsMarketplaceCustodyTableBody = document.querySelector('#earnings-marketplace-custody-table-body');
-const earningsMarketplaceCustodyDirectionButtons = Array.from(document.querySelectorAll('[data-marketplace-custody-direction]'));
+const earningsMarketplaceGlobalStatus = document.querySelector('#earnings-marketplace-global-status');
+const earningsMarketplaceGlobalTableBody = document.querySelector('#earnings-marketplace-global-table-body');
+const earningsMarketplaceGameStatus = document.querySelector('#earnings-marketplace-game-status');
+const earningsMarketplaceGameTableBody = document.querySelector('#earnings-marketplace-game-table-body');
+const earningsMarketplaceGameDirectionButtons = Array.from(document.querySelectorAll('[data-marketplace-game-direction]'));
 const earningsScanningDateFilter = document.querySelector('#earnings-scanning-date-filter');
 const earningsScanningFleetFilter = document.querySelector('#earnings-scanning-fleet-filter');
 const earningsMiningDateFilter = document.querySelector('#earnings-mining-date-filter');
@@ -385,7 +387,7 @@ let currentSection = 'production';
 let currentSubtab = 'scanning';
 let currentEarningsSubtab = 'scanning';
 let currentMarketplaceSubtab = 'raw';
-let marketplaceCustodyDirection = 'deposit';
+let marketplaceGameDirection = 'deposit';
 let marketplaceRawSort = { column: 'timestamp', direction: 'desc' };
 let marketplaceEventsSort = { column: 'timestamp', direction: 'desc' };
 let marketplaceLinkedSignature = '';
@@ -825,18 +827,36 @@ const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'status', label: 'Status' }),
 
 ]);
-const marketplaceCustodyColumns = Object.freeze([
-  Object.freeze({ id: 'custodyTimestamp', label: 'Custody Timestamp' }),
-  Object.freeze({ id: 'custodyRoute', label: 'Custody From → To' }),
-  Object.freeze({ id: 'custodyStarbase', label: 'Custody Starbase' }),
-  Object.freeze({ id: 'custodyAsset', label: 'Custody Asset' }),
-  Object.freeze({ id: 'custodyQuantity', label: 'Custody Quantity' }),
-  Object.freeze({ id: 'custodyCarriedBasis', label: 'Custody Carried Basis' }),
-  Object.freeze({ id: 'custodyTxFee', label: 'Custody Tx Fee' }),
-  Object.freeze({ id: 'custodyFinalBasis', label: 'Custody Final Basis' }),
-  Object.freeze({ id: 'custodyUnitBasis', label: 'Custody Cost / Unit' }),
-  Object.freeze({ id: 'custodySignature', label: 'Custody Signature' }),
-  Object.freeze({ id: 'custodyStatus', label: 'Custody Status' }),
+const marketplaceGlobalColumns = Object.freeze([
+  Object.freeze({ id: 'globalTimestamp', label: 'Timestamp (UTC)' }),
+  Object.freeze({ id: 'globalDirection', label: 'Direction' }),
+  Object.freeze({ id: 'globalWallet', label: 'Wallet' }),
+  Object.freeze({ id: 'globalCounterparty', label: 'Counterparty' }),
+  Object.freeze({ id: 'globalMovement', label: 'Movement' }),
+  Object.freeze({ id: 'globalAsset', label: 'Asset' }),
+  Object.freeze({ id: 'globalQuantity', label: 'Quantity' }),
+  Object.freeze({ id: 'globalPrincipal', label: 'Principal' }),
+  Object.freeze({ id: 'globalMarketplaceFee', label: 'Marketplace Fee' }),
+  Object.freeze({ id: 'globalTxFee', label: 'Tx Fees' }),
+  Object.freeze({ id: 'globalFinalBasis', label: 'Final Basis' }),
+  Object.freeze({ id: 'globalUnitBasis', label: 'Cost / Unit' }),
+  Object.freeze({ id: 'globalSignature', label: 'Signature' }),
+  Object.freeze({ id: 'globalStatus', label: 'Status' }),
+]);
+const marketplaceGameColumns = Object.freeze([
+  Object.freeze({ id: 'gameTimestamp', label: 'Game Timestamp' }),
+  Object.freeze({ id: 'gameStarbase', label: 'Game Starbase' }),
+  Object.freeze({ id: 'gameAsset', label: 'Game Asset' }),
+  Object.freeze({ id: 'gameQuantity', label: 'Game Quantity' }),
+  Object.freeze({ id: 'gamePrincipal', label: 'Game Principal' }),
+  Object.freeze({ id: 'gameCarriedBasis', label: 'Game Carried Basis' }),
+  Object.freeze({ id: 'gameMarketplaceFee', label: 'Game Marketplace Fee' }),
+  Object.freeze({ id: 'gameTxFee', label: 'Game Tx Fees' }),
+  Object.freeze({ id: 'gameFinalBasis', label: 'Game Final Basis' }),
+  Object.freeze({ id: 'gameUnitBasis', label: 'Game Cost / Unit' }),
+  Object.freeze({ id: 'gameSignature', label: 'Game Signature' }),
+  Object.freeze({ id: 'gamePhysicalWithdrawal', label: 'Physical Withdrawal' }),
+  Object.freeze({ id: 'gameStatus', label: 'Game Status' }),
 ]);
 
 
@@ -877,7 +897,8 @@ const earningsColumnsBySubtab = Object.freeze({
   upgrading: upgradingEarningsOptionalColumns,
   breakeven: breakevenEarningsOptionalColumns,
   marketplace: marketplaceEarningsOptionalColumns,
-  marketplaceCustody: marketplaceCustodyColumns,
+  marketplaceGlobal: marketplaceGlobalColumns,
+  marketplaceGame: marketplaceGameColumns,
   marketplaceRaw: marketplaceRawColumns,
   marketplaceEvents: marketplaceEventColumns,
 });
@@ -891,7 +912,8 @@ const earningsColumnState = {
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   breakeven: new Set(),
   marketplace: new Set(marketplaceEarningsOptionalColumns.map((column) => column.id)),
-  marketplaceCustody: new Set(marketplaceCustodyColumns.map((column) => column.id)),
+  marketplaceGlobal: new Set(marketplaceGlobalColumns.map((column) => column.id)),
+  marketplaceGame: new Set(marketplaceGameColumns.map((column) => column.id)),
   marketplaceRaw: new Set(marketplaceRawColumns.map((column) => column.id)),
   marketplaceEvents: new Set(marketplaceEventColumns.map((column) => column.id)),
 };
@@ -5893,7 +5915,8 @@ function getActiveEarningsColumnsSubtab() {
   if (currentEarningsSubtab === 'cargo' && activeCargoTable === 'allocation') return 'cargoAllocation';
   if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'raw') return 'marketplaceRaw';
   if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'events') return 'marketplaceEvents';
-  if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'custody') return 'marketplaceCustody';
+  if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'global') return 'marketplaceGlobal';
+  if (currentEarningsSubtab === 'marketplace' && currentMarketplaceSubtab === 'game') return 'marketplaceGame';
   return currentEarningsSubtab;
 }
 
@@ -5992,8 +6015,10 @@ function renderEarningsColumnControls() {
         renderMarketplaceRawData(latestMarketplaceResult);
       } else if (subtab === 'marketplaceEvents') {
         renderMarketplaceDecodedEvents(latestMarketplaceResult);
-      } else if (subtab === 'marketplaceCustody') {
-        renderMarketplaceCustodyLedger(latestMarketplaceResult);
+      } else if (subtab === 'marketplaceGlobal') {
+        renderMarketplaceGlobalLedger(latestMarketplaceResult);
+      } else if (subtab === 'marketplaceGame') {
+        renderMarketplaceGameLedger(latestMarketplaceResult);
       } else if (latestEarningsResult) {
         renderEarnings(latestEarningsResult);
       } else {
@@ -7135,7 +7160,8 @@ function renderMarketplaceDecodedEvents(result) {
 }
 
 const marketplaceTradeFilters = { marketplace: '', faction: '', side: '', asset: '', status: '' };
-const marketplaceCustodyFilters = { starbase: '', asset: '', status: '' };
+const marketplaceGlobalFilters = { wallet: '', direction: '', movementType: '', asset: '', status: '' };
+const marketplaceGameFilters = { starbase: '', asset: '', status: '' };
 
 function filterMarketplaceRows(rows, state) {
   return Array.from(rows || []).filter((row) => Object.entries(state).every(([key, selected]) => {
@@ -7184,10 +7210,10 @@ function renderMarketplaceTableFilters(id, tableBody, rows, definitions, state, 
   }
 }
 
-function applyMarketplaceCustodyColumnVisibility() {
-  const ids = ['custodyTimestamp', 'custodyRoute', 'custodyStarbase', 'custodyAsset', 'custodyQuantity', 'custodyCarriedBasis', 'custodyTxFee', 'custodyFinalBasis', 'custodyUnitBasis', 'custodySignature', 'custodyStatus'];
-  const selected = earningsColumnState.marketplaceCustody || new Set(marketplaceCustodyColumns.map((column) => column.id));
-  const table = earningsMarketplaceCustodyTableBody?.closest('table');
+function applyMarketplaceLedgerColumnVisibility(tableBody, subtab, columns) {
+  const ids = columns.map((column) => column.id);
+  const selected = earningsColumnState[subtab] || new Set(ids);
+  const table = tableBody?.closest('table');
   if (!table) return;
   const headers = Array.from(table.querySelectorAll('thead th'));
   headers.forEach((header, index) => { header.hidden = !selected.has(ids[index]); });
@@ -7202,54 +7228,104 @@ function applyMarketplaceCustodyColumnVisibility() {
   }
 }
 
-function renderMarketplaceCustodyLedger(result) {
-  const sourceCustodyResult = result;
-  const sourceRows = Array.from(result?.marketplaceCustodyRows || []);
-  renderMarketplaceTableFilters('earnings-marketplace-custody-filters', earningsMarketplaceCustodyTableBody, sourceRows, [
-    { key: 'starbase', label: 'Starbase' },
+function appendMarketplaceSignatureCell(row, signature) {
+  const cell = document.createElement('td');
+  if (signature) {
+    const link = document.createElement('a');
+    link.href = `https://solscan.io/tx/${encodeURIComponent(signature)}`;
+    link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = signature;
+    cell.appendChild(link);
+  } else cell.textContent = '--';
+  row.appendChild(cell);
+}
+
+function renderMarketplaceGlobalLedger(result) {
+  const sourceResult = result;
+  const sourceRows = Array.from(result?.marketplaceGlobalLedgerRows || []);
+  renderMarketplaceTableFilters('earnings-marketplace-global-filters', earningsMarketplaceGlobalTableBody, sourceRows, [
+    { key: 'wallet', label: 'Wallet' },
+    { key: 'direction', label: 'Direction' },
+    { key: 'movementType', label: 'Movement' },
     { key: 'asset', label: 'Asset' },
     { key: 'status', label: 'Status' },
-  ], marketplaceCustodyFilters, () => renderMarketplaceCustodyLedger(sourceCustodyResult));
-  result = { ...result, marketplaceCustodyRows: filterMarketplaceRows(sourceRows, marketplaceCustodyFilters) };
-
-  const rows = (Array.isArray(result?.marketplaceCustodyRows) ? result.marketplaceCustodyRows : [])
-    .filter((row) => row.direction === marketplaceCustodyDirection);
-  setText(earningsMarketplaceCustodyStatus, `${formatMarketplaceWhole(rows.length)} ${marketplaceCustodyDirection === 'deposit' ? 'deposits' : 'withdrawals'} at ${formatCheckedAt(result?.checkedAt)}`);
-  earningsMarketplaceCustodyDirectionButtons.forEach((button) => {
-    const active = button.dataset.marketplaceCustodyDirection === marketplaceCustodyDirection;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
-  });
-  if (!earningsMarketplaceCustodyTableBody) return;
-  earningsMarketplaceCustodyTableBody.replaceChildren();
+  ], marketplaceGlobalFilters, () => renderMarketplaceGlobalLedger(sourceResult));
+  const rows = filterMarketplaceRows(sourceRows, marketplaceGlobalFilters);
+  setText(earningsMarketplaceGlobalStatus, `ALL WALLETS · ${formatMarketplaceWhole(rows.length)} movements at ${formatCheckedAt(result?.checkedAt)}`);
+  if (!earningsMarketplaceGlobalTableBody) return;
+  earningsMarketplaceGlobalTableBody.replaceChildren();
   if (!rows.length) {
     const tr = document.createElement('tr'); tr.className = 'empty-row';
-    const td = createTextCell(`No ${marketplaceCustodyDirection === 'deposit' ? 'deposits' : 'withdrawals'} found`); td.colSpan = 11;
-    tr.appendChild(td); earningsMarketplaceCustodyTableBody.appendChild(tr);
-    applyMarketplaceCustodyColumnVisibility();
+    const td = createTextCell('No global ledger movements found'); td.colSpan = marketplaceGlobalColumns.length;
+    tr.appendChild(td); earningsMarketplaceGlobalTableBody.appendChild(tr);
+    applyMarketplaceLedgerColumnVisibility(earningsMarketplaceGlobalTableBody, 'marketplaceGlobal', marketplaceGlobalColumns);
     return;
   }
   for (const entry of rows) {
     const tr = document.createElement('tr');
-    const route = [entry.from, entry.to].filter(Boolean).join(' → ') || '--';
     const values = [
-      formatMarketplaceTimestamp(entry.timestamp), route, entry.starbase || '--', entry.asset || '--',
+      formatMarketplaceTimestamp(entry.timestamp), String(entry.direction || '').toUpperCase(), entry.wallet || '--',
+      entry.counterparty || '--', entry.movementType || '--', entry.asset || '--',
       entry.quantity == null ? '--' : formatMarketplaceWhole(entry.quantity),
-      entry.carriedBasisAtlas == null ? '--' : formatMarketplaceAtlas(entry.carriedBasisAtlas, 2),
+      entry.principalAtlas == null ? '--' : formatMarketplaceAtlas(entry.principalAtlas, 2),
+      entry.marketplaceFeeAtlas == null ? '--' : formatMarketplaceAtlas(entry.marketplaceFeeAtlas, 2),
       entry.transactionFeeAtlas == null ? '--' : formatMarketplaceAtlas(entry.transactionFeeAtlas, 2),
       entry.finalBasisAtlas == null ? '--' : formatMarketplaceAtlas(entry.finalBasisAtlas, 2),
       entry.costPerUnitAtlas == null ? '--' : formatMarketplaceAtlas(entry.costPerUnitAtlas, 8),
     ];
     for (const value of values) tr.appendChild(createTextCell(value));
-    const signatureCell = document.createElement('td');
-    if (entry.signature) {
-      const link = document.createElement('a'); link.href = `https://solscan.io/tx/${encodeURIComponent(entry.signature)}`;
-      link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = entry.signature; signatureCell.appendChild(link);
-    } else signatureCell.textContent = '--';
-    tr.append(signatureCell, createTextCell(entry.status || 'Unvalued'));
-    earningsMarketplaceCustodyTableBody.appendChild(tr);
+    appendMarketplaceSignatureCell(tr, entry.signature);
+    tr.appendChild(createTextCell(entry.status || 'Pending'));
+    earningsMarketplaceGlobalTableBody.appendChild(tr);
   }
-  applyMarketplaceCustodyColumnVisibility();
+  applyMarketplaceLedgerColumnVisibility(earningsMarketplaceGlobalTableBody, 'marketplaceGlobal', marketplaceGlobalColumns);
+}
+
+function renderMarketplaceGameLedger(result) {
+  const sourceGameResult = result;
+  const sourceRows = Array.from(result?.marketplaceGameLedgerRows || []);
+  renderMarketplaceTableFilters('earnings-marketplace-game-filters', earningsMarketplaceGameTableBody, sourceRows, [
+    { key: 'starbase', label: 'Starbase' },
+    { key: 'asset', label: 'Asset' },
+    { key: 'status', label: 'Status' },
+  ], marketplaceGameFilters, () => renderMarketplaceGameLedger(sourceGameResult));
+  result = { ...result, marketplaceGameLedgerRows: filterMarketplaceRows(sourceRows, marketplaceGameFilters) };
+
+  const rows = (Array.isArray(result?.marketplaceGameLedgerRows) ? result.marketplaceGameLedgerRows : [])
+    .filter((row) => row.direction === marketplaceGameDirection);
+  setText(earningsMarketplaceGameStatus, `${formatMarketplaceWhole(rows.length)} ${marketplaceGameDirection === 'deposit' ? 'deposits' : 'withdrawals'} at ${formatCheckedAt(result?.checkedAt)}`);
+  earningsMarketplaceGameDirectionButtons.forEach((button) => {
+    const active = button.dataset.marketplaceGameDirection === marketplaceGameDirection;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  if (!earningsMarketplaceGameTableBody) return;
+  earningsMarketplaceGameTableBody.replaceChildren();
+  if (!rows.length) {
+    const tr = document.createElement('tr'); tr.className = 'empty-row';
+    const td = createTextCell(`No ${marketplaceGameDirection === 'deposit' ? 'deposits' : 'withdrawals'} found`); td.colSpan = marketplaceGameColumns.length;
+    tr.appendChild(td); earningsMarketplaceGameTableBody.appendChild(tr);
+    applyMarketplaceLedgerColumnVisibility(earningsMarketplaceGameTableBody, 'marketplaceGame', marketplaceGameColumns);
+    return;
+  }
+  for (const entry of rows) {
+    const tr = document.createElement('tr');
+    const values = [
+      formatMarketplaceTimestamp(entry.timestamp), entry.starbase || '--', entry.asset || '--',
+      entry.quantity == null ? '--' : formatMarketplaceWhole(entry.quantity),
+      entry.principalAtlas == null ? '--' : formatMarketplaceAtlas(entry.principalAtlas, 2),
+      entry.carriedBasisAtlas == null ? '--' : formatMarketplaceAtlas(entry.carriedBasisAtlas, 2),
+      entry.marketplaceFeeAtlas == null ? '--' : formatMarketplaceAtlas(entry.marketplaceFeeAtlas, 2),
+      entry.transactionFeeAtlas == null ? '--' : formatMarketplaceAtlas(entry.transactionFeeAtlas, 2),
+      entry.finalBasisAtlas == null ? '--' : formatMarketplaceAtlas(entry.finalBasisAtlas, 2),
+      entry.costPerUnitAtlas == null ? '--' : formatMarketplaceAtlas(entry.costPerUnitAtlas, 8),
+    ];
+    for (const value of values) tr.appendChild(createTextCell(value));
+    appendMarketplaceSignatureCell(tr, entry.signature);
+    appendMarketplaceSignatureCell(tr, entry.physicalWithdrawalSignature || entry.physicalSignature);
+    tr.appendChild(createTextCell(entry.status || 'Pending'));
+    earningsMarketplaceGameTableBody.appendChild(tr);
+  }
+  applyMarketplaceLedgerColumnVisibility(earningsMarketplaceGameTableBody, 'marketplaceGame', marketplaceGameColumns);
 }
 
 function renderEarningsMarketplace(result) {
@@ -7266,7 +7342,8 @@ function renderEarningsMarketplace(result) {
 
   renderMarketplaceRawData(result);
   renderMarketplaceDecodedEvents(result);
-  renderMarketplaceCustodyLedger(result);
+  renderMarketplaceGlobalLedger(result);
+  renderMarketplaceGameLedger(result);
   updateMarketplaceSubtab();
   const rows = Array.isArray(result?.marketplaceTrades) ? result.marketplaceTrades : [];
   const errorSuffix = result?.marketplaceEventsError ? ` · Decoded Events read failed: ${result.marketplaceEventsError}` : '';
@@ -7753,8 +7830,10 @@ async function refreshMarketplace({ sync = false } = {}) {
             marketplaceEventCount: prior.marketplaceEventCount,
             marketplaceTrades: prior.marketplaceTrades,
             marketplaceTradeCount: prior.marketplaceTradeCount,
-            marketplaceCustodyRows: prior.marketplaceCustodyRows,
-            marketplaceCustodyCount: prior.marketplaceCustodyCount,
+            marketplaceGlobalLedgerRows: prior.marketplaceGlobalLedgerRows,
+            marketplaceGlobalLedgerCount: prior.marketplaceGlobalLedgerCount,
+            marketplaceGameLedgerRows: prior.marketplaceGameLedgerRows,
+            marketplaceGameLedgerCount: prior.marketplaceGameLedgerCount,
           } : {}),
         }
       : result;
@@ -9823,17 +9902,17 @@ document.querySelectorAll('.earnings-subtab-button').forEach((button) => {
 
 earningsMarketplaceSubtabButtons.forEach((button) => {
   button.addEventListener('click', () => {
-    currentMarketplaceSubtab = ['raw', 'events', 'trades', 'custody'].includes(button.dataset.marketplaceSubtab)
+    currentMarketplaceSubtab = ['raw', 'events', 'trades', 'global', 'game'].includes(button.dataset.marketplaceSubtab)
       ? button.dataset.marketplaceSubtab : 'raw';
     updateMarketplaceSubtab();
     renderEarningsColumnControls();
   });
 });
 
-earningsMarketplaceCustodyDirectionButtons.forEach((button) => {
+earningsMarketplaceGameDirectionButtons.forEach((button) => {
   button.addEventListener('click', () => {
-    marketplaceCustodyDirection = button.dataset.marketplaceCustodyDirection === 'withdraw' ? 'withdraw' : 'deposit';
-    if (latestMarketplaceResult) renderMarketplaceCustodyLedger(latestMarketplaceResult);
+    marketplaceGameDirection = button.dataset.marketplaceGameDirection === 'withdraw' ? 'withdraw' : 'deposit';
+    if (latestMarketplaceResult) renderMarketplaceGameLedger(latestMarketplaceResult);
   });
 });
 

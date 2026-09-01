@@ -68,16 +68,22 @@ test('Marketplace Decoded Events is a separate persisted event view linked to ra
   assert.doesNotMatch(renderer, /id: 'transactionFeeLamports'/);
 });
 
-test('Custody Ledger is faction-specific with a Deposits and Withdrawals switch', () => {
-  assert.match(html, /data-marketplace-subtab="custody"[^>]*>Custody Ledger</);
-  assert.match(html, /data-marketplace-panel="custody" hidden/);
-  assert.match(html, /data-marketplace-custody-direction="deposit"[^>]*>DEPOSITS</);
-  assert.match(html, /data-marketplace-custody-direction="withdraw"[^>]*>WITHDRAWALS</);
-  assert.doesNotMatch(html.match(/data-marketplace-panel="custody"[\s\S]*?<\/section>/)?.[0] || '', /ALL FACTIONS|Faction:/);
-  assert.match(renderer, /function renderMarketplaceCustodyLedger\(result\)/);
-  assert.match(renderer, /result\?\.marketplaceCustodyRows/);
-  assert.match(renderer, /marketplaceCustodyDirection = button\.dataset\.marketplaceCustodyDirection/);
-  assert.match(main, /buildValuedCustodyRows\(marketplaceEvents, \{[\s\S]*faction: settings\.faction, inventoryBasisObservations/);
+test('Global Ledger is all-wallet and Game Ledger is faction-specific and asymmetric', () => {
+  assert.match(html, /data-marketplace-subtab="global"[^>]*>Global Ledger</);
+  assert.match(html, /data-marketplace-panel="global" hidden/);
+  assert.match(html, /ALL WALLETS · Awaiting global ledger events/);
+  assert.match(html, /data-marketplace-subtab="game"[^>]*>Game Ledger</);
+  assert.match(html, /data-marketplace-panel="game" hidden/);
+  assert.match(html, /data-marketplace-game-direction="deposit"[^>]*>DEPOSITS</);
+  assert.match(html, /data-marketplace-game-direction="withdraw"[^>]*>WITHDRAWALS</);
+  assert.doesNotMatch(html.match(/data-marketplace-panel="game"[\s\S]*?<\/section>/)?.[0] || '', /ALL FACTIONS|Faction:/);
+  assert.match(renderer, /function renderMarketplaceGlobalLedger\(result\)/);
+  assert.match(renderer, /function renderMarketplaceGameLedger\(result\)/);
+  assert.match(renderer, /result\?\.marketplaceGlobalLedgerRows/);
+  assert.match(renderer, /result\?\.marketplaceGameLedgerRows/);
+  assert.match(renderer, /marketplaceGameDirection = button\.dataset\.marketplaceGameDirection/);
+  assert.match(main, /buildMarketplaceInventoryMovements\(marketplaceEvents, \{ inventoryBasisObservations \}\)/);
+  assert.match(main, /projectGameLedgerRows\(marketplaceInventoryLedger\.rows, \{ faction: settings\.faction \}\)/);
 });
 
 test('Raw Data and Decoded Events share one reversible signature selector', () => {

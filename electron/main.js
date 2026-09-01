@@ -119,7 +119,10 @@ const {
 } = require('./marketplace-trade-compat');
 const { deriveMarketplaceTradeId } = require('./marketplace-v2-point');
 const { projectDecodedMarketplaceTrades } = require('./marketplace-trade-ledger');
-const { buildValuedCustodyRows } = require('./marketplace-custody-ledger');
+const {
+  buildMarketplaceInventoryMovements, replayMarketplaceInventoryLedger,
+  projectGlobalLedgerRows, projectGameLedgerRows,
+} = require('./marketplace-inventory-ledger');
 const {
   loadMarketplacePublicationHolds,
   recordMarketplacePublicationHold,
@@ -6074,9 +6077,10 @@ async function fetchMarketplaceSnapshot(payload) {
   const rawSignatures = new Set(rawData.rows.map((row) => row.signature));
   const marketplaceEvents = decodedEvents.rows.filter((event) => rawSignatures.has(event.signature));
   const marketplaceTrades = projectDecodedMarketplaceTrades(marketplaceEvents);
-  const marketplaceCustodyRows = buildValuedCustodyRows(marketplaceEvents, {
-    faction: settings.faction, inventoryBasisObservations,
-  });
+  const marketplaceInventoryMovements = buildMarketplaceInventoryMovements(marketplaceEvents, { inventoryBasisObservations });
+  const marketplaceInventoryLedger = replayMarketplaceInventoryLedger(marketplaceInventoryMovements);
+  const marketplaceGlobalLedgerRows = projectGlobalLedgerRows(marketplaceInventoryLedger.rows);
+  const marketplaceGameLedgerRows = projectGameLedgerRows(marketplaceInventoryLedger.rows, { faction: settings.faction });
   return {
     ok: !result.error,
     marketplaceRawData: rawData.rows,
@@ -6087,8 +6091,10 @@ async function fetchMarketplaceSnapshot(payload) {
     marketplaceEventCount: marketplaceEvents.length,
     marketplaceTrades,
     marketplaceTradeCount: marketplaceTrades.length,
-    marketplaceCustodyRows,
-    marketplaceCustodyCount: marketplaceCustodyRows.length,
+    marketplaceGlobalLedgerRows,
+    marketplaceGlobalLedgerCount: marketplaceGlobalLedgerRows.length,
+    marketplaceGameLedgerRows,
+    marketplaceGameLedgerCount: marketplaceGameLedgerRows.length,
     marketplaceEventsError: decodedEvents.error,
     localMarketTrades: trades,
     localMarketTradeCount: trades.length,
