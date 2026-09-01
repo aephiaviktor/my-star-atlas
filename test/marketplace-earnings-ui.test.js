@@ -113,6 +113,7 @@ test('Earnings snapshot stays on the fast path and leaves Marketplace to its own
 test('Marketplace loader uses profile-scoped cached snapshots on tab and faction activation', () => {
   assert.match(main, /fetchMarketplaceAssetFlowsFromInflux\(settings\)/);
   assert.match(main, /readInventoryBasisSnapshots\(\{[\s\S]*?bucket: settings\.influxBucket,[\s\S]*?query: async \(flux\) => parseInfluxCsv\(await queryInfluxFlux\(settings, flux\)\),[\s\S]*?\}\)/);
+  assert.match(main, /readHistoricalBreakevenBasisStates\(settings\)\.catch\(\(\) => \[\]\)/);
   assert.match(main, /enrichGmTradesWithInventoryBasis\(result\.trades, accounting\.appliedEventResults, \{ inventoryBasisObservations \}\)/);
   assert.match(renderer, /function renderEarningsMarketplaceLoading/);
   assert.match(renderer, /renderEarningsMarketplaceLoading\(sync \? 'Syncing Marketplace data\.\.\.' : 'Loading Marketplace data\.\.\.'\)/);

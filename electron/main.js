@@ -74,7 +74,7 @@ const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { projectInventoryCostLedgerRows } = require('./inventory-cost-ledger-view');
 const {
   formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
-  diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux,
+  diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux, buildHistoricalBreakevenBasisStateFlux,
 } = require('./breakeven-basis-state');
 const {
   parseAephiaPriceSeries, valuationTimestampMs, selectAssetSeriesCurrency,
@@ -4700,6 +4700,11 @@ async function readLatestBreakevenBasisStates(settings) {
   return projectBreakevenBasisStateRows(parseInfluxCsv(csv));
 }
 
+async function readHistoricalBreakevenBasisStates(settings) {
+  const csv = await queryInfluxFlux(settings, buildHistoricalBreakevenBasisStateFlux(settings.influxBucket));
+  return projectBreakevenBasisStateRows(parseInfluxCsv(csv));
+}
+
 async function writeBreakevenBasisStates(settings, states) {
   const lines = (states || []).map(formatBreakevenBasisStateInfluxLine).filter(Boolean);
   if (lines.length) await writeInventoryBasisLinesToInflux(settings, lines.join('\n'));
@@ -6061,7 +6066,7 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
 
 async function fetchMarketplaceSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
-  const [result, rawData, decodedEvents, rawDataCoverage, assetFlowEvents, inventoryBasisObservations] = await Promise.all([
+  const [result, rawData, decodedEvents, rawDataCoverage, assetFlowEvents, inventoryBasisObservations, breakevenBasisStates] = await Promise.all([
     fetchMarketplaceTradesFromInflux(settings),
     fetchMarketplaceRawDataFromInflux(settings),
     fetchMarketplaceEventsFromInflux(settings),
@@ -6071,13 +6076,16 @@ async function fetchMarketplaceSnapshot(payload) {
       bucket: settings.influxBucket,
       query: async (flux) => parseInfluxCsv(await queryInfluxFlux(settings, flux)),
     }).catch(() => []),
+    readHistoricalBreakevenBasisStates(settings).catch(() => []),
   ]);
   const accounting = buildCostLedgerResult({ localMarketTrades: result.trades, assetFlowEvents });
   const trades = enrichGmTradesWithInventoryBasis(result.trades, accounting.appliedEventResults, { inventoryBasisObservations });
   const rawSignatures = new Set(rawData.rows.map((row) => row.signature));
   const marketplaceEvents = decodedEvents.rows.filter((event) => rawSignatures.has(event.signature));
   const marketplaceTrades = projectDecodedMarketplaceTrades(marketplaceEvents);
-  const marketplaceInventoryMovements = buildMarketplaceInventoryMovements(marketplaceEvents, { inventoryBasisObservations });
+  const marketplaceInventoryMovements = buildMarketplaceInventoryMovements(marketplaceEvents, {
+    inventoryBasisObservations, breakevenBasisStates,
+  });
   const marketplaceInventoryLedger = replayMarketplaceInventoryLedger(marketplaceInventoryMovements);
   const marketplaceGlobalLedgerRows = projectGlobalLedgerRows(marketplaceInventoryLedger.rows);
   const marketplaceGameLedgerRows = projectGameLedgerRows(marketplaceInventoryLedger.rows, { faction: settings.faction });

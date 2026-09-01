@@ -82,7 +82,7 @@ test('Global Ledger is all-wallet and Game Ledger is faction-specific and asymme
   assert.match(renderer, /result\?\.marketplaceGlobalLedgerRows/);
   assert.match(renderer, /result\?\.marketplaceGameLedgerRows/);
   assert.match(renderer, /marketplaceGameDirection = button\.dataset\.marketplaceGameDirection/);
-  assert.match(main, /buildMarketplaceInventoryMovements\(marketplaceEvents, \{ inventoryBasisObservations \}\)/);
+  assert.match(main, /buildMarketplaceInventoryMovements\(marketplaceEvents, \{[\s\S]*inventoryBasisObservations, breakevenBasisStates/);
   assert.match(main, /projectGameLedgerRows\(marketplaceInventoryLedger\.rows, \{ faction: settings\.faction \}\)/);
 });
 
