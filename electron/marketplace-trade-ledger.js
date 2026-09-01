@@ -27,6 +27,7 @@ function projectDecodedMarketplaceTrades(events = []) {
       return {
         tradeId: String(event.eventId || ''), timestamp: String(event.timestamp || ''), side,
         marketplace, faction: marketplace === 'GM' ? 'GLOBAL' : String(event.faction || '').toUpperCase(),
+        starbase: marketplace === 'GM' ? '-' : String(event.starbase || ''),
         asset: String(event.asset || ''), quantity, unitPriceAtlas, grossAtlas,
         marketplaceFeeAtlas: side === 'buy' ? 0 : marketplaceFeeAtlas,
         transactionFeeAtlas, netAtlas,

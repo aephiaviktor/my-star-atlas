@@ -15,14 +15,15 @@ test('Marketplace Trades is a global combined BUY and SELL list without a side s
   assert.doesNotMatch(html, /id="earnings-marketplace-side-switch"|data-marketplace-side=/);
   const panel = html.match(/data-earnings-panel="marketplace"[\s\S]*?<\/div>\s*<div class="earnings-panel" data-earnings-panel="cargo"/)?.[0] || '';
   const tradesPanel = panel.match(/data-marketplace-panel="trades"[\s\S]*?<\/section>/)?.[0] || '';
-  for (const label of ['Timestamp \\(UTC\\)', 'Side', 'Marketplace', 'Faction', 'Asset', 'Amount', 'Gross Value', 'Unit Price', 'Marketplace Fee', 'Tx Fee', 'Net Paid / Received', 'Net / Unit', 'Signature', 'Status']) assert.match(tradesPanel, new RegExp(label));
+  for (const label of ['Timestamp \\(UTC\\)', 'Side', 'Marketplace', 'Faction', 'Starbase', 'Asset', 'Amount', 'Gross Value', 'Unit Price', 'Marketplace Fee', 'Tx Fee', 'Net Paid / Received', 'Net / Unit', 'Signature']) assert.match(tradesPanel, new RegExp(label));
+  assert.doesNotMatch(tradesPanel, />Status</);
   assert.match(tradesPanel, /ALL FACTIONS/);
 });
 
 test('Marketplace exposes every table column in the persistent Earnings sidebar selector', () => {
   assert.match(renderer, /const marketplaceEarningsOptionalColumns = Object\.freeze/);
   assert.match(renderer, /marketplace: marketplaceEarningsOptionalColumns/);
-  assert.match(renderer, /marketplace: new Set\(marketplaceEarningsOptionalColumns\.map\(\(column\) => column\.id\)\)/);
+  assert.match(renderer, /marketplace: new Set\(marketplaceEarningsOptionalColumns\.map\(\(column\) => column\.id\)\.filter\(\(id\) => id !== 'starbase'\)\)/);
   assert.match(renderer, /getVisibleEarningsColumns\('marketplace'\)/);
   assert.match(renderer, /renderMarketplaceHeader\(visibleColumns\)/);
   assert.match(renderer, /createMarketplaceEarningsCell\(entry, column\.id/);
@@ -55,7 +56,7 @@ test('Marketplace Trades, Global Ledger, and Game Ledger expose persistent table
 test('Global Ledger and Game Ledger columns participate in the Marketplace sidebar selection', () => {
   for (const id of ['globalTimestamp', 'globalWallet', 'globalCounterparty', 'globalAsset', 'globalQuantity',
     'globalPrincipal', 'globalMarketplaceFee', 'globalTxFee', 'globalFinalBasis', 'globalUnitBasis', 'globalSignature', 'globalStatus',
-    'gameTimestamp', 'gameStarbase', 'gameAsset', 'gameQuantity', 'gamePrincipal', 'gameCarriedBasis',
+    'gameTimestamp', 'gameAsset', 'gameQuantity', 'gamePrincipal', 'gameCarriedBasis',
     'gameMarketplaceFee', 'gameTxFee', 'gameFinalBasis', 'gameUnitBasis', 'gameSignature', 'gamePhysicalWithdrawal', 'gameStatus']) {
     assert.match(renderer, new RegExp(`id: '${id}'`));
   }
@@ -67,6 +68,8 @@ test('Global Ledger and Game Ledger columns participate in the Marketplace sideb
   assert.match(renderer, /subtab === 'marketplaceGame'[\s\S]*renderMarketplaceGameLedger/);
   assert.match(renderer, /applyMarketplaceLedgerColumnVisibility/);
   assert.match(renderer, /header\.hidden = !selected\.has\(ids\[index\]\)/);
+  assert.doesNotMatch(renderer, /id: 'gameStarbase'/);
+  assert.match(renderer, /marketplace: new Set\(marketplaceEarningsOptionalColumns\.map\(\(column\) => column\.id\)\.filter\(\(id\) => id !== 'starbase'\)\)/);
 });
 
 test('Marketplace event synchronization supplies decoded LM and GM executions with explicit scope', () => {

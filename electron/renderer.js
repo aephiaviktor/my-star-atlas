@@ -815,6 +815,7 @@ const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'side', label: 'Side' }),
   Object.freeze({ id: 'marketplace', label: 'Marketplace' }),
   Object.freeze({ id: 'faction', label: 'Faction' }),
+  Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
   Object.freeze({ id: 'amount', label: 'Amount' }),
   Object.freeze({ id: 'grossAtlas', label: 'Gross Value' }),
@@ -824,8 +825,6 @@ const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'netAtlas', label: 'Net Paid / Received' }),
   Object.freeze({ id: 'unitMetric', label: 'Net / Unit' }),
   Object.freeze({ id: 'tradingSignatures', label: 'Signature' }),
-  Object.freeze({ id: 'status', label: 'Status' }),
-
 ]);
 const marketplaceGlobalColumns = Object.freeze([
   Object.freeze({ id: 'globalTimestamp', label: 'Timestamp (UTC)' }),
@@ -845,7 +844,6 @@ const marketplaceGlobalColumns = Object.freeze([
 ]);
 const marketplaceGameColumns = Object.freeze([
   Object.freeze({ id: 'gameTimestamp', label: 'Game Timestamp' }),
-  Object.freeze({ id: 'gameStarbase', label: 'Game Starbase' }),
   Object.freeze({ id: 'gameAsset', label: 'Game Asset' }),
   Object.freeze({ id: 'gameQuantity', label: 'Game Quantity' }),
   Object.freeze({ id: 'gamePrincipal', label: 'Game Principal' }),
@@ -911,7 +909,7 @@ const earningsColumnState = {
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   breakeven: new Set(),
-  marketplace: new Set(marketplaceEarningsOptionalColumns.map((column) => column.id)),
+  marketplace: new Set(marketplaceEarningsOptionalColumns.map((column) => column.id).filter((id) => id !== 'starbase')),
   marketplaceGlobal: new Set(marketplaceGlobalColumns.map((column) => column.id)),
   marketplaceGame: new Set(marketplaceGameColumns.map((column) => column.id)),
   marketplaceRaw: new Set(marketplaceRawColumns.map((column) => column.id)),
@@ -7159,9 +7157,9 @@ function renderMarketplaceDecodedEvents(result) {
   }
 }
 
-const marketplaceTradeFilters = { marketplace: '', faction: '', side: '', asset: '', status: '' };
+const marketplaceTradeFilters = { marketplace: '', faction: '', starbase: '', side: '', asset: '' };
 const marketplaceGlobalFilters = { wallet: '', direction: '', movementType: '', asset: '', status: '' };
-const marketplaceGameFilters = { starbase: '', asset: '', status: '' };
+const marketplaceGameFilters = { asset: '', status: '' };
 
 function filterMarketplaceRows(rows, state) {
   return Array.from(rows || []).filter((row) => Object.entries(state).every(([key, selected]) => {
@@ -7284,7 +7282,6 @@ function renderMarketplaceGameLedger(result) {
   const sourceGameResult = result;
   const sourceRows = Array.from(result?.marketplaceGameLedgerRows || []);
   renderMarketplaceTableFilters('earnings-marketplace-game-filters', earningsMarketplaceGameTableBody, sourceRows, [
-    { key: 'starbase', label: 'Starbase' },
     { key: 'asset', label: 'Asset' },
     { key: 'status', label: 'Status' },
   ], marketplaceGameFilters, () => renderMarketplaceGameLedger(sourceGameResult));
@@ -7310,7 +7307,7 @@ function renderMarketplaceGameLedger(result) {
   for (const entry of rows) {
     const tr = document.createElement('tr');
     const values = [
-      formatMarketplaceTimestamp(entry.timestamp), entry.starbase || '--', entry.asset || '--',
+      formatMarketplaceTimestamp(entry.timestamp), entry.asset || '--',
       entry.quantity == null ? '--' : formatMarketplaceWhole(entry.quantity),
       entry.principalAtlas == null ? '--' : formatMarketplaceAtlas(entry.principalAtlas, 2),
       entry.carriedBasisAtlas == null ? '--' : formatMarketplaceAtlas(entry.carriedBasisAtlas, 2),
@@ -7334,9 +7331,9 @@ function renderEarningsMarketplace(result) {
   renderMarketplaceTableFilters('earnings-marketplace-trades-filters', earningsMarketplaceTableBody, sourceTradeRows, [
     { key: 'marketplace', label: 'Marketplace' },
     { key: 'faction', label: 'Faction' },
+    { key: 'starbase', label: 'Starbase' },
     { key: 'side', label: 'Side' },
     { key: 'asset', label: 'Asset' },
-    { key: 'status', label: 'Status' },
   ], marketplaceTradeFilters, () => renderEarningsMarketplace(sourceTradeResult));
   result = { ...result, marketplaceTrades: filterMarketplaceRows(sourceTradeRows, marketplaceTradeFilters) };
 
@@ -7387,14 +7384,13 @@ function renderMarketplaceHeader(visibleColumns) {
 function createMarketplaceEarningsCell(entry, columnId, calculated) {
   const values = {
     timestamp: formatMarketplaceTimestamp(entry.timestamp), side: String(entry.side || '').toUpperCase(), marketplace: entry.marketplace || '--',
-    faction: entry.faction || '--', asset: entry.asset || '--', amount: formatMarketplaceWhole(calculated.quantity),
+    faction: entry.faction || '--', starbase: entry.starbase || '-', asset: entry.asset || '--', amount: formatMarketplaceWhole(calculated.quantity),
     grossAtlas: calculated.gross == null ? '--' : formatMarketplaceAtlas(calculated.gross, 2),
     price: entry.unitPriceAtlas == null ? '--' : formatMarketplaceAtlas(entry.unitPriceAtlas, 8),
     marketplaceFee: entry.side === 'buy' ? 'Seller-paid' : entry.marketplaceFeeAtlas == null ? '--' : formatMarketplaceAtlas(entry.marketplaceFeeAtlas, 6),
     txsFee: calculated.txFee == null ? '--' : formatMarketplaceAtlas(calculated.txFee, 2),
     netAtlas: calculated.net == null ? '--' : formatMarketplaceAtlas(calculated.net, 2),
     unitMetric: calculated.unitMetric == null ? '--' : formatMarketplaceAtlas(calculated.unitMetric, 8),
-    status: entry.status || 'Partial',
   };
   if (columnId !== 'tradingSignatures') return createTextCell(values[columnId] ?? '--');
   const signatures = [String(entry.signature || '').trim()].filter(Boolean);
