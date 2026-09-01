@@ -855,6 +855,8 @@ const marketplaceGameColumns = Object.freeze([
   Object.freeze({ id: 'gameTxFee', label: 'Game Tx Fees' }),
   Object.freeze({ id: 'gameFinalBasis', label: 'Game Final Basis' }),
   Object.freeze({ id: 'gameUnitBasis', label: 'Game Cost / Unit' }),
+  Object.freeze({ id: 'gameReceivedUnit', label: 'Received / Unit' }),
+  Object.freeze({ id: 'gameNetProfitUnit', label: 'Net Profit / Unit' }),
   Object.freeze({ id: 'gameSignature', label: 'Game Signature' }),
   Object.freeze({ id: 'gamePhysicalWithdrawal', label: 'Physical Withdrawal' }),
   Object.freeze({ id: 'gameStatus', label: 'Game Status' }),
@@ -930,6 +932,9 @@ function restoreEarningsColumnState() {
         ? [...saved[subtab], 'tradingSignatures']
         : [...saved[subtab]];
       if (subtab === 'marketplace' && Number(saved.schemaVersion || 1) < 2) restoredIds.push('side', 'faction', 'status');
+      if (subtab === 'marketplaceGame' && Number(saved.schemaVersion || 1) < 3) {
+        restoredIds.push('gameReceivedUnit', 'gameNetProfitUnit');
+      }
       const validIds = new Set(getEarningsColumns(subtab).map((column) => column.id));
       earningsColumnState[subtab] = new Set(restoredIds.filter((id) => validIds.has(id)));
     }
@@ -941,7 +946,7 @@ function restoreEarningsColumnState() {
 function persistEarningsColumnState() {
   try {
     const serialized = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       ...Object.fromEntries(Object.entries(earningsColumnState).map(([subtab, selected]) => [subtab, Array.from(selected)])),
     };
     localStorage.setItem(EARNINGS_COLUMN_STORAGE_KEY, JSON.stringify(serialized));
@@ -7244,7 +7249,8 @@ function marketplaceTableColumnValue(entry, columnId) {
     globalSignature: 'signature', globalStatus: 'status',
     gameTimestamp: 'timestamp', gameAsset: 'asset', gameQuantity: 'quantity', gamePrincipal: 'principalAtlas',
     gameCarriedBasis: 'carriedBasisAtlas', gameMarketplaceFee: 'marketplaceFeeAtlas', gameTxFee: 'transactionFeeAtlas',
-    gameFinalBasis: 'finalBasisAtlas', gameUnitBasis: 'costPerUnitAtlas', gameSignature: 'signature', gameStatus: 'status',
+    gameFinalBasis: 'finalBasisAtlas', gameUnitBasis: 'costPerUnitAtlas', gameReceivedUnit: 'receivedPerUnitAtlas',
+    gameNetProfitUnit: 'netProfitPerUnitAtlas', gameSignature: 'signature', gameStatus: 'status',
   };
   return entry?.[fields[columnId]] ?? '';
 }
@@ -7259,6 +7265,7 @@ function compareMarketplaceTableValues(left, right, columnId) {
     'amount', 'grossAtlas', 'price', 'marketplaceFee', 'txsFee', 'netAtlas', 'unitMetric',
     'globalQuantity', 'globalPrincipal', 'globalMarketplaceFee', 'globalTxFee', 'globalFinalBasis', 'globalUnitBasis',
     'gameQuantity', 'gamePrincipal', 'gameCarriedBasis', 'gameMarketplaceFee', 'gameTxFee', 'gameFinalBasis', 'gameUnitBasis',
+    'gameReceivedUnit', 'gameNetProfitUnit',
   ]);
   if (numericColumns.has(columnId)) return (Number(leftValue) || 0) - (Number(rightValue) || 0);
   return String(leftValue).localeCompare(String(rightValue), undefined, { sensitivity: 'base', numeric: true });
@@ -7423,6 +7430,8 @@ function renderMarketplaceGameLedger(result) {
       entry.transactionFeeAtlas == null ? '--' : formatMarketplaceAtlas(entry.transactionFeeAtlas, 2),
       entry.finalBasisAtlas == null ? '--' : formatMarketplaceAtlas(entry.finalBasisAtlas, 2),
       entry.costPerUnitAtlas == null ? '--' : formatMarketplaceAtlas(entry.costPerUnitAtlas, 8),
+      entry.receivedPerUnitAtlas == null ? '--' : formatMarketplaceAtlas(entry.receivedPerUnitAtlas, 8),
+      entry.netProfitPerUnitAtlas == null ? '--' : formatMarketplaceAtlas(entry.netProfitPerUnitAtlas, 8),
     ];
     for (const value of values) tr.appendChild(createTextCell(value));
     appendMarketplaceSignatureCell(tr, entry.signature);

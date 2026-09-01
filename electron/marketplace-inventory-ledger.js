@@ -437,6 +437,9 @@ function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {
   for (const group of saleGroups.values()) {
     group.finalBasisAtlas = group.principalAtlas + group.marketplaceFeeAtlas + group.transactionFeeAtlas;
     group.costPerUnitAtlas = group.quantity > 0 ? group.finalBasisAtlas / group.quantity : null;
+    group.receivedPerUnitAtlas = group.quantity > 0 ? group.netProceedsAtlas / group.quantity : null;
+    group.netProfitPerUnitAtlas = group.quantity > 0
+      ? (group.netProceedsAtlas - group.finalBasisAtlas) / group.quantity : null;
     group.physicalWithdrawals = [...group.physicalWithdrawals.values()]
       .sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
         || left.movementId.localeCompare(right.movementId));

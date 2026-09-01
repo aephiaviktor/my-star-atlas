@@ -215,6 +215,8 @@ test('Game Ledger aggregates one sale signature and rebases its complete weighte
   assert.equal(rows[0].marketplaceFeeAtlas, 391.03);
   assert.equal(rows[0].transactionFeeAtlas, 3.78);
   assert.ok(Math.abs(rows[0].finalBasisAtlas - 4522.14) < 1e-9);
+  assert.ok(Math.abs(rows[0].receivedPerUnitAtlas - (8294.72 / 7339437)) < 1e-12);
+  assert.ok(Math.abs(rows[0].netProfitPerUnitAtlas - ((8294.72 - 4522.14) / 7339437)) < 1e-12);
   assert.deepEqual(rows[0].physicalWithdrawals, [
     { movementId: 'physical-2', signature: 'withdraw-2', timestamp: '2026-09-01T06:27:39Z', quantity: 7339436 },
   ]);

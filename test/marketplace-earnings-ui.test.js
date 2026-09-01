@@ -73,7 +73,8 @@ test('Global Ledger and Game Ledger columns participate in the Marketplace sideb
   for (const id of ['globalTimestamp', 'globalWallet', 'globalCounterparty', 'globalAsset', 'globalQuantity',
     'globalPrincipal', 'globalMarketplaceFee', 'globalTxFee', 'globalFinalBasis', 'globalUnitBasis', 'globalSignature', 'globalStatus',
     'gameTimestamp', 'gameAsset', 'gameQuantity', 'gamePrincipal', 'gameCarriedBasis',
-    'gameMarketplaceFee', 'gameTxFee', 'gameFinalBasis', 'gameUnitBasis', 'gameSignature', 'gamePhysicalWithdrawal', 'gameStatus']) {
+    'gameMarketplaceFee', 'gameTxFee', 'gameFinalBasis', 'gameUnitBasis', 'gameReceivedUnit', 'gameNetProfitUnit',
+    'gameSignature', 'gamePhysicalWithdrawal', 'gameStatus']) {
     assert.match(renderer, new RegExp(`id: '${id}'`));
   }
   assert.match(renderer, /marketplaceGlobal: marketplaceGlobalColumns/);
@@ -88,6 +89,9 @@ test('Global Ledger and Game Ledger columns participate in the Marketplace sideb
   assert.match(renderer, /marketplace: new Set\(marketplaceEarningsOptionalColumns\.map\(\(column\) => column\.id\)\.filter\(\(id\) => id !== 'starbase'\)\)/);
   assert.match(renderer, /function appendPhysicalWithdrawalsCell\(row, entry\)/);
   assert.match(renderer, /`\$\{items\.length\} withdrawals: `/);
+  assert.match(renderer, /formatMarketplaceAtlas\(entry\.receivedPerUnitAtlas, 8\)/);
+  assert.match(renderer, /formatMarketplaceAtlas\(entry\.netProfitPerUnitAtlas, 8\)/);
+  assert.match(renderer, /subtab === 'marketplaceGame' && Number\(saved\.schemaVersion \|\| 1\) < 3/);
 });
 
 test('Marketplace event synchronization supplies decoded LM and GM executions with explicit scope', () => {
