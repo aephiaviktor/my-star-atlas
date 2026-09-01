@@ -139,10 +139,16 @@ function replayMarketplaceInventoryLedger(movements = []) {
       const toWallet = text(movement.toWallet);
       const lot = consume(fromWallet, asset, quantity);
       if (!fromWallet || !toWallet || lot == null) { rows.push({ ...common, fromWallet, toWallet, status: 'pending_inventory' }); continue; }
+      const sourceLot = lotFields(lot);
       const payer = text(movement.transactionFeePayer);
       if (payer === fromWallet || payer === toWallet) addFeeToLot(lot, movement.transactionFeeAtlas);
       const after = add(toWallet, asset, lot);
-      rows.push({ ...common, fromWallet, toWallet, ...lotFields(lot), after: copyPool(after) });
+      rows.push({ ...common, fromWallet, toWallet, ...lotFields(lot),
+        sourcePrincipalAtlas: sourceLot.principalAtlas,
+        sourceMarketplaceFeeAtlas: sourceLot.marketplaceFeeAtlas,
+        sourceTransactionFeeAtlas: sourceLot.transactionFeeAtlas,
+        sourceBasisMovedAtlas: sourceLot.basisMovedAtlas,
+        after: copyPool(after) });
       continue;
     }
     if (kind === 'deposit') {
@@ -300,6 +306,49 @@ function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {
     || left.gameLedgerId.localeCompare(right.gameLedgerId));
 }
 
+function projectGlobalLedgerRows(ledgerRows = []) {
+  const rows = [];
+  const add = (row, direction, wallet, counterparty, values = {}) => {
+    if (!text(wallet)) return;
+    const principalAtlas = Number(values.principalAtlas ?? row.principalAtlas ?? 0);
+    const marketplaceFeeAtlas = Number(values.marketplaceFeeAtlas ?? row.marketplaceFeeAtlas ?? 0);
+    const transactionFeeAtlas = Number(values.transactionFeeAtlas ?? row.transactionFeeAtlas ?? 0);
+    const finalBasisAtlas = Number(values.finalBasisAtlas ?? row.basisMovedAtlas ?? 0);
+    rows.push({
+      globalLedgerId: `${row.movementId}:${direction}:${wallet}`, movementId: row.movementId,
+      timestamp: row.timestamp, direction, wallet: text(wallet), counterparty: text(counterparty),
+      movementType: row.kind, asset: row.asset, quantity: row.quantity,
+      principalAtlas, marketplaceFeeAtlas, transactionFeeAtlas, finalBasisAtlas,
+      costPerUnitAtlas: row.quantity > 0 ? finalBasisAtlas / row.quantity : null,
+      signature: row.signature, status: row.status === 'applied' ? 'Complete' : text(row.status),
+    });
+  };
+  for (const row of ledgerRows || []) {
+    if (row.kind === 'buy') add(row, 'deposit', row.toWallet, row.marketplace || 'Market');
+    else if (row.kind === 'withdraw') add(row, 'deposit', row.toWallet, `${text(row.faction)}:${text(row.starbase)}`);
+    else if (row.kind === 'transfer') {
+      add(row, 'withdraw', row.fromWallet, row.toWallet, {
+        principalAtlas: row.sourcePrincipalAtlas,
+        marketplaceFeeAtlas: row.sourceMarketplaceFeeAtlas,
+        transactionFeeAtlas: row.sourceTransactionFeeAtlas,
+        finalBasisAtlas: row.sourceBasisMovedAtlas,
+      });
+      add(row, 'deposit', row.toWallet, row.fromWallet);
+    } else if (row.kind === 'deposit') add(row, 'withdraw', row.fromWallet, row.destination);
+    else if (row.kind === 'sell') add(row, 'withdraw', row.fromWallet, row.marketplace || 'Market', {
+      principalAtlas: row.principalAtlas,
+      marketplaceFeeAtlas: row.marketplaceFeeAtlas,
+      transactionFeeAtlas: Number(row.transactionFeeAtlas || 0) + Number(row.saleTransactionFeeAtlas || 0),
+      finalBasisAtlas: Number(row.basisMovedAtlas || 0) + Number(row.marketplaceFeeAtlas || 0) + Number(row.saleTransactionFeeAtlas || 0),
+    });
+  }
+  return rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
+    || left.movementId.localeCompare(right.movementId)
+    || Number(right.direction === 'withdraw') - Number(left.direction === 'withdraw')
+    || left.globalLedgerId.localeCompare(right.globalLedgerId));
+}
+
 module.exports = {
-  poolKey, buildMarketplaceInventoryMovements, replayMarketplaceInventoryLedger, projectGameLedgerRows,
+  poolKey, buildMarketplaceInventoryMovements, replayMarketplaceInventoryLedger,
+  projectGlobalLedgerRows, projectGameLedgerRows,
 };

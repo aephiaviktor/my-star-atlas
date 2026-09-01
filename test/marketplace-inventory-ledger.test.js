@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  buildMarketplaceInventoryMovements, replayMarketplaceInventoryLedger, projectGameLedgerRows,
+  buildMarketplaceInventoryMovements, replayMarketplaceInventoryLedger, projectGlobalLedgerRows, projectGameLedgerRows,
 } = require('../electron/marketplace-inventory-ledger');
 const {
   createBreakevenBasisState, resolveBreakevenBasisAtOrBefore, buildHistoricalBreakevenBasisStateFlux,
@@ -140,4 +140,20 @@ test('Game Ledger is asymmetric: deposits use game time while withdrawals use se
   ]);
   assert.ok(withdrawals.every((row) => row.physicalWithdrawalTimestamp === '2026-08-30T12:00:00.000Z'));
   assert.ok(withdrawals.every((row) => row.physicalWithdrawalSignature === 'withdraw-signature'));
+});
+
+test('Global Ledger renders wallet transfers as balanced withdrawal and deposit rows', () => {
+  const ledger = replayMarketplaceInventoryLedger([
+    { movementId: 'buy', timestamp: '2026-08-30T10:00:00Z', kind: 'buy', asset: 'Carbon', quantity: 10,
+      toWallet: 'gm', principalAtlas: 100, transactionFeeAtlas: 1 },
+    { movementId: 'transfer', timestamp: '2026-08-30T10:05:00Z', kind: 'transfer', asset: 'Carbon', quantity: 10,
+      fromWallet: 'gm', toWallet: 'player', transactionFeeAtlas: 0.5, transactionFeePayer: 'gm' },
+  ]);
+  const rows = projectGlobalLedgerRows(ledger.rows);
+  const transferRows = rows.filter((row) => row.movementId === 'transfer');
+  assert.deepEqual(transferRows.map((row) => [row.direction, row.wallet, row.counterparty]), [
+    ['withdraw', 'gm', 'player'], ['deposit', 'player', 'gm'],
+  ]);
+  assert.equal(transferRows.find((row) => row.direction === 'withdraw').finalBasisAtlas, 101);
+  assert.equal(transferRows.find((row) => row.direction === 'deposit').finalBasisAtlas, 101.5);
 });
