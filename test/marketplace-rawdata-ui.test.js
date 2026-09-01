@@ -51,8 +51,9 @@ test('Marketplace Decoded Events is a separate persisted event view linked to ra
   assert.match(renderer, /eventsReadFailed[\s\S]*marketplaceEvents: prior\.marketplaceEvents/);
   assert.match(main, /async function syncMarketplaceEventsFromRawData[\s\S]*fetchMarketplaceRawDataFromInflux\(settings\)/);
   assert.match(main, /deriveCustodyEventsFromRawRows\(rawData\.rows/);
-  assert.match(main, /projectMarketplaceEventsFromRawRows\(rawData\.rows, 'LM'\)/);
+  assert.match(main, /projectMarketplaceEventsFromRawRows\(rawData\.rows, 'LM', \{[\s\S]*marketAssetsByMint: localMarketAssetsByMint, faction: settings\.faction/);
   assert.match(main, /projectMarketplaceEventsFromRawRows\(rawData\.rows, 'GM'\)/);
+  assert.match(main, /decodeLocalMarketTransactions\(transactions, assetMap\)/);
   assert.match(main, /action: 'order_cancelled'/);
   assert.doesNotMatch(main, /writeMarketplaceEvents\(settings, projectMarketplaceOrderAndExecutionEvents\(scanned/);
   assert.match(renderer, /const marketplaceEventColumns = Object\.freeze/);

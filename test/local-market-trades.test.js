@@ -7,7 +7,7 @@ const {
   buildLocalMarketLedgerEvents,
   formatLocalMarketInfluxLine,
 } = require('../electron/local-market-trades');
-const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, fetchTransactions, resolveLocalMarketStartIso, createLocalMarketPacer, computeTxFeeAtlas, calculateExecutionAccounting, DEFAULT_REQUESTS_PER_SECOND } = require('../electron/local-market-scanner');
+const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, decodeLocalMarketTransactions, fetchTransactions, resolveLocalMarketStartIso, createLocalMarketPacer, computeTxFeeAtlas, calculateExecutionAccounting, DEFAULT_REQUESTS_PER_SECOND } = require('../electron/local-market-scanner');
 const crypto = require('node:crypto');
 const { MarketplaceRpcBudgetExhaustedError } = require('../electron/marketplace-rpc-telemetry');
 const bs58Module = require('bs58');
@@ -203,6 +203,22 @@ function lifecycleTx({ signature, name, accounts, values = [], fee = 5000, logs 
     transaction: { signatures: [signature], message: { accountKeys: accounts.map((pubkey, index) => ({ pubkey, signer: index === 0 })), instructions: [{ programId: GM_PROGRAM_ID, accounts, data: gmData(name, ...values) }] } },
   };
 }
+
+test('raw LM projection decodes order creation and an orphan exchange from token deltas', () => {
+  const orderTx = lifecycleTx({
+    signature: 'create', name: 'process_initialize_sell', values: [100000000, 12],
+    accounts: ['wallet-1', 'market-vars', 'certificate-1', ATLAS_MINT, 'vault', 'vault-auth', 'asset-ata', 'atlas-ata', 'order-1'],
+  });
+  const orphanExchange = tx({
+    signature: 'orphan-exchange', wallet: 'wallet-1', assetMint: 'certificate-1',
+    assetBefore: 20, assetAfter: 20, atlasBefore: 10, atlasAfter: 21.5,
+  });
+  const decoded = decodeLocalMarketTransactions([orderTx, orphanExchange], {
+    'certificate-1': { starbase: 'UST-1', asset: 'Carbon', rawMint: 'carbon-mint' },
+  });
+  assert.deepEqual(decoded.orders.map((order) => order.creationSignature), ['create']);
+  assert.deepEqual(decoded.trades.map((trade) => [trade.signature, trade.marketplace]), [['orphan-exchange', 'LM']]);
+});
 
 test('transaction fetches use one RPC call per signature so batch-disabled plans still work', async () => {
   const rows = new Map(Array.from({ length: 5 }, (_, index) => {

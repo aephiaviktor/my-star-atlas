@@ -167,6 +167,31 @@ function decodeOrderExecution(transaction, ordersById, trackedWallets = [], { at
   return null;
 }
 
+function decodeLocalMarketTransactions(transactions = [], marketAssetsByMint = {}, { atlasPerSol } = {}) {
+  const orderedTransactions = Array.from(transactions || [])
+    .sort((left, right) => Number(left?.blockTime || 0) - Number(right?.blockTime || 0));
+  const ordersById = new Map();
+  const accountKeys = (transaction) => Array.from(new Set([
+    ...(transaction?.transaction?.message?.accountKeys || []).map(keyText),
+    ...(transaction?.meta?.preTokenBalances || []).map((balance) => String(balance?.owner || '')),
+    ...(transaction?.meta?.postTokenBalances || []).map((balance) => String(balance?.owner || '')),
+  ].filter(Boolean)));
+  for (const transaction of orderedTransactions) {
+    const order = decodeLocalMarketOrder(transaction, {
+      trackedWallets: accountKeys(transaction), marketAssetsByMint, atlasPerSol,
+    });
+    if (order) ordersById.set(order.orderId, order);
+  }
+  const trades = [];
+  for (const transaction of orderedTransactions) {
+    const trackedWallets = accountKeys(transaction);
+    const trade = decodeOrderExecution(transaction, ordersById, trackedWallets, { atlasPerSol })
+      || decodeLocalMarketTrade(transaction, { trackedWallets, marketAssetsByMint });
+    if (trade) trades.push({ ...trade, marketplace: String(trade.marketplace || 'LM') });
+  }
+  return { orders: Array.from(ordersById.values()), trades };
+}
+
 async function collectSignatures(connection, addresses, startMs, addressFactory, maxPages, pacer, stats, cursors = {}) {
   const signatures = new Map();
   const nextCursors = { ...cursors };
@@ -416,5 +441,6 @@ async function scanLocalMarketTrades(connection, {
 module.exports = {
   DEFAULT_START_ISO, MAX_LOOKBACK_MS, DEFAULT_REQUESTS_PER_SECOND,
   resolveLocalMarketStartIso, createLocalMarketPacer,
-  scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, computeTxFeeAtlas, calculateExecutionAccounting, fetchTransactions,
+  scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution, decodeLocalMarketTransactions,
+  computeTxFeeAtlas, calculateExecutionAccounting, fetchTransactions,
 };

@@ -89,7 +89,7 @@ const {
   valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
 } = require('./cargo-cost-source');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
-const { scanLocalMarketTrades, decodeLocalMarketOrder, decodeOrderExecution } = require('./local-market-scanner');
+const { scanLocalMarketTrades, decodeLocalMarketTransactions } = require('./local-market-scanner');
 const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows, selectFactionAssetFlows } = require('./marketplace-asset-flow');
 const {
@@ -4842,33 +4842,20 @@ function rawRowHasDiscoverySource(row, source) {
   return discoverySource === source || discoverySource === 'multiple';
 }
 
-function rawTransactionAccountKeys(transaction) {
-  return (transaction?.transaction?.message?.accountKeys || []).map((key) => String(key?.pubkey || key || '')).filter(Boolean);
-}
-
-function projectMarketplaceEventsFromRawRows(rawRows, market) {
+function projectMarketplaceEventsFromRawRows(rawRows, market, { marketAssetsByMint = {}, faction = '' } = {}) {
   const discoverySource = market === 'GM' ? 'gm_wallet' : 'lm_scanner';
   const transactions = (rawRows || []).filter((row) => rawRowHasDiscoverySource(row, discoverySource))
     .map((row) => row.payload).filter(Boolean);
-  const marketAssetsByMint = buildGlobalMarketAssetMap();
-  const ordersById = new Map();
-  for (const transaction of transactions) {
-    const order = decodeLocalMarketOrder(transaction, {
-      trackedWallets: rawTransactionAccountKeys(transaction), marketAssetsByMint,
-    });
-    if (order && order.marketplace === market) ordersById.set(order.orderId, order);
-  }
-  const trades = [];
-  for (const transaction of transactions) {
-    const trade = decodeOrderExecution(transaction, ordersById, rawTransactionAccountKeys(transaction));
-    if (trade && trade.marketplace === market) trades.push(trade);
-  }
+  const assetMap = market === 'GM' ? buildGlobalMarketAssetMap() : marketAssetsByMint;
+  const decoded = decodeLocalMarketTransactions(transactions, assetMap);
   return projectMarketplaceOrderAndExecutionEvents({
-    orders: Array.from(ordersById.values()), trades, rawTransactions: transactions,
-  }, market);
+    orders: decoded.orders.filter((order) => order.marketplace === market),
+    trades: decoded.trades.filter((trade) => trade.marketplace === market),
+    rawTransactions: transactions,
+  }, market, { faction });
 }
 
-async function syncMarketplaceEventsFromRawData(settings, { localTrades = [], globalTrades = [] } = {}) {
+async function syncMarketplaceEventsFromRawData(settings, { localTrades = [], globalTrades = [], localMarketAssetsByMint = {} } = {}) {
   const rawData = await fetchMarketplaceRawDataFromInflux(settings);
   if (rawData.error) throw new Error(rawData.error);
   const cssScopes = ['MUD', 'ONI', 'USTUR'].map((faction) => ({
@@ -4898,7 +4885,9 @@ async function syncMarketplaceEventsFromRawData(settings, { localTrades = [], gl
     ...projectMarketplaceOrderAndExecutionEvents({ trades: localTrades }, 'LM', { faction: settings.faction }),
     ...projectMarketplaceOrderAndExecutionEvents({ trades: globalTrades }, 'GM', { faction: 'GLOBAL' }),
     ...deriveCustodyEventsFromRawRows(rawData.rows, { cssScopes, assetsByMint }),
-    ...projectMarketplaceEventsFromRawRows(rawData.rows, 'LM'),
+    ...projectMarketplaceEventsFromRawRows(rawData.rows, 'LM', {
+      marketAssetsByMint: localMarketAssetsByMint, faction: settings.faction,
+    }),
     ...projectMarketplaceEventsFromRawRows(rawData.rows, 'GM'),
   ], transactions, { sol, atlas });
   return writeMarketplaceEvents(settings, events, transactions);
@@ -5694,6 +5683,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   } catch (error) {
     return {
       trades,
+      marketAssetsByMint,
       error: marketplacePublicationErrorCode(error?.message, 'marketplace_rawdata_lm_write_failed'),
       rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
       exhaustion: scanned.exhaustion || null,
@@ -5721,7 +5711,7 @@ async function fetchLocalMarketTrades(settings, connection) {
     { commitSafeCursor: () => writeJsonAtomic(filePath, safeCheckpointDocument) },
   );
   if (!publication.safeCursorCommitted) return {
-    trades, error: publication.error,
+    trades, marketAssetsByMint, error: publication.error,
     rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
     exhaustion: scanned.exhaustion || null,
   };
@@ -5749,6 +5739,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   });
   return {
     trades,
+    marketAssetsByMint,
     error: publishError,
     rpc: { ...scanned.stats, openOrderRequests: openOrders.requestCount, totalRpcRequests: scanned.stats.totalRpcRequests + openOrders.requestCount },
     exhaustion: scanned.exhaustion || null,
@@ -6002,6 +5993,7 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
         ? await syncMarketplaceEventsFromRawData(settings, {
           localTrades: local.trades,
           globalTrades: global.trades,
+          localMarketAssetsByMint: local.marketAssetsByMint,
         })
           .catch((error) => ({ written: 0, error: String(error?.message || error || 'marketplace_events_sync_failed') }))
         : { written: 0, error: '' };

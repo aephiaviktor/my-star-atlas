@@ -64,6 +64,7 @@ test('Custody Ledger columns participate in the Marketplace sidebar selection', 
 
 test('Marketplace event synchronization supplies decoded LM and GM executions with explicit scope', () => {
   assert.match(main, /syncMarketplaceEventsFromRawData\(settings, \{[\s\S]*localTrades: local\.trades,[\s\S]*globalTrades: global\.trades/);
+  assert.match(main, /localMarketAssetsByMint: local\.marketAssetsByMint/);
   assert.match(main, /projectMarketplaceOrderAndExecutionEvents\(\{ trades: localTrades \}, 'LM', \{ faction: settings\.faction \}\)/);
   assert.match(main, /projectMarketplaceOrderAndExecutionEvents\(\{ trades: globalTrades \}, 'GM', \{ faction: 'GLOBAL' \}\)/);
 });
