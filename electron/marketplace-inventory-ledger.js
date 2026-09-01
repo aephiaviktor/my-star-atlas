@@ -220,6 +220,36 @@ function buildMarketplaceInventoryMovements(events = [], { inventoryBasisObserva
   const primarySignatures = new Set(rows.filter((event) => event?.action === 'execution'
       || ['deposit', 'withdraw'].includes(text(event?.eventType).toLowerCase()))
     .map((event) => text(event?.signature)).filter(Boolean));
+  const ownedSeeds = new Set(rows.flatMap((event) => {
+    if (event?.action === 'execution') return [text(event?.fromWallet)];
+    if (text(event?.eventType).toLowerCase() === 'deposit') return [text(event?.fromWallet)];
+    if (text(event?.eventType).toLowerCase() === 'withdraw') return [text(event?.toWallet)];
+    return [];
+  }).filter(Boolean));
+  const transferEdges = rows.filter((event) => text(event?.eventType).toLowerCase() === 'transfer'
+    && !primarySignatures.has(text(event?.signature)) && text(event?.fromWallet) && text(event?.toWallet)
+    && text(event?.fromWallet) !== text(event?.toWallet));
+  const neighbors = new Map();
+  const connect = (left, right) => {
+    if (!neighbors.has(left)) neighbors.set(left, new Set());
+    neighbors.get(left).add(right);
+  };
+  for (const event of transferEdges) {
+    const fromWallet = text(event.fromWallet);
+    const toWallet = text(event.toWallet);
+    connect(fromWallet, toWallet); connect(toWallet, fromWallet);
+  }
+  const ownedWallets = new Set(neighbors.keys());
+  const queue = [...ownedWallets].filter((wallet) => !ownedSeeds.has(wallet) && (neighbors.get(wallet)?.size || 0) <= 1);
+  while (queue.length) {
+    const wallet = queue.pop();
+    if (!ownedWallets.delete(wallet)) continue;
+    for (const neighbor of neighbors.get(wallet) || []) {
+      neighbors.get(neighbor)?.delete(wallet);
+      if (ownedWallets.has(neighbor) && !ownedSeeds.has(neighbor) && (neighbors.get(neighbor)?.size || 0) <= 1) queue.push(neighbor);
+    }
+  }
+  for (const wallet of ownedSeeds) ownedWallets.add(wallet);
   return rows.flatMap((event) => {
     const movementId = text(event?.eventId);
     const timestamp = text(event?.timestamp);
@@ -245,7 +275,7 @@ function buildMarketplaceInventoryMovements(events = [], { inventoryBasisObserva
       if (primarySignatures.has(signature)) return [];
       const fromWallet = text(event?.fromWallet);
       const toWallet = text(event?.toWallet);
-      if (!fromWallet || !toWallet || fromWallet === toWallet) return [];
+      if (!fromWallet || !toWallet || fromWallet === toWallet || !ownedWallets.has(fromWallet) || !ownedWallets.has(toWallet)) return [];
       return [{ ...common, kind: 'transfer', fromWallet, toWallet,
         transactionFeeAtlas: Math.max(0, number(event?.transactionFeeAtlas) || 0),
         transactionFeePayer: text(event?.transactionFeePayer) }];

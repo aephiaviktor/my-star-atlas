@@ -101,6 +101,8 @@ test('decoded events project to one global movement stream without duplicate tra
     { eventId: 'wallet-transfer', eventType: 'transfer', action: 'transfer', timestamp: '2026-08-30T10:05:00Z',
       signature: 'transfer-signature', fromWallet: 'gm', toWallet: 'player', asset: 'Carbon', quantityRaw: '100',
       transactionFeeAtlas: 0.5, transactionFeePayer: 'gm' },
+    { eventId: 'external-transfer', eventType: 'transfer', action: 'transfer', timestamp: '2026-08-30T10:06:00Z',
+      signature: 'external-signature', fromWallet: 'gm', toWallet: 'external', asset: 'Carbon', quantityRaw: '5' },
     { eventId: 'game-deposit', eventType: 'deposit', action: 'deposit_cargo_to_game', timestamp: '2026-08-30T10:10:00Z',
       signature: 'deposit-signature', fromWallet: 'player', toWallet: 'css', faction: 'USTUR', starbase: 'UST-1',
       asset: 'Carbon', quantityRaw: '100', transactionFeeAtlas: 0.2, transactionFeePayer: 'player' },
@@ -109,6 +111,7 @@ test('decoded events project to one global movement stream without duplicate tra
   assert.deepEqual(movements.map((movement) => movement.kind), ['buy', 'transfer', 'deposit']);
   assert.equal(movements[0].marketplaceFeeAtlas, 0);
   assert.equal(movements[0].transactionFeeAtlas, 1);
+  assert.ok(!movements.some((movement) => movement.toWallet === 'external'));
 });
 
 test('Game Ledger is asymmetric: deposits use game time while withdrawals use sell time and amount', () => {
