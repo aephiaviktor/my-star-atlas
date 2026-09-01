@@ -22,7 +22,22 @@ test('historical Breakeven lookup selects the exact latest basis before a CSS wi
   assert.match(buildHistoricalBreakevenBasisStateFlux('slya', { stop: '2026-08-30T12:00:00Z' }), /stop: time\(v: "2026-08-30T12:00:00.000Z"\)/);
 });
 
-test('ledger carries GM buy basis into game and production basis back out to realized sell profit', () => {
+test('game withdrawal falls back to historical landed basis when inventory snapshot basis is zero', () => {
+  const [movement] = buildMarketplaceInventoryMovements([{
+    eventId: 'withdraw', eventType: 'withdraw', action: 'withdraw_cargo_from_game',
+    timestamp: '2026-08-30T12:00:00Z', signature: 'withdraw-signature', toWallet: 'player',
+    faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore', quantityRaw: '40',
+  }], {
+    inventoryBasisObservations: [{ faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore',
+      timestamp: '2026-08-30T11:30:00Z', weightedAveragePriceAtlas: 0 }],
+    breakevenBasisStates: [createBreakevenBasisState({ faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore',
+      timestamp: '2026-08-30T11:00:00Z', inventory: 90, landedCostPerUnit: 6 })],
+  });
+  assert.equal(movement.unitBasisAtlas, 6);
+  assert.equal(movement.basisSource, 'breakeven_basis_state');
+});
+
+test('ledger carries GM buy basis through game and back out to realized sell profit', () => {
   const result = replayMarketplaceInventoryLedger([
     { movementId: '1-buy', timestamp: '2026-08-30T10:00:00Z', kind: 'buy', asset: 'Iron Ore', quantity: 100,
       toWallet: 'gm', principalAtlas: 1000, transactionFeeAtlas: 1 },
@@ -31,7 +46,8 @@ test('ledger carries GM buy basis into game and production basis back out to rea
     { movementId: '3-deposit', timestamp: '2026-08-30T10:10:00Z', kind: 'deposit', asset: 'Iron Ore', quantity: 100,
       fromWallet: 'player', destination: 'USTUR:CSS' },
     { movementId: '4-withdraw', timestamp: '2026-08-30T12:00:00Z', kind: 'withdraw', asset: 'Iron Ore', quantity: 40,
-      toWallet: 'player', unitBasisAtlas: 6, basisSource: 'breakeven_basis_state', transactionFeeAtlas: 0.2 },
+      toWallet: 'player', unitBasisAtlas: 6, basisSource: 'breakeven_basis_state', transactionFeeAtlas: 0.2,
+      faction: 'USTUR', starbase: 'CSS' },
     { movementId: '5-transfer-out', timestamp: '2026-08-30T12:05:00Z', kind: 'transfer', asset: 'Iron Ore', quantity: 40,
       fromWallet: 'player', toWallet: 'gm', transactionFeeAtlas: 0.1, transactionFeePayer: 'player' },
     { movementId: '6-sell', timestamp: '2026-08-30T12:10:00Z', kind: 'sell', asset: 'Iron Ore', quantity: 40,
@@ -41,10 +57,10 @@ test('ledger carries GM buy basis into game and production basis back out to rea
   const withdrawal = result.rows.find((row) => row.kind === 'withdraw');
   const sale = result.rows.find((row) => row.kind === 'sell');
   assert.equal(deposit.basisMovedAtlas, 1001.5);
-  assert.equal(withdrawal.basisMovedAtlas, 240.2);
-  assert.ok(Math.abs(sale.basisMovedAtlas - 240.3) < 1e-9);
+  assert.ok(Math.abs(withdrawal.basisMovedAtlas - 400.8) < 1e-9);
+  assert.ok(Math.abs(sale.basisMovedAtlas - 400.9) < 1e-9);
   assert.equal(sale.netProceedsAtlas, 389);
-  assert.ok(Math.abs(sale.realizedProfitAtlas - 148.7) < 1e-9);
+  assert.ok(Math.abs(sale.realizedProfitAtlas - (-11.9)) < 1e-9);
   assert.equal(result.pools.find((pool) => pool.wallet === 'gm').quantity, 0);
 });
 
@@ -70,10 +86,39 @@ test('wallet pools carry weighted basis components and game-withdrawal provenanc
   assert.equal(deposit.marketplaceFeeAtlas, 0, 'buyer must not inherit the seller-paid marketplace fee');
   assert.equal(deposit.transactionFeeAtlas, 1.7);
   assert.equal(deposit.basisMovedAtlas, 1001.7);
-  assert.ok(Math.abs(sell.basisMovedAtlas - 90.1125) < 1e-9);
+  assert.ok(Math.abs(sell.basisMovedAtlas - 150.3675) < 1e-9);
   assert.deepEqual(sell.gameOrigins.map((origin) => ({
     movementId: origin.movementId, faction: origin.faction, starbase: origin.starbase, quantity: origin.quantity,
   })), [{ movementId: 'game-withdraw', faction: 'USTUR', starbase: 'UST-1', quantity: 15 }]);
+});
+
+test('game deposits fund later withdrawals and sells with the carried principal', () => {
+  const ledger = replayMarketplaceInventoryLedger([
+    { movementId: 'buy', timestamp: '2026-08-30T10:00:00Z', kind: 'buy', asset: 'Iron Ore', quantity: 100,
+      toWallet: 'gm', principalAtlas: 1000, transactionFeeAtlas: 1 },
+    { movementId: 'to-player', timestamp: '2026-08-30T10:05:00Z', kind: 'transfer', asset: 'Iron Ore', quantity: 100,
+      fromWallet: 'gm', toWallet: 'player', transactionFeeAtlas: 0.5, transactionFeePayer: 'gm' },
+    { movementId: 'game-deposit', timestamp: '2026-08-30T10:10:00Z', kind: 'deposit', asset: 'Iron Ore', quantity: 100,
+      fromWallet: 'player', destination: 'USTUR:UST-1', faction: 'USTUR', starbase: 'UST-1',
+      transactionFeeAtlas: 0.2, transactionFeePayer: 'player' },
+    { movementId: 'game-withdraw', timestamp: '2026-08-30T12:00:00Z', kind: 'withdraw', asset: 'Iron Ore', quantity: 40,
+      toWallet: 'player', unitBasisAtlas: 0, faction: 'USTUR', starbase: 'UST-1', transactionFeeAtlas: 0.2,
+      transactionFeePayer: 'player', signature: 'withdraw-signature' },
+    { movementId: 'to-gm', timestamp: '2026-08-30T12:05:00Z', kind: 'transfer', asset: 'Iron Ore', quantity: 40,
+      fromWallet: 'player', toWallet: 'gm', transactionFeeAtlas: 0.1, transactionFeePayer: 'player' },
+    { movementId: 'sell', timestamp: '2026-08-30T13:00:00Z', kind: 'sell', asset: 'Iron Ore', quantity: 40,
+      fromWallet: 'gm', grossAtlas: 500, marketplaceFeeAtlas: 10, transactionFeeAtlas: 1 },
+  ]);
+  const withdrawal = ledger.rows.find((row) => row.movementId === 'game-withdraw');
+  const sell = ledger.rows.find((row) => row.movementId === 'sell');
+  assert.equal(withdrawal.basisSource, 'game_pool');
+  assert.equal(withdrawal.principalAtlas, 400);
+  assert.equal(sell.principalAtlas, 400);
+  assert.ok(Math.abs(sell.basisMovedAtlas - 400.98) < 1e-9);
+  const [gameWithdrawal] = projectGameLedgerRows(ledger.rows, { faction: 'USTUR' })
+    .filter((row) => row.direction === 'withdraw');
+  assert.equal(gameWithdrawal.principalAtlas, 400);
+  assert.ok(gameWithdrawal.finalBasisAtlas > 400);
 });
 
 test('ledger is deterministic, idempotent, and holds unresolved sells pending instead of inventing cost', () => {

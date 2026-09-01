@@ -1,5 +1,7 @@
 'use strict';
 
+const { resolveBreakevenBasisAtOrBefore } = require('./breakeven-basis-state');
+
 function text(value) { return String(value || '').trim(); }
 function number(value) { const result = Number(value); return Number.isFinite(result) ? result : null; }
 function poolKey(wallet, asset) { return `${text(wallet)}\n${text(asset)}`; }
@@ -62,6 +64,7 @@ function addFeeToLot(lot, fee) {
 
 function replayMarketplaceInventoryLedger(movements = []) {
   const pools = new Map();
+  const gamePools = new Map();
   const rows = [];
   const seen = new Set();
   const ordered = [...movements].sort(ledgerOrder);
@@ -71,8 +74,12 @@ function replayMarketplaceInventoryLedger(movements = []) {
     if (!pools.has(key)) pools.set(key, { wallet: text(wallet), asset: text(asset), ...emptyLot() });
     return pools.get(key);
   };
-  const consume = (wallet, asset, quantity) => {
-    const pool = getPool(wallet, asset);
+  const getGamePool = (location, asset) => {
+    const key = poolKey(location, asset);
+    if (!gamePools.has(key)) gamePools.set(key, { location: text(location), asset: text(asset), ...emptyLot() });
+    return gamePools.get(key);
+  };
+  const consumePool = (pool, quantity) => {
     if (!(quantity > 0) || pool.quantity + 1e-9 < quantity) return null;
     const ratio = pool.quantity > 0 ? quantity / pool.quantity : 0;
     const lot = emptyLot(quantity);
@@ -93,13 +100,16 @@ function replayMarketplaceInventoryLedger(movements = []) {
     if (pool.quantity <= 1e-9) Object.assign(pool, emptyLot());
     return lot;
   };
-  const add = (wallet, asset, lot) => {
-    const pool = getPool(wallet, asset);
+  const consume = (wallet, asset, quantity) => consumePool(getPool(wallet, asset), quantity);
+  const addPool = (pool, lot) => {
     pool.quantity += lot.quantity;
     for (const field of ['principalAtlas', 'marketplaceFeeAtlas', 'transactionFeeAtlas']) pool[field] += Number(lot[field] || 0);
     for (const origin of lot.gameOrigins.values()) addOrigin(pool.gameOrigins, origin);
     return pool;
   };
+  const add = (wallet, asset, lot) => addPool(getPool(wallet, asset), lot);
+  const consumeGame = (location, asset, quantity) => consumePool(getGamePool(location, asset), quantity);
+  const addGame = (location, asset, lot) => addPool(getGamePool(location, asset), lot);
   const lotFields = (lot) => ({
     principalAtlas: lot.principalAtlas,
     marketplaceFeeAtlas: lot.marketplaceFeeAtlas,
@@ -134,17 +144,24 @@ function replayMarketplaceInventoryLedger(movements = []) {
     }
     if (kind === 'withdraw') {
       const wallet = text(movement.toWallet);
-      const unitBasis = number(movement.unitBasisAtlas);
-      if (!wallet || unitBasis == null || unitBasis < 0) { rows.push({ ...common, status: 'pending_basis' }); continue; }
-      const lot = emptyLot(quantity);
-      lot.principalAtlas = quantity * unitBasis;
+      const gameLocation = `${text(movement.faction)}:${text(movement.starbase)}`;
+      let lot = consumeGame(gameLocation, asset, quantity);
+      let basisSource = lot ? 'game_pool' : text(movement.basisSource);
+      if (!lot) {
+        const unitBasis = number(movement.unitBasisAtlas);
+        if (!wallet || unitBasis == null || unitBasis < 0) { rows.push({ ...common, status: 'pending_basis' }); continue; }
+        lot = emptyLot(quantity);
+        lot.principalAtlas = quantity * unitBasis;
+      }
       addFeeToLot(lot, movement.transactionFeeAtlas);
+      lot.gameOrigins = new Map();
       addOrigin(lot.gameOrigins, { movementId, faction: movement.faction, starbase: movement.starbase,
-        signature: movement.signature, quantity, principalAtlas: quantity * unitBasis,
-        transactionFeeAtlas: lot.transactionFeeAtlas });
+        signature: movement.signature, quantity, principalAtlas: lot.principalAtlas,
+        marketplaceFeeAtlas: lot.marketplaceFeeAtlas, transactionFeeAtlas: lot.transactionFeeAtlas });
       const after = add(wallet, asset, lot);
-      rows.push({ ...common, toWallet: wallet, ...lotFields(lot), unitBasisAtlas: unitBasis,
-        basisSource: text(movement.basisSource), after: copyPool(after) });
+      rows.push({ ...common, toWallet: wallet, ...lotFields(lot),
+        unitBasisAtlas: quantity > 0 ? basisAtlas(lot) / quantity : null,
+        basisSource, after: copyPool(after) });
       continue;
     }
     if (kind === 'transfer') {
@@ -169,9 +186,11 @@ function replayMarketplaceInventoryLedger(movements = []) {
       const lot = consume(fromWallet, asset, quantity);
       if (!fromWallet || lot == null) { rows.push({ ...common, fromWallet, status: 'pending_inventory' }); continue; }
       if (text(movement.transactionFeePayer) === fromWallet) addFeeToLot(lot, movement.transactionFeeAtlas);
+      const gameLocation = text(movement.destination) || `${text(movement.faction)}:${text(movement.starbase)}`;
+      const gameAfter = addGame(gameLocation, asset, lot);
       rows.push({ ...common, fromWallet, ...lotFields(lot), unitBasisAtlas: basisAtlas(lot) / quantity,
         destination: text(movement.destination), faction: text(movement.faction), starbase: text(movement.starbase),
-        basisHandoff: 'game' });
+        basisHandoff: 'game', gameAfter: copyPool(gameAfter) });
       continue;
     }
     if (kind === 'sell') {
@@ -192,6 +211,8 @@ function replayMarketplaceInventoryLedger(movements = []) {
     rows,
     pools: [...pools.values()].map((pool) => ({ wallet: pool.wallet, asset: pool.asset, ...copyPool(pool) }))
       .sort((a, b) => a.wallet.localeCompare(b.wallet) || a.asset.localeCompare(b.asset)),
+    gamePools: [...gamePools.values()].map((pool) => ({ location: pool.location, asset: pool.asset, ...copyPool(pool) }))
+      .sort((a, b) => a.location.localeCompare(b.location) || a.asset.localeCompare(b.asset)),
   };
 }
 
@@ -215,7 +236,9 @@ function inventoryBasisAtOrBefore(observations, event) {
     || latest(candidates);
 }
 
-function buildMarketplaceInventoryMovements(events = [], { inventoryBasisObservations = [] } = {}) {
+function buildMarketplaceInventoryMovements(events = [], {
+  inventoryBasisObservations = [], breakevenBasisStates = [],
+} = {}) {
   const rows = Array.from(events || []);
   const primarySignatures = new Set(rows.filter((event) => event?.action === 'execution'
       || ['deposit', 'withdraw'].includes(text(event?.eventType).toLowerCase()))
@@ -292,9 +315,13 @@ function buildMarketplaceInventoryMovements(events = [], { inventoryBasisObserva
       const toWallet = text(event?.toWallet);
       if (!toWallet) return [];
       const observation = inventoryBasisAtOrBefore(inventoryBasisObservations, event);
-      const unitBasisAtlas = number(observation?.weightedAveragePriceAtlas);
+      const observationBasis = number(observation?.weightedAveragePriceAtlas);
+      const historicalBasis = resolveBreakevenBasisAtOrBefore(breakevenBasisStates, event);
+      const historicalUnitBasis = number(historicalBasis?.landedCostPerUnit);
+      const unitBasisAtlas = observationBasis > 0 ? observationBasis : historicalUnitBasis;
       return [{ ...common, kind: 'withdraw', toWallet, unitBasisAtlas,
-        basisSource: observation ? 'inventory_basis_snapshot' : 'unavailable',
+        basisSource: observationBasis > 0 ? 'inventory_basis_snapshot'
+          : historicalUnitBasis != null ? 'breakeven_basis_state' : 'unavailable',
         faction: text(event?.faction), starbase: text(event?.starbase),
         transactionFeeAtlas: Math.max(0, number(event?.transactionFeeAtlas) || 0),
         transactionFeePayer: text(event?.transactionFeePayer) }];
