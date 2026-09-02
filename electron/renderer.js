@@ -207,6 +207,7 @@ const earningsMarketplaceEventsLinkedSignature = document.querySelector('#earnin
 const earningsMarketplaceEventsFrom = document.querySelector('#earnings-marketplace-events-from');
 const earningsMarketplaceEventsTo = document.querySelector('#earnings-marketplace-events-to');
 const earningsMarketplaceEventsType = document.querySelector('#earnings-marketplace-events-type');
+const earningsMarketplaceEventsAction = document.querySelector('#earnings-marketplace-events-action');
 const earningsMarketplaceSubtabButtons = Array.from(document.querySelectorAll('[data-marketplace-subtab]'));
 const earningsMarketplacePanels = Array.from(document.querySelectorAll('[data-marketplace-panel]'));
 const earningsMarketplaceGlobalStatus = document.querySelector('#earnings-marketplace-global-status');
@@ -7136,13 +7137,15 @@ function renderMarketplaceDecodedEvents(result) {
   renderMarketplaceEventsHeader(visibleColumns);
   renderMarketplaceLinkedSignature(earningsMarketplaceEventsLinkedSignature);
   updateMarketplaceRawFilterOptions(earningsMarketplaceEventsType, rows.map((entry) => entry.eventType));
+  updateMarketplaceRawFilterOptions(earningsMarketplaceEventsAction, rows.map((entry) => entry.action));
   const from = earningsMarketplaceEventsFrom?.value || '';
   const to = earningsMarketplaceEventsTo?.value || '';
   const filtered = rows.filter((entry) => {
     const day = String(entry.timestamp || '').slice(0, 10);
     return (!marketplaceLinkedSignature || entry.signature === marketplaceLinkedSignature)
       && (!from || day >= from) && (!to || day <= to)
-      && (!earningsMarketplaceEventsType?.value || entry.eventType === earningsMarketplaceEventsType.value);
+      && (!earningsMarketplaceEventsType?.value || entry.eventType === earningsMarketplaceEventsType.value)
+      && (!earningsMarketplaceEventsAction?.value || entry.action === earningsMarketplaceEventsAction.value);
   });
   const direction = marketplaceEventsSort.direction === 'asc' ? 1 : -1;
   filtered.sort((a, b) => direction * compareMarketplaceEventValues(a, b, marketplaceEventsSort.column)
@@ -10026,7 +10029,7 @@ earningsMarketplaceGameDirectionButtons.forEach((button) => {
 });
 
 [
-  earningsMarketplaceEventsFrom, earningsMarketplaceEventsTo, earningsMarketplaceEventsType,
+  earningsMarketplaceEventsFrom, earningsMarketplaceEventsTo, earningsMarketplaceEventsType, earningsMarketplaceEventsAction,
 ].forEach((control) => control?.addEventListener('change', () => {
   if (latestMarketplaceResult) renderMarketplaceDecodedEvents(latestMarketplaceResult);
 }));

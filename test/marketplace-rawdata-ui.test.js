@@ -44,6 +44,10 @@ test('Marketplace Decoded Events is a separate persisted event view linked to ra
   assert.match(renderer, /ALL FACTIONS ·.*raw transactions/);
   assert.match(renderer, /ALL FACTIONS ·.*decoded events/);
   assert.match(html, /id="earnings-marketplace-events-table-body"/);
+  assert.match(html, /id="earnings-marketplace-events-action"/);
+  assert.match(renderer, /const earningsMarketplaceEventsAction = document\.querySelector\('#earnings-marketplace-events-action'\)/);
+  assert.match(renderer, /updateMarketplaceRawFilterOptions\(earningsMarketplaceEventsAction, rows\.map\(\(entry\) => entry\.action\)\)/);
+  assert.match(renderer, /entry\.action === earningsMarketplaceEventsAction\.value/);
   assert.match(main, /r\._measurement == "marketplace_events"/);
   assert.match(main, /decodedEvents\.rows\.filter\(\(event\) => rawSignatures\.has\(event\.signature\)\)/);
   assert.match(renderer, /function renderMarketplaceDecodedEvents\(result\)/);
