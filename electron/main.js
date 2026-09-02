@@ -4719,11 +4719,12 @@ async function loadMarketplaceRawDataCheckpoint() {
     return {
       ...parsed,
       schemaVersion: 2,
+      custodyBackfillVersion: Number(parsed.custodyBackfillVersion || 0),
       tokenAccountOwners: Array.isArray(parsed.tokenAccountOwners) ? parsed.tokenAccountOwners : [],
     };
   } catch (_error) {
     return {
-      schemaVersion: 2, cursors: {}, tokenAccounts: [], tokenAccountOwners: [],
+      schemaVersion: 2, custodyBackfillVersion: 0, cursors: {}, tokenAccounts: [], tokenAccountOwners: [],
       tokenAccountsRefreshedAt: '', lastTransferScanAt: '',
     };
   }
@@ -4918,22 +4919,30 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
   });
   const tokenAccountOwners = [...new Set([...playerWallets, ...gmWallets].map(String).filter(Boolean))].sort();
   const checkpointTokenAccountOwners = [...new Set((checkpoint.tokenAccountOwners || []).map(String).filter(Boolean))].sort();
+  const needsCustodyBackfill = checkpoint.custodyBackfillVersion < 1;
   const tokenAccountOwnersChanged = JSON.stringify(tokenAccountOwners) !== JSON.stringify(checkpointTokenAccountOwners);
   const transferScanAge = Date.now() - Date.parse(checkpoint.lastTransferScanAt || '');
-  const transferScanDue = tokenAccountOwnersChanged || !Number.isFinite(transferScanAge) || transferScanAge >= 60 * 60 * 1000;
+  const transferScanDue = needsCustodyBackfill || tokenAccountOwnersChanged
+    || !Number.isFinite(transferScanAge) || transferScanAge >= 60 * 60 * 1000;
   const tokenAccountsAge = Date.now() - Date.parse(checkpoint.tokenAccountsRefreshedAt || '');
   const refreshTokenAccounts = transferScanDue
-    && (tokenAccountOwnersChanged || !checkpoint.tokenAccounts.length || !Number.isFinite(tokenAccountsAge) || tokenAccountsAge >= 24 * 60 * 60 * 1000);
+    && (needsCustodyBackfill || tokenAccountOwnersChanged || !checkpoint.tokenAccounts.length
+      || !Number.isFinite(tokenAccountsAge) || tokenAccountsAge >= 24 * 60 * 60 * 1000);
   const tokenAccounts = refreshTokenAccounts
     ? await discoverPlayerTokenAccounts(connection, tokenAccountOwners, ASSET_REGISTRY.map((asset) => asset.mint))
     : checkpoint.tokenAccounts;
+  const tokenAccountAddresses = new Set(tokenAccounts.map((account) => String(account.address || '')).filter(Boolean));
+  const scanCursors = needsCustodyBackfill
+    ? Object.fromEntries(Object.entries(checkpoint.cursors).filter(([address]) => !tokenAccountAddresses.has(address)))
+    : checkpoint.cursors;
   const scanned = await scanMarketplaceRawData(connection, {
-    gmWallets, cssScopes, playerWallets, tokenAccounts: transferScanDue ? tokenAccounts : [], cursors: checkpoint.cursors,
+    gmWallets, cssScopes, playerWallets, tokenAccounts: transferScanDue ? tokenAccounts : [], cursors: scanCursors,
     startIso: MARKETPLACE_RAWDATA_CUTOVER_ISO, startSlot: MARKETPLACE_RAWDATA_CUTOVER_SLOT, maxPages: 1,
   });
   const written = await writeMarketplaceRawRecords(settings, scanned.records);
   await writeJsonAtomic(marketplaceRawDataCheckpointPath(), {
-    schemaVersion: 2, savedAt: new Date().toISOString(), cursors: scanned.cursors, tokenAccounts, tokenAccountOwners,
+    schemaVersion: 2, custodyBackfillVersion: 1, savedAt: new Date().toISOString(),
+    cursors: scanned.cursors, tokenAccounts, tokenAccountOwners,
     tokenAccountsRefreshedAt: refreshTokenAccounts ? new Date().toISOString() : checkpoint.tokenAccountsRefreshedAt,
     lastTransferScanAt: transferScanDue ? new Date().toISOString() : checkpoint.lastTransferScanAt,
   });

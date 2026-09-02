@@ -852,7 +852,7 @@ const marketplaceGameColumns = Object.freeze([
   Object.freeze({ id: 'gamePrincipal', label: 'Game Principal' }),
   Object.freeze({ id: 'gameCarriedBasis', label: 'Game Carried Basis' }),
   Object.freeze({ id: 'gameMarketplaceFee', label: 'Selling Marketplace Fee' }),
-  Object.freeze({ id: 'gameTxFee', label: 'Selling Tx Fees', description: 'Transaction fees assigned to the sale; these reduce proceeds and are not added to inventory basis.' }),
+  Object.freeze({ id: 'gameTxFee', label: 'Tx Fees', description: 'Deposits show cumulative transaction fees carried into the game; withdrawals show transaction fees assigned to the sale.' }),
   Object.freeze({ id: 'gameFinalBasis', label: 'Inventory Basis' }),
   Object.freeze({ id: 'gameUnitBasis', label: 'Game Cost / Unit' }),
   Object.freeze({ id: 'gameReceivedUnit', label: 'Received / Unit' }),

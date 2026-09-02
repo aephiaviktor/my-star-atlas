@@ -94,7 +94,7 @@ test('Global Ledger and Game Ledger columns participate in the Marketplace sideb
   assert.match(renderer, /subtab === 'marketplaceGame' && Number\(saved\.schemaVersion \|\| 1\) < 3/);
   assert.match(renderer, /id: 'globalTxFee', label: 'Cumulative Tx Fees'/);
   assert.match(renderer, /id: 'gameMarketplaceFee', label: 'Selling Marketplace Fee'/);
-  assert.match(renderer, /id: 'gameTxFee', label: 'Selling Tx Fees'/);
+  assert.match(renderer, /id: 'gameTxFee', label: 'Tx Fees'/);
   assert.match(renderer, /id: 'gameFinalBasis', label: 'Inventory Basis'/);
 });
 
@@ -214,6 +214,9 @@ test('GM raw sync scans configured trading wallets and narrow CSS/token scopes w
   assert.match(main, /deriveCssStarbasePlayer/);
   assert.match(main, /discoverPlayerTokenAccounts/);
   assert.match(main, /transferScanAge >= 60 \* 60 \* 1000/);
+  assert.match(main, /const needsCustodyBackfill = checkpoint\.custodyBackfillVersion < 1/);
+  assert.match(main, /needsCustodyBackfill \|\| tokenAccountOwnersChanged/);
+  assert.match(main, /custodyBackfillVersion: 1/);
   assert.doesNotMatch(main, /const executionWallets = Array\.from\(new Set\(\[\.\.\.profileWallets/);
   assert.doesNotMatch(main, /const trackedWallets = Array\.from\(new Set\(\[\.\.\.marketplaceWallets/);
   assert.match(main, /getMultipleAccountsInfo\(profileKeys, 'confirmed'\)/);
