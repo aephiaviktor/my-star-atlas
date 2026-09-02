@@ -194,6 +194,7 @@ const earningsMarketplaceTableBody = document.querySelector('#earnings-marketpla
 const earningsMarketplaceRawStatus = document.querySelector('#earnings-marketplace-raw-status');
 const earningsMarketplaceRawTableHead = document.querySelector('#earnings-marketplace-raw-table-head');
 const earningsMarketplaceRawTableBody = document.querySelector('#earnings-marketplace-raw-table-body');
+const earningsMarketplaceRawSearch = document.querySelector('#earnings-marketplace-raw-search');
 const earningsMarketplaceRawFrom = document.querySelector('#earnings-marketplace-raw-from');
 const earningsMarketplaceRawTo = document.querySelector('#earnings-marketplace-raw-to');
 const earningsMarketplaceRawDiscoverySource = document.querySelector('#earnings-marketplace-raw-discovery-source');
@@ -204,6 +205,7 @@ const earningsMarketplaceEventsTableBody = document.querySelector('#earnings-mar
 const earningsMarketplaceEventsTableHead = document.querySelector('#earnings-marketplace-events-table-head');
 const earningsMarketplaceRawLinkedSignature = document.querySelector('#earnings-marketplace-raw-linked-signature');
 const earningsMarketplaceEventsLinkedSignature = document.querySelector('#earnings-marketplace-events-linked-signature');
+const earningsMarketplaceEventsSearch = document.querySelector('#earnings-marketplace-events-search');
 const earningsMarketplaceEventsFrom = document.querySelector('#earnings-marketplace-events-from');
 const earningsMarketplaceEventsTo = document.querySelector('#earnings-marketplace-events-to');
 const earningsMarketplaceEventsType = document.querySelector('#earnings-marketplace-events-type');
@@ -7037,6 +7039,16 @@ function createMarketplaceRawCell(entry, columnId) {
   return createTextCell('--');
 }
 
+function marketplaceRowMatchesSearch(entry, query) {
+  const needle = String(query || '').trim().toLocaleLowerCase();
+  if (!needle) return true;
+  try {
+    return JSON.stringify(entry).toLocaleLowerCase().includes(needle);
+  } catch (_error) {
+    return Object.values(entry || {}).map(String).join(' ').toLocaleLowerCase().includes(needle);
+  }
+}
+
 function renderMarketplaceRawData(result) {
   const rows = Array.isArray(result?.marketplaceRawData) ? result.marketplaceRawData : [];
   const error = String(result?.marketplaceRawDataError || '');
@@ -7050,7 +7062,8 @@ function renderMarketplaceRawData(result) {
     const day = String(entry.timestamp || '').slice(0, 10);
     return (!marketplaceLinkedSignature || entry.signature === marketplaceLinkedSignature)
       && (!from || day >= from) && (!to || day <= to)
-      && (!earningsMarketplaceRawDiscoverySource?.value || entry.discoverySource === earningsMarketplaceRawDiscoverySource.value);
+      && (!earningsMarketplaceRawDiscoverySource?.value || entry.discoverySource === earningsMarketplaceRawDiscoverySource.value)
+      && marketplaceRowMatchesSearch(entry, earningsMarketplaceRawSearch?.value);
   });
   const direction = marketplaceRawSort.direction === 'asc' ? 1 : -1;
   filtered.sort((a, b) => direction * compareMarketplaceRawValues(a, b, marketplaceRawSort.column)
@@ -7145,7 +7158,8 @@ function renderMarketplaceDecodedEvents(result) {
     return (!marketplaceLinkedSignature || entry.signature === marketplaceLinkedSignature)
       && (!from || day >= from) && (!to || day <= to)
       && (!earningsMarketplaceEventsType?.value || entry.eventType === earningsMarketplaceEventsType.value)
-      && (!earningsMarketplaceEventsAction?.value || entry.action === earningsMarketplaceEventsAction.value);
+      && (!earningsMarketplaceEventsAction?.value || entry.action === earningsMarketplaceEventsAction.value)
+      && marketplaceRowMatchesSearch(entry, earningsMarketplaceEventsSearch?.value);
   });
   const direction = marketplaceEventsSort.direction === 'asc' ? 1 : -1;
   filtered.sort((a, b) => direction * compareMarketplaceEventValues(a, b, marketplaceEventsSort.column)
@@ -10032,6 +10046,12 @@ earningsMarketplaceGameDirectionButtons.forEach((button) => {
   earningsMarketplaceEventsFrom, earningsMarketplaceEventsTo, earningsMarketplaceEventsType, earningsMarketplaceEventsAction,
 ].forEach((control) => control?.addEventListener('change', () => {
   if (latestMarketplaceResult) renderMarketplaceDecodedEvents(latestMarketplaceResult);
+}));
+
+[earningsMarketplaceRawSearch, earningsMarketplaceEventsSearch].forEach((control) => control?.addEventListener('input', () => {
+  if (!latestMarketplaceResult) return;
+  if (control === earningsMarketplaceRawSearch) renderMarketplaceRawData(latestMarketplaceResult);
+  else renderMarketplaceDecodedEvents(latestMarketplaceResult);
 }));
 
 [

@@ -13,7 +13,7 @@ const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
 const raw = fs.readFileSync(path.join(root, 'electron', 'marketplace-rawdata.js'), 'utf8');
 
 test('Marketplace Raw Data exposes only transaction filters, sortable facts, and payload details', () => {
-  for (const id of ['raw-from', 'raw-to', 'raw-discovery-source']) assert.match(html, new RegExp(`id="earnings-marketplace-${id}"`));
+  for (const id of ['raw-search', 'raw-from', 'raw-to', 'raw-discovery-source']) assert.match(html, new RegExp(`id="earnings-marketplace-${id}"`));
   assert.doesNotMatch(html, /id="earnings-marketplace-raw-stream"/);
   for (const id of ['raw-record', 'raw-wallet', 'raw-event', 'raw-asset']) assert.doesNotMatch(html, new RegExp(`id="earnings-marketplace-${id}"`));
   assert.match(html, /id="earnings-marketplace-raw-coverage-summary"/);
@@ -25,6 +25,8 @@ test('Marketplace Raw Data exposes only transaction filters, sortable facts, and
   assert.match(renderer, /setAttribute\('aria-sort'/);
   assert.match(renderer, /navigator\.clipboard\.writeText\(text\)/);
   assert.match(renderer, /className = 'marketplace-raw-payload'/);
+  assert.match(renderer, /marketplaceRowMatchesSearch\(entry, earningsMarketplaceRawSearch\?\.value\)/);
+  assert.match(renderer, /JSON\.stringify\(entry\)/);
 });
 
 test('Marketplace shows only the table belonging to the active global data or Trades subtab', () => {
@@ -44,10 +46,13 @@ test('Marketplace Decoded Events is a separate persisted event view linked to ra
   assert.match(renderer, /ALL FACTIONS ·.*raw transactions/);
   assert.match(renderer, /ALL FACTIONS ·.*decoded events/);
   assert.match(html, /id="earnings-marketplace-events-table-body"/);
+  assert.match(html, /id="earnings-marketplace-events-search"/);
   assert.match(html, /id="earnings-marketplace-events-action"/);
   assert.match(renderer, /const earningsMarketplaceEventsAction = document\.querySelector\('#earnings-marketplace-events-action'\)/);
   assert.match(renderer, /updateMarketplaceRawFilterOptions\(earningsMarketplaceEventsAction, rows\.map\(\(entry\) => entry\.action\)\)/);
   assert.match(renderer, /entry\.action === earningsMarketplaceEventsAction\.value/);
+  assert.match(renderer, /marketplaceRowMatchesSearch\(entry, earningsMarketplaceEventsSearch\?\.value\)/);
+  assert.match(renderer, /\[earningsMarketplaceRawSearch, earningsMarketplaceEventsSearch\][\s\S]*addEventListener\('input'/);
   assert.match(main, /r\._measurement == "marketplace_events"/);
   assert.match(main, /decodedEvents\.rows\.filter\(\(event\) => rawSignatures\.has\(event\.signature\)\)/);
   assert.match(renderer, /function renderMarketplaceDecodedEvents\(result\)/);
