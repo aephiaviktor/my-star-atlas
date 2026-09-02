@@ -37,6 +37,18 @@ test('game withdrawal falls back to historical landed basis when inventory snaps
   assert.equal(movement.basisSource, 'breakeven_basis_state');
 });
 
+test('missing withdrawal basis remains pending instead of becoming zero principal', () => {
+  const [movement] = buildMarketplaceInventoryMovements([{
+    eventId: 'withdraw', eventType: 'withdraw', action: 'withdraw_cargo_from_game',
+    timestamp: '2026-08-30T12:00:00Z', signature: 'withdraw-signature', toWallet: 'player',
+    faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore', quantityRaw: '1000000',
+  }]);
+  assert.equal(movement.unitBasisAtlas, null);
+  const [row] = replayMarketplaceInventoryLedger([movement]).rows;
+  assert.equal(row.status, 'pending_basis');
+  assert.equal(row.principalAtlas, undefined);
+});
+
 test('ledger carries GM buy basis through game and back out to realized sell profit', () => {
   const result = replayMarketplaceInventoryLedger([
     { movementId: '1-buy', timestamp: '2026-08-30T10:00:00Z', kind: 'buy', asset: 'Iron Ore', quantity: 100,

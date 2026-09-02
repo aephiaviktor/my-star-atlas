@@ -3,7 +3,11 @@
 const { resolveBreakevenBasisAtOrBefore } = require('./breakeven-basis-state');
 
 function text(value) { return String(value || '').trim(); }
-function number(value) { const result = Number(value); return Number.isFinite(result) ? result : null; }
+function number(value) {
+  if (value == null || (typeof value === 'string' && !value.trim())) return null;
+  const result = Number(value);
+  return Number.isFinite(result) ? result : null;
+}
 function poolKey(wallet, asset) { return `${text(wallet)}\n${text(asset)}`; }
 function ledgerOrder(left, right) {
   const leftSlot = number(left?.slot);
@@ -338,10 +342,10 @@ function buildMarketplaceInventoryMovements(events = [], {
       const observationBasis = number(observation?.weightedAveragePriceAtlas);
       const historicalBasis = resolveBreakevenBasisAtOrBefore(breakevenBasisStates, event);
       const historicalUnitBasis = number(historicalBasis?.landedCostPerUnit);
-      const unitBasisAtlas = observationBasis > 0 ? observationBasis : historicalUnitBasis;
+      const unitBasisAtlas = observationBasis > 0 ? observationBasis : historicalUnitBasis > 0 ? historicalUnitBasis : null;
       return [{ ...common, kind: 'withdraw', toWallet, unitBasisAtlas,
         basisSource: observationBasis > 0 ? 'inventory_basis_snapshot'
-          : historicalUnitBasis != null ? 'breakeven_basis_state' : 'unavailable',
+          : historicalUnitBasis > 0 ? 'breakeven_basis_state' : 'unavailable',
         faction: text(event?.faction), starbase: text(event?.starbase),
         transactionFeeAtlas: Math.max(0, number(event?.transactionFeeAtlas) || 0),
         transactionFeePayer: text(event?.transactionFeePayer) }];

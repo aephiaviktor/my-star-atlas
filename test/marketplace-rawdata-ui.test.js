@@ -93,6 +93,8 @@ test('Global Ledger is all-wallet and Game Ledger is faction-specific and asymme
   assert.match(renderer, /marketplaceGameDirection = button\.dataset\.marketplaceGameDirection/);
   assert.match(main, /buildMarketplaceInventoryMovements\(marketplaceEvents, \{[\s\S]*inventoryBasisObservations, breakevenBasisStates/);
   assert.match(main, /projectGameLedgerRows\(marketplaceInventoryLedger\.rows, \{ faction: settings\.faction \}\)/);
+  assert.match(main, /inventoryBasisScopesFromEvents\(marketplaceEvents\)/);
+  assert.match(main, /marketplaceInventoryBasisError/);
 });
 
 test('Raw Data and Decoded Events share one reversible signature selector', () => {

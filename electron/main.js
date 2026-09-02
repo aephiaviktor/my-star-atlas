@@ -69,7 +69,7 @@ const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./craft
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { publishInventoryBasisSnapshots } = require('./inventory-basis-publication');
 const { createInventoryBasisSnapshot } = require('./inventory-basis-snapshot');
-const { readInventoryBasisSnapshots } = require('./inventory-basis-read');
+const { readInventoryBasisSnapshots, inventoryBasisScopesFromEvents } = require('./inventory-basis-read');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { projectInventoryCostLedgerRows } = require('./inventory-cost-ledger-view');
 const {
@@ -6075,22 +6075,28 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
 
 async function fetchMarketplaceSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
-  const [result, rawData, decodedEvents, rawDataCoverage, assetFlowEvents, inventoryBasisObservations, breakevenBasisStates] = await Promise.all([
+  const [result, rawData, decodedEvents, rawDataCoverage, assetFlowEvents, breakevenBasisStates] = await Promise.all([
     fetchMarketplaceTradesFromInflux(settings),
     fetchMarketplaceRawDataFromInflux(settings),
     fetchMarketplaceEventsFromInflux(settings),
     buildMarketplaceRawDataCoverage(settings).catch(() => ({ sources: [], total: 0, complete: 0, pending: 0, lastSavedAt: '' })),
     fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []),
-    readInventoryBasisSnapshots({
-      bucket: settings.influxBucket,
-      query: async (flux) => parseInfluxCsv(await queryInfluxFlux(settings, flux)),
-    }).catch(() => []),
     readHistoricalBreakevenBasisStates(settings).catch(() => []),
   ]);
-  const accounting = buildCostLedgerResult({ localMarketTrades: result.trades, assetFlowEvents });
-  const trades = enrichGmTradesWithInventoryBasis(result.trades, accounting.appliedEventResults, { inventoryBasisObservations });
   const rawSignatures = new Set(rawData.rows.map((row) => row.signature));
   const marketplaceEvents = decodedEvents.rows.filter((event) => rawSignatures.has(event.signature));
+  let inventoryBasisObservations = [];
+  let marketplaceInventoryBasisError = '';
+  try {
+    inventoryBasisObservations = await readInventoryBasisSnapshots({
+      bucket: settings.influxBucket, scopes: inventoryBasisScopesFromEvents(marketplaceEvents),
+      query: async (flux) => parseInfluxCsv(await queryInfluxFlux(settings, flux)),
+    });
+  } catch (error) {
+    marketplaceInventoryBasisError = String(error?.message || error || 'marketplace_inventory_basis_read_failed');
+  }
+  const accounting = buildCostLedgerResult({ localMarketTrades: result.trades, assetFlowEvents });
+  const trades = enrichGmTradesWithInventoryBasis(result.trades, accounting.appliedEventResults, { inventoryBasisObservations });
   const marketplaceTrades = projectDecodedMarketplaceTrades(marketplaceEvents);
   const marketplaceInventoryMovements = buildMarketplaceInventoryMovements(marketplaceEvents, {
     inventoryBasisObservations, breakevenBasisStates,
@@ -6113,6 +6119,7 @@ async function fetchMarketplaceSnapshot(payload) {
     marketplaceGameLedgerRows,
     marketplaceGameLedgerCount: marketplaceGameLedgerRows.length,
     marketplaceEventsError: decodedEvents.error,
+    marketplaceInventoryBasisError,
     localMarketTrades: trades,
     localMarketTradeCount: trades.length,
     localMarketError: result.error,

@@ -1,7 +1,9 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildInventoryBasisSnapshotFlux, readInventoryBasisSnapshots } = require('../electron/inventory-basis-read');
+const {
+  buildInventoryBasisSnapshotFlux, readInventoryBasisSnapshots, inventoryBasisScopesFromEvents,
+} = require('../electron/inventory-basis-read');
 const { createInventoryBasisSnapshot } = require('../electron/inventory-basis-snapshot');
 
 test('basis read is one bounded read-only 30-day measurement query', async () => {
@@ -22,4 +24,19 @@ test('basis read accepts only canonical snapshot rows', async () => {
   const rows = await readInventoryBasisSnapshots({ bucket: 'slya', query: async () => [valid, { ...valid, snapshotId: 'bad' }] });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].weightedAveragePriceAtlas, 0.5);
+});
+
+test('Marketplace basis reads are independently scoped to exact withdrawal faction, starbase, and asset', async () => {
+  const scopes = inventoryBasisScopesFromEvents([
+    { eventType: 'withdraw', faction: 'UST', starbase: 'UST-1', asset: 'Iron Ore' },
+    { eventType: 'withdraw', faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore' },
+    { eventType: 'gm', faction: 'USTUR', starbase: 'UST-1', asset: 'Ammo' },
+  ]);
+  assert.deepEqual(scopes, [{ faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore' }]);
+  const queries = [];
+  await readInventoryBasisSnapshots({ bucket: 'slya', scopes, query: async (flux) => { queries.push(flux); return []; } });
+  assert.equal(queries.length, 1);
+  assert.match(queries[0], /r\.faction == "USTUR"/);
+  assert.match(queries[0], /r\.starbase == "UST-1"/);
+  assert.match(queries[0], /r\.asset == "Iron Ore"/);
 });

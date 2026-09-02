@@ -7377,7 +7377,8 @@ function renderMarketplaceGlobalLedger(result) {
   ], marketplaceGlobalFilters, () => renderMarketplaceGlobalLedger(sourceResult));
   const rows = sortMarketplaceTableRows(filterMarketplaceRows(sourceRows, marketplaceGlobalFilters), marketplaceGlobalSort);
   renderMarketplaceSortableHeader(earningsMarketplaceGlobalTableBody, marketplaceGlobalColumns, marketplaceGlobalSort, 'global');
-  setText(earningsMarketplaceGlobalStatus, `ALL WALLETS · ${formatMarketplaceWhole(rows.length)} movements at ${formatCheckedAt(result?.checkedAt)}`);
+  const basisError = result?.marketplaceInventoryBasisError ? ` · Inventory basis read failed: ${result.marketplaceInventoryBasisError}` : '';
+  setText(earningsMarketplaceGlobalStatus, `ALL WALLETS · ${formatMarketplaceWhole(rows.length)} movements at ${formatCheckedAt(result?.checkedAt)}${basisError}`);
   if (!earningsMarketplaceGlobalTableBody) return;
   earningsMarketplaceGlobalTableBody.replaceChildren();
   if (!rows.length) {
@@ -7422,7 +7423,8 @@ function renderMarketplaceGameLedger(result) {
     .filter((row) => row.direction === marketplaceGameDirection);
   sortMarketplaceTableRows(rows, marketplaceGameSort);
   renderMarketplaceSortableHeader(earningsMarketplaceGameTableBody, marketplaceGameColumns, marketplaceGameSort, 'game');
-  setText(earningsMarketplaceGameStatus, `${formatMarketplaceWhole(rows.length)} ${marketplaceGameDirection === 'deposit' ? 'deposits' : 'withdrawals'} at ${formatCheckedAt(result?.checkedAt)}`);
+  const basisError = result?.marketplaceInventoryBasisError ? ` · Inventory basis read failed: ${result.marketplaceInventoryBasisError}` : '';
+  setText(earningsMarketplaceGameStatus, `${formatMarketplaceWhole(rows.length)} ${marketplaceGameDirection === 'deposit' ? 'deposits' : 'withdrawals'} at ${formatCheckedAt(result?.checkedAt)}${basisError}`);
   earningsMarketplaceGameDirectionButtons.forEach((button) => {
     const active = button.dataset.marketplaceGameDirection === marketplaceGameDirection;
     button.classList.toggle('active', active);

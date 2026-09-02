@@ -6,19 +6,45 @@ function escapeFluxString(value) {
   return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-function buildInventoryBasisSnapshotFlux(bucket) {
+function normalizeFaction(value) {
+  const faction = String(value || '').trim().toUpperCase();
+  return faction === 'UST' ? 'USTUR' : faction;
+}
+
+function buildInventoryBasisSnapshotFlux(bucket, scope = null) {
+  const scopeFilter = scope ? `
+  |> filter(fn: (r) => r.faction == "${escapeFluxString(normalizeFaction(scope.faction))}"
+    and r.starbase == "${escapeFluxString(scope.starbase)}" and r.asset == "${escapeFluxString(scope.asset)}")` : '';
   return `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: -30d)
-  |> filter(fn: (r) => r._measurement == "inventory_basis_snapshot")
+  |> filter(fn: (r) => r._measurement == "inventory_basis_snapshot")${scopeFilter}
   |> pivot(rowKey: ["_time", "snapshotId", "faction", "starbase", "asset"], columnKey: ["_field"], valueColumn: "_value")
   |> keep(columns: ["_time", "snapshotId", "faction", "starbase", "asset", "eventId", "quantity", "knownQuantity", "uncostedQuantity", "knownInventoryValueAtlas", "weightedAveragePriceAtlas", "scanningCostAtlas", "miningCostAtlas", "craftingCostAtlas", "lmCostAtlas", "gmCostAtlas", "cargoCostAtlas"])
   |> sort(columns: ["_time", "snapshotId"])`;
 }
 
-async function readInventoryBasisSnapshots({ bucket, query } = {}) {
+function inventoryBasisScopesFromEvents(events = []) {
+  const scopes = new Map();
+  for (const event of events || []) {
+    if (String(event?.eventType || '').toLowerCase() !== 'withdraw') continue;
+    const faction = normalizeFaction(event?.faction);
+    const starbase = String(event?.starbase || '').trim();
+    const asset = String(event?.asset || '').trim();
+    if (!faction || !starbase || !asset) continue;
+    scopes.set(`${faction}\n${starbase}\n${asset}`, { faction, starbase, asset });
+  }
+  return [...scopes.values()].sort((left, right) => left.faction.localeCompare(right.faction)
+    || left.starbase.localeCompare(right.starbase) || left.asset.localeCompare(right.asset));
+}
+
+async function readInventoryBasisSnapshots({ bucket, query, scopes = null } = {}) {
   if (!String(bucket || '').trim() || typeof query !== 'function') return [];
-  const rows = await query(buildInventoryBasisSnapshotFlux(bucket));
+  const selectedScopes = Array.isArray(scopes) ? scopes : null;
+  if (selectedScopes && !selectedScopes.length) return [];
+  if (!selectedScopes) return projectInventoryBasisSnapshotRows(await query(buildInventoryBasisSnapshotFlux(bucket)));
+  const rows = [];
+  for (const scope of selectedScopes) rows.push(...await query(buildInventoryBasisSnapshotFlux(bucket, scope)));
   return projectInventoryBasisSnapshotRows(rows);
 }
 
-module.exports = { buildInventoryBasisSnapshotFlux, readInventoryBasisSnapshots };
+module.exports = { buildInventoryBasisSnapshotFlux, inventoryBasisScopesFromEvents, readInventoryBasisSnapshots };
