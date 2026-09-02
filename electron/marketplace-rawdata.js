@@ -156,6 +156,12 @@ function hasProcessHarvestInstruction(transaction, playerTokenAccount) {
   return Boolean(accounts && accounts.slice(7, 11).includes(String(playerTokenAccount)));
 }
 
+function rewindMarketplaceTokenAccountCursors(cursors, tokenAccounts, shouldRewind) {
+  if (!shouldRewind) return cursors;
+  const addresses = new Set((tokenAccounts || []).map((account) => String(account?.address || '')).filter(Boolean));
+  return Object.fromEntries(Object.entries(cursors || {}).filter(([address]) => !addresses.has(address)));
+}
+
 function classifyCssCargoEvents(transaction, { sageProgramId, cssStarbasePlayer }) {
   const signature = String(transaction?.transaction?.signatures?.[0] || '');
   const { accountKeys, entries } = allInstructions(transaction);
@@ -439,7 +445,7 @@ module.exports = Object.freeze({
   MARKETPLACE_RAWDATA_MEASUREMENT, GM_PROGRAM_ID, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME, PROCESS_HARVEST,
   CLAIM_STAKE_PROGRAM_ID, CLAIM_STAKE_TREASURY_AUTHORITY, CSS_STARBASE_NAMES,
   TOKEN_PROGRAM_IDS, deriveCssStarbasePlayer, hasCssCargoGameInstruction, hasGmProgramInstruction, hasTraderProgramInstruction,
-  hasTokenTransferInstruction, hasProcessHarvestInstruction,
+  hasTokenTransferInstruction, hasProcessHarvestInstruction, rewindMarketplaceTokenAccountCursors,
   classifyCssCargoEvents, playerTransferEvents, processHarvestRewardEvents, buildLmRawRecords,
   formatRawTransactionInfluxLine, formatRawEventInfluxLine, discoverPlayerTokenAccounts, collectAddressTransactions, scanMarketplaceRawData,
 });

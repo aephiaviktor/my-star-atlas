@@ -12,6 +12,7 @@ const {
   hasTokenTransferInstruction, hasProcessHarvestInstruction,
   classifyCssCargoEvents, playerTransferEvents, buildLmRawRecords,
   formatRawTransactionInfluxLine, formatRawEventInfluxLine, scanMarketplaceRawData,
+  rewindMarketplaceTokenAccountCursors,
 } = require('../electron/marketplace-rawdata');
 
 function key() { return Keypair.generate().publicKey.toBase58(); }
@@ -116,6 +117,20 @@ test('raw scan archives exact ProcessHarvest discovered through an owned destina
   });
   assert.equal(scanned.records.length, 1);
   assert.deepEqual(scanned.records[0].discoverySources, ['token_account']);
+});
+
+test('owner-set changes rewind current token-account cursors without disturbing other discovery scopes', () => {
+  const currentToken = key(); const priorOwnerToken = key(); const gmWallet = key(); const cssAccount = key();
+  const cursors = {
+    [currentToken]: { newestSignature: 'old-current' },
+    [priorOwnerToken]: { newestSignature: 'old-prior' },
+    [gmWallet]: { newestSignature: 'gm' },
+    [cssAccount]: { newestSignature: 'css' },
+  };
+  assert.deepEqual(rewindMarketplaceTokenAccountCursors(cursors, [{ address: currentToken }], false), cursors);
+  assert.deepEqual(rewindMarketplaceTokenAccountCursors(cursors, [{ address: currentToken }], true), {
+    [priorOwnerToken]: cursors[priorOwnerToken], [gmWallet]: cursors[gmWallet], [cssAccount]: cursors[cssAccount],
+  });
 });
 
 test('transfer projection keeps only balanced token movements between configured player owners', () => {
