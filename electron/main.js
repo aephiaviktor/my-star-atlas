@@ -69,7 +69,9 @@ const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./craft
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const { publishInventoryBasisSnapshots } = require('./inventory-basis-publication');
 const { createInventoryBasisSnapshot } = require('./inventory-basis-snapshot');
-const { readInventoryBasisSnapshots, inventoryBasisScopesFromEvents } = require('./inventory-basis-read');
+const {
+  readInventoryBasisSnapshots, inventoryBasisScopesFromEvents, inventoryBasisScopesFromAssetFlows,
+} = require('./inventory-basis-read');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { projectInventoryCostLedgerRows } = require('./inventory-cost-ledger-view');
 const {
@@ -8208,10 +8210,14 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     ? await fetchMarketplaceTradesFromInflux(settings)
     : { trades: [], error: '' };
   const marketplaceAssetFlowEvents = needsInventoryLedger ? await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []) : [];
+  let inventoryBasisObservationError = '';
   const inventoryBasisObservations = needsInventoryLedger ? await readInventoryBasisSnapshots({
-    bucket: settings.influxBucket,
+    bucket: settings.influxBucket, scopes: inventoryBasisScopesFromAssetFlows(marketplaceAssetFlowEvents),
     query: (flux) => queryInfluxFlux(settings, flux).then(parseInfluxCsv),
-  }).catch(() => []) : [];
+  }).catch((error) => {
+    inventoryBasisObservationError = String(error?.message || error || 'inventory_basis_observation_read_failed');
+    return [];
+  }) : [];
   const factionCustodyLedger = buildFactionCustodyLedgerEvents({
     flows: marketplaceAssetFlowEvents,
     observations: inventoryBasisObservations,
@@ -8721,7 +8727,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     craftingRows: crafting,
     upgradingRows: upgrading,
     breakevenRows,
-    breakevenError,
+    breakevenError: [breakevenError, inventoryBasisObservationError].filter(Boolean).join(' · '),
     breakevenBasisStateSource,
     breakevenBasisStateWrittenCount,
     breakevenBasisStateError,
@@ -8741,6 +8747,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     pendingInventoryBasisSnapshotCount: pendingInventoryBasisSnapshots.length,
     inventoryBasisPublishedCount,
     inventoryBasisPublicationError,
+    inventoryBasisObservationError,
   };
 }
 

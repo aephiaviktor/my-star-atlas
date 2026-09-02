@@ -37,6 +37,19 @@ function inventoryBasisScopesFromEvents(events = []) {
     || left.starbase.localeCompare(right.starbase) || left.asset.localeCompare(right.asset));
 }
 
+function inventoryBasisScopesFromAssetFlows(flows = []) {
+  const scopes = new Map();
+  for (const flow of flows || []) {
+    const faction = normalizeFaction(flow?.faction);
+    const starbase = String(flow?.starbase || '').trim();
+    const asset = String(flow?.asset || '').trim();
+    if (!faction || !starbase || !asset) continue;
+    scopes.set(`${faction}\n${starbase}\n${asset}`, { faction, starbase, asset });
+  }
+  return [...scopes.values()].sort((left, right) => left.faction.localeCompare(right.faction)
+    || left.starbase.localeCompare(right.starbase) || left.asset.localeCompare(right.asset));
+}
+
 async function readInventoryBasisSnapshots({ bucket, query, scopes = null } = {}) {
   if (!String(bucket || '').trim() || typeof query !== 'function') return [];
   const selectedScopes = Array.isArray(scopes) ? scopes : null;
@@ -47,4 +60,7 @@ async function readInventoryBasisSnapshots({ bucket, query, scopes = null } = {}
   return projectInventoryBasisSnapshotRows(rows);
 }
 
-module.exports = { buildInventoryBasisSnapshotFlux, inventoryBasisScopesFromEvents, readInventoryBasisSnapshots };
+module.exports = {
+  buildInventoryBasisSnapshotFlux, inventoryBasisScopesFromEvents, inventoryBasisScopesFromAssetFlows,
+  readInventoryBasisSnapshots,
+};

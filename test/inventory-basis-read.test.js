@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildInventoryBasisSnapshotFlux, readInventoryBasisSnapshots, inventoryBasisScopesFromEvents,
+  inventoryBasisScopesFromAssetFlows,
 } = require('../electron/inventory-basis-read');
 const { createInventoryBasisSnapshot } = require('../electron/inventory-basis-snapshot');
 
@@ -39,4 +40,16 @@ test('Marketplace basis reads are independently scoped to exact withdrawal facti
   assert.match(queries[0], /r\.faction == "USTUR"/);
   assert.match(queries[0], /r\.starbase == "UST-1"/);
   assert.match(queries[0], /r\.asset == "Iron Ore"/);
+});
+
+test('Inventory Ledger basis reads are scoped to exact custody-flow locations', () => {
+  assert.deepEqual(inventoryBasisScopesFromAssetFlows([
+    { faction: 'UST', starbase: 'UST-1', asset: 'Iron Ore' },
+    { faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore' },
+    { faction: 'ONI', starbase: 'ONI-1', asset: 'Ammo' },
+    { faction: '', starbase: 'ONI-1', asset: 'Food' },
+  ]), [
+    { faction: 'ONI', starbase: 'ONI-1', asset: 'Ammo' },
+    { faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore' },
+  ]);
 });
