@@ -141,8 +141,9 @@ test('Raw ingestion records factual discovery provenance without decoding event 
   assert.match(raw, /scope\.kind === 'css' && hasCssCargoGameInstruction/);
   assert.match(raw, /discoverySources\.add\('css_account'\)/);
   assert.match(raw, /scope\.kind === 'gm' && hasGmProgramInstruction/);
-  assert.match(raw, /scope\.kind === 'token' && hasTokenTransferInstruction/);
-  assert.match(raw, /if \(innerIndex !== null\) return false/);
+  assert.match(raw, /scope\.kind === 'token' && \(hasTokenTransferInstruction/);
+  assert.match(raw, /hasProcessHarvestInstruction\(transaction, scope\.address\)/);
+  assert.match(raw, /if \(innerIndex !== null\) (?:return false|continue)/);
   assert.match(main, /\[\.\.\.playerWallets, \.\.\.gmWallets\]/);
   assert.match(main, /discoverPlayerTokenAccounts\(connection, tokenAccountOwners/);
   assert.match(main, /\[1, 2\]\.includes\(parsed\?\.schemaVersion\)/);

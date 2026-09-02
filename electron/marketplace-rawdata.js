@@ -136,6 +136,26 @@ function hasTokenTransferInstruction(transaction, tokenAccount) {
   });
 }
 
+function exactProcessHarvestAccounts(transaction) {
+  if (transaction?.meta?.err) return null;
+  const { accountKeys, entries } = allInstructions(transaction);
+  for (const { instruction, innerIndex } of entries) {
+    if (innerIndex !== null) continue;
+    const programId = String(instruction?.programId || accountKeys[instruction?.programIdIndex]?.pubkey
+      || accountKeys[instruction?.programIdIndex] || '');
+    const data = instructionData(instruction);
+    const accounts = instructionAccounts(instruction, accountKeys);
+    if (programId === CLAIM_STAKE_PROGRAM_ID && data?.subarray(0, 8).equals(PROCESS_HARVEST)
+      && accounts[11] === CLAIM_STAKE_TREASURY_AUTHORITY) return accounts;
+  }
+  return null;
+}
+
+function hasProcessHarvestInstruction(transaction, playerTokenAccount) {
+  const accounts = exactProcessHarvestAccounts(transaction);
+  return Boolean(accounts && accounts.slice(7, 11).includes(String(playerTokenAccount)));
+}
+
 function classifyCssCargoEvents(transaction, { sageProgramId, cssStarbasePlayer }) {
   const signature = String(transaction?.transaction?.signatures?.[0] || '');
   const { accountKeys, entries } = allInstructions(transaction);
@@ -248,16 +268,7 @@ function playerTransferEvents(transaction, playerWallets) {
 }
 
 function processHarvestRewardEvents(transaction) {
-  if (transaction?.meta?.err) return [];
-  const { accountKeys, entries } = allInstructions(transaction);
-  const harvest = entries.find(({ instruction }) => {
-    const programId = String(instruction?.programId || accountKeys[instruction?.programIdIndex]?.pubkey
-      || accountKeys[instruction?.programIdIndex] || '');
-    const data = instructionData(instruction);
-    return programId === CLAIM_STAKE_PROGRAM_ID && data?.subarray(0, 8).equals(PROCESS_HARVEST)
-      && instructionAccounts(instruction, accountKeys)[11] === CLAIM_STAKE_TREASURY_AUTHORITY;
-  });
-  if (!harvest) return [];
+  if (!exactProcessHarvestAccounts(transaction)) return [];
   const owners = [...new Set([
     ...(transaction.meta?.preTokenBalances || []), ...(transaction.meta?.postTokenBalances || []),
   ].map((balance) => String(balance?.owner || '')).filter(Boolean))];
@@ -411,7 +422,8 @@ async function scanMarketplaceRawData(connection, {
     const discoverySources = new Set();
     for (const scope of item.scopes) {
       if (scope.kind === 'gm' && hasGmProgramInstruction(transaction, scope.address)) discoverySources.add('gm_wallet');
-      if (scope.kind === 'token' && hasTokenTransferInstruction(transaction, scope.address)) discoverySources.add('token_account');
+      if (scope.kind === 'token' && (hasTokenTransferInstruction(transaction, scope.address)
+        || hasProcessHarvestInstruction(transaction, scope.address))) discoverySources.add('token_account');
       if (scope.kind === 'css' && hasCssCargoGameInstruction(transaction, {
         sageProgramId: scope.sageProgramId,
         cssStarbasePlayer: scope.address,
@@ -427,7 +439,7 @@ module.exports = Object.freeze({
   MARKETPLACE_RAWDATA_MEASUREMENT, GM_PROGRAM_ID, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME, PROCESS_HARVEST,
   CLAIM_STAKE_PROGRAM_ID, CLAIM_STAKE_TREASURY_AUTHORITY, CSS_STARBASE_NAMES,
   TOKEN_PROGRAM_IDS, deriveCssStarbasePlayer, hasCssCargoGameInstruction, hasGmProgramInstruction, hasTraderProgramInstruction,
-  hasTokenTransferInstruction,
+  hasTokenTransferInstruction, hasProcessHarvestInstruction,
   classifyCssCargoEvents, playerTransferEvents, processHarvestRewardEvents, buildLmRawRecords,
   formatRawTransactionInfluxLine, formatRawEventInfluxLine, discoverPlayerTokenAccounts, collectAddressTransactions, scanMarketplaceRawData,
 });

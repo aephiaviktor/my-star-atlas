@@ -214,9 +214,9 @@ test('GM raw sync scans configured trading wallets and narrow CSS/token scopes w
   assert.match(main, /deriveCssStarbasePlayer/);
   assert.match(main, /discoverPlayerTokenAccounts/);
   assert.match(main, /transferScanAge >= 60 \* 60 \* 1000/);
-  assert.match(main, /const needsCustodyBackfill = checkpoint\.custodyBackfillVersion < 1/);
+  assert.match(main, /const needsCustodyBackfill = checkpoint\.custodyBackfillVersion < 2/);
   assert.match(main, /needsCustodyBackfill \|\| tokenAccountOwnersChanged/);
-  assert.match(main, /custodyBackfillVersion: 1/);
+  assert.match(main, /custodyBackfillVersion: 2/);
   assert.doesNotMatch(main, /const executionWallets = Array\.from\(new Set\(\[\.\.\.profileWallets/);
   assert.doesNotMatch(main, /const trackedWallets = Array\.from\(new Set\(\[\.\.\.marketplaceWallets/);
   assert.match(main, /getMultipleAccountsInfo\(profileKeys, 'confirmed'\)/);

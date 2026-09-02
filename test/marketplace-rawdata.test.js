@@ -7,9 +7,11 @@ const bs58 = bs58Module.default || bs58Module;
 const { Keypair } = require('@solana/web3.js');
 const {
   MARKETPLACE_RAWDATA_MEASUREMENT, GM_PROGRAM_ID, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME,
-  deriveCssStarbasePlayer, hasCssCargoGameInstruction, hasGmProgramInstruction, hasTraderProgramInstruction, hasTokenTransferInstruction,
+  PROCESS_HARVEST, CLAIM_STAKE_PROGRAM_ID, CLAIM_STAKE_TREASURY_AUTHORITY,
+  deriveCssStarbasePlayer, hasCssCargoGameInstruction, hasGmProgramInstruction, hasTraderProgramInstruction,
+  hasTokenTransferInstruction, hasProcessHarvestInstruction,
   classifyCssCargoEvents, playerTransferEvents, buildLmRawRecords,
-  formatRawTransactionInfluxLine, formatRawEventInfluxLine,
+  formatRawTransactionInfluxLine, formatRawEventInfluxLine, scanMarketplaceRawData,
 } = require('../electron/marketplace-rawdata');
 
 function key() { return Keypair.generate().publicKey.toBase58(); }
@@ -77,6 +79,43 @@ test('token qualification accepts exact transfer endpoints and rejects unrelated
     },
   }] }];
   assert.equal(hasTokenTransferInstruction(innerOnly, source), false);
+});
+
+test('ProcessHarvest qualification accepts only exact rewards into the scanned player token account', () => {
+  const playerToken = key(); const otherPlayerToken = key(); const treasuryToken = key();
+  const accountKeys = [CLAIM_STAKE_PROGRAM_ID, treasuryToken, playerToken, otherPlayerToken, CLAIM_STAKE_TREASURY_AUTHORITY];
+  const accounts = [0, 0, 0, 1, 1, 1, 1, 2, 3, 3, 3, 4];
+  const transaction = tx({ accountKeys, instructions: [
+    { programIdIndex: 0, accounts, data: bs58.encode(PROCESS_HARVEST) },
+  ] });
+  assert.equal(hasProcessHarvestInstruction(transaction, playerToken), true);
+  assert.equal(hasProcessHarvestInstruction(transaction, otherPlayerToken), true);
+  assert.equal(hasProcessHarvestInstruction(transaction, treasuryToken), false);
+  const wrongAuthority = tx({ accountKeys: [...accountKeys.slice(0, 4), key()], instructions: [
+    { programIdIndex: 0, accounts, data: bs58.encode(PROCESS_HARVEST) },
+  ] });
+  assert.equal(hasProcessHarvestInstruction(wrongAuthority, playerToken), false);
+  const wrongInstruction = tx({ accountKeys, instructions: [
+    { programIdIndex: 0, accounts, data: bs58.encode(Buffer.alloc(8, 9)) },
+  ] });
+  assert.equal(hasProcessHarvestInstruction(wrongInstruction, playerToken), false);
+});
+
+test('raw scan archives exact ProcessHarvest discovered through an owned destination token account', async () => {
+  const player = key(); const playerToken = key(); const treasuryToken = key(); const signature = key();
+  const accountKeys = [CLAIM_STAKE_PROGRAM_ID, treasuryToken, playerToken, CLAIM_STAKE_TREASURY_AUTHORITY];
+  const transaction = tx({ signature, accountKeys, instructions: [{
+    programIdIndex: 0, accounts: [0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3], data: bs58.encode(PROCESS_HARVEST),
+  }] });
+  const connection = {
+    async getSignaturesForAddress() { return [{ signature, blockTime: transaction.blockTime, slot: transaction.slot, err: null }]; },
+    async getParsedTransactions() { return [transaction]; },
+  };
+  const scanned = await scanMarketplaceRawData(connection, {
+    tokenAccounts: [{ address: playerToken, owner: player }], startIso: '2026-07-24T00:00:00Z', startSlot: 1,
+  });
+  assert.equal(scanned.records.length, 1);
+  assert.deepEqual(scanned.records[0].discoverySources, ['token_account']);
 });
 
 test('transfer projection keeps only balanced token movements between configured player owners', () => {
