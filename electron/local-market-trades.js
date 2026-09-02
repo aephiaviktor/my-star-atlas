@@ -89,6 +89,7 @@ function decodeLocalMarketTrade(transaction, { trackedWallets = [], marketAssets
         signature,
         timestamp: timestamp.toISOString(),
         wallet,
+        marketplace,
         starbase,
         asset,
         rawMint: String(context?.rawMint || mint),

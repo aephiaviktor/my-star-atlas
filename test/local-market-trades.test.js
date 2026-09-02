@@ -64,7 +64,7 @@ test('decodes an LM buy from confirmed wallet token deltas using settled ATLAS c
   });
   assert.deepEqual(trade, {
     id: 'buy-sig:certificate-1:UST-1', signature: 'buy-sig', timestamp: '2026-07-15T23:47:25.000Z',
-    wallet: 'wallet-1', starbase: 'UST-1', asset: 'Food', rawMint: 'food-mint', certificateMint: 'certificate-1',
+    wallet: 'wallet-1', marketplace: 'LM', starbase: 'UST-1', asset: 'Food', rawMint: 'food-mint', certificateMint: 'certificate-1',
     side: 'buy', quantity: 12, settledAtlas: 12, grossAtlas: 12, marketplaceFeeAtlas: 0.5, netAtlas: 11.5, unitPriceAtlas: 1,
   });
 });
@@ -84,8 +84,14 @@ test('decodes a GM external-order fill without requiring a starbase', () => {
   assert.equal(trade.starbase, '');
   assert.equal(trade.asset, 'Ammo');
   assert.equal(trade.id, 'gm-ammo-fill:ammo-mint:GLOBAL');
+  assert.equal(trade.marketplace, 'GM');
   assert.equal(trade.executionTxFeeSol, 0.000005);
   assert.equal(trade.allocatedCreationTxFeeSol, 0);
+  const projected = decodeLocalMarketTransactions([input], {
+    'ammo-mint': { marketplace: 'GM', starbase: '', asset: 'Ammo', rawMint: 'ammo-mint' },
+  });
+  assert.equal(projected.trades.length, 1);
+  assert.equal(projected.trades[0].marketplace, 'GM');
 });
 
 test('decodes an LM sell and ignores failed or non-exchange transactions', () => {
