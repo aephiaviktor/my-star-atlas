@@ -8,7 +8,8 @@ const {
   MARKETPLACE_EVENTS_MEASUREMENT, eventPayloadHash, formatMarketplaceEventInfluxLine,
   deriveCustodyEventsFromRawRows, enrichMarketplaceEventsWithTransactionFees,
 } = require('../electron/marketplace-events');
-const { DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME } = require('../electron/marketplace-rawdata');
+const { DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME, PROCESS_HARVEST,
+  CLAIM_STAKE_PROGRAM_ID, CLAIM_STAKE_TREASURY_AUTHORITY } = require('../electron/marketplace-rawdata');
 
 const signature = '5abc';
 
@@ -117,4 +118,36 @@ test('decoded wallet transfers carry the registered asset name into the ledger',
   ], { assetsByMint: { 'carbon-mint': { name: 'Carbon' } } });
   assert.equal(event.eventType, 'transfer');
   assert.equal(event.asset, 'Carbon');
+});
+
+test('Claim Stake ProcessHarvest emits zero-principal reward inventory movements', () => {
+  const transaction = {
+    blockTime: 1788290000,
+    transaction: { signatures: ['harvest-signature'], message: {
+      accountKeys: ['player', CLAIM_STAKE_PROGRAM_ID, CLAIM_STAKE_TREASURY_AUTHORITY, 'treasury-token', 'player-token'],
+      instructions: [{ programIdIndex: 1, accounts: [0, 0, 0, 3, 3, 3, 3, 4, 4, 4, 4, 2], data: bs58.encode(PROCESS_HARVEST) }],
+    } },
+    meta: {
+      err: null, innerInstructions: [{ index: 0, instructions: [{ parsed: { type: 'transfer', info: {
+        source: 'treasury-token', destination: 'player-token', amount: '25',
+      } } }] }],
+      preTokenBalances: [
+        { accountIndex: 3, mint: 'ammo-mint', owner: CLAIM_STAKE_TREASURY_AUTHORITY, uiTokenAmount: { amount: '100', decimals: 0, uiAmountString: '100' } },
+        { accountIndex: 4, mint: 'ammo-mint', owner: 'player', uiTokenAmount: { amount: '0', decimals: 0, uiAmountString: '0' } },
+      ],
+      postTokenBalances: [
+        { accountIndex: 3, mint: 'ammo-mint', owner: CLAIM_STAKE_TREASURY_AUTHORITY, uiTokenAmount: { amount: '75', decimals: 0, uiAmountString: '75' } },
+        { accountIndex: 4, mint: 'ammo-mint', owner: 'player', uiTokenAmount: { amount: '25', decimals: 0, uiAmountString: '25' } },
+      ],
+    },
+  };
+  const events = deriveCustodyEventsFromRawRows([
+    { signature: 'harvest-signature', discoverySource: 'token_account', payload: transaction },
+  ], { assetsByMint: { 'ammo-mint': { name: 'Ammo' } } });
+  assert.equal(events.length, 1, 'harvest token transfers must not be duplicated as generic custody transfers');
+  const reward = events.find((event) => event.eventType === 'reward');
+  assert.deepEqual({ action: reward.action, from: reward.fromWallet, to: reward.toWallet, asset: reward.asset,
+    quantity: reward.quantityRaw, principal: reward.principalAtlas }, {
+    action: 'process_harvest', from: CLAIM_STAKE_TREASURY_AUTHORITY, to: 'player', asset: 'Ammo', quantity: '25', principal: 0,
+  });
 });

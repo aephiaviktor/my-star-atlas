@@ -1,10 +1,10 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { classifyCssCargoEvents, playerTransferEvents } = require('./marketplace-rawdata');
+const { classifyCssCargoEvents, playerTransferEvents, processHarvestRewardEvents } = require('./marketplace-rawdata');
 
 const MARKETPLACE_EVENTS_MEASUREMENT = 'marketplace_events';
-const EVENT_TYPES = new Set(['deposit', 'withdraw', 'transfer', 'lm', 'gm']);
+const EVENT_TYPES = new Set(['deposit', 'withdraw', 'transfer', 'reward', 'lm', 'gm']);
 
 function escapeTag(value) {
   return String(value).replace(/([ ,=])/g, '\\$1');
@@ -67,7 +67,14 @@ function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [], assetsByMint 
       const balanceOwners = [...new Set([
         ...(transaction.meta?.preTokenBalances || []), ...(transaction.meta?.postTokenBalances || []),
       ].map((balance) => String(balance?.owner || '')).filter(Boolean))];
-      events.push(...playerTransferEvents(transaction, balanceOwners).map((event) => ({
+      const rewards = processHarvestRewardEvents(transaction).map((event) => ({
+        ...event, eventType: 'reward',
+        asset: String(assetsByMint[String(event.mint || '')]?.name
+          || assetsByMint[String(event.mint || '')]?.asset
+          || assetsByMint[String(event.mint || '')] || ''),
+      }));
+      if (rewards.length) events.push(...rewards);
+      else events.push(...playerTransferEvents(transaction, balanceOwners).map((event) => ({
         ...event, eventType: 'transfer', action: 'transfer',
         asset: String(assetsByMint[String(event.mint || '')]?.name
           || assetsByMint[String(event.mint || '')]?.asset

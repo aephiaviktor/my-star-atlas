@@ -786,7 +786,7 @@ async function fetchMarketplaceEventsFromInflux(settings) {
   const flux = `from(bucket: "${escapeFluxString(bucket)}")
   |> range(start: time(v: "${MARKETPLACE_RAWDATA_CUTOVER_ISO}"))
   |> filter(fn: (r) => r._measurement == "marketplace_events")
-  |> filter(fn: (r) => r.eventType == "deposit" or r.eventType == "withdraw" or r.eventType == "transfer" or r.eventType == "lm" or r.eventType == "gm")
+  |> filter(fn: (r) => r.eventType == "deposit" or r.eventType == "withdraw" or r.eventType == "transfer" or r.eventType == "reward" or r.eventType == "lm" or r.eventType == "gm")
   |> filter(fn: (r) => r._field == "payload" or r._field == "payloadHash")
   |> pivot(rowKey: ["_time", "eventType", "eventId", "signature"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"], desc: true)`;
@@ -4920,7 +4920,7 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
   const checkpointTokenAccountOwners = [...new Set((checkpoint.tokenAccountOwners || []).map(String).filter(Boolean))].sort();
   const tokenAccountOwnersChanged = JSON.stringify(tokenAccountOwners) !== JSON.stringify(checkpointTokenAccountOwners);
   const transferScanAge = Date.now() - Date.parse(checkpoint.lastTransferScanAt || '');
-  const transferScanDue = tokenAccountOwnersChanged || !Number.isFinite(transferScanAge) || transferScanAge >= 24 * 60 * 60 * 1000;
+  const transferScanDue = tokenAccountOwnersChanged || !Number.isFinite(transferScanAge) || transferScanAge >= 60 * 60 * 1000;
   const tokenAccountsAge = Date.now() - Date.parse(checkpoint.tokenAccountsRefreshedAt || '');
   const refreshTokenAccounts = transferScanDue
     && (tokenAccountOwnersChanged || !checkpoint.tokenAccounts.length || !Number.isFinite(tokenAccountsAge) || tokenAccountsAge >= 24 * 60 * 60 * 1000);

@@ -213,6 +213,7 @@ test('GM raw sync scans configured trading wallets and narrow CSS/token scopes w
   assert.match(main, /syncMarketplaceRawData\(settings, connection/);
   assert.match(main, /deriveCssStarbasePlayer/);
   assert.match(main, /discoverPlayerTokenAccounts/);
+  assert.match(main, /transferScanAge >= 60 \* 60 \* 1000/);
   assert.doesNotMatch(main, /const executionWallets = Array\.from\(new Set\(\[\.\.\.profileWallets/);
   assert.doesNotMatch(main, /const trackedWallets = Array\.from\(new Set\(\[\.\.\.marketplaceWallets/);
   assert.match(main, /getMultipleAccountsInfo\(profileKeys, 'confirmed'\)/);

@@ -78,11 +78,14 @@ function decodeLocalMarketTrade(transaction, { trackedWallets = [], marketAssets
       if (!side) continue;
       const starbase = String(context?.starbase || '').trim();
       const asset = String(context?.asset || '').trim();
-      if (!starbase || !asset) continue;
+      const marketplace = String(context?.marketplace || context?.market || 'LM').toUpperCase();
+      if (!asset || (!starbase && marketplace !== 'GM')) continue;
       const quantity = exchange.quantity;
       const settledAtlas = side === 'buy' ? exchange.grossAtlas : exchange.netAtlas;
+      const feeLamports = accountKeyText(accounts[0]) === wallet ? Number(transaction.meta?.fee || 0) : 0;
+      const executionTxFeeSol = Number.isFinite(feeLamports) && feeLamports > 0 ? feeLamports / 1e9 : 0;
       return {
-        id: `${signature}:${mint}:${starbase}`,
+        id: `${signature}:${mint}:${starbase || 'GLOBAL'}`,
         signature,
         timestamp: timestamp.toISOString(),
         wallet,
@@ -96,6 +99,7 @@ function decodeLocalMarketTrade(transaction, { trackedWallets = [], marketAssets
         grossAtlas: exchange.grossAtlas,
         marketplaceFeeAtlas: exchange.marketplaceFeeAtlas,
         netAtlas: exchange.netAtlas,
+        ...(executionTxFeeSol > 0 ? { executionTxFeeSol, allocatedCreationTxFeeSol: 0 } : {}),
         unitPriceAtlas: exchange.grossAtlas / quantity,
       };
     }

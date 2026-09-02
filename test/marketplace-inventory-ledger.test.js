@@ -246,6 +246,25 @@ test('Global pending game deposits retain their faction starbase counterparty', 
   const [row] = projectGlobalLedgerRows(ledger.rows);
   assert.equal(row.status, 'pending_inventory');
   assert.equal(row.counterparty, 'UST-1');
+  const [gameRow] = projectGameLedgerRows(ledger.rows, { faction: 'USTUR' });
+  assert.equal(gameRow.status, 'Pending Inventory');
+  assert.equal(gameRow.quantity, 3000000);
+  assert.equal(gameRow.principalAtlas, null);
+});
+
+test('ProcessHarvest rewards enter owned inventory at zero principal plus transaction fees', () => {
+  const ledger = replayMarketplaceInventoryLedger(buildMarketplaceInventoryMovements([
+    { eventId: 'reward', eventType: 'reward', action: 'process_harvest', timestamp: '2026-09-01T15:00:00Z',
+      signature: 'harvest', fromWallet: 'treasury', toWallet: 'player', asset: 'Ammo', quantityRaw: '25',
+      principalAtlas: 0, transactionFeeAtlas: 0.4, transactionFeePayer: 'player' },
+    { eventId: 'deposit', eventType: 'deposit', action: 'deposit_cargo_to_game', timestamp: '2026-09-01T16:00:00Z',
+      signature: 'deposit', fromWallet: 'player', asset: 'Ammo', quantityRaw: '25', faction: 'USTUR', starbase: 'UST-1',
+      transactionFeeAtlas: 0.2, transactionFeePayer: 'player' },
+  ]));
+  const deposit = ledger.rows.find((row) => row.kind === 'deposit');
+  assert.equal(deposit.principalAtlas, 0);
+  assert.ok(Math.abs(deposit.transactionFeeAtlas - 0.6) < 1e-12);
+  assert.ok(Math.abs(deposit.basisMovedAtlas - 0.6) < 1e-12);
 });
 
 test('Global sale keeps cumulative fees visible without adding selling fees to inventory basis', () => {

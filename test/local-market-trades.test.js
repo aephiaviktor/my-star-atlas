@@ -69,6 +69,25 @@ test('decodes an LM buy from confirmed wallet token deltas using settled ATLAS c
   });
 });
 
+test('decodes a GM external-order fill without requiring a starbase', () => {
+  const input = tx({
+    signature: 'gm-ammo-fill', wallet: 'wallet-1', assetMint: 'ammo-mint', assetBefore: 0, assetAfter: 5000000,
+    atlasBefore: 87.5, atlasAfter: 87.5,
+  });
+  input.meta.fee = 5000;
+  input.transaction.message.accountKeys.unshift({ pubkey: 'wallet-1' });
+  const trade = decodeLocalMarketTrade(input, {
+    trackedWallets: ['wallet-1'],
+    marketAssetsByMint: { 'ammo-mint': { marketplace: 'GM', starbase: '', asset: 'Ammo', rawMint: 'ammo-mint' } },
+  });
+  assert.equal(trade.side, 'buy');
+  assert.equal(trade.starbase, '');
+  assert.equal(trade.asset, 'Ammo');
+  assert.equal(trade.id, 'gm-ammo-fill:ammo-mint:GLOBAL');
+  assert.equal(trade.executionTxFeeSol, 0.000005);
+  assert.equal(trade.allocatedCreationTxFeeSol, 0);
+});
+
 test('decodes an LM sell and ignores failed or non-exchange transactions', () => {
   const input = tx({ signature: 'sell-sig', wallet: 'wallet-1', assetMint: 'certificate-1', assetBefore: 20, assetAfter: 20, atlasBefore: 10, atlasAfter: 21.5 });
   const trade = decodeLocalMarketTrade(input, { trackedWallets: ['wallet-1'], marketAssetsByMint: { 'certificate-1': { starbase: 'MUD-2', asset: 'Carbon' } } });

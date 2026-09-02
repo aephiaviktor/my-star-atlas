@@ -130,6 +130,17 @@ function replayMarketplaceInventoryLedger(movements = []) {
     const common = { movementId, timestamp: parsedTimestamp.toISOString(), slot: number(movement.slot),
       outerIndex: number(movement.outerIndex), innerIndex: number(movement.innerIndex), kind, asset, quantity,
       signature: text(movement.signature), status: 'applied' };
+    if (kind === 'reward') {
+      const wallet = text(movement.toWallet);
+      if (!wallet) { rows.push({ ...common, status: 'pending_wallet' }); continue; }
+      const lot = emptyLot(quantity);
+      lot.principalAtlas = 0;
+      if (text(movement.transactionFeePayer) === wallet) addFeeToLot(lot, movement.transactionFeeAtlas);
+      const after = add(wallet, asset, lot);
+      rows.push({ ...common, fromWallet: text(movement.fromWallet), toWallet: wallet, ...lotFields(lot),
+        marketplaceFeeAtlas: 0, basisSource: 'zero_principal_reward', after: copyPool(after) });
+      continue;
+    }
     if (kind === 'buy') {
       const wallet = text(movement.toWallet);
       const principal = number(movement.principalAtlas);
@@ -242,12 +253,13 @@ function buildMarketplaceInventoryMovements(events = [], {
 } = {}) {
   const rows = Array.from(events || []);
   const primarySignatures = new Set(rows.filter((event) => event?.action === 'execution'
-      || ['deposit', 'withdraw'].includes(text(event?.eventType).toLowerCase()))
+      || ['deposit', 'withdraw', 'reward'].includes(text(event?.eventType).toLowerCase()))
     .map((event) => text(event?.signature)).filter(Boolean));
   const ownedSeeds = new Set(rows.flatMap((event) => {
     if (event?.action === 'execution') return [text(event?.fromWallet)];
     if (text(event?.eventType).toLowerCase() === 'deposit') return [text(event?.fromWallet)];
     if (text(event?.eventType).toLowerCase() === 'withdraw') return [text(event?.toWallet)];
+    if (text(event?.eventType).toLowerCase() === 'reward') return [text(event?.toWallet)];
     return [];
   }).filter(Boolean));
   const transferEdges = rows.filter((event) => text(event?.eventType).toLowerCase() === 'transfer'
@@ -295,6 +307,13 @@ function buildMarketplaceInventoryMovements(events = [], {
         marketplaceFeeAtlas: 0, transactionFeeAtlas,
         marketplace: text(event?.market || eventType).toUpperCase(), faction: text(event?.faction) }];
     }
+    if (eventType === 'reward' && event?.action === 'process_harvest') {
+      const toWallet = text(event?.toWallet);
+      if (!toWallet) return [];
+      return [{ ...common, kind: 'reward', fromWallet: text(event?.fromWallet), toWallet,
+        principalAtlas: 0, transactionFeeAtlas: Math.max(0, number(event?.transactionFeeAtlas) || 0),
+        transactionFeePayer: text(event?.transactionFeePayer) }];
+    }
     if (eventType === 'transfer') {
       if (primarySignatures.has(signature)) return [];
       const fromWallet = text(event?.fromWallet);
@@ -330,7 +349,7 @@ function buildMarketplaceInventoryMovements(events = [], {
     return [];
   }).sort(ledgerOrder);
   const feeGroups = new Map();
-  for (const movement of movements.filter((row) => ['transfer', 'deposit', 'withdraw'].includes(row.kind))) {
+  for (const movement of movements.filter((row) => ['transfer', 'deposit', 'withdraw', 'reward'].includes(row.kind))) {
     if (!feeGroups.has(movement.signature)) feeGroups.set(movement.signature, []);
     feeGroups.get(movement.signature).push(movement);
   }
@@ -390,18 +409,23 @@ function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {
   const rows = [];
   const saleGroups = new Map();
   for (const row of ledgerRows || []) {
-    if (row?.status !== 'applied') continue;
     if (row.kind === 'deposit' && text(row.faction).toUpperCase().replace(/^UST$/, 'USTUR') === selectedFaction) {
+      const applied = row.status === 'applied';
       rows.push({
         gameLedgerId: row.movementId, direction: 'deposit', timestamp: row.timestamp,
         physicalTimestamp: row.timestamp, faction: selectedFaction, starbase: text(row.starbase), asset: row.asset,
-        quantity: row.quantity, principalAtlas: row.principalAtlas, carriedBasisAtlas: row.basisMovedAtlas,
-        marketplaceFeeAtlas: row.marketplaceFeeAtlas, transactionFeeAtlas: row.transactionFeeAtlas,
-        finalBasisAtlas: row.basisMovedAtlas, costPerUnitAtlas: row.quantity > 0 ? row.basisMovedAtlas / row.quantity : null,
-        signature: row.signature, physicalSignature: row.signature, status: 'Complete',
+        quantity: row.quantity, principalAtlas: applied ? row.principalAtlas : null,
+        carriedBasisAtlas: applied ? row.basisMovedAtlas : null,
+        marketplaceFeeAtlas: applied ? row.marketplaceFeeAtlas : null,
+        transactionFeeAtlas: applied ? row.transactionFeeAtlas : null,
+        finalBasisAtlas: applied ? row.basisMovedAtlas : null,
+        costPerUnitAtlas: applied && row.quantity > 0 ? row.basisMovedAtlas / row.quantity : null,
+        signature: row.signature, physicalSignature: row.signature,
+        status: applied ? 'Complete' : text(row.status).split('_').map((part) => part[0]?.toUpperCase() + part.slice(1)).join(' '),
       });
       continue;
     }
+    if (row?.status !== 'applied') continue;
     if (row.kind !== 'sell' || !(row.quantity > 0)) continue;
     const origins = (row.gameOrigins || []).filter((origin) =>
       text(origin.faction).toUpperCase().replace(/^UST$/, 'USTUR') === selectedFaction && Number(origin.quantity) > 0);
@@ -476,6 +500,7 @@ function projectGlobalLedgerRows(ledgerRows = []) {
   };
   for (const row of ledgerRows || []) {
     if (row.kind === 'buy') add(row, 'deposit', row.toWallet, row.marketplace || 'Market');
+    else if (row.kind === 'reward') add(row, 'deposit', row.toWallet, row.fromWallet || 'Faction Claims');
     else if (row.kind === 'withdraw') add(row, 'deposit', row.toWallet, `${text(row.faction)}:${text(row.starbase)}`);
     else if (row.kind === 'transfer') {
       add(row, 'withdraw', row.fromWallet, row.toWallet, {

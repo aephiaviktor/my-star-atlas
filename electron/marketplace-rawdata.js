@@ -9,6 +9,9 @@ const MARKETPLACE_RAWDATA_MEASUREMENT = 'marketplace_rawdata';
 const GM_PROGRAM_ID = 'traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg';
 const DEPOSIT_CARGO_TO_GAME = Buffer.from([87, 49, 117, 148, 241, 247, 176, 18]);
 const WITHDRAW_CARGO_FROM_GAME = Buffer.from([102, 218, 88, 53, 255, 194, 24, 62]);
+const PROCESS_HARVEST = Buffer.from([191, 70, 102, 41, 226, 36, 127, 160]);
+const CLAIM_STAKE_PROGRAM_ID = 'STAKEr4Bh8sbBMoAVmTDBRqouPzgdocVrvtjmhJhd65';
+const CLAIM_STAKE_TREASURY_AUTHORITY = '6gxMWRY4DJnx8WfJi45KqYY1LaqMGEHfX9YdLeQ6Wi5';
 const CSS_STARBASE_NAMES = Object.freeze({ MUD: 'MUD-1', ONI: 'ONI-1', USTUR: 'UST-1' });
 const TOKEN_PROGRAM_IDS = Object.freeze([
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
@@ -181,9 +184,11 @@ function playerTransferEvents(transaction, playerWallets) {
   const message = transaction?.transaction?.message || {};
   const accountKeys = message.accountKeys || message.staticAccountKeys || [];
   const tokenOwnerByAccount = new Map();
+  const tokenMintByAccount = new Map();
   for (const row of [...(transaction?.meta?.preTokenBalances || []), ...(transaction?.meta?.postTokenBalances || [])]) {
     const account = String(accountKeys[row.accountIndex]?.pubkey || accountKeys[row.accountIndex] || '');
     if (account && row.owner) tokenOwnerByAccount.set(account, String(row.owner));
+    if (account && row.mint) tokenMintByAccount.set(account, String(row.mint));
   }
   const parsedEvents = [];
   const { entries } = allInstructions(transaction);
@@ -200,7 +205,8 @@ function playerTransferEvents(transaction, playerWallets) {
     parsedEvents.push({
       eventId: `${signature}:${outerIndex}:${innerIndex === null ? 'outer' : innerIndex}`,
       signature, stream: 'transfer', fromWallet, toWallet,
-      mint: String(info.mint || ''), quantityRaw, decimals,
+      mint: String(info.mint || tokenMintByAccount.get(String(info.source || ''))
+        || tokenMintByAccount.get(String(info.destination || '')) || ''), quantityRaw, decimals,
     });
   }
   if (parsedEvents.length) return parsedEvents;
@@ -239,6 +245,26 @@ function playerTransferEvents(transaction, playerWallets) {
     }
   }
   return events;
+}
+
+function processHarvestRewardEvents(transaction) {
+  if (transaction?.meta?.err) return [];
+  const { accountKeys, entries } = allInstructions(transaction);
+  const harvest = entries.find(({ instruction }) => {
+    const programId = String(instruction?.programId || accountKeys[instruction?.programIdIndex]?.pubkey
+      || accountKeys[instruction?.programIdIndex] || '');
+    const data = instructionData(instruction);
+    return programId === CLAIM_STAKE_PROGRAM_ID && data?.subarray(0, 8).equals(PROCESS_HARVEST)
+      && instructionAccounts(instruction, accountKeys)[11] === CLAIM_STAKE_TREASURY_AUTHORITY;
+  });
+  if (!harvest) return [];
+  const owners = [...new Set([
+    ...(transaction.meta?.preTokenBalances || []), ...(transaction.meta?.postTokenBalances || []),
+  ].map((balance) => String(balance?.owner || '')).filter(Boolean))];
+  return playerTransferEvents(transaction, owners)
+    .filter((event) => event.fromWallet === CLAIM_STAKE_TREASURY_AUTHORITY)
+    .map((event, index) => ({ ...event, eventId: `${event.signature}:reward:${index}`, stream: 'reward',
+      action: 'process_harvest', principalAtlas: 0 }));
 }
 
 function formatRawTransactionInfluxLine({ transaction, discoverySource = 'legacy_unknown' }) {
@@ -398,9 +424,10 @@ async function scanMarketplaceRawData(connection, {
 }
 
 module.exports = Object.freeze({
-  MARKETPLACE_RAWDATA_MEASUREMENT, GM_PROGRAM_ID, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME, CSS_STARBASE_NAMES,
+  MARKETPLACE_RAWDATA_MEASUREMENT, GM_PROGRAM_ID, DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME, PROCESS_HARVEST,
+  CLAIM_STAKE_PROGRAM_ID, CLAIM_STAKE_TREASURY_AUTHORITY, CSS_STARBASE_NAMES,
   TOKEN_PROGRAM_IDS, deriveCssStarbasePlayer, hasCssCargoGameInstruction, hasGmProgramInstruction, hasTraderProgramInstruction,
   hasTokenTransferInstruction,
-  classifyCssCargoEvents, playerTransferEvents, buildLmRawRecords,
+  classifyCssCargoEvents, playerTransferEvents, processHarvestRewardEvents, buildLmRawRecords,
   formatRawTransactionInfluxLine, formatRawEventInfluxLine, discoverPlayerTokenAccounts, collectAddressTransactions, scanMarketplaceRawData,
 });
