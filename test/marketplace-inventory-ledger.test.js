@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildMarketplaceInventoryMovements, replayMarketplaceInventoryLedger, projectGlobalLedgerRows, projectGameLedgerRows,
+  projectInventoryCostLedgerDepositEvents,
 } = require('../electron/marketplace-inventory-ledger');
 const {
   createBreakevenBasisState, resolveBreakevenBasisAtOrBefore, buildHistoricalBreakevenBasisStateFlux,
@@ -277,6 +278,32 @@ test('ProcessHarvest rewards enter owned inventory at zero principal plus transa
   assert.equal(deposit.principalAtlas, 0);
   assert.ok(Math.abs(deposit.transactionFeeAtlas - 0.6) < 1e-12);
   assert.ok(Math.abs(deposit.basisMovedAtlas - 0.6) < 1e-12);
+});
+
+test('completed GM-origin game deposits become exact Inventory Cost Ledger lots', () => {
+  const events = projectInventoryCostLedgerDepositEvents([
+    { movementId: 'gm-deposit', kind: 'deposit', status: 'applied', timestamp: '2026-09-01T10:00:00Z',
+      faction: 'MUD', starbase: 'MUD-1', asset: 'Framework', quantity: 100, principalAtlas: 250,
+      basisMovedAtlas: 253, gameOrigins: [] },
+    { movementId: 'game-redeposit', kind: 'deposit', status: 'applied', timestamp: '2026-09-01T11:00:00Z',
+      faction: 'MUD', starbase: 'MUD-PHANTOM', asset: 'Framework', quantity: 10, principalAtlas: 20,
+      basisMovedAtlas: 21, gameOrigins: [{ movementId: 'withdraw' }] },
+  ], { faction: 'MUD' });
+  assert.deepEqual(events, [{
+    type: 'acquire-lot', timestamp: '2026-09-01T10:00:00.000Z', location: 'MUD-1', asset: 'Framework',
+    quantity: 100, uncostedQuantity: 0,
+    costs: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: 250 }, cargoCost: 3,
+    flowId: 'gm-deposit', basisSource: 'marketplace-game-deposit',
+  }, {
+    type: 'acquire-lot', timestamp: '2026-09-01T11:00:00.000Z', location: 'MUD-PHANTOM', asset: 'Framework',
+    quantity: 10, uncostedQuantity: 0,
+    costs: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: 20 }, cargoCost: 1,
+    flowId: 'game-redeposit', basisSource: 'marketplace-game-deposit',
+  }]);
+  assert.equal(projectInventoryCostLedgerDepositEvents([{
+    movementId: 'ammo', kind: 'deposit', status: 'applied', timestamp: '2026-09-01T12:00:00Z', faction: 'MUD',
+    starbase: 'MUD-1', asset: 'Ammo', quantity: 1, principalAtlas: 1, basisMovedAtlas: 1, gameOrigins: [],
+  }], { faction: 'MUD' })[0].asset, 'Ammunition');
 });
 
 test('Global sale keeps cumulative fees visible without adding selling fees to inventory basis', () => {

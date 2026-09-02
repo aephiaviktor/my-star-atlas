@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 4 forces a clean replay after historical price valuation became authoritative.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 5;
+// Version 6 replays exact Marketplace game-deposit basis into Inventory Ledger.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 6;
 
 function emptyResult(status, error = '') {
   return {

@@ -8,7 +8,7 @@ function reconcileInventoryLedger({ ledger, inventoryRows = [] } = {}) {
   const currentRows = [...(inventoryRows || [])];
   const currentKeys = new Set(currentRows.map((row) => `${String(row?.starbase || '').trim()}\n${String(row?.asset || '').trim()}`));
   const omittedLedgerRows = typeof ledger.snapshot === 'function' ? ledger.snapshot()
-    .filter((row) => Number(row?.quantity) > EPSILON
+    .filter((row) => !String(row?.location || '').startsWith('wallet:') && Number(row?.quantity) > EPSILON
       && !currentKeys.has(`${String(row?.location || '').trim()}\n${String(row?.asset || '').trim()}`))
     .map((row) => ({ starbase: row.location, asset: row.asset, quantity: 0 })) : [];
   const rows = [...currentRows, ...omittedLedgerRows].sort((left, right) => (

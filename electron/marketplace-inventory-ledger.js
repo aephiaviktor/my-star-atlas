@@ -485,6 +485,29 @@ function projectGameLedgerRows(ledgerRows = [], { faction = '' } = {}) {
     || left.gameLedgerId.localeCompare(right.gameLedgerId));
 }
 
+function projectInventoryCostLedgerDepositEvents(ledgerRows = [], { faction = '' } = {}) {
+  const selectedFaction = text(faction).toUpperCase().replace(/^UST$/, 'USTUR');
+  return (ledgerRows || []).flatMap((row) => {
+    const rowFaction = text(row?.faction).toUpperCase().replace(/^UST$/, 'USTUR');
+    const quantity = number(row?.quantity);
+    const principalAtlas = number(row?.principalAtlas);
+    const basisMovedAtlas = number(row?.basisMovedAtlas);
+    if (row?.kind !== 'deposit' || row?.status !== 'applied' || rowFaction !== selectedFaction
+      || !(quantity > 0) || principalAtlas == null || principalAtlas < 0
+      || basisMovedAtlas == null || basisMovedAtlas < principalAtlas) return [];
+    const timestamp = new Date(row.timestamp);
+    if (Number.isNaN(timestamp.getTime()) || !text(row.starbase) || !text(row.asset)) return [];
+    const asset = text(row.asset) === 'Ammo' ? 'Ammunition' : text(row.asset);
+    return [{
+      type: 'acquire-lot', timestamp: timestamp.toISOString(), location: text(row.starbase), asset,
+      quantity, uncostedQuantity: 0,
+      costs: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: principalAtlas },
+      cargoCost: basisMovedAtlas - principalAtlas,
+      flowId: text(row.movementId), basisSource: 'marketplace-game-deposit',
+    }];
+  });
+}
+
 function projectGlobalLedgerRows(ledgerRows = []) {
   const rows = [];
   const add = (row, direction, wallet, counterparty, values = {}) => {
@@ -533,5 +556,5 @@ function projectGlobalLedgerRows(ledgerRows = []) {
 
 module.exports = {
   poolKey, buildMarketplaceInventoryMovements, replayMarketplaceInventoryLedger,
-  projectGlobalLedgerRows, projectGameLedgerRows,
+  projectGlobalLedgerRows, projectGameLedgerRows, projectInventoryCostLedgerDepositEvents,
 };

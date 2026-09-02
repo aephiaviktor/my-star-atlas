@@ -21,3 +21,10 @@ test('reconciliation consumes ledger pools omitted from current zero inventory',
   });
   assert.equal(ledger.get('UST-1', 'Copper Wire').quantity, 0);
 });
+
+test('reconciliation never treats off-game wallet custody as omitted game inventory', () => {
+  const ledger = new InventoryCostLedger();
+  ledger.acquire({ location: 'wallet:gm', asset: 'Framework', quantity: 10, costs: { gm: 25 } });
+  assert.deepEqual(reconcileInventoryLedger({ ledger, inventoryRows: [] }), []);
+  assert.equal(ledger.get('wallet:gm', 'Framework').quantity, 10);
+});

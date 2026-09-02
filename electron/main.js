@@ -124,7 +124,7 @@ const { deriveMarketplaceTradeId } = require('./marketplace-v2-point');
 const { projectDecodedMarketplaceTrades } = require('./marketplace-trade-ledger');
 const {
   buildMarketplaceInventoryMovements, replayMarketplaceInventoryLedger,
-  projectGlobalLedgerRows, projectGameLedgerRows,
+  projectGlobalLedgerRows, projectGameLedgerRows, projectInventoryCostLedgerDepositEvents,
 } = require('./marketplace-inventory-ledger');
 const {
   loadMarketplacePublicationHolds,
@@ -8209,6 +8209,9 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const localMarketResult = needsInventoryLedger
     ? await fetchMarketplaceTradesFromInflux(settings)
     : { trades: [], error: '' };
+  const inventoryMarketplaceEvents = needsInventoryLedger
+    ? await fetchMarketplaceEventsFromInflux(settings)
+    : { rows: [], error: '' };
   const marketplaceAssetFlowEvents = needsInventoryLedger ? await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []) : [];
   let inventoryBasisObservationError = '';
   const inventoryBasisObservations = needsInventoryLedger ? await readInventoryBasisSnapshots({
@@ -8223,6 +8226,15 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     observations: inventoryBasisObservations,
     faction: ledgerFaction,
   });
+  const inventoryMarketplaceLedger = replayMarketplaceInventoryLedger(
+    buildMarketplaceInventoryMovements(inventoryMarketplaceEvents.rows),
+  );
+  const inventoryMarketplaceDepositEvents = projectInventoryCostLedgerDepositEvents(
+    inventoryMarketplaceLedger.rows, { faction: ledgerFaction },
+  );
+  const inventoryLedgerMarketTrades = localMarketResult.trades.filter((trade) =>
+    String(trade?.marketplace || trade?.market || '').toUpperCase() !== 'GM'
+      || Date.parse(trade?.timestamp) < Date.parse(MARKETPLACE_RAWDATA_CUTOVER_ISO));
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
   const checkpoint = needsInventoryLedger
     ? await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName })
@@ -8249,8 +8261,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     cargoRows: cargoAllocationLedgerRows,
     craftingRows: ledgerCraftingRows,
     upgradingRows: upgradingRows.ledgerEvents || [],
-    localMarketTrades: localMarketResult.trades,
-    assetFlowEvents: factionCustodyLedger.events,
+    localMarketTrades: inventoryLedgerMarketTrades,
+    assetFlowEvents: [...factionCustodyLedger.events, ...inventoryMarketplaceDepositEvents],
     inventoryBasisFaction: ledgerFaction,
   }) : { events: [], appliedEventResults: [], ledger: { snapshot: () => [] }, rejectedEvents: [], seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {}, inventoryBasisSnapshots: [] };
   const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
@@ -8727,7 +8739,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     craftingRows: crafting,
     upgradingRows: upgrading,
     breakevenRows,
-    breakevenError: [breakevenError, inventoryBasisObservationError].filter(Boolean).join(' · '),
+    breakevenError: [breakevenError, inventoryMarketplaceEvents.error, inventoryBasisObservationError].filter(Boolean).join(' · '),
     breakevenBasisStateSource,
     breakevenBasisStateWrittenCount,
     breakevenBasisStateError,
@@ -8748,6 +8760,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     inventoryBasisPublishedCount,
     inventoryBasisPublicationError,
     inventoryBasisObservationError,
+    inventoryMarketplaceEventError: inventoryMarketplaceEvents.error,
   };
 }
 
