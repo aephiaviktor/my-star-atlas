@@ -137,6 +137,7 @@ const { createMarketplacePublicationCoordinator } = require(['./marketplace', 'p
 const { loadMarketplaceOutboxV2 } = require(['./marketplace', 'outbox-v2'].join('-'));
 const { STARBASE_REGISTRY } = require('./starbase-registry');
 const { ASSET_REGISTRY } = require('./asset-registry');
+const { canonicalAssetName } = require('./asset-name');
 const {
   createMarketplaceRpcTelemetry,
   createMarketplaceRpcInstrumentation,
@@ -654,7 +655,7 @@ function normalizeFactionGmMarketplaceRow(row) {
   return {
     id, timestamp, marketplace: 'GM', market: 'GM', side: String(row.side || '').toLowerCase(),
     faction: String(row.faction || ''), profile: String(row.profile || ''),
-    asset: String(row.asset || ''), rawMint: String(row.rawMint || ''), starbase: String(row.starbase || ''),
+    asset: canonicalAssetName(row.asset), rawMint: String(row.rawMint || ''), starbase: String(row.starbase || ''),
     wallet: String(row.wallet || ''), quantity,
     basisAvailable, unitPriceAtlas: basisAvailable ? Number(row.unitPriceAtlas || 0) : null,
     grossAtlas: basisAvailable ? Number(row.grossAtlas || 0) : null,
@@ -799,6 +800,7 @@ async function fetchMarketplaceEventsFromInflux(settings) {
       try { payload = JSON.parse(String(row.payload || '')); } catch (_error) { payload = null; }
       return {
         ...(payload && typeof payload === 'object' ? payload : {}),
+        asset: canonicalAssetName(payload?.asset),
         timestamp: String(row._time || ''), eventType: String(row.eventType || payload?.eventType || ''),
         eventId: String(row.eventId || payload?.eventId || ''), signature: String(row.signature || payload?.signature || ''),
         payloadHash: String(row.payloadHash || ''),
@@ -4820,7 +4822,7 @@ function projectMarketplaceOrderAndExecutionEvents(scanned, market, { faction = 
       eventId: `${signature}:${eventType}:order:${order.orderId}`, signature, eventType,
       action: 'order_created', market: String(market || '').toUpperCase(), orderId: String(order.orderId),
       faction: eventFaction,
-      side: String(order.side || ''), fromWallet: String(order.initializer || ''), asset: String(order.asset || ''),
+      side: String(order.side || ''), fromWallet: String(order.initializer || ''), asset: canonicalAssetName(order.asset),
       mint: String(order.rawMint || order.certificateMint || ''), quantityRaw: String(order.originalQuantity ?? ''),
       unitPriceAtlas: Number(order.priceAtlas),
     });
@@ -4832,7 +4834,7 @@ function projectMarketplaceOrderAndExecutionEvents(scanned, market, { faction = 
       eventId: `${signature}:${eventType}:execution:${trade.id}`, signature, eventType,
       action: 'execution', market: String(market || '').toUpperCase(), orderId: String(trade.orderId || ''),
       faction: eventFaction,
-      side: String(trade.side || ''), fromWallet: String(trade.wallet || ''), asset: String(trade.asset || ''),
+      side: String(trade.side || ''), fromWallet: String(trade.wallet || ''), asset: canonicalAssetName(trade.asset),
       mint: String(trade.rawMint || trade.certificateMint || ''), quantityRaw: String(trade.quantity ?? ''),
       unitPriceAtlas: Number(trade.unitPriceAtlas ?? trade.priceAtlas), grossAtlas: Number(trade.grossAtlas),
       marketplaceFeeAtlas: Number(trade.marketplaceFeeAtlas || 0), txFeeAtlas: Number(trade.txFeeAtlas || 0),
@@ -4922,7 +4924,7 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
   });
   const tokenAccountOwners = [...new Set([...playerWallets, ...gmWallets].map(String).filter(Boolean))].sort();
   const checkpointTokenAccountOwners = [...new Set((checkpoint.tokenAccountOwners || []).map(String).filter(Boolean))].sort();
-  const needsCustodyBackfill = checkpoint.custodyBackfillVersion < 3;
+  const needsCustodyBackfill = checkpoint.custodyBackfillVersion < 4;
   const tokenAccountOwnersChanged = JSON.stringify(tokenAccountOwners) !== JSON.stringify(checkpointTokenAccountOwners);
   const transferScanAge = Date.now() - Date.parse(checkpoint.lastTransferScanAt || '');
   const transferScanDue = needsCustodyBackfill || tokenAccountOwnersChanged
@@ -4943,7 +4945,7 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
   });
   const written = await writeMarketplaceRawRecords(settings, scanned.records);
   await writeJsonAtomic(marketplaceRawDataCheckpointPath(), {
-    schemaVersion: 2, custodyBackfillVersion: 3, savedAt: new Date().toISOString(),
+    schemaVersion: 2, custodyBackfillVersion: 4, savedAt: new Date().toISOString(),
     cursors: scanned.cursors, tokenAccounts, tokenAccountOwners,
     tokenAccountsRefreshedAt: refreshTokenAccounts ? new Date().toISOString() : checkpoint.tokenAccountsRefreshedAt,
     lastTransferScanAt: transferScanDue ? new Date().toISOString() : checkpoint.lastTransferScanAt,

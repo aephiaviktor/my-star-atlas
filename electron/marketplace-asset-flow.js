@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { canonicalAssetName } = require('./asset-name');
 const bs58Module = require('bs58');
 const bs58 = bs58Module.default || bs58Module;
 const SAGE_PROGRAM_ID = 'SAGE2HAwep459SNq61LHvjxPk4pLPEJLoMETef7f7EE';
@@ -66,7 +67,7 @@ function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsB
       if (!asset || !starbase || !tracked.has(wallet) || !(quantity > 0)) return;
       events.push({
         id: `${signature}:${index}:${isDeposit ? 'deposit' : 'withdraw'}`, timestamp, signature,
-        type: 'transfer', asset: asset.name || asset.asset || String(asset), rawMint: mint, quantity,
+        type: 'transfer', asset: canonicalAssetName(asset.name || asset.asset || asset), rawMint: mint, quantity,
         origin: isDeposit ? `wallet:${wallet}` : starbase,
         destination: isDeposit ? starbase : `wallet:${wallet}`,
         txFeeSol, txFeeAtlas, flow: isDeposit ? 'css-deposit' : 'css-withdraw', faction, starbase,
@@ -84,7 +85,7 @@ function decodeMarketplaceAssetFlows(transaction, { trackedWallets = [], assetsB
     if (!asset || !source || !destination || (!tracked.has(source.owner) && !tracked.has(destination.owner)) || source.owner === destination.owner || !(quantity > 0)) return;
     events.push({
       id: `${signature}:${index}:wallet-transfer`, timestamp, signature, type: 'transfer',
-      asset: asset.name || asset.asset || String(asset), rawMint: mint, quantity,
+      asset: canonicalAssetName(asset.name || asset.asset || asset), rawMint: mint, quantity,
       origin: `wallet:${source.owner}`, destination: `wallet:${destination.owner}`,
       txFeeSol, txFeeAtlas, flow: 'wallet-transfer',
     });
@@ -169,7 +170,7 @@ function projectAssetFlowInfluxRows(rows) {
     const quantity = Number(row?.quantity);
     const origin = String(row?.origin || '');
     const destination = String(row?.destination || '');
-    const asset = String(row?.asset || '');
+    const asset = canonicalAssetName(row?.asset);
     if (!timestamp || !origin || !destination || !asset || !(quantity > 0)) return [];
     const txFeeAtlas = Number(row?.txFeeAtlas || 0);
     const flowId = String(row?.flowId || '');

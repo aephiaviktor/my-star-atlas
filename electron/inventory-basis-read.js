@@ -1,5 +1,6 @@
 'use strict';
 
+const { canonicalAssetName } = require('./asset-name');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
 function escapeFluxString(value) {
@@ -29,7 +30,7 @@ function inventoryBasisScopesFromEvents(events = []) {
     if (String(event?.eventType || '').toLowerCase() !== 'withdraw') continue;
     const faction = normalizeFaction(event?.faction);
     const starbase = String(event?.starbase || '').trim();
-    const asset = String(event?.asset || '').trim();
+    const asset = canonicalAssetName(event?.asset);
     if (!faction || !starbase || !asset) continue;
     scopes.set(`${faction}\n${starbase}\n${asset}`, { faction, starbase, asset });
   }
@@ -42,7 +43,7 @@ function inventoryBasisScopesFromAssetFlows(flows = []) {
   for (const flow of flows || []) {
     const faction = normalizeFaction(flow?.faction);
     const starbase = String(flow?.starbase || '').trim();
-    const asset = String(flow?.asset || '').trim();
+    const asset = canonicalAssetName(flow?.asset);
     if (!faction || !starbase || !asset) continue;
     scopes.set(`${faction}\n${starbase}\n${asset}`, { faction, starbase, asset });
   }

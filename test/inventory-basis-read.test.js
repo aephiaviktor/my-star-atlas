@@ -49,7 +49,7 @@ test('Inventory Ledger basis reads are scoped to exact custody-flow locations', 
     { faction: 'ONI', starbase: 'ONI-1', asset: 'Ammo' },
     { faction: '', starbase: 'ONI-1', asset: 'Food' },
   ]), [
-    { faction: 'ONI', starbase: 'ONI-1', asset: 'Ammo' },
+    { faction: 'ONI', starbase: 'ONI-1', asset: 'Ammunition' },
     { faction: 'USTUR', starbase: 'UST-1', asset: 'Iron Ore' },
   ]);
 });

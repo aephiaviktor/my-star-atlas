@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 6 replays exact Marketplace game-deposit basis into Inventory Ledger.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 6;
+// Version 7 replays Marketplace custody with canonical Ammunition pool identity.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 7;
 
 function emptyResult(status, error = '') {
   return {

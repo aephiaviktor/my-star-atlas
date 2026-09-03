@@ -1,5 +1,6 @@
 'use strict';
 
+const { canonicalAssetName } = require('./asset-name');
 const { resolveBreakevenBasisAtOrBefore } = require('./breakeven-basis-state');
 
 function text(value) { return String(value || '').trim(); }
@@ -126,7 +127,7 @@ function replayMarketplaceInventoryLedger(movements = []) {
   for (const movement of ordered) {
     const movementId = text(movement.movementId);
     const kind = text(movement.kind);
-    const asset = text(movement.asset);
+    const asset = canonicalAssetName(movement.asset);
     const quantity = number(movement.quantity);
     const parsedTimestamp = new Date(movement.timestamp);
     if (!movementId || seen.has(movementId) || !kind || !asset || !(quantity > 0) || Number.isNaN(parsedTimestamp.getTime())) continue;
@@ -242,8 +243,8 @@ function inventoryBasisAtOrBefore(observations, event) {
   const timestamp = Date.parse(event?.timestamp);
   const faction = text(event?.faction).toUpperCase().replace(/^UST$/, 'USTUR');
   const starbase = text(event?.starbase);
-  const asset = text(event?.asset);
-  const candidates = (observations || []).filter((row) => text(row?.asset) === asset
+  const asset = canonicalAssetName(event?.asset);
+  const candidates = (observations || []).filter((row) => canonicalAssetName(row?.asset) === asset
     && Number.isFinite(Date.parse(row?.timestamp)) && Date.parse(row.timestamp) <= timestamp);
   const latest = (rows) => [...rows].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0] || null;
   return latest(candidates.filter((row) => text(row?.faction).toUpperCase().replace(/^UST$/, 'USTUR') === faction
@@ -296,7 +297,7 @@ function buildMarketplaceInventoryMovements(events = [], {
     const signature = text(event?.signature);
     const eventType = text(event?.eventType).toLowerCase();
     const quantity = eventQuantity(event);
-    const asset = text(event?.asset);
+    const asset = canonicalAssetName(event?.asset);
     if (!movementId || !timestamp || !signature || !asset || !(quantity > 0)) return [];
     const common = { movementId, timestamp, signature, slot: number(event?.slot),
       outerIndex: number(event?.outerIndex), innerIndex: number(event?.innerIndex), asset, quantity };
@@ -497,7 +498,7 @@ function projectInventoryCostLedgerDepositEvents(ledgerRows = [], { faction = ''
       || basisMovedAtlas == null || basisMovedAtlas < principalAtlas) return [];
     const timestamp = new Date(row.timestamp);
     if (Number.isNaN(timestamp.getTime()) || !text(row.starbase) || !text(row.asset)) return [];
-    const asset = text(row.asset) === 'Ammo' ? 'Ammunition' : text(row.asset);
+    const asset = canonicalAssetName(row.asset);
     return [{
       type: 'acquire-lot', timestamp: timestamp.toISOString(), location: text(row.starbase), asset,
       quantity, uncostedQuantity: 0,

@@ -148,6 +148,6 @@ test('Claim Stake ProcessHarvest emits zero-principal reward inventory movements
   const reward = events.find((event) => event.eventType === 'reward');
   assert.deepEqual({ action: reward.action, from: reward.fromWallet, to: reward.toWallet, asset: reward.asset,
     quantity: reward.quantityRaw, principal: reward.principalAtlas }, {
-    action: 'process_harvest', from: CLAIM_STAKE_TREASURY_AUTHORITY, to: 'player', asset: 'Ammo', quantity: '25', principal: 0,
+    action: 'process_harvest', from: CLAIM_STAKE_TREASURY_AUTHORITY, to: 'player', asset: 'Ammunition', quantity: '25', principal: 0,
   });
 });

@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { canonicalAssetName } = require('./asset-name');
 const { classifyCssCargoEvents, playerTransferEvents, processHarvestRewardEvents } = require('./marketplace-rawdata');
 
 const MARKETPLACE_EVENTS_MEASUREMENT = 'marketplace_events';
@@ -43,6 +44,11 @@ function rawRowSources(row) {
   return new Set(String(row?.discoverySource || '').split(',').map((value) => value.trim()).filter(Boolean));
 }
 
+function assetName(assetsByMint, mint) {
+  const asset = assetsByMint[String(mint || '')];
+  return canonicalAssetName(asset?.name || asset?.asset || asset || '');
+}
+
 function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [], assetsByMint = {} } = {}) {
   const events = [];
   for (const row of rawRows || []) {
@@ -54,11 +60,10 @@ function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [], assetsByMint 
         events.push(...classifyCssCargoEvents(transaction, {
           sageProgramId: scope.sageProgramId, cssStarbasePlayer: scope.address,
         }).map((event) => {
-          const asset = assetsByMint[String(event.mint || '')];
           return {
             ...event, eventType: event.stream, action: event.type,
             faction: String(scope.faction || ''), starbase: String(scope.starbase || ''),
-            asset: String(asset?.name || asset?.asset || asset || ''),
+            asset: assetName(assetsByMint, event.mint),
           };
         }));
       }
@@ -68,17 +73,11 @@ function deriveCustodyEventsFromRawRows(rawRows, { cssScopes = [], assetsByMint 
         ...(transaction.meta?.preTokenBalances || []), ...(transaction.meta?.postTokenBalances || []),
       ].map((balance) => String(balance?.owner || '')).filter(Boolean))];
       const rewards = processHarvestRewardEvents(transaction).map((event) => ({
-        ...event, eventType: 'reward',
-        asset: String(assetsByMint[String(event.mint || '')]?.name
-          || assetsByMint[String(event.mint || '')]?.asset
-          || assetsByMint[String(event.mint || '')] || ''),
+        ...event, eventType: 'reward', asset: assetName(assetsByMint, event.mint),
       }));
       if (rewards.length) events.push(...rewards);
       else events.push(...playerTransferEvents(transaction, balanceOwners).map((event) => ({
-        ...event, eventType: 'transfer', action: 'transfer',
-        asset: String(assetsByMint[String(event.mint || '')]?.name
-          || assetsByMint[String(event.mint || '')]?.asset
-          || assetsByMint[String(event.mint || '')] || ''),
+        ...event, eventType: 'transfer', action: 'transfer', asset: assetName(assetsByMint, event.mint),
       })));
     }
   }

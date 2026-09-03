@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { canonicalAssetName } = require('./asset-name');
 const {
   FALLBACK_FIELD_KEYS,
   ENRICHED_FIELD_KEYS,
@@ -128,7 +129,7 @@ function normalizeMarketplaceV1Row(row = {}, context = {}) {
   const output = makeOutput({
     id: clean(row.tradeId || row.id), tradeId: complete ? identity.tradeId : '', timestamp: clean(row._time || row.timestamp),
     marketplace: identity.market || 'LM', faction: identity.faction, profile: identity.profile?.profileScope || '',
-    starbase: clean(row.starbase), asset: clean(row.asset), side: identity.side, wallet: clean(row.wallet),
+    starbase: clean(row.starbase), asset: canonicalAssetName(row.asset), side: identity.side, wallet: clean(row.wallet),
     ...preservedEconomics, txFeeAtlas: finite(row.txFeeAtlas) ?? 0, signature: identity.signature,
     creationSignature: clean(row.creationSignature), rawMint: identity.rawMint, certificateMint: clean(row.certificateMint),
     orderId: clean(row.orderId), representationRank: complete ? rank : 'identity_uncertain', schemaGeneration: 'v1',
@@ -165,7 +166,7 @@ function normalizeMarketplaceV2Row(row = {}, context = {}) {
   if (identity.market === 'LM' && !meaningful(row[cap('starbase')])) return null;
   return makeOutput({
     id: identity.tradeId, tradeId: identity.tradeId, timestamp: clean(row._time || row.timestamp), marketplace: identity.market,
-    faction: identity.faction, profile: identity.profile.profileScope, starbase: clean(row[cap('starbase')]), asset: clean(row[cap('asset')]),
+    faction: identity.faction, profile: identity.profile.profileScope, starbase: clean(row[cap('starbase')]), asset: canonicalAssetName(row[cap('asset')]),
     side: identity.side, wallet: clean(row[cap('wallet')]), ...chosen.economics,
     txFeeAtlas: rank === 'enriched' ? finite(row.enrichedTxFeeAtlas) ?? 0 : 0,
     signature: identity.signature, creationSignature: rank === 'enriched' ? clean(row.enrichedCreationSignature) : '', rawMint: identity.rawMint,

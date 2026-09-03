@@ -77,6 +77,32 @@ test('ledger carries GM buy basis through game and back out to realized sell pro
   assert.equal(result.pools.find((pool) => pool.wallet === 'gm').quantity, 0);
 });
 
+test('legacy Ammo events form one Ammunition custody chain from GM purchase through game deposit', () => {
+  const movements = buildMarketplaceInventoryMovements([
+    { eventId: 'buy-5m', eventType: 'gm', action: 'execution', side: 'buy', timestamp: '2026-09-01T17:14:17Z',
+      signature: 'buy-signature', fromWallet: 'GQAC', asset: 'Ammo', quantityRaw: '5000000', grossAtlas: 5165.25 },
+    { eventId: 'transfer-5m', eventType: 'transfer', action: 'transfer', timestamp: '2026-09-01T18:32:17Z',
+      signature: 'transfer-signature', fromWallet: 'GQAC', toWallet: 'HHD', asset: 'Ammo', quantityRaw: '5000000' },
+    { eventId: 'deposit-5m', eventType: 'deposit', action: 'deposit_cargo_to_game', timestamp: '2026-09-01T18:35:43Z',
+      signature: 'deposit-signature', fromWallet: 'HHD', faction: 'MUD', starbase: 'MUD-1',
+      asset: 'Ammo', quantityRaw: '5000000' },
+  ]);
+  assert.ok(movements.every((movement) => movement.asset === 'Ammunition'));
+  const ledger = replayMarketplaceInventoryLedger(movements);
+  assert.deepEqual(ledger.rows.map((row) => [row.kind, row.status]), [
+    ['buy', 'applied'], ['transfer', 'applied'], ['deposit', 'applied'],
+  ]);
+  const deposit = ledger.rows.find((row) => row.kind === 'deposit');
+  assert.equal(deposit.principalAtlas, 5165.25);
+  assert.equal(deposit.basisMovedAtlas, 5165.25);
+  assert.deepEqual(projectInventoryCostLedgerDepositEvents(ledger.rows, { faction: 'MUD' }), [{
+    type: 'acquire-lot', timestamp: '2026-09-01T18:35:43.000Z', location: 'MUD-1', asset: 'Ammunition',
+    quantity: 5000000, uncostedQuantity: 0,
+    costs: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: 5165.25 }, cargoCost: 0,
+    flowId: 'deposit-5m', basisSource: 'marketplace-game-deposit',
+  }]);
+});
+
 test('wallet pools carry weighted basis components and game-withdrawal provenance through transfers', () => {
   const result = replayMarketplaceInventoryLedger([
     { movementId: 'buy', timestamp: '2026-08-30T10:00:00Z', kind: 'buy', asset: 'Carbon', quantity: 100,

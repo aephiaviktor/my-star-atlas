@@ -51,7 +51,7 @@ const ASSET_REGISTRY = Object.freeze([
     "mint": "tiorehR1rLfeATZ96YoByUkvNFsBfUUSQWgSH2mizXL"
   },
   {
-    "name": "Ammo",
+    "name": "Ammunition",
     "mint": "ammoK8AkX2wnebQb35cDAZtTkvsXQbi82cGeTnUvvfK"
   },
   {
