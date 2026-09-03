@@ -52,6 +52,19 @@ test('inventory shortfall changes quantity without changing the known pool unit 
   assert.equal(row.totalCostPerUnit, 0.5);
 });
 
+test('inventory shortfall projection always removes uncosted quantity before costed evidence', () => {
+  for (const inventory of [1_999, 1_400, 1_000, 750, 0]) {
+    const [row] = projectInventoryCostLedgerRows({
+      ledgerRows: [ledgerRow({ quantity: 2_000, uncostedQuantity: 1_000,
+        costs: { scanning: 0, mining: 4, crafting: 0, lm: 0, gm: 0 }, cargoCost: 0 })],
+      valuationRows: [{ starbase: 'MUD-PHANTOM', asset: 'Electronics', inventory, reconciliationStatus: 'shortfall' }],
+    });
+    const reduction = 2_000 - inventory;
+    assert.equal(row.uncostedQuantity, Math.max(0, 1_000 - reduction));
+    assert.equal(row.knownCostQuantity, inventory - row.uncostedQuantity);
+  }
+});
+
 test('authoritative deposit basis prices every current unit independently of stale ledger coverage', () => {
   const [row] = projectInventoryCostLedgerRows({
     ledgerRows: [ledgerRow({ location: 'MUD-1', asset: 'Ammunition', quantity: 3_167_109,

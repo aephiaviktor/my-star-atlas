@@ -192,3 +192,29 @@ test('invalid sources and overdrafts fail instead of silently corrupting the led
     /insufficient inventory/,
   );
 });
+
+test('every downward quantity change consumes all available uncosted inventory before priced evidence', () => {
+  for (const reduction of [1, 600, 1_000, 1_250, 2_000]) {
+    const ledger = new InventoryCostLedger();
+    ledger.acquire({ location: 'MUD-1', asset: 'Ammunition', quantity: 1_000, source: null, totalCost: null });
+    ledger.acquire({ location: 'MUD-1', asset: 'Ammunition', quantity: 1_000, source: 'gm', totalCost: 4 });
+    ledger.consume({ location: 'MUD-1', asset: 'Ammunition', quantity: reduction });
+    const row = ledger.get('MUD-1', 'Ammunition');
+    assert.equal(row.quantity, 2_000 - reduction);
+    assert.equal(row.uncostedQuantity, Math.max(0, 1_000 - reduction));
+    assert.equal(row.quantity - row.uncostedQuantity, 1_000 - Math.max(0, reduction - 1_000));
+    close(row.knownCosts.gm, 4 * (1 - Math.max(0, reduction - 1_000) / 1_000));
+  }
+});
+
+test('downward inventory reconciliation consumes uncosted inventory before priced evidence', () => {
+  const ledger = new InventoryCostLedger();
+  ledger.acquire({ location: 'MUD-1', asset: 'Ammunition', quantity: 1_000, source: null, totalCost: null });
+  ledger.acquire({ location: 'MUD-1', asset: 'Ammunition', quantity: 1_000, source: 'gm', totalCost: 4 });
+  ledger.reconcile({ location: 'MUD-1', asset: 'Ammunition', quantity: 750 });
+  const row = ledger.get('MUD-1', 'Ammunition');
+  assert.equal(row.quantity, 750);
+  assert.equal(row.uncostedQuantity, 0);
+  assert.equal(row.quantity - row.uncostedQuantity, 750);
+  close(row.knownCosts.gm, 3);
+});
