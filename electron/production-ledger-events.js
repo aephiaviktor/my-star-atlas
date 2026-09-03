@@ -72,6 +72,22 @@ function completeOpeningInventoryRows(openingInventoryRows = [], currentInventor
   return completed;
 }
 
+function buildInventoryReconciliationEvents(rows) {
+  const events = [];
+  for (const row of rows || []) {
+    const timestamp = normalizeTimestamp(row?.timestamp);
+    const location = String(row?.starbase || row?.location || '').trim();
+    const asset = canonicalAssetName(row?.asset);
+    const quantity = Number(row?.quantity);
+    if (!timestamp || !location || !asset || !Number.isFinite(quantity) || quantity < 0) continue;
+    events.push({
+      type: 'reconcile', timestamp, location, asset, quantity,
+      depositFlowId: String(row?.depositFlowId || '').trim(),
+    });
+  }
+  return events;
+}
+
 function buildScanningAcquisitionEvents(rows) {
   const events = [];
   for (const row of rows || []) {
@@ -173,7 +189,7 @@ function buildUpgradingConsumptionEvents(rows) {
   return events;
 }
 
-function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], currentInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [], inventoryBasisFaction = '' } = {}) {
+function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], currentInventoryRows = [], inventoryReconciliationRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [], inventoryBasisFaction = '' } = {}) {
   const ledger = initialLedger || new InventoryCostLedger();
   const previousCounts = { ...(eventFingerprintCounts || {}) };
   for (const fingerprint of seenEventFingerprints || []) previousCounts[fingerprint] = Math.max(1, Number(previousCounts[fingerprint] || 0));
@@ -186,6 +202,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
     : completeOpeningInventoryRows(openingInventoryRows, currentInventoryRows);
   const events = [
     ...buildOpeningInventoryEvents(completedOpeningInventoryRows),
+    ...buildInventoryReconciliationEvents(inventoryReconciliationRows),
     ...buildScanningAcquisitionEvents(scanningRows),
     ...buildMiningAcquisitionEvents(miningRows),
     ...buildCargoTransferEvents(cargoRows),
@@ -278,6 +295,7 @@ module.exports = {
   eventFingerprint,
   buildOpeningInventoryEvents,
   completeOpeningInventoryRows,
+  buildInventoryReconciliationEvents,
   buildScanningAcquisitionEvents,
   buildMiningAcquisitionEvents,
   buildCargoTransferEvents,

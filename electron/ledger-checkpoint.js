@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 9 reconstructs missing opening pools before chronological depletion.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 9;
+// Version 10 reconciles authoritative game inventory immediately before valued deposits.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 10;
 
 function emptyResult(status, error = '') {
   return {

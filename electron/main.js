@@ -67,6 +67,9 @@ const { buildCostLedgerResult } = require('./production-ledger-events');
 const { reconcileInventoryLedger } = require('./inventory-ledger-reconciliation');
 const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
+const {
+  buildInventoryDepositBaselineQuery, projectInventoryDepositBaselineRows,
+} = require('./inventory-deposit-baseline');
 const { publishInventoryBasisSnapshots } = require('./inventory-basis-publication');
 const { createInventoryBasisSnapshot } = require('./inventory-basis-snapshot');
 const {
@@ -6158,7 +6161,7 @@ async function fetchCurrentPerStarbaseInventory(settings) {
   const result = [];
   for (const row of rows) {
     const starbase = String(row.starbase || '').trim();
-    const asset = String(row.rss || '').trim();
+    const asset = canonicalAssetName(row.rss);
     if (!starbase || !asset) continue;
     const quantity = Number(row._value);
     if (!Number.isFinite(quantity) || quantity <= 0) continue;
@@ -6202,6 +6205,17 @@ async function fetchOpeningPerStarbaseInventory(settings) {
     result.push({ starbase, asset, quantity, timestamp: baselineTimestamp });
   }
   return result;
+}
+
+async function fetchInventoryDepositBaselines(settings, depositEvents) {
+  const query = buildInventoryDepositBaselineQuery({ bucket: settings.influxBucket, depositEvents });
+  if (!query.flux) return [];
+  const rows = projectInventoryDepositBaselineRows({
+    scopes: query.scopes,
+    rows: parseInfluxCsv(await queryInfluxFlux(settings, query.flux)),
+  });
+  if (rows.length !== query.scopes.length) throw new Error('inventory_deposit_baseline_missing');
+  return rows;
 }
 
 async function fetchShipStatsSot() {
@@ -8234,6 +8248,15 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const inventoryMarketplaceDepositEvents = projectInventoryCostLedgerDepositEvents(
     inventoryMarketplaceLedger.rows, { faction: ledgerFaction },
   );
+  let inventoryDepositBaselineRows = [];
+  let inventoryDepositBaselineError = '';
+  if (needsInventoryLedger && inventoryMarketplaceDepositEvents.length) {
+    try {
+      inventoryDepositBaselineRows = await fetchInventoryDepositBaselines(settings, inventoryMarketplaceDepositEvents);
+    } catch (error) {
+      inventoryDepositBaselineError = String(error?.message || error || 'inventory_deposit_baseline_unavailable');
+    }
+  }
   const inventoryLedgerMarketTrades = localMarketResult.trades.filter((trade) =>
     String(trade?.marketplace || trade?.market || '').toUpperCase() !== 'GM'
       || Date.parse(trade?.timestamp) < Date.parse(MARKETPLACE_RAWDATA_CUTOVER_ISO));
@@ -8259,6 +8282,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     eventResultsByFingerprint: checkpoint.eventResultsByFingerprint,
     openingInventoryRows,
     currentInventoryRows,
+    inventoryReconciliationRows: inventoryDepositBaselineRows,
     scanningRows: rows,
     miningRows: mining,
     cargoRows: cargoAllocationLedgerRows,
@@ -8302,8 +8326,10 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   let inventoryBasisPublicationError = '';
   if (!needsInventoryLedger) {
     ledgerCheckpointStatus = 'skipped';
-  } else if (checkpoint.status !== 'loaded' && openingInventoryError && !currentInventoryRows.length) {
+  } else if (inventoryDepositBaselineError
+    || (checkpoint.status !== 'loaded' && openingInventoryError && !currentInventoryRows.length)) {
     ledgerCheckpointStatus = 'baseline-unavailable';
+    ledgerCheckpointError = inventoryDepositBaselineError || openingInventoryError;
   } else {
     try {
       await saveLedgerCheckpoint(checkpointPath, {
@@ -8742,7 +8768,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     craftingRows: crafting,
     upgradingRows: upgrading,
     breakevenRows,
-    breakevenError: [breakevenError, inventoryMarketplaceEvents.error, inventoryBasisObservationError].filter(Boolean).join(' · '),
+    breakevenError: [breakevenError, inventoryMarketplaceEvents.error, inventoryBasisObservationError, inventoryDepositBaselineError].filter(Boolean).join(' · '),
     breakevenBasisStateSource,
     breakevenBasisStateWrittenCount,
     breakevenBasisStateError,
@@ -8756,6 +8782,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     inventoryCostLedgerRejectedEvents,
     openingInventoryCount: openingInventoryRows.length,
     openingInventoryError,
+    inventoryDepositBaselineCount: inventoryDepositBaselineRows.length,
+    inventoryDepositBaselineError,
     ledgerCheckpointStatus,
     ledgerCheckpointError,
     ledgerCheckpointSavedAt,

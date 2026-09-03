@@ -137,6 +137,24 @@ test('missing opening snapshot seeds current inventory before replay so unexplai
   assert.ok(Math.abs(ammunition.costs.gm / ammunition.quantity - 0.00100229) < 1e-12);
 });
 
+test('authoritative pre-deposit inventory supersedes stale pooled basis before the exact game lot', () => {
+  const result = buildCostLedgerResult({
+    assetFlowEvents: [
+      { type: 'acquire-lot', timestamp: '2026-09-01T06:00:00Z', location: 'MUD-1', asset: 'Ammunition', quantity: 10646326, costs: { gm: 8465.74 } },
+      { type: 'acquire-lot', timestamp: '2026-09-03T07:00:00Z', location: 'MUD-1', asset: 'Ammunition', quantity: 5000000, costs: { gm: 5011.45 } },
+      { type: 'consume', timestamp: '2026-09-03T08:00:00Z', location: 'MUD-1', asset: 'Ammunition', quantity: 1374668 },
+    ],
+    inventoryReconciliationRows: [
+      { timestamp: '2026-09-03T06:59:59Z', starbase: 'MUD-1', asset: 'Ammo', quantity: 0, depositFlowId: 'morning-deposit' },
+    ],
+  });
+  const ammunition = result.ledger.get('MUD-1', 'Ammunition');
+  assert.equal(ammunition.quantity, 3625332);
+  assert.equal(ammunition.uncostedQuantity, 0);
+  assert.ok(Math.abs(ammunition.knownCosts.gm - 3625332 * 0.00100229) < 1e-8);
+  assert.ok(Math.abs(ammunition.totalCostPerUnit - 0.00100229) < 1e-12);
+});
+
 test('scanning acquisitions are split across deposit starbases without duplicating daily costs', () => {
   const events = buildScanningAcquisitionEvents([{
     isoDate: '2026-07-25',

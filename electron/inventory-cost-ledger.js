@@ -170,6 +170,15 @@ class InventoryCostLedger {
     return cloneLot(lot);
   }
 
+  reconcile({ location, asset, quantity }) {
+    const targetQuantity = requireNonNegative(quantity, 'quantity');
+    const entry = this.ensure(location, asset);
+    const variance = targetQuantity - entry.quantity;
+    if (variance > EPSILON) this.acquire({ location, asset, quantity: variance, source: null, totalCost: null });
+    else if (variance < -EPSILON) this.consume({ location, asset, quantity: -variance });
+    return this.get(location, asset);
+  }
+
   transfer({ origin, destination, asset, quantity, cargoCost = 0 }) {
     const lot = this.consume({ location: origin, asset, quantity });
     const addedCargoCost = requireNonNegative(cargoCost, 'cargoCost');
@@ -217,6 +226,7 @@ class InventoryCostLedger {
     if (event.type === 'acquire') return this.acquire(event);
     if (event.type === 'acquire-lot') return this.acquireLot(event);
     if (event.type === 'consume') return this.consume(event);
+    if (event.type === 'reconcile') return this.reconcile(event);
     if (event.type === 'transfer') return this.transfer(event);
     if (event.type === 'craft') return this.craft(event);
     throw new Error(`unsupported ledger event: ${event.type}`);

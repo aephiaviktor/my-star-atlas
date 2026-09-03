@@ -150,6 +150,22 @@ test('events are applied chronologically rather than in input order', () => {
   close(ledger.get('MUD-2', 'Fuel').totalCostPerUnit, 2.2);
 });
 
+test('inventory reconciliation resets stale pooled basis before a later exact deposit', () => {
+  const ledger = new InventoryCostLedger();
+  ledger.applyEvents([
+    { type: 'acquire', timestamp: '2026-09-01T06:00:00Z', location: 'MUD-1', asset: 'Ammunition', quantity: 10_646_326, source: 'gm', totalCost: 8_465.74 },
+    { type: 'reconcile', timestamp: '2026-09-03T06:59:59Z', location: 'MUD-1', asset: 'Ammunition', quantity: 0 },
+    { type: 'acquire-lot', timestamp: '2026-09-03T07:00:00Z', location: 'MUD-1', asset: 'Ammunition', quantity: 5_000_000, costs: { gm: 5_011.45 } },
+    { type: 'consume', timestamp: '2026-09-03T08:00:00Z', location: 'MUD-1', asset: 'Ammunition', quantity: 1_374_668 },
+  ]);
+
+  const ammunition = ledger.get('MUD-1', 'Ammunition');
+  assert.equal(ammunition.quantity, 3_625_332);
+  assert.equal(ammunition.uncostedQuantity, 0);
+  close(ammunition.knownCosts.gm, 3_625_332 * 0.00100229);
+  close(ammunition.totalCostPerUnit, 0.00100229);
+});
+
 test('ledger snapshots restore exact quantities and weighted basis', () => {
   const original = new InventoryCostLedger();
   original.acquire({ location: 'MUD-1', asset: 'Carbon', quantity: 8 });
