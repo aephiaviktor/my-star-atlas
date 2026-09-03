@@ -353,8 +353,8 @@ test('earnings column selections persist per subtab in local storage', () => {
 
 test('Inventory Ledger distinguishes priced, estimated, and unpriced pool bases', () => {
   const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
-  assert.match(renderer, /row\.basisStatus === 'priced' \? 'Priced'/);
-  assert.match(renderer, /row\.basisStatus === 'estimated' \? 'Estimated' : 'Unpriced'/);
+  assert.match(renderer, /row\?\.basisStatus === 'priced' \? 'Priced'/);
+  assert.match(renderer, /row\?\.basisStatus === 'estimated' \? 'Estimated' : 'Unpriced'/);
   assert.doesNotMatch(renderer, /Costed Qty|Uncosted Qty/);
 });
 
@@ -371,7 +371,24 @@ test('Inventory Ledger exposes one pool-basis table with a per-unit toggle', () 
   assert.match(rendererSource, /function renderInventoryCostLedger\(result\)/);
   assert.match(rendererSource, /result\?\.inventoryCostLedgerRows/);
   assert.match(rendererSource, /isEarningsPerUnitEnabled\('inventoryLedger'\)/);
-  assert.match(rendererSource, /row\.basisStatus === 'priced' \? 'Priced'/);
+  assert.match(rendererSource, /row\?\.basisStatus === 'priced' \? 'Priced'/);
   assert.doesNotMatch(rendererSource, /currentInventoryLedgerView|inventoryLedgerViewButtons/);
   assert.match(mainSource, /poolBasisRows: inventoryDepositPoolBasisRows/);
+});
+
+test('Inventory Ledger suppresses zeroes, sorts every column, and exposes every column control', () => {
+  const htmlSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
+  const rendererSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+  assert.match(rendererSource, /function formatInventoryLedgerBasisValue[\s\S]*Math\.abs\(number\) < 1e-12[\s\S]*return '--'/);
+  assert.match(rendererSource, /handle\(earningsCostLedgerTableHead, 'breakeven'\)/);
+  assert.match(rendererSource, /appendEarningsHeaderCell\(tr, column\.id, label, sortState/);
+  assert.match(rendererSource, /sort\(\(left, right\) => sortState\?\.column[\s\S]*compareEarningsValues\(inventoryLedgerSortValue/);
+  assert.match(rendererSource, /const breakevenEarningsOptionalColumns = Object\.freeze\(\[/);
+  for (const id of ['starbase', 'asset', 'quantity', 'scanning', 'mining', 'crafting', 'lm', 'gm', 'cargo', 'totalBasis', 'status']) {
+    assert.match(rendererSource, new RegExp(`id: '${id}'`));
+  }
+  assert.match(rendererSource, /breakeven: new Set\(breakevenEarningsOptionalColumns\.map\(\(column\) => column\.id\)\)/);
+  assert.match(rendererSource, /subtab === 'breakeven' && Number\(saved\.schemaVersion \|\| 1\) < 4[\s\S]*restoredIds = getEarningsColumns\(subtab\)\.map/);
+  assert.match(rendererSource, /schemaVersion: 4/);
+  assert.doesNotMatch(htmlSource, /0\.000000/);
 });

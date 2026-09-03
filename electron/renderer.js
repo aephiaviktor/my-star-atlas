@@ -792,26 +792,19 @@ const upgradingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
 ]);
 
-const breakevenEarningsBaseColumns = Object.freeze([
+const breakevenEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
-  Object.freeze({ id: 'inventory', label: 'Inventory' }),
-  Object.freeze({ id: 'scanningCost', label: 'Scanning C/U' }),
-  Object.freeze({ id: 'miningCost', label: 'Mining C/U' }),
-  Object.freeze({ id: 'craftingCost', label: 'Crafting C/U' }),
-  Object.freeze({ id: 'lmCost', label: 'LM C/U' }),
-  Object.freeze({ id: 'gmCost', label: 'GM C/U' }),
-  Object.freeze({ id: 'baseCost', label: 'Base Cost / Unit' }),
-  Object.freeze({ id: 'cargoCost', label: 'Cargo Cost / Unit' }),
-  Object.freeze({ id: 'landedCost', label: 'Total Cost / Unit' }),
-  Object.freeze({ id: 'inventoryValue', label: 'Inventory Cost Basis' }),
-  Object.freeze({ id: 'costCoverage', label: 'Cost Coverage' }),
-  Object.freeze({ id: 'gmPrice', label: 'GM Price / Unit' }),
-  Object.freeze({ id: 'inventoryExternalValue', label: 'Inventory External Value' }),
-  Object.freeze({ id: 'ledgerStatus', label: 'Ledger Status' }),
+  Object.freeze({ id: 'quantity', label: 'Quantity' }),
+  Object.freeze({ id: 'scanning', label: 'Scanning' }),
+  Object.freeze({ id: 'mining', label: 'Mining' }),
+  Object.freeze({ id: 'crafting', label: 'Crafting' }),
+  Object.freeze({ id: 'lm', label: 'LM' }),
+  Object.freeze({ id: 'gm', label: 'GM' }),
+  Object.freeze({ id: 'cargo', label: 'Cargo' }),
+  Object.freeze({ id: 'totalBasis', label: 'Total Basis' }),
+  Object.freeze({ id: 'status', label: 'Status' }),
 ]);
-
-const breakevenEarningsOptionalColumns = Object.freeze([]);
 
 const marketplaceEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'timestamp', label: 'Timestamp (UTC)' }),
@@ -913,7 +906,7 @@ const earningsColumnState = {
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
-  breakeven: new Set(),
+  breakeven: new Set(breakevenEarningsOptionalColumns.map((column) => column.id)),
   marketplace: new Set(marketplaceEarningsOptionalColumns.map((column) => column.id).filter((id) => id !== 'starbase')),
   marketplaceGlobal: new Set(marketplaceGlobalColumns.map((column) => column.id)),
   marketplaceGame: new Set(marketplaceGameColumns.map((column) => column.id)),
@@ -935,6 +928,9 @@ function restoreEarningsColumnState() {
       if (subtab === 'marketplaceGame' && Number(saved.schemaVersion || 1) < 3) {
         restoredIds.push('gameReceivedUnit', 'gameNetProfitUnit');
       }
+      if (subtab === 'breakeven' && Number(saved.schemaVersion || 1) < 4) {
+        restoredIds = getEarningsColumns(subtab).map((column) => column.id);
+      }
       const validIds = new Set(getEarningsColumns(subtab).map((column) => column.id));
       earningsColumnState[subtab] = new Set(restoredIds.filter((id) => validIds.has(id)));
     }
@@ -946,7 +942,7 @@ function restoreEarningsColumnState() {
 function persistEarningsColumnState() {
   try {
     const serialized = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       ...Object.fromEntries(Object.entries(earningsColumnState).map(([subtab, selected]) => [subtab, Array.from(selected)])),
     };
     localStorage.setItem(EARNINGS_COLUMN_STORAGE_KEY, JSON.stringify(serialized));
@@ -5947,9 +5943,7 @@ function renderEarningsMetricGuide(subtab = currentEarningsSubtab) {
   const container = document.querySelector(`#earnings-${subtab}-metric-guide`);
   if (!container) return;
   container.textContent = '';
-  const guideColumns = subtab === 'breakeven'
-    ? [...breakevenEarningsBaseColumns, ...getVisibleEarningsColumns(subtab)]
-    : getVisibleEarningsColumns(subtab);
+  const guideColumns = getVisibleEarningsColumns(subtab);
   for (const column of guideColumns) {
     const guide = getEarningsMetricGuideEntry(subtab, column.id);
     if (!guide) continue;
@@ -6413,6 +6407,7 @@ function setupEarningsHeaderSortHandlers() {
   handle(earningsCargoTableHead, 'cargo');
   handle(earningsCraftingTableHead, 'crafting');
   handle(earningsUpgradingTableHead, 'upgrading');
+  handle(earningsCostLedgerTableHead, 'breakeven');
 }
 
 function appendEarningsHeaderCell(row, columnId, label, sortState, highlighted = false) {
@@ -7558,19 +7553,49 @@ function isDisplayableInventoryLedgerRow(row) {
   return !String(row?.location || '').startsWith('wallet:');
 }
 
+function inventoryLedgerValues(row, perUnit) {
+  const quantity = Number(row?.quantity || 0);
+  const costs = row?.costs || {};
+  const cargo = Number(row?.cargoCost || 0);
+  const totalBasis = Object.values(costs).reduce((sum, value) => sum + Number(value || 0), cargo);
+  const basisValue = (value) => perUnit && quantity > 0 ? Number(value || 0) / quantity : Number(value || 0);
+  const status = quantity <= 0 ? 'Empty'
+    : row?.basisStatus === 'priced' ? 'Priced'
+      : row?.basisStatus === 'estimated' ? 'Estimated' : 'Unpriced';
+  return {
+    starbase: row?.location || '', asset: row?.asset || '', quantity,
+    scanning: basisValue(costs.scanning), mining: basisValue(costs.mining), crafting: basisValue(costs.crafting),
+    lm: basisValue(costs.lm), gm: basisValue(costs.gm), cargo: basisValue(cargo),
+    totalBasis: basisValue(totalBasis), status,
+  };
+}
+
+function inventoryLedgerSortValue(row, columnId, perUnit) {
+  return inventoryLedgerValues(row, perUnit)[columnId];
+}
+
+function formatInventoryLedgerBasisValue(value, perUnit) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || Math.abs(number) < 1e-12) return '--';
+  return perUnit ? costLedgerUnitFormatter.format(number) : costLedgerBasisFormatter.format(number);
+}
+
 function renderInventoryCostLedger(result) {
   if (!earningsCostLedgerTableBody) return;
   const perUnit = isEarningsPerUnitEnabled('inventoryLedger');
+  const visibleColumns = getVisibleEarningsColumns('breakeven');
+  const sortState = earningsSort.breakeven;
   applyEarningsPerUnitButtonState('inventoryLedger');
   if (earningsCostLedgerTableHead) {
-    const suffix = perUnit ? ' / Unit' : '';
-    const labels = ['Starbase', 'Asset', 'Quantity', `Scanning${suffix}`, `Mining${suffix}`, `Crafting${suffix}`,
-      `LM${suffix}`, `GM${suffix}`, `Cargo${suffix}`, perUnit ? 'Total / Unit' : 'Total Basis', 'Status'];
     const tr = document.createElement('tr');
-    for (const label of labels) {
-      const th = document.createElement('th');
-      th.textContent = label;
-      tr.appendChild(th);
+    for (const column of visibleColumns) {
+      const basisColumn = !['starbase', 'asset', 'quantity', 'status'].includes(column.id);
+      const label = basisColumn && perUnit
+        ? (column.id === 'totalBasis' ? 'Total / Unit' : `${column.label} / Unit`)
+        : column.label;
+      appendEarningsHeaderCell(tr, column.id, label, sortState, basisColumn && perUnit);
+      const arrow = tr.lastElementChild?.querySelector('.earnings-sort-arrow');
+      if (arrow && !arrow.textContent) arrow.textContent = '↕';
     }
     earningsCostLedgerTableHead.replaceChildren(tr);
   }
@@ -7581,35 +7606,29 @@ function renderInventoryCostLedger(result) {
     .filter((row) => !filter.starbase || String(row.location) === filter.starbase)
     .filter((row) => !filter.asset || String(row.asset) === filter.asset)
     .filter((row) => !filter.hideLowInventory || Number(row.quantity) > 2)
-    .sort((left, right) => String(left.location).localeCompare(String(right.location)) || String(left.asset).localeCompare(String(right.asset)));
+    .sort((left, right) => sortState?.column
+      ? compareEarningsValues(inventoryLedgerSortValue(left, sortState.column, perUnit), inventoryLedgerSortValue(right, sortState.column, perUnit), sortState.direction)
+      : String(left.location).localeCompare(String(right.location)) || String(left.asset).localeCompare(String(right.asset)));
   if (!rows.length) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     const td = document.createElement('td');
-    td.colSpan = 11;
+    td.colSpan = Math.max(1, visibleColumns.length);
     td.textContent = 'No Inventory Ledger rows match the current filters';
     tr.appendChild(td);
     earningsCostLedgerTableBody.appendChild(tr);
     return;
   }
   for (const row of rows) {
-    const quantity = Number(row.quantity || 0);
-    const costs = row.costs || {};
-    const cargo = Number(row.cargoCost || 0);
-    const totalBasis = Object.values(costs).reduce((sum, value) => sum + Number(value || 0), cargo);
-    const displayBasis = (value) => perUnit
-      ? costLedgerUnitFormatter.format(quantity > 0 ? Number(value || 0) / quantity : 0)
-      : costLedgerBasisFormatter.format(value || 0);
-    const status = quantity <= 0 ? 'Empty'
-      : row.basisStatus === 'priced' ? 'Priced'
-        : row.basisStatus === 'estimated' ? 'Estimated' : 'Unpriced';
-    const values = [
-      row.location, row.asset, formatWholeNumber(quantity),
-      displayBasis(costs.scanning), displayBasis(costs.mining), displayBasis(costs.crafting),
-      displayBasis(costs.lm), displayBasis(costs.gm), displayBasis(cargo), displayBasis(totalBasis), status,
-    ];
+    const values = inventoryLedgerValues(row, perUnit);
     const tr = document.createElement('tr');
-    for (const value of values) tr.appendChild(createTextCell(value));
+    for (const column of visibleColumns) {
+      const value = values[column.id];
+      const formatted = column.id === 'quantity' ? formatWholeNumber(value)
+        : ['starbase', 'asset', 'status'].includes(column.id) ? value
+          : formatInventoryLedgerBasisValue(value, perUnit);
+      tr.appendChild(createTextCell(formatted));
+    }
     earningsCostLedgerTableBody.appendChild(tr);
   }
 }

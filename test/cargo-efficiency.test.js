@@ -191,6 +191,6 @@ test('Inventory Ledger labels total basis consistently in total and per-unit mod
   const html = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
 
   assert.match(html, /<th>Total Basis<\/th>/);
-  assert.match(renderer, /perUnit \? 'Total \/ Unit' : 'Total Basis'/);
+  assert.match(renderer, /column\.id === 'totalBasis' \? 'Total \/ Unit' : `\$\{column\.label\} \/ Unit`/);
   assert.doesNotMatch(html, /Landed Cost/);
 });
