@@ -65,6 +65,19 @@ function projectInventoryDepositBaselineRows({ scopes = [], rows = [] } = {}) {
 
 function projectAuthoritativeDepositPoolBasisRows({ depositEvents = [], baselineRows = [] } = {}) {
   const baselineByFlowId = new Map((baselineRows || []).map((row) => [String(row?.depositFlowId || ''), row]));
+  const latestDepositOrderKeyByPool = new Map();
+  for (const event of depositEvents || []) {
+    if (event?.basisSource !== 'marketplace-game-deposit') continue;
+    const location = String(event?.location || '').trim();
+    const asset = canonicalAssetName(event?.asset);
+    const timestamp = new Date(event?.timestamp);
+    if (!location || !asset || Number.isNaN(timestamp.getTime())) continue;
+    const poolKey = `${location}\n${asset}`;
+    const orderKey = `${timestamp.toISOString()}\n${String(event?.flowId || '')}`;
+    if (orderKey > (latestDepositOrderKeyByPool.get(poolKey) || '')) {
+      latestDepositOrderKeyByPool.set(poolKey, orderKey);
+    }
+  }
   const latestByPool = new Map();
   for (const event of depositEvents || []) {
     const baseline = baselineByFlowId.get(String(event?.flowId || ''));
@@ -87,6 +100,8 @@ function projectAuthoritativeDepositPoolBasisRows({ depositEvents = [], baseline
       basisSource: 'marketplace-game-deposit',
     };
     const poolKey = `${location}\n${asset}`;
+    const orderKey = `${row.timestamp}\n${String(event?.flowId || '')}`;
+    if (orderKey !== latestDepositOrderKeyByPool.get(poolKey)) continue;
     const previous = latestByPool.get(poolKey);
     if (!previous || row.timestamp > previous.timestamp) latestByPool.set(poolKey, row);
   }

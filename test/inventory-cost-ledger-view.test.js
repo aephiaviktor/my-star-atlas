@@ -66,3 +66,18 @@ test('authoritative deposit basis prices every current unit independently of sta
   assert.equal(row.totalCostPerUnit, 0.00100229);
   assert.equal(row.basisStatus, 'priced');
 });
+
+test('multiple priced deposits average only their costed evidence then price the complete inventory', () => {
+  const [row] = projectInventoryCostLedgerRows({
+    ledgerRows: [ledgerRow({
+      location: 'MUD-1', asset: 'Electronics', quantity: 12_000_000, uncostedQuantity: 10_000_000,
+      costs: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: 9_000 }, cargoCost: 0,
+    })],
+    valuationRows: [{ starbase: 'MUD-1', asset: 'Electronics', inventory: 12_000_000, reconciliationStatus: 'reconciled' }],
+  });
+  assert.equal(row.knownCostQuantity, 12_000_000);
+  assert.equal(row.uncostedQuantity, 0);
+  assert.ok(Math.abs(row.totalCostPerUnit - 0.0045) < 1e-12);
+  assert.ok(Math.abs(row.costs.gm - 54_000) < 1e-9);
+  assert.equal(row.basisStatus, 'estimated');
+});

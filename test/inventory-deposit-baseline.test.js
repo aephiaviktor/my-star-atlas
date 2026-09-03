@@ -66,3 +66,22 @@ test('a deposit into negligible inventory establishes one unit basis for the com
   assert.ok(Math.abs(row.unitCosts.gm - 0.00100139) < 1e-12);
   assert.ok(Math.abs(row.unitCosts.gm + row.cargoCostPerUnit - 0.00100229) < 1e-12);
 });
+
+test('a later priced deposit releases the reset override so replay can calculate the weighted pool rate', () => {
+  const depositEvents = [{
+    type: 'acquire-lot', timestamp: '2026-09-03T07:00:00.000Z', location: 'MUD-1', asset: 'Electronics',
+    quantity: 1_000_000, costs: { gm: 4_000 }, cargoCost: 0,
+    flowId: 'first-deposit', basisSource: 'marketplace-game-deposit',
+  }, {
+    type: 'acquire-lot', timestamp: '2026-09-03T09:00:00.000Z', location: 'MUD-1', asset: 'Electronics',
+    quantity: 1_000_000, costs: { gm: 5_000 }, cargoCost: 0,
+    flowId: 'second-deposit', basisSource: 'marketplace-game-deposit',
+  }];
+  assert.deepEqual(projectAuthoritativeDepositPoolBasisRows({
+    depositEvents,
+    baselineRows: [
+      { starbase: 'MUD-1', asset: 'Electronics', quantity: 0, depositFlowId: 'first-deposit' },
+      { starbase: 'MUD-1', asset: 'Electronics', quantity: 11_000_000, depositFlowId: 'second-deposit' },
+    ],
+  }), []);
+});
