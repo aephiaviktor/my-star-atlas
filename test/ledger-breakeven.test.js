@@ -36,8 +36,8 @@ test('completed cargo delivery carries source mining basis plus allocated transp
     inventoryRows: [{ starbase: 'MRZ-20', asset: 'Copper Ore', quantity: 40 }],
   }).find((row) => row.starbase === 'MRZ-20');
 
-  assert.equal(destination.miningCostPerUnit, 0.000231);
-  assert.equal(destination.cargoCostPerUnit, 0.000141);
+  assert.ok(Math.abs(destination.miningCostPerUnit - 0.000231) < 1e-12);
+  assert.ok(Math.abs(destination.cargoCostPerUnit - 0.000141) < 1e-12);
   assert.ok(Math.abs(destination.landedCostPerUnit - 0.000372) < 1e-12);
   assert.equal(destination.fullyTracked, true);
 });

@@ -212,13 +212,29 @@ test('cargo transfers preserve weighted source basis and add cargo costs only at
   assert.equal(result.ledger.get('MUD-2', 'Carbon').cargoCost, 5);
 });
 
+test('replayed deliveries price destination stock when its opening inventory was uncosted', () => {
+  const result = buildCostLedgerResult({
+    currentInventoryRows: [{ starbase: 'UST-PHANTOM', asset: 'Electronics', quantity: 500 }],
+    miningRows: [{ isoDate: '2026-09-02', starbase: 'UST-MINE', rawMaterial: 'Electronics', mined: 200, totalCostsAtlas: 40 }],
+    cargoRows: [{ timestamp: '2026-09-03T12:00:00Z', origin: 'UST-MINE', destination: 'UST-PHANTOM', asset: 'Electronics', amount: 200, totalCostsAtlas: 4 }],
+  });
+  result.ledger.reconcile({ location: 'UST-PHANTOM', asset: 'Electronics', quantity: 500 });
+  const destination = result.ledger.get('UST-PHANTOM', 'Electronics');
+  assert.equal(result.rejectedEvents.length, 0);
+  assert.equal(destination.quantity, 500);
+  assert.equal(destination.uncostedQuantity, 300);
+  assert.equal(destination.quantity - destination.uncostedQuantity, 200);
+  assert.equal(destination.knownCosts.mining, 40);
+  assert.equal(destination.knownCargoCost, 4);
+});
+
 test('cargo events use telemetry timestamps and reject incomplete routes or costs', () => {
   assert.deepEqual(buildCargoTransferEvents([
     { timestamp: '2026-07-25T10:15:00Z', origin: 'ONI-1', destination: 'ONI-2', asset: 'Food', amount: 5, totalCostsAtlas: 2 },
     { isoDate: '2026-07-25', origin: '--', destination: 'ONI-2', asset: 'Food', amount: 5, totalCostsAtlas: 2 },
     { isoDate: '2026-07-25', origin: 'ONI-1', destination: 'ONI-2', asset: 'Food', amount: 5, totalCostsAtlas: null },
   ]), [{
-    type: 'transfer', timestamp: '2026-07-25T10:15:00.000Z', origin: 'ONI-1', destination: 'ONI-2', asset: 'Food', quantity: 5, cargoCost: 2,
+    type: 'transfer', timestamp: '2026-07-25T10:15:00.000Z', origin: 'ONI-1', destination: 'ONI-2', asset: 'Food', quantity: 5, cargoCost: 2, carryPoolRate: true,
   }]);
 });
 

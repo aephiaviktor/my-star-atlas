@@ -179,11 +179,24 @@ class InventoryCostLedger {
     return this.get(location, asset);
   }
 
-  transfer({ origin, destination, asset, quantity, cargoCost = 0 }) {
-    const lot = this.consume({ location: origin, asset, quantity });
+  transfer({ origin, destination, asset, quantity, cargoCost = 0, carryPoolRate = false }) {
+    const units = requirePositive(quantity, 'quantity');
+    const originPool = this.get(origin, asset);
+    const consumed = this.consume({ location: origin, asset, quantity: units });
     const addedCargoCost = requireNonNegative(cargoCost, 'cargoCost');
-    lot.cargoCost += addedCargoCost;
-    lot.uncostedCargoCost += addedCargoCost * (lot.uncostedQuantity / lot.quantity);
+    const hasPoolRate = originPool.quantity - originPool.uncostedQuantity > EPSILON;
+    const lot = carryPoolRate && hasPoolRate ? {
+      quantity: units,
+      uncostedQuantity: 0,
+      costs: Object.fromEntries(COST_SOURCES.map((source) => [source, originPool.costPerUnit[source] * units])),
+      uncostedCosts: emptyCosts(),
+      cargoCost: addedCargoCost + originPool.cargoCostPerUnit * units,
+      uncostedCargoCost: 0,
+    } : consumed;
+    if (!(carryPoolRate && hasPoolRate)) {
+      lot.cargoCost += addedCargoCost;
+      lot.uncostedCargoCost += addedCargoCost * (lot.uncostedQuantity / lot.quantity);
+    }
     this.addLot(destination, asset, lot);
     return cloneLot(lot);
   }

@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 10 reconciles authoritative game inventory immediately before valued deposits.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 10;
+// Version 11 rebuilds transfers so they carry the origin pool rate through uncosted stock.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 11;
 
 function emptyResult(status, error = '') {
   return {

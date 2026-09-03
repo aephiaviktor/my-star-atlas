@@ -76,6 +76,30 @@ test('uncosted opening quantity is consumed before the costed weighted-average p
   close(remaining.costs.mining, 10);
 });
 
+test('a transfer carries the origin pool rate even while uncosted quantity depletes first', () => {
+  const ledger = new InventoryCostLedger();
+  ledger.acquire({ location: 'UST-MINE', asset: 'Electronics', quantity: 900 });
+  ledger.acquire({ location: 'UST-MINE', asset: 'Electronics', quantity: 100, source: 'mining', totalCost: 20 });
+
+  const moved = ledger.transfer({
+    origin: 'UST-MINE', destination: 'UST-PHANTOM', asset: 'Electronics', quantity: 200, cargoCost: 4,
+    carryPoolRate: true,
+  });
+
+  const origin = ledger.get('UST-MINE', 'Electronics');
+  assert.equal(origin.quantity, 800);
+  assert.equal(origin.uncostedQuantity, 700);
+  close(origin.knownCosts.mining, 20);
+  assert.equal(moved.uncostedQuantity, 0);
+  close(moved.costs.mining, 40);
+  close(moved.cargoCost, 4);
+  const destination = ledger.get('UST-PHANTOM', 'Electronics');
+  assert.equal(destination.quantity, 200);
+  assert.equal(destination.uncostedQuantity, 0);
+  close(destination.costPerUnit.mining, 0.2);
+  close(destination.cargoCostPerUnit, 0.02);
+});
+
 test('known-cost inventory grows and stabilizes its weighted average while uncosted stock depletes first', () => {
   const ledger = new InventoryCostLedger();
   ledger.acquire({ location: 'MUD-PHANTOM', asset: 'Framework', quantity: 900 });

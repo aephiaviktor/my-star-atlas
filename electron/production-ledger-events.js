@@ -150,6 +150,7 @@ function buildCargoTransferEvents(rows) {
       asset,
       quantity,
       cargoCost: Number(row.totalCostsAtlas),
+      carryPoolRate: true,
     });
   }
   return events;
