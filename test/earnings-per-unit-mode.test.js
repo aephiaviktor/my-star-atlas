@@ -46,10 +46,11 @@ test('Per Unit mode fails closed for missing or non-positive Crafted and Install
   assert.equal(resolve({ crafted: 2, totalCostsAtlas: null }, 'crafting', 'totalCosts', true), null);
 });
 
-test('Crafting and Upgrading expose independent orange Per Unit controls and highlighted columns', () => {
-  assert.equal((html.match(/data-earnings-per-unit=/g) || []).length, 2);
+test('Crafting, Upgrading, and Inventory Ledger expose independent orange Per Unit controls', () => {
+  assert.equal((html.match(/data-earnings-per-unit=/g) || []).length, 3);
   assert.match(html, /data-earnings-per-unit="crafting"[^>]*>Per Unit</);
   assert.match(html, /data-earnings-per-unit="upgrading"[^>]*>Per Unit</);
+  assert.match(html, /data-earnings-per-unit="inventoryLedger"[^>]*>Per Unit</);
   assert.match(css, /\.earnings-per-unit-btn/);
   assert.match(css, /\.earnings-per-unit-btn\.active/);
   assert.match(css, /\.earnings-per-unit-column/);

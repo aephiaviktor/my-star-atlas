@@ -3,6 +3,7 @@
 const { canonicalAssetName } = require('./asset-name');
 
 const MAX_DEPOSIT_BASELINE_SCOPES = 128;
+const COST_SOURCES = Object.freeze(['scanning', 'mining', 'crafting', 'lm', 'gm']);
 
 function fluxString(value) {
   return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r/g, '\\r').replace(/\n/g, '\\n');
@@ -62,8 +63,40 @@ function projectInventoryDepositBaselineRows({ scopes = [], rows = [] } = {}) {
     || left.depositFlowId.localeCompare(right.depositFlowId));
 }
 
+function projectAuthoritativeDepositPoolBasisRows({ depositEvents = [], baselineRows = [] } = {}) {
+  const baselineByFlowId = new Map((baselineRows || []).map((row) => [String(row?.depositFlowId || ''), row]));
+  const latestByPool = new Map();
+  for (const event of depositEvents || []) {
+    const baseline = baselineByFlowId.get(String(event?.flowId || ''));
+    const quantity = Number(event?.quantity);
+    const baselineQuantity = Number(baseline?.quantity);
+    const timestamp = new Date(event?.timestamp);
+    const location = String(event?.location || '').trim();
+    const asset = canonicalAssetName(event?.asset);
+    if (event?.basisSource !== 'marketplace-game-deposit' || !(quantity > 0)
+      || !Number.isFinite(baselineQuantity) || baselineQuantity < 0 || baselineQuantity > 1
+      || Number.isNaN(timestamp.getTime()) || !location || !asset) continue;
+    const unitCosts = Object.fromEntries(COST_SOURCES.map((source) => {
+      const cost = Number(event?.costs?.[source] || 0);
+      return [source, Number.isFinite(cost) && cost >= 0 ? cost / quantity : 0];
+    }));
+    const cargoCost = Number(event?.cargoCost || 0);
+    const row = {
+      location, asset, timestamp: timestamp.toISOString(), unitCosts,
+      cargoCostPerUnit: Number.isFinite(cargoCost) && cargoCost >= 0 ? cargoCost / quantity : 0,
+      basisSource: 'marketplace-game-deposit',
+    };
+    const poolKey = `${location}\n${asset}`;
+    const previous = latestByPool.get(poolKey);
+    if (!previous || row.timestamp > previous.timestamp) latestByPool.set(poolKey, row);
+  }
+  return [...latestByPool.values()].sort((left, right) => left.location.localeCompare(right.location)
+    || left.asset.localeCompare(right.asset));
+}
+
 module.exports = {
   MAX_DEPOSIT_BASELINE_SCOPES,
   buildInventoryDepositBaselineQuery,
   projectInventoryDepositBaselineRows,
+  projectAuthoritativeDepositPoolBasisRows,
 };

@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const {
   buildInventoryDepositBaselineQuery,
   projectInventoryDepositBaselineRows,
+  projectAuthoritativeDepositPoolBasisRows,
 } = require('../electron/inventory-deposit-baseline');
 
 test('pre-deposit inventory query is bounded and requests the latest state before each exact game deposit', () => {
@@ -43,4 +44,25 @@ test('deposit baseline query rejects an unbounded number of scopes', () => {
     location: `MUD-${index}`, asset: 'Fuel', flowId: `deposit-${index}`, basisSource: 'marketplace-game-deposit',
   }));
   assert.throws(() => buildInventoryDepositBaselineQuery({ bucket: 'aephia', depositEvents }), /at most 128/);
+});
+
+test('a deposit into negligible inventory establishes one unit basis for the complete pool', () => {
+  const depositEvents = [{
+    type: 'acquire-lot', timestamp: '2026-09-03T07:00:00.000Z', location: 'MUD-1', asset: 'Ammunition',
+    quantity: 5_000_000, uncostedQuantity: 0,
+    costs: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: 5_006.95 }, cargoCost: 4.5,
+    flowId: 'morning-deposit', basisSource: 'marketplace-game-deposit',
+  }];
+  const [row] = projectAuthoritativeDepositPoolBasisRows({
+    depositEvents,
+    baselineRows: [{ starbase: 'MUD-1', asset: 'Ammo', quantity: 1, depositFlowId: 'morning-deposit' }],
+  });
+  assert.deepEqual({ ...row, unitCosts: { ...row.unitCosts, gm: 0 } }, {
+    location: 'MUD-1', asset: 'Ammunition', timestamp: '2026-09-03T07:00:00.000Z',
+    unitCosts: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: 0 },
+    cargoCostPerUnit: 0.0000009,
+    basisSource: 'marketplace-game-deposit',
+  });
+  assert.ok(Math.abs(row.unitCosts.gm - 0.00100139) < 1e-12);
+  assert.ok(Math.abs(row.unitCosts.gm + row.cargoCostPerUnit - 0.00100229) < 1e-12);
 });

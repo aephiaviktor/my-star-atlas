@@ -69,6 +69,7 @@ const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./craft
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const {
   buildInventoryDepositBaselineQuery, projectInventoryDepositBaselineRows,
+  projectAuthoritativeDepositPoolBasisRows,
 } = require('./inventory-deposit-baseline');
 const { publishInventoryBasisSnapshots } = require('./inventory-basis-publication');
 const { createInventoryBasisSnapshot } = require('./inventory-basis-snapshot');
@@ -8257,6 +8258,10 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       inventoryDepositBaselineError = String(error?.message || error || 'inventory_deposit_baseline_unavailable');
     }
   }
+  const inventoryDepositPoolBasisRows = projectAuthoritativeDepositPoolBasisRows({
+    depositEvents: inventoryMarketplaceDepositEvents,
+    baselineRows: inventoryDepositBaselineRows,
+  });
   const inventoryLedgerMarketTrades = localMarketResult.trades.filter((trade) =>
     String(trade?.marketplace || trade?.market || '').toUpperCase() !== 'GM'
       || Date.parse(trade?.timestamp) < Date.parse(MARKETPLACE_RAWDATA_CUTOVER_ISO));
@@ -8778,12 +8783,17 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     inventoryCostLedgerEvents,
     inventoryCostLedgerAppliedEventResults,
     inventoryReconciliationEvents,
-    inventoryCostLedgerRows: projectInventoryCostLedgerRows({ ledgerRows: inventoryCostLedgerRows, valuationRows: breakevenRows }),
+    inventoryCostLedgerRows: projectInventoryCostLedgerRows({
+      ledgerRows: inventoryCostLedgerRows,
+      valuationRows: breakevenRows,
+      poolBasisRows: inventoryDepositPoolBasisRows,
+    }),
     inventoryCostLedgerRejectedEvents,
     openingInventoryCount: openingInventoryRows.length,
     openingInventoryError,
     inventoryDepositBaselineCount: inventoryDepositBaselineRows.length,
     inventoryDepositBaselineError,
+    authoritativePoolBasisCount: inventoryDepositPoolBasisRows.length,
     ledgerCheckpointStatus,
     ledgerCheckpointError,
     ledgerCheckpointSavedAt,

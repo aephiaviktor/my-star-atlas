@@ -180,14 +180,12 @@ const earningsUpgradingDateFilter = document.querySelector('#earnings-upgrading-
 const earningsUpgradingStarbaseFilter = document.querySelector('#earnings-upgrading-starbase-filter');
 const earningsUpgradingAssetFilter = document.querySelector('#earnings-upgrading-asset-filter');
 const earningsUpgradingPerUnitButton = document.querySelector('[data-earnings-per-unit="upgrading"]');
-const earningsBreakevenTableHead = document.querySelector('#earnings-breakeven-table-head');
-const earningsBreakevenTableBody = document.querySelector('#earnings-breakeven-table-body');
 const earningsBreakevenSyncStatus = document.querySelector('#earnings-breakeven-sync-status');
 const earningsBreakevenStarbaseFilter = document.querySelector('#earnings-breakeven-starbase-filter');
 const earningsBreakevenAssetFilter = document.querySelector('#earnings-breakeven-asset-filter');
 const earningsBreakevenHideLowInventory = document.querySelector('#earnings-breakeven-hide-low-inventory');
-const inventoryLedgerViewButtons = [...document.querySelectorAll('[data-inventory-ledger-view]')];
-const inventoryLedgerViewPanels = [...document.querySelectorAll('[data-inventory-ledger-view-panel]')];
+const earningsInventoryLedgerPerUnitButton = document.querySelector('[data-earnings-per-unit="inventoryLedger"]');
+const earningsCostLedgerTableHead = document.querySelector('#earnings-cost-ledger-table-head');
 const earningsCostLedgerTableBody = document.querySelector('#earnings-cost-ledger-table-body');
 const earningsMarketplaceSyncStatus = document.querySelector('#earnings-marketplace-sync-status');
 const earningsMarketplaceTableBody = document.querySelector('#earnings-marketplace-table-body');
@@ -405,7 +403,6 @@ let latestMarketplaceResult = null;
 let latestCargoAllocationResult = null;
 let cargoAllocationRequestSequence = 0;
 let latestBreakevenResult = null;
-let currentInventoryLedgerView = 'cost-ledger';
 let latestUpgradingResult = null;
 let latestOptimizationResult = null;
 let optimizationRows = [];
@@ -428,7 +425,7 @@ const upgradingBreakevenColumns = Object.freeze([
   { key: 'factionLp', label: 'Faction LP redemption', selected: false },
   { key: 'breakevenLp', label: 'Breakeven LP', selected: true },
   { key: 'externalPrice', label: 'External', selected: true, title: 'Galactic Marketplace (GM) price' },
-  { key: 'internalCost', label: 'Internal', selected: true, title: 'Production cost from Earnings → Inventory Ledger → Inventory Valuation, including applicable Scanning C/U, Mining C/U, and every Crafting C/U in the full production chain' },
+  { key: 'internalCost', label: 'Internal', selected: true, title: 'Production cost from Earnings → Inventory Ledger, including applicable Scanning C/U, Mining C/U, and every Crafting C/U in the full production chain' },
   { key: 'equalNetPrice', label: 'Equal-Net Price', selected: true },
   { key: 'customPrice', label: 'Custom Price', selected: true },
   { key: 'grossAtlasPerSecond', label: 'Gross ATLAS/s', selected: false },
@@ -1092,7 +1089,7 @@ const earningsPerUnitModeByFaction = new Map();
 
 function getEarningsPerUnitState(faction = normalizeFaction(latestSettings?.faction)) {
   if (!earningsPerUnitModeByFaction.has(faction)) {
-    earningsPerUnitModeByFaction.set(faction, { crafting: false, upgrading: false });
+    earningsPerUnitModeByFaction.set(faction, { crafting: false, upgrading: false, inventoryLedger: false });
   }
   return earningsPerUnitModeByFaction.get(faction);
 }
@@ -1130,7 +1127,9 @@ function isEarningsPerUnitEnabled(subtab) {
 }
 
 function applyEarningsPerUnitButtonState(subtab) {
-  const button = subtab === 'crafting' ? earningsCraftingPerUnitButton : earningsUpgradingPerUnitButton;
+  const button = subtab === 'crafting' ? earningsCraftingPerUnitButton
+    : subtab === 'upgrading' ? earningsUpgradingPerUnitButton
+      : subtab === 'inventoryLedger' ? earningsInventoryLedgerPerUnitButton : null;
   if (!button) return;
   const active = isEarningsPerUnitEnabled(subtab);
   button.classList.toggle('active', active);
@@ -1235,7 +1234,6 @@ const earningsTableHeadBySubtab = Object.freeze({
   cargo: () => earningsCargoTableHead,
   crafting: () => earningsCraftingTableHead,
   upgrading: () => earningsUpgradingTableHead,
-  breakeven: () => earningsBreakevenTableHead,
 });
 
 const earningsRowsKeyBySubtab = Object.freeze({
@@ -6415,7 +6413,6 @@ function setupEarningsHeaderSortHandlers() {
   handle(earningsCargoTableHead, 'cargo');
   handle(earningsCraftingTableHead, 'crafting');
   handle(earningsUpgradingTableHead, 'upgrading');
-  handle(earningsBreakevenTableHead, 'breakeven');
 }
 
 function appendEarningsHeaderCell(row, columnId, label, sortState, highlighted = false) {
@@ -7554,16 +7551,6 @@ function renderEarningsMarketplaceLoading(message = 'Loading Marketplace data...
   earningsMarketplaceTableBody.appendChild(tr);
 }
 
-function setInventoryLedgerView(view) {
-  currentInventoryLedgerView = view === 'valuation' ? 'valuation' : 'cost-ledger';
-  for (const button of inventoryLedgerViewButtons) {
-    const active = button.dataset.inventoryLedgerView === currentInventoryLedgerView;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-selected', String(active));
-  }
-  for (const panel of inventoryLedgerViewPanels) panel.hidden = panel.dataset.inventoryLedgerViewPanel !== currentInventoryLedgerView;
-}
-
 const costLedgerBasisFormatter = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const costLedgerUnitFormatter = new Intl.NumberFormat(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 6 });
 
@@ -7573,6 +7560,20 @@ function isDisplayableInventoryLedgerRow(row) {
 
 function renderInventoryCostLedger(result) {
   if (!earningsCostLedgerTableBody) return;
+  const perUnit = isEarningsPerUnitEnabled('inventoryLedger');
+  applyEarningsPerUnitButtonState('inventoryLedger');
+  if (earningsCostLedgerTableHead) {
+    const suffix = perUnit ? ' / Unit' : '';
+    const labels = ['Starbase', 'Asset', 'Quantity', `Scanning${suffix}`, `Mining${suffix}`, `Crafting${suffix}`,
+      `LM${suffix}`, `GM${suffix}`, `Cargo${suffix}`, perUnit ? 'Total / Unit' : 'Total Basis', 'Status'];
+    const tr = document.createElement('tr');
+    for (const label of labels) {
+      const th = document.createElement('th');
+      th.textContent = label;
+      tr.appendChild(th);
+    }
+    earningsCostLedgerTableHead.replaceChildren(tr);
+  }
   earningsCostLedgerTableBody.replaceChildren();
   const filter = earningsFilters.breakeven;
   const rows = (Array.isArray(result?.inventoryCostLedgerRows) ? result.inventoryCostLedgerRows : [])
@@ -7585,25 +7586,27 @@ function renderInventoryCostLedger(result) {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     const td = document.createElement('td');
-    td.colSpan = 14;
-    td.textContent = 'No Cost Ledger rows match the current filters';
+    td.colSpan = 11;
+    td.textContent = 'No Inventory Ledger rows match the current filters';
     tr.appendChild(td);
     earningsCostLedgerTableBody.appendChild(tr);
     return;
   }
   for (const row of rows) {
     const quantity = Number(row.quantity || 0);
-    const uncosted = Number(row.uncostedQuantity || 0);
-    const costed = Number(row.knownCostQuantity ?? Math.max(0, quantity - uncosted));
     const costs = row.costs || {};
     const cargo = Number(row.cargoCost || 0);
     const totalBasis = Object.values(costs).reduce((sum, value) => sum + Number(value || 0), cargo);
+    const displayBasis = (value) => perUnit
+      ? costLedgerUnitFormatter.format(quantity > 0 ? Number(value || 0) / quantity : 0)
+      : costLedgerBasisFormatter.format(value || 0);
+    const status = quantity <= 0 ? 'Empty'
+      : row.basisStatus === 'priced' ? 'Priced'
+        : row.basisStatus === 'estimated' ? 'Estimated' : 'Unpriced';
     const values = [
-      row.location, row.asset, formatWholeNumber(quantity), formatWholeNumber(costed), formatWholeNumber(uncosted),
-      costLedgerBasisFormatter.format(costs.scanning || 0), costLedgerBasisFormatter.format(costs.mining || 0), costLedgerBasisFormatter.format(costs.crafting || 0),
-      costLedgerBasisFormatter.format(costs.lm || 0), costLedgerBasisFormatter.format(costs.gm || 0), costLedgerBasisFormatter.format(cargo),
-      costLedgerBasisFormatter.format(totalBasis), costed > 0 ? costLedgerUnitFormatter.format(totalBasis / costed) : '--',
-      quantity <= 0 ? 'Empty' : uncosted > 0 ? 'Partial' : 'Costed',
+      row.location, row.asset, formatWholeNumber(quantity),
+      displayBasis(costs.scanning), displayBasis(costs.mining), displayBasis(costs.crafting),
+      displayBasis(costs.lm), displayBasis(costs.gm), displayBasis(cargo), displayBasis(totalBasis), status,
     ];
     const tr = document.createElement('tr');
     for (const value of values) tr.appendChild(createTextCell(value));
@@ -7611,39 +7614,15 @@ function renderInventoryCostLedger(result) {
   }
 }
 
-for (const button of inventoryLedgerViewButtons) button.addEventListener('click', () => setInventoryLedgerView(button.dataset.inventoryLedgerView));
-setInventoryLedgerView(currentInventoryLedgerView);
-
 function renderEarningsBreakevenEmpty(message) {
   renderInventoryCostLedger(null);
-  renderEarningsBreakevenHeader();
   setText(earningsBreakevenSyncStatus, message);
-  if (!earningsBreakevenTableBody) return;
-  earningsBreakevenTableBody.textContent = '';
-  const row = document.createElement('tr');
-  row.className = 'empty-row';
-  const cell = document.createElement('td');
-  cell.colSpan = breakevenEarningsBaseColumns.length + getVisibleEarningsColumns('breakeven').length;
-  cell.textContent = message;
-  row.appendChild(cell);
-  earningsBreakevenTableBody.appendChild(row);
-}
-
-function renderEarningsBreakevenHeader() {
-  if (!earningsBreakevenTableHead) return;
-  earningsBreakevenTableHead.textContent = '';
-  const headRow = document.createElement('tr');
-  const sortState = earningsSort.breakeven;
-  for (const column of [...breakevenEarningsBaseColumns, ...getVisibleEarningsColumns('breakeven')]) {
-    appendEarningsHeaderCell(headRow, column.id, column.label, sortState);
-  }
-  earningsBreakevenTableHead.appendChild(headRow);
 }
 
 function getBreakevenSnapshotError(result) {
   if (!result || result.ok !== true) return String(result?.error || 'Inventory Ledger snapshot failed');
   const sources = [
-    ['breakevenError', 'Inventory valuation projection'],
+    ['breakevenError', 'Inventory basis projection'],
     ['openingInventoryError', 'Opening inventory baseline'],
     ['ledgerCheckpointError', 'Inventory ledger checkpoint'],
     ['cargoAllocationLedgerError', 'Cargo allocation ledger'],
@@ -7688,42 +7667,6 @@ function renderEarningsBreakeven(result) {
     .map((row) => ({ starbase: row.location, asset: row.asset }));
   populateEarningsFilterOptions('breakeven', [...rows, ...ledgerFilterRows]);
   if (earningsBreakevenHideLowInventory) earningsBreakevenHideLowInventory.checked = earningsFilters.breakeven.hideLowInventory;
-  renderEarningsBreakevenHeader();
-
-  if (!earningsBreakevenTableBody) return;
-  earningsBreakevenTableBody.textContent = '';
-  const filteredRows = getFilteredEarningsRows('breakeven', rows);
-  const sortedRows = sortEarningsRows('breakeven', filteredRows);
-  if (!sortedRows.length) {
-    return renderEarningsBreakevenEmpty(rows.length ? 'No inventory valuation rows match the current filters' : snapshotError || 'No inventory valuation data available — check production, cargo, marketplace, and inventory telemetry');
-  }
-  const optionalColumns = getVisibleEarningsColumns('breakeven');
-  for (const entry of sortedRows) {
-    const tr = document.createElement('tr');
-    tr.appendChild(createTextCell(entry.starbase || '--'));
-    tr.appendChild(createTextCell(entry.asset || '--'));
-    tr.appendChild(createTextCell(formatWholeNumber(entry.inventory || 0)));
-    tr.appendChild(createTextCell(entry.scanningCostPerUnit == null ? '--' : formatAtlasNumber(entry.scanningCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.miningCostPerUnit == null ? '--' : formatAtlasNumber(entry.miningCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.craftingCostPerUnit == null ? '--' : formatAtlasNumber(entry.craftingCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.lmCostPerUnit == null ? '--' : formatAtlasNumber(entry.lmCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.gmCostPerUnit == null ? '--' : formatAtlasNumber(entry.gmCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.baseCostPerUnit == null ? '--' : formatAtlasNumber(entry.baseCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.cargoCostPerUnit == null ? '--' : formatAtlasNumber(entry.cargoCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.landedCostPerUnit == null ? '--' : formatAtlasNumber(entry.landedCostPerUnit, 6)));
-    tr.appendChild(createTextCell(entry.inventoryValue == null ? '--' : formatAtlasWhole(entry.inventoryValue)));
-    tr.appendChild(createTextCell(entry.fullyTracked ? '100% tracked' : entry.estimatedPercent == null ? '--' : `${formatWholeNumber(entry.estimatedPercent)}% estimated`));
-    tr.appendChild(createTextCell(entry.gmPricePerUnit == null ? '--' : formatAtlasNumber(entry.gmPricePerUnit, 6)));
-    tr.appendChild(createTextCell(entry.inventoryExternalValue == null ? '--' : formatAtlasWhole(entry.inventoryExternalValue)));
-    const status = entry.reconciliationStatus === 'reconciled'
-      ? (Number(entry.uncostedQuantity || 0) > 1e-9 ? `Reconciled · ${formatWholeNumber(entry.uncostedQuantity)} uncosted` : 'Reconciled')
-      : entry.reconciliationStatus === 'surplus'
-        ? `Surplus +${formatWholeNumber(entry.quantityVariance)}`
-        : `Shortfall ${formatWholeNumber(Math.abs(Number(entry.quantityVariance || 0)))}`;
-    tr.appendChild(createTextCell(status));
-    for (const column of optionalColumns) tr.appendChild(createTextCell(entry[column.id] ?? '--'));
-    earningsBreakevenTableBody.appendChild(tr);
-  }
 }
 
 // Legacy wiring assertions retained as documentation only; the broad result is
@@ -10681,12 +10624,13 @@ for (const button of document.querySelectorAll('[data-earnings-cost-basis]')) {
 for (const button of document.querySelectorAll('[data-earnings-per-unit]')) {
   button.addEventListener('click', () => {
     const subtab = button.dataset.earningsPerUnit;
-    if (!['crafting', 'upgrading'].includes(subtab)) return;
+    if (!['crafting', 'upgrading', 'inventoryLedger'].includes(subtab)) return;
     const state = getEarningsPerUnitState();
     state[subtab] = !state[subtab];
     applyEarningsPerUnitButtonState(subtab);
     if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
-    else renderEarningsUpgrading(latestUpgradingResult);
+    else if (subtab === 'upgrading') renderEarningsUpgrading(latestUpgradingResult);
+    else renderInventoryCostLedger(latestBreakevenResult);
   });
 }
 

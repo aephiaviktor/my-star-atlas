@@ -33,8 +33,8 @@ test('External basis values consumed crafting ingredients and upgrading componen
   assert.match(renderer, /externalTotalCostsAtlas/);
 });
 
-test('Breakeven includes inventory external value after GM Price per Unit', () => {
-  assert.match(renderer, /id: 'gmPrice'[\s\S]*id: 'inventoryExternalValue'/);
-  assert.match(renderer, /entry\.inventoryExternalValue/);
+test('Inventory Ledger presents internal pool basis without a redundant external valuation table', () => {
+  assert.doesNotMatch(html, /Inventory Valuation/);
+  assert.doesNotMatch(renderer, /entry\.inventoryExternalValue/);
   assert.match(breakeven, /inventoryExternalValue/);
 });

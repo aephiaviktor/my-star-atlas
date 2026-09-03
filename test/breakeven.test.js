@@ -249,45 +249,18 @@ test('buildBreakevenRows sorts output by starbase then asset for a stable table 
   assert.deepEqual(keys, ['MRZ-17/ARCO', 'MRZ-17/Iron', 'MRZ-21/ARCO']);
 });
 
-test('renderer wires the Breakeven Analysis subtab, panel, and filters', () => {
+test('renderer wires the Inventory Ledger pool-basis table and filters', () => {
   const html = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
   const js = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
   assert.match(html, /data-earnings-subtab="breakeven"/);
-  assert.match(html, /id="earnings-breakeven-table-head"/);
-  assert.match(html, /id="earnings-breakeven-table-body"/);
+  assert.match(html, /id="earnings-cost-ledger-table-head"/);
+  assert.match(html, /id="earnings-cost-ledger-table-body"/);
   assert.match(html, /id="earnings-breakeven-starbase-filter"/);
   assert.match(html, /id="earnings-breakeven-asset-filter"/);
-  assert.doesNotMatch(html, /id="earnings-breakeven-source-filter"/);
   assert.match(html, /id="earnings-breakeven-hide-low-inventory"[^>]*> Hide Inventory ≤ 2/);
-  assert.match(html, /class="breakeven-inventory-toggle"/);
-  assert.doesNotMatch(html, /activity-filter-note">Landed cost =/);
-  assert.match(html, /<th>Scanning C\/U<\/th>.*<th>Mining C\/U<\/th>.*<th>Crafting C\/U<\/th>.*<th>LM C\/U<\/th>.*<th>GM C\/U<\/th>/s);
-  assert.match(html, /<th>Inventory Cost Basis<\/th>/);
-  assert.match(html, /<th>Cost Coverage<\/th>/);
-  assert.match(html, /<th>Ledger Status<\/th>/);
-  assert.doesNotMatch(html, /<th>Source<\/th>/);
-  assert.match(html, /<th>GM Price \/ Unit<\/th>/);
-  assert.match(js, /function renderEarningsBreakeven\(/);
-  for (const name of [
-    'earningsBreakevenTableHead',
-    'earningsBreakevenTableBody',
-    'earningsBreakevenSyncStatus',
-    'earningsBreakevenStarbaseFilter',
-    'earningsBreakevenAssetFilter',
-  ]) {
-    assert.match(js, new RegExp(`const ${name} = document\\.querySelector`), `${name} must be declared before use`);
-  }
-  assert.match(js, /breakeven: 'breakevenRows'/);
-  assert.match(js, /breakeven: \(\) => earningsBreakevenTableHead/);
-  assert.match(js, /const breakevenEarningsOptionalColumns/);
-  assert.match(js, /breakeven: breakevenEarningsOptionalColumns/);
-  assert.match(js, /breakeven: new Set\(\)/);
-  assert.match(js, /breakeven: \{ starbase: '', asset: '', hideLowInventory: false \}/);
-  const css = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.css'), 'utf8');
-  assert.match(css, /\.breakeven-inventory-toggle\s*\{[^}]*font-size:\s*0\.72rem/s);
-  assert.match(js, /handle\(earningsBreakevenTableHead, 'breakeven'\)/);
-  assert.match(js, /else if \(subtab === 'breakeven'\) renderEarningsBreakeven\(latestEarningsResult\);/);
-  assert.match(js, /renderEarningsUpgrading\(result\);\s+renderEarningsMarketplace\(result\);\s+renderEarningsBreakeven\(result\);/);
+  assert.match(html, /data-earnings-per-unit="inventoryLedger"/);
+  assert.match(js, /function renderInventoryCostLedger\(/);
+  assert.match(js, /earningsCostLedgerTableHead\.replaceChildren\(tr\)/);
   assert.match(js, /result\?\.openingInventoryError/);
   assert.match(js, /result\?\.ledgerCheckpointStatus/);
 });
@@ -378,31 +351,27 @@ test('earnings column selections persist per subtab in local storage', () => {
   assert.match(renderer, /persistEarningsColumnState\(\);/);
 });
 
-test('Cost Coverage distinguishes fully tracked, estimated, and unavailable pools', () => {
+test('Inventory Ledger distinguishes priced, estimated, and unpriced pool bases', () => {
   const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
-  assert.match(renderer, /entry\.fullyTracked \? '100% tracked' : entry\.estimatedPercent == null \? '--' : `\$\{formatWholeNumber\(entry\.estimatedPercent\)\}% estimated`/);
-  assert.doesNotMatch(renderer, /`0% estimated`/);
+  assert.match(renderer, /row\.basisStatus === 'priced' \? 'Priced'/);
+  assert.match(renderer, /row\.basisStatus === 'estimated' \? 'Estimated' : 'Unpriced'/);
+  assert.doesNotMatch(renderer, /Costed Qty|Uncosted Qty/);
 });
 
-test('Inventory Ledger exposes Cost Ledger and Inventory Valuation views', () => {
+test('Inventory Ledger exposes one pool-basis table with a per-unit toggle', () => {
   const htmlSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
   const rendererSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
   const mainSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   assert.match(htmlSource, /data-earnings-subtab="breakeven"[^>]*>Inventory Ledger<\/button>/);
-  assert.match(htmlSource, /data-inventory-ledger-view="cost-ledger"[^>]*>Cost Ledger<\/button>/);
-  assert.match(htmlSource, /data-inventory-ledger-view="valuation"[^>]*>Inventory Valuation<\/button>/);
+  assert.match(htmlSource, /data-earnings-per-unit="inventoryLedger"[^>]*>Per Unit<\/button>/);
+  assert.doesNotMatch(htmlSource, /Inventory Valuation/);
+  assert.doesNotMatch(htmlSource, /Costed Qty|Uncosted Qty/);
+  assert.match(htmlSource, /id="earnings-cost-ledger-table-head"/);
   assert.match(htmlSource, /id="earnings-cost-ledger-table-body"/);
   assert.match(rendererSource, /function renderInventoryCostLedger\(result\)/);
   assert.match(rendererSource, /result\?\.inventoryCostLedgerRows/);
-  assert.match(rendererSource, /function isDisplayableInventoryLedgerRow\(row\)[\s\S]*startsWith\('wallet:'\)/);
-  const costLedgerStart = rendererSource.indexOf('function renderInventoryCostLedger');
-  const costLedgerRenderer = rendererSource.slice(costLedgerStart, rendererSource.indexOf('for (const button of inventoryLedgerViewButtons)', costLedgerStart));
-  assert.match(costLedgerRenderer, /filter\(isDisplayableInventoryLedgerRow\)/);
-  assert.match(rendererSource, /costLedgerBasisFormatter = new Intl\.NumberFormat\(undefined, \{ minimumFractionDigits: 2, maximumFractionDigits: 2 \}\)/);
-  assert.match(costLedgerRenderer, /costLedgerBasisFormatter\.format\(costs\.scanning/);
-  assert.match(costLedgerRenderer, /costLedgerBasisFormatter\.format\(totalBasis\)/);
-  assert.match(rendererSource, /costLedgerUnitFormatter = new Intl\.NumberFormat\(undefined, \{ minimumFractionDigits: 6, maximumFractionDigits: 6 \}\)/);
-  assert.match(costLedgerRenderer, /costLedgerUnitFormatter\.format\(totalBasis \/ costed\)/);
-  assert.match(mainSource, /inventoryCostLedgerRows: projectInventoryCostLedgerRows\(\{ ledgerRows: inventoryCostLedgerRows, valuationRows: breakevenRows \}\)/);
-  assert.doesNotMatch(costLedgerRenderer, /formatAtlas\(/);
+  assert.match(rendererSource, /isEarningsPerUnitEnabled\('inventoryLedger'\)/);
+  assert.match(rendererSource, /row\.basisStatus === 'priced' \? 'Priced'/);
+  assert.doesNotMatch(rendererSource, /currentInventoryLedgerView|inventoryLedgerViewButtons/);
+  assert.match(mainSource, /poolBasisRows: inventoryDepositPoolBasisRows/);
 });
