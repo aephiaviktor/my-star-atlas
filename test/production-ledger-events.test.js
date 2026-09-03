@@ -250,6 +250,26 @@ test('crafting events carry ingredient basis and add only direct conversion cost
   assert.equal(output.costs.crafting, 3);
 });
 
+test('same-day replay retries crafting after ingredient delivery and then resolves out-of-order output hops', () => {
+  const result = buildCostLedgerResult({
+    miningRows: [{ isoDate: '2026-09-03', starbase: 'UST-MINE', rawMaterial: 'Copper Ore', mined: 100, totalCostsAtlas: 20 }],
+    cargoRows: [
+      { timestamp: '2026-09-03T10:00:00Z', origin: 'UST-MINE', destination: 'MRZ-22', asset: 'Copper Ore', amount: 100, totalCostsAtlas: 2 },
+      { timestamp: '2026-09-03T11:00:00Z', origin: 'UST-HUB', destination: 'UST-1', asset: 'Electronics', amount: 10, totalCostsAtlas: 1 },
+      { timestamp: '2026-09-03T12:00:00Z', origin: 'MRZ-22', destination: 'UST-HUB', asset: 'Electronics', amount: 10, totalCostsAtlas: 1 },
+    ],
+    craftingRows: [{ isoDate: '2026-09-03', starbase: 'MRZ-22', output: 'Electronics', crafted: 10,
+      ingredients: [{ input: 'Copper Ore', amount: 100 }], feeCostsAtlas: 3, txsCostsAtlas: 1 }],
+  });
+  assert.equal(result.rejectedEvents.length, 0);
+  const destination = result.ledger.get('UST-1', 'Electronics');
+  assert.equal(destination.quantity, 10);
+  assert.equal(destination.uncostedQuantity, 0);
+  assert.equal(destination.knownCosts.mining, 20);
+  assert.equal(destination.knownCosts.crafting, 4);
+  assert.equal(destination.knownCargoCost, 4);
+});
+
 test('crafting adapter rejects incomplete telemetry rather than inventing ingredients or cost', () => {
   assert.deepEqual(buildCraftingEvents([
     { isoDate: '2026-07-25', starbase: 'UST-1', output: 'Framework', crafted: 2, ingredients: [], feeCostsAtlas: 1, txsCostsAtlas: 2 },

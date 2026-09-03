@@ -221,7 +221,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
   const inventoryBasisSnapshots = [];
   const currentCounts = {};
   const currentResults = {};
-  for (const event of events) {
+  const attemptEvent = (event) => {
     const fingerprint = eventFingerprint(event);
     const occurrence = (currentCounts[fingerprint] || 0) + 1;
     currentCounts[fingerprint] = occurrence;
@@ -233,7 +233,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
         currentResults[fingerprint][occurrence - 1] = storedResult;
         appliedEventResults.push({ event, result: storedResult, fromCheckpoint: true });
       }
-      continue;
+      return { status: 'resolved' };
     }
     try {
       const result = ledger.applyEvent(event);
@@ -267,10 +267,37 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
           if (snapshot) inventoryBasisSnapshots.push(snapshot);
         }
       }
+      return { status: 'applied' };
     } catch (error) {
       currentCounts[fingerprint] -= 1;
       if (currentCounts[fingerprint] === 0) delete currentCounts[fingerprint];
-      rejectedEvents.push({ event, error: String(error?.message || error) });
+      const message = String(error?.message || error);
+      return { status: message.startsWith('insufficient inventory for ') ? 'deferred' : 'rejected', error: message };
+    }
+  };
+  const eventsByDay = new Map();
+  for (const event of events) {
+    const day = String(event.timestamp || '').slice(0, 10);
+    if (!eventsByDay.has(day)) eventsByDay.set(day, []);
+    eventsByDay.get(day).push(event);
+  }
+  for (const dayEvents of eventsByDay.values()) {
+    let pending = dayEvents.map((event) => ({ event, error: '' }));
+    while (pending.length) {
+      const deferred = [];
+      let appliedInPass = false;
+      for (const item of pending) {
+        const outcome = attemptEvent(item.event);
+        if (outcome.status === 'applied') appliedInPass = true;
+        else if (outcome.status === 'deferred') deferred.push({ event: item.event, error: outcome.error });
+        else if (outcome.status === 'rejected') rejectedEvents.push({ event: item.event, error: outcome.error });
+      }
+      if (!deferred.length) break;
+      if (!appliedInPass) {
+        rejectedEvents.push(...deferred);
+        break;
+      }
+      pending = deferred;
     }
   }
   return {
