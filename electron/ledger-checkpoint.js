@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 8 rebuilds opening inventory with canonical Ammunition pool identity.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 8;
+// Version 9 reconstructs missing opening pools before chronological depletion.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 9;
 
 function emptyResult(status, error = '') {
   return {

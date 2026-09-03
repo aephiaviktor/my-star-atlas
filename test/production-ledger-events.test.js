@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildOpeningInventoryEvents,
+  completeOpeningInventoryRows,
   buildScanningAcquisitionEvents,
   buildMiningAcquisitionEvents,
   buildProductionLedger,
@@ -11,6 +12,7 @@ const {
   buildCostLedgerResult,
   eventFingerprint,
 } = require('../electron/production-ledger-events');
+const { reconcileInventoryLedger } = require('../electron/inventory-ledger-reconciliation');
 
 test('event fingerprints are deterministic across object key order', () => {
   const left = { type: 'acquire', timestamp: '2026-07-01T00:00:00.000Z', location: 'MUD-1', asset: 'Carbon', quantity: 2, source: 'mining', totalCost: 1 };
@@ -50,6 +52,19 @@ test('checkpointed consumption results remain available to historical earnings r
   assert.equal(second.appliedEventResults.length, 1);
   assert.equal(second.appliedEventResults[0].fromCheckpoint, true);
   assert.equal(second.appliedEventResults[0].result.uncostedQuantity, 2);
+});
+
+test('current inventory fills only missing canonical opening pools', () => {
+  assert.deepEqual(completeOpeningInventoryRows(
+    [{ timestamp: '2026-08-01T00:00:00Z', starbase: 'MUD-1', asset: 'Ammo', quantity: 3 }],
+    [
+      { starbase: 'MUD-1', asset: 'Ammunition', quantity: 5 },
+      { starbase: 'MUD-1', asset: 'Fuel', quantity: 2 },
+    ],
+  ), [
+    { timestamp: '2026-08-01T00:00:00Z', starbase: 'MUD-1', asset: 'Ammunition', quantity: 3 },
+    { timestamp: '1970-01-01T00:00:00.000Z', starbase: 'MUD-1', asset: 'Fuel', quantity: 2 },
+  ]);
 });
 
 test('opening inventory becomes chronological explicitly uncosted acquisition events', () => {
@@ -102,6 +117,24 @@ test('legacy Ammo opening inventory protects later Ammunition basis by consuming
   assert.equal(ammunition.quantity - ammunition.uncostedQuantity, 4236296);
   assert.ok(Math.abs(ammunition.costs.gm / ammunition.quantity - 0.00100229) < 1e-12);
   assert.equal(result.ledger.get('MUD-1', 'Ammo').quantity, 0);
+});
+
+test('missing opening snapshot seeds current inventory before replay so unexplained stock protects known basis', () => {
+  const currentInventoryRows = [{ starbase: 'MUD-1', asset: 'Ammunition', quantity: 3930814 }];
+  const result = buildCostLedgerResult({
+    currentInventoryRows,
+    assetFlowEvents: [
+      { type: 'acquire-lot', timestamp: '2026-09-01T18:35:43Z', location: 'MUD-1', asset: 'Ammunition',
+        quantity: 5000000, uncostedQuantity: 0, costs: { gm: 5011.45 }, cargoCost: 0 },
+      { type: 'consume', timestamp: '2026-09-03T08:57:00Z', location: 'MUD-1', asset: 'Ammunition', quantity: 4471779 },
+    ],
+  });
+  reconcileInventoryLedger({ ledger: result.ledger, inventoryRows: currentInventoryRows });
+  const ammunition = result.ledger.get('MUD-1', 'Ammunition');
+  assert.equal(ammunition.quantity, 3930814);
+  assert.equal(ammunition.uncostedQuantity, 0);
+  assert.equal(ammunition.quantity - ammunition.uncostedQuantity, 3930814);
+  assert.ok(Math.abs(ammunition.costs.gm / ammunition.quantity - 0.00100229) < 1e-12);
 });
 
 test('scanning acquisitions are split across deposit starbases without duplicating daily costs', () => {

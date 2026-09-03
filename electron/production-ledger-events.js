@@ -52,6 +52,26 @@ function buildOpeningInventoryEvents(rows) {
   return events;
 }
 
+function completeOpeningInventoryRows(openingInventoryRows = [], currentInventoryRows = []) {
+  const completed = (openingInventoryRows || []).map((row) => ({
+    ...row,
+    asset: canonicalAssetName(row?.asset),
+  }));
+  const existingPools = new Set(completed.map((row) => (
+    `${String(row?.starbase || '').trim()}\n${canonicalAssetName(row?.asset)}`
+  )));
+  for (const row of currentInventoryRows || []) {
+    const starbase = String(row?.starbase || '').trim();
+    const asset = canonicalAssetName(row?.asset);
+    const quantity = Number(row?.quantity);
+    const poolKey = `${starbase}\n${asset}`;
+    if (!starbase || !asset || !(quantity > 0) || existingPools.has(poolKey)) continue;
+    completed.push({ starbase, asset, quantity, timestamp: '1970-01-01T00:00:00.000Z' });
+    existingPools.add(poolKey);
+  }
+  return completed;
+}
+
 function buildScanningAcquisitionEvents(rows) {
   const events = [];
   for (const row of rows || []) {
@@ -153,7 +173,7 @@ function buildUpgradingConsumptionEvents(rows) {
   return events;
 }
 
-function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [], inventoryBasisFaction = '' } = {}) {
+function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], currentInventoryRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [], inventoryBasisFaction = '' } = {}) {
   const ledger = initialLedger || new InventoryCostLedger();
   const previousCounts = { ...(eventFingerprintCounts || {}) };
   for (const fingerprint of seenEventFingerprints || []) previousCounts[fingerprint] = Math.max(1, Number(previousCounts[fingerprint] || 0));
@@ -161,8 +181,11 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
   for (const [fingerprint, result] of Object.entries(eventResultByFingerprint || {})) {
     if (!previousResults[fingerprint]) previousResults[fingerprint] = [result];
   }
+  const completedOpeningInventoryRows = initialLedger
+    ? openingInventoryRows
+    : completeOpeningInventoryRows(openingInventoryRows, currentInventoryRows);
   const events = [
-    ...buildOpeningInventoryEvents(openingInventoryRows),
+    ...buildOpeningInventoryEvents(completedOpeningInventoryRows),
     ...buildScanningAcquisitionEvents(scanningRows),
     ...buildMiningAcquisitionEvents(miningRows),
     ...buildCargoTransferEvents(cargoRows),
@@ -254,6 +277,7 @@ function buildProductionLedger(options = {}) {
 module.exports = {
   eventFingerprint,
   buildOpeningInventoryEvents,
+  completeOpeningInventoryRows,
   buildScanningAcquisitionEvents,
   buildMiningAcquisitionEvents,
   buildCargoTransferEvents,

@@ -8258,6 +8258,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     eventFingerprintCounts: checkpoint.eventFingerprintCounts,
     eventResultsByFingerprint: checkpoint.eventResultsByFingerprint,
     openingInventoryRows,
+    currentInventoryRows,
     scanningRows: rows,
     miningRows: mining,
     cargoRows: cargoAllocationLedgerRows,
@@ -8301,7 +8302,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   let inventoryBasisPublicationError = '';
   if (!needsInventoryLedger) {
     ledgerCheckpointStatus = 'skipped';
-  } else if (checkpoint.status !== 'loaded' && openingInventoryError) {
+  } else if (checkpoint.status !== 'loaded' && openingInventoryError && !currentInventoryRows.length) {
     ledgerCheckpointStatus = 'baseline-unavailable';
   } else {
     try {
