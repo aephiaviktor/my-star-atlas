@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 7 replays Marketplace custody with canonical Ammunition pool identity.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 7;
+// Version 8 rebuilds opening inventory with canonical Ammunition pool identity.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 8;
 
 function emptyResult(status, error = '') {
   return {

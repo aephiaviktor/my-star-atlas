@@ -87,6 +87,23 @@ test('opening inventory is applied before later events even when supplied after 
   assert.equal(row.costs.mining, 2);
 });
 
+test('legacy Ammo opening inventory protects later Ammunition basis by consuming uncosted quantity first', () => {
+  const result = buildCostLedgerResult({
+    openingInventoryRows: [{ timestamp: '2026-08-01T00:00:00Z', starbase: 'MUD-1', asset: 'Ammo', quantity: 3249852 }],
+    assetFlowEvents: [
+      { type: 'acquire-lot', timestamp: '2026-09-01T18:35:43Z', location: 'MUD-1', asset: 'Ammunition',
+        quantity: 5000000, uncostedQuantity: 0, costs: { gm: 5011.45 }, cargoCost: 0 },
+      { type: 'consume', timestamp: '2026-09-02T00:00:00Z', location: 'MUD-1', asset: 'Ammunition', quantity: 4013556 },
+    ],
+  });
+  const ammunition = result.ledger.get('MUD-1', 'Ammunition');
+  assert.equal(ammunition.quantity, 4236296);
+  assert.equal(ammunition.uncostedQuantity, 0);
+  assert.equal(ammunition.quantity - ammunition.uncostedQuantity, 4236296);
+  assert.ok(Math.abs(ammunition.costs.gm / ammunition.quantity - 0.00100229) < 1e-12);
+  assert.equal(result.ledger.get('MUD-1', 'Ammo').quantity, 0);
+});
+
 test('scanning acquisitions are split across deposit starbases without duplicating daily costs', () => {
   const events = buildScanningAcquisitionEvents([{
     isoDate: '2026-07-25',

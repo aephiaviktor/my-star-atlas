@@ -6191,7 +6191,7 @@ async function fetchOpeningPerStarbaseInventory(settings) {
   const result = [];
   for (const row of rows) {
     const starbase = String(row.starbase || '').trim();
-    const asset = String(row.rss || '').trim();
+    const asset = canonicalAssetName(row.rss);
     const quantity = Number(row._value);
     const timestamp = row._time ? new Date(row._time) : null;
     if (!starbase || !asset || !Number.isFinite(quantity) || quantity <= 0

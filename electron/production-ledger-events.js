@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { canonicalAssetName } = require('./asset-name');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { buildLocalMarketLedgerEvents } = require('./local-market-trades');
 const { createInventoryBasisSnapshot } = require('./inventory-basis-snapshot');
@@ -41,7 +42,7 @@ function buildOpeningInventoryEvents(rows) {
     const event = acquisition({
       timestamp: normalizeTimestamp(row.timestamp),
       location: row.starbase,
-      asset: row.asset,
+      asset: canonicalAssetName(row.asset),
       quantity: row.quantity,
       source: null,
       totalCost: null,
