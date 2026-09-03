@@ -21,8 +21,8 @@ test('known pool unit basis prices the complete authoritative inventory quantity
     }],
   });
   assert.equal(row.quantity, 16_509_526);
-  assert.equal(row.knownCostQuantity, 16_509_526);
-  assert.equal(row.uncostedQuantity, 0);
+  assert.equal(row.knownCostQuantity, 105);
+  assert.equal(row.uncostedQuantity, 16_509_421);
   assert.ok(Math.abs(row.costs.mining - 16_509_526 * 0.04 / 105) < 1e-9);
   assert.ok(Math.abs(row.costs.crafting - 16_509_526 * 0.03 / 105) < 1e-9);
   assert.ok(Math.abs(row.cargoCost - 16_509_526 * 0.09 / 105) < 1e-9);
@@ -60,11 +60,11 @@ test('authoritative deposit basis prices every current unit independently of sta
     poolBasisRows: [{ location: 'MUD-1', asset: 'Ammunition', timestamp: '2026-09-03T07:00:00Z',
       unitCosts: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: 0.00100229 }, cargoCostPerUnit: 0 }],
   });
-  assert.equal(row.knownCostQuantity, 3_167_109);
-  assert.equal(row.uncostedQuantity, 0);
+  assert.equal(row.knownCostQuantity, 1_608_337);
+  assert.equal(row.uncostedQuantity, 1_558_772);
   assert.equal(row.costs.gm, 3_167_109 * 0.00100229);
   assert.equal(row.totalCostPerUnit, 0.00100229);
-  assert.equal(row.basisStatus, 'priced');
+  assert.equal(row.basisStatus, 'estimated');
 });
 
 test('multiple priced deposits average only their costed evidence then price the complete inventory', () => {
@@ -75,8 +75,8 @@ test('multiple priced deposits average only their costed evidence then price the
     })],
     valuationRows: [{ starbase: 'MUD-1', asset: 'Electronics', inventory: 12_000_000, reconciliationStatus: 'reconciled' }],
   });
-  assert.equal(row.knownCostQuantity, 12_000_000);
-  assert.equal(row.uncostedQuantity, 0);
+  assert.equal(row.knownCostQuantity, 2_000_000);
+  assert.equal(row.uncostedQuantity, 10_000_000);
   assert.ok(Math.abs(row.totalCostPerUnit - 0.0045) < 1e-12);
   assert.ok(Math.abs(row.costs.gm - 54_000) < 1e-9);
   assert.equal(row.basisStatus, 'estimated');

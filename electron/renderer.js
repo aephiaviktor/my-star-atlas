@@ -796,6 +796,8 @@ const breakevenEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
   Object.freeze({ id: 'quantity', label: 'Quantity' }),
+  Object.freeze({ id: 'costedQuantity', label: 'Costed Qty' }),
+  Object.freeze({ id: 'uncostedQuantity', label: 'Uncosted Qty' }),
   Object.freeze({ id: 'scanning', label: 'Scanning' }),
   Object.freeze({ id: 'mining', label: 'Mining' }),
   Object.freeze({ id: 'crafting', label: 'Crafting' }),
@@ -906,7 +908,9 @@ const earningsColumnState = {
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
-  breakeven: new Set(breakevenEarningsOptionalColumns.map((column) => column.id)),
+  breakeven: new Set(breakevenEarningsOptionalColumns
+    .filter((column) => !['costedQuantity', 'uncostedQuantity'].includes(column.id))
+    .map((column) => column.id)),
   marketplace: new Set(marketplaceEarningsOptionalColumns.map((column) => column.id).filter((id) => id !== 'starbase')),
   marketplaceGlobal: new Set(marketplaceGlobalColumns.map((column) => column.id)),
   marketplaceGame: new Set(marketplaceGameColumns.map((column) => column.id)),
@@ -929,7 +933,9 @@ function restoreEarningsColumnState() {
         restoredIds.push('gameReceivedUnit', 'gameNetProfitUnit');
       }
       if (subtab === 'breakeven' && Number(saved.schemaVersion || 1) < 4) {
-        restoredIds = getEarningsColumns(subtab).map((column) => column.id);
+        restoredIds = getEarningsColumns(subtab)
+          .filter((column) => !['costedQuantity', 'uncostedQuantity'].includes(column.id))
+          .map((column) => column.id);
       }
       const validIds = new Set(getEarningsColumns(subtab).map((column) => column.id));
       earningsColumnState[subtab] = new Set(restoredIds.filter((id) => validIds.has(id)));
@@ -7564,6 +7570,8 @@ function inventoryLedgerValues(row, perUnit) {
       : row?.basisStatus === 'estimated' ? 'Estimated' : 'Unpriced';
   return {
     starbase: row?.location || '', asset: row?.asset || '', quantity,
+    costedQuantity: Number(row?.knownCostQuantity || 0),
+    uncostedQuantity: Number(row?.uncostedQuantity || 0),
     scanning: basisValue(costs.scanning), mining: basisValue(costs.mining), crafting: basisValue(costs.crafting),
     lm: basisValue(costs.lm), gm: basisValue(costs.gm), cargo: basisValue(cargo),
     totalBasis: basisValue(totalBasis), status,
@@ -7589,7 +7597,7 @@ function renderInventoryCostLedger(result) {
   if (earningsCostLedgerTableHead) {
     const tr = document.createElement('tr');
     for (const column of visibleColumns) {
-      const basisColumn = !['starbase', 'asset', 'quantity', 'status'].includes(column.id);
+      const basisColumn = !['starbase', 'asset', 'quantity', 'costedQuantity', 'uncostedQuantity', 'status'].includes(column.id);
       const label = basisColumn && perUnit
         ? (column.id === 'totalBasis' ? 'Total / Unit' : `${column.label} / Unit`)
         : column.label;
@@ -7624,7 +7632,7 @@ function renderInventoryCostLedger(result) {
     const tr = document.createElement('tr');
     for (const column of visibleColumns) {
       const value = values[column.id];
-      const formatted = column.id === 'quantity' ? formatWholeNumber(value)
+      const formatted = ['quantity', 'costedQuantity', 'uncostedQuantity'].includes(column.id) ? formatWholeNumber(value)
         : ['starbase', 'asset', 'status'].includes(column.id) ? value
           : formatInventoryLedgerBasisValue(value, perUnit);
       tr.appendChild(createTextCell(formatted));

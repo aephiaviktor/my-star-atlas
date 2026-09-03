@@ -355,7 +355,7 @@ test('Inventory Ledger distinguishes priced, estimated, and unpriced pool bases'
   const renderer = readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
   assert.match(renderer, /row\?\.basisStatus === 'priced' \? 'Priced'/);
   assert.match(renderer, /row\?\.basisStatus === 'estimated' \? 'Estimated' : 'Unpriced'/);
-  assert.doesNotMatch(renderer, /Costed Qty|Uncosted Qty/);
+  assert.match(renderer, /Costed Qty|Uncosted Qty/);
 });
 
 test('Inventory Ledger exposes one pool-basis table with a per-unit toggle', () => {
@@ -387,8 +387,17 @@ test('Inventory Ledger suppresses zeroes, sorts every column, and exposes every 
   for (const id of ['starbase', 'asset', 'quantity', 'scanning', 'mining', 'crafting', 'lm', 'gm', 'cargo', 'totalBasis', 'status']) {
     assert.match(rendererSource, new RegExp(`id: '${id}'`));
   }
-  assert.match(rendererSource, /breakeven: new Set\(breakevenEarningsOptionalColumns\.map\(\(column\) => column\.id\)\)/);
-  assert.match(rendererSource, /subtab === 'breakeven' && Number\(saved\.schemaVersion \|\| 1\) < 4[\s\S]*restoredIds = getEarningsColumns\(subtab\)\.map/);
+  assert.match(rendererSource, /breakeven: new Set\(breakevenEarningsOptionalColumns[\s\S]*\.map\(\(column\) => column\.id\)\)/);
+  assert.match(rendererSource, /subtab === 'breakeven' && Number\(saved\.schemaVersion \|\| 1\) < 4[\s\S]*restoredIds = getEarningsColumns\(subtab\)[\s\S]*\.map\(\(column\) => column\.id\)/);
   assert.match(rendererSource, /schemaVersion: 4/);
   assert.doesNotMatch(htmlSource, /0\.000000/);
+});
+
+test('Inventory Ledger offers costed and uncosted quantity columns deselected by default', () => {
+  const rendererSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+  const columns = rendererSource.slice(rendererSource.indexOf('const breakevenEarningsOptionalColumns'), rendererSource.indexOf('const marketplaceEarningsOptionalColumns'));
+  assert.match(columns, /id: 'quantity'[\s\S]*id: 'costedQuantity', label: 'Costed Qty'[\s\S]*id: 'uncostedQuantity', label: 'Uncosted Qty'[\s\S]*id: 'scanning'/);
+  assert.match(rendererSource, /breakeven: new Set\(breakevenEarningsOptionalColumns[\s\S]*!\['costedQuantity', 'uncostedQuantity'\]\.includes\(column\.id\)[\s\S]*\.map\(\(column\) => column\.id\)/);
+  assert.match(rendererSource, /costedQuantity: Number\(row\?\.knownCostQuantity \|\| 0\)/);
+  assert.match(rendererSource, /uncostedQuantity: Number\(row\?\.uncostedQuantity \|\| 0\)/);
 });

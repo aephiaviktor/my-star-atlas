@@ -32,9 +32,14 @@ function projectInventoryCostLedgerRows({ ledgerRows = [], valuationRows = [], p
     const ledgerUncosted = Math.min(ledgerQuantity, nonNegative(ledger.uncostedQuantity));
     const ledgerKnown = Math.max(0, ledgerQuantity - ledgerUncosted);
     const quantity = valuation ? nonNegative(valuation.inventory) : ledgerQuantity;
+    const removedQuantity = Math.max(0, ledgerQuantity - quantity);
+    const uncostedQuantity = quantity >= ledgerQuantity
+      ? Math.max(0, quantity - ledgerKnown)
+      : Math.max(0, ledgerUncosted - removedQuantity);
+    const knownCostQuantity = Math.max(0, quantity - uncostedQuantity);
     const hasBasis = Boolean(poolBasis) || ledgerKnown > 0;
-    const basisStatus = poolBasis || (ledgerKnown > 0 && ledgerKnown + 1e-9 >= quantity)
-      ? 'priced' : ledgerKnown > 0 ? 'estimated' : 'unpriced';
+    const basisStatus = !hasBasis ? 'unpriced'
+      : uncostedQuantity > 1e-9 ? 'estimated' : 'priced';
     const unitCosts = emptyCosts();
     for (const source of COST_SOURCES) {
       unitCosts[source] = poolBasis
@@ -53,8 +58,8 @@ function projectInventoryCostLedgerRows({ ledgerRows = [], valuationRows = [], p
       location,
       asset,
       quantity,
-      knownCostQuantity: hasBasis ? quantity : 0,
-      uncostedQuantity: hasBasis ? 0 : quantity,
+      knownCostQuantity,
+      uncostedQuantity,
       costs,
       cargoCost,
       totalCostPerUnit: hasBasis ? Object.values(unitCosts).reduce((sum, value) => sum + value, cargoCostPerUnit) : null,
