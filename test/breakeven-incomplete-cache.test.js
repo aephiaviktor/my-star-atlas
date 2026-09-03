@@ -7,6 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
+const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 
 function loadErrorPolicy() {
   const start = renderer.indexOf('function getBreakevenSnapshotError');
@@ -41,4 +42,15 @@ test('Inventory Ledger rendering preserves exact source diagnostics', () => {
   const render = renderer.slice(renderer.indexOf('function renderEarningsBreakeven(result)'), renderer.indexOf('// Legacy wiring assertions'));
   assert.match(render, /const snapshotError = getBreakevenSnapshotError\(result\)/);
   assert.match(render, /snapshotError \? ' · ' \+ snapshotError : ''/);
+});
+
+test('missing optional deposit baselines degrade to estimated evidence instead of blanking the ledger', () => {
+  const baselineFetch = main.slice(main.indexOf('async function fetchInventoryDepositBaselines'), main.indexOf('async function fetchShipStatsSot'));
+  assert.doesNotMatch(baselineFetch, /throw new Error\('inventory_deposit_baseline_missing'\)/);
+  assert.match(baselineFetch, /return rows/);
+});
+
+test('Inventory Ledger resets unavailable faction filters before rendering rows', () => {
+  const render = renderer.slice(renderer.indexOf('function renderEarningsBreakeven(result)'), renderer.indexOf('// Legacy wiring assertions'));
+  assert.ok(render.indexOf("populateEarningsFilterOptions('breakeven'") < render.indexOf('renderInventoryCostLedger(result)'));
 });

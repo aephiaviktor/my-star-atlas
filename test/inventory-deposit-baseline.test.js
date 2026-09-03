@@ -38,6 +38,17 @@ test('pre-deposit inventory rows become canonical reconciliation events before t
   }]);
 });
 
+test('missing pre-deposit observations leave unmatched deposits estimated without discarding available baselines', () => {
+  const scopes = [
+    { index: 0, timestamp: '2026-09-03T07:00:00.000Z', location: 'UST-1', asset: 'Fuel', flowId: 'observed' },
+    { index: 1, timestamp: '2026-09-03T08:00:00.000Z', location: 'UST-1', asset: 'Food', flowId: 'missing' },
+  ];
+  assert.deepEqual(projectInventoryDepositBaselineRows({
+    scopes,
+    rows: [{ baselineIndex: '0', _time: '2026-09-03T06:59:30.000Z', _value: '5', rss: 'Fuel', starbase: 'UST-1' }],
+  }).map((row) => row.depositFlowId), ['observed']);
+});
+
 test('deposit baseline query rejects an unbounded number of scopes', () => {
   const depositEvents = Array.from({ length: 129 }, (_, index) => ({
     type: 'acquire-lot', timestamp: `2026-09-03T${String(index % 24).padStart(2, '0')}:00:00.000Z`,

@@ -7677,7 +7677,6 @@ async function fetchCompleteBreakevenSnapshot(settings) {
 
 function renderEarningsBreakeven(result) {
   const rows = Array.isArray(result?.breakevenRows) ? result.breakevenRows : [];
-  renderInventoryCostLedger(result);
   const snapshotError = getBreakevenSnapshotError(result);
   const baselineStatus = result?.openingInventoryError
     ? ` · opening baseline unavailable: ${result.openingInventoryError}`
@@ -7693,6 +7692,7 @@ function renderEarningsBreakeven(result) {
     .filter(isDisplayableInventoryLedgerRow)
     .map((row) => ({ starbase: row.location, asset: row.asset }));
   populateEarningsFilterOptions('breakeven', [...rows, ...ledgerFilterRows]);
+  renderInventoryCostLedger(result);
   if (earningsBreakevenHideLowInventory) earningsBreakevenHideLowInventory.checked = earningsFilters.breakeven.hideLowInventory;
 }
 

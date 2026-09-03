@@ -6215,7 +6215,9 @@ async function fetchInventoryDepositBaselines(settings, depositEvents) {
     scopes: query.scopes,
     rows: parseInfluxCsv(await queryInfluxFlux(settings, query.flux)),
   });
-  if (rows.length !== query.scopes.length) throw new Error('inventory_deposit_baseline_missing');
+  if (rows.length !== query.scopes.length) {
+    console.warn(`[MyStarAtlas] ${query.scopes.length - rows.length} inventory deposit baseline(s) were not observed; retaining weighted ledger evidence`);
+  }
   return rows;
 }
 
