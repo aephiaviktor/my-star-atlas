@@ -190,6 +190,54 @@ function buildUpgradingConsumptionEvents(rows) {
   return events;
 }
 
+function poolKey(location, asset) {
+  return `${String(location || '').trim()}\n${canonicalAssetName(asset)}`;
+}
+
+function producedProductionPools(event) {
+  if (event?.type === 'craft') return [poolKey(event.location, event.outputAsset)];
+  if (event?.type === 'transfer' && event.carryPoolRate) return [poolKey(event.destination, event.asset)];
+  return [];
+}
+
+function consumedProductionPools(event) {
+  if (event?.type === 'craft') return (event.ingredients || []).map((ingredient) => poolKey(event.location, ingredient.asset));
+  if (event?.type === 'transfer' && event.carryPoolRate) return [poolKey(event.origin, event.asset)];
+  return [];
+}
+
+function orderSameDayProductionDependencies(events) {
+  const nodes = events.map((event, index) => ({ event, index, outgoing: new Set(), indegree: 0 }));
+  const consumedByNode = nodes.map(({ event }) => new Set(consumedProductionPools(event)));
+  for (const producer of nodes) {
+    for (const producedPool of producedProductionPools(producer.event)) {
+      for (const consumer of nodes) {
+        if (producer === consumer || !consumedByNode[consumer.index].has(producedPool)
+          || producer.outgoing.has(consumer.index)) continue;
+        producer.outgoing.add(consumer.index);
+        consumer.indegree += 1;
+      }
+    }
+  }
+  const ready = nodes.filter((node) => node.indegree === 0);
+  const ordered = [];
+  while (ready.length) {
+    ready.sort((left, right) => left.index - right.index);
+    const node = ready.shift();
+    ordered.push(node.event);
+    for (const targetIndex of node.outgoing) {
+      const target = nodes[targetIndex];
+      target.indegree -= 1;
+      if (target.indegree === 0) ready.push(target);
+    }
+  }
+  if (ordered.length < nodes.length) {
+    const orderedEvents = new Set(ordered);
+    ordered.push(...nodes.filter((node) => !orderedEvents.has(node.event)).map((node) => node.event));
+  }
+  return ordered;
+}
+
 function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], currentInventoryRows = [], inventoryReconciliationRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [], inventoryBasisFaction = '' } = {}) {
   const ledger = initialLedger || new InventoryCostLedger();
   const previousCounts = { ...(eventFingerprintCounts || {}) };
@@ -282,7 +330,7 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
     eventsByDay.get(day).push(event);
   }
   for (const dayEvents of eventsByDay.values()) {
-    let pending = dayEvents.map((event) => ({ event, error: '' }));
+    let pending = orderSameDayProductionDependencies(dayEvents).map((event) => ({ event, error: '' }));
     while (pending.length) {
       const deferred = [];
       let appliedInPass = false;

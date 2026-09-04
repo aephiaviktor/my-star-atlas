@@ -270,6 +270,30 @@ test('same-day replay retries crafting after ingredient delivery and then resolv
   assert.equal(destination.knownCargoCost, 4);
 });
 
+test('same-day multistep crafting establishes intermediate pool basis through arbitrary recipe depth', () => {
+  const result = buildCostLedgerResult({
+    currentInventoryRows: [
+      { starbase: 'MRZ-21', asset: 'Hydrocarbon', quantity: 90 },
+      { starbase: 'MRZ-21', asset: 'Polymer', quantity: 90 },
+    ],
+    miningRows: [{ isoDate: '2026-09-04', starbase: 'MRZ-21', rawMaterial: 'Hydrogen', mined: 100, totalCostsAtlas: 20 }],
+    craftingRows: [
+      { isoDate: '2026-09-04', starbase: 'MRZ-21', output: 'Electronics', crafted: 10,
+        ingredients: [{ input: 'Polymer', amount: 10 }], feeCostsAtlas: 1, txsCostsAtlas: 0 },
+      { isoDate: '2026-09-04', starbase: 'MRZ-21', output: 'Polymer', crafted: 10,
+        ingredients: [{ input: 'Hydrocarbon', amount: 10 }], feeCostsAtlas: 1, txsCostsAtlas: 0 },
+      { isoDate: '2026-09-04', starbase: 'MRZ-21', output: 'Hydrocarbon', crafted: 10,
+        ingredients: [{ input: 'Hydrogen', amount: 100 }], feeCostsAtlas: 2, txsCostsAtlas: 0 },
+    ],
+  });
+  assert.equal(result.rejectedEvents.length, 0);
+  const electronics = result.ledger.get('MRZ-21', 'Electronics');
+  assert.equal(electronics.quantity, 10);
+  assert.equal(electronics.uncostedQuantity, 0);
+  assert.equal(electronics.knownCosts.mining, 20);
+  assert.equal(electronics.knownCosts.crafting, 4);
+});
+
 test('crafting adapter rejects incomplete telemetry rather than inventing ingredients or cost', () => {
   assert.deepEqual(buildCraftingEvents([
     { isoDate: '2026-07-25', starbase: 'UST-1', output: 'Framework', crafted: 2, ingredients: [], feeCostsAtlas: 1, txsCostsAtlas: 2 },

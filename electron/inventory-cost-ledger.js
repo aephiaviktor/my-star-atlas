@@ -219,10 +219,18 @@ class InventoryCostLedger {
     const outputLot = { quantity: outputUnits, uncostedQuantity: 0, costs: emptyCosts(), uncostedCosts: emptyCosts(), cargoCost: 0, uncostedCargoCost: 0 };
     let hasUncostedIngredient = false;
     for (const ingredient of ingredients) {
+      const ingredientPool = this.get(location, ingredient.asset);
+      const hasPoolRate = ingredientPool.quantity - ingredientPool.uncostedQuantity > EPSILON;
       const consumed = this.consume({ location, asset: ingredient.asset, quantity: ingredient.quantity });
-      if (consumed.uncostedQuantity > EPSILON) hasUncostedIngredient = true;
-      outputLot.cargoCost += consumed.cargoCost;
-      for (const source of COST_SOURCES) outputLot.costs[source] += consumed.costs[source];
+      if (!hasPoolRate) hasUncostedIngredient = true;
+      outputLot.cargoCost += hasPoolRate
+        ? ingredientPool.cargoCostPerUnit * ingredient.quantity
+        : consumed.cargoCost;
+      for (const source of COST_SOURCES) {
+        outputLot.costs[source] += hasPoolRate
+          ? ingredientPool.costPerUnit[source] * ingredient.quantity
+          : consumed.costs[source];
+      }
     }
     outputLot.uncostedQuantity = hasUncostedIngredient ? outputUnits : 0;
     outputLot.costs.crafting += requireNonNegative(craftingCost, 'craftingCost');

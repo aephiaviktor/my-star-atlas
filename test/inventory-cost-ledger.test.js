@@ -116,6 +116,32 @@ test('known-cost inventory grows and stabilizes its weighted average while uncos
   close((framework.costs.crafting + framework.costs.lm) / 200, 1.5);
 });
 
+test('multi-step crafting consumes a mixed ingredient pool at its known rate while depleting uncosted quantity first', () => {
+  const ledger = new InventoryCostLedger();
+  ledger.acquire({ location: 'MRZ-21', asset: 'Hydrogen', quantity: 100, source: 'mining', totalCost: 20 });
+  ledger.craft({
+    location: 'MRZ-21', outputAsset: 'Hydrocarbon', outputQuantity: 10,
+    ingredients: [{ asset: 'Hydrogen', quantity: 100 }], craftingCost: 2,
+  });
+  ledger.acquire({ location: 'MRZ-21', asset: 'Hydrocarbon', quantity: 90 });
+
+  const polymer = ledger.craft({
+    location: 'MRZ-21', outputAsset: 'Polymer', outputQuantity: 10,
+    ingredients: [{ asset: 'Hydrocarbon', quantity: 10 }], craftingCost: 1,
+  });
+
+  const hydrocarbon = ledger.get('MRZ-21', 'Hydrocarbon');
+  assert.equal(hydrocarbon.quantity, 90);
+  assert.equal(hydrocarbon.uncostedQuantity, 80);
+  close(hydrocarbon.knownCosts.mining, 20);
+  close(hydrocarbon.knownCosts.crafting, 2);
+  assert.equal(polymer.uncostedQuantity, 0);
+  close(polymer.costs.mining, 20);
+  close(polymer.costs.crafting, 3);
+  const polymerPool = ledger.get('MRZ-21', 'Polymer');
+  close(polymerPool.totalCostPerUnit, 2.3);
+});
+
 test('partial known costs remain attached to an entirely uncosted lot during depletion', () => {
   const ledger = new InventoryCostLedger();
   ledger.acquireLot({

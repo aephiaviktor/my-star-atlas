@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 12 rebuilds same-day production and multi-hop cargo dependencies to a stable order.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 12;
+// Version 13 rebuilds multistep crafting with producer-before-consumer pool ordering.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 13;
 
 function emptyResult(status, error = '') {
   return {
