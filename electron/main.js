@@ -8342,11 +8342,11 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       await saveLedgerCheckpoint(checkpointPath, {
         faction: ledgerFaction,
         profile: profileName,
-        ledger: inventoryCostLedgerResult.ledger,
-        seenEventFingerprints: inventoryCostLedgerResult.seenEventFingerprints,
-        eventResultByFingerprint: inventoryCostLedgerResult.eventResultByFingerprint,
-        eventFingerprintCounts: inventoryCostLedgerResult.eventFingerprintCounts,
-        eventResultsByFingerprint: inventoryCostLedgerResult.eventResultsByFingerprint,
+        ledger: inventoryCostLedgerResult.checkpointLedger || inventoryCostLedgerResult.ledger,
+        seenEventFingerprints: inventoryCostLedgerResult.checkpointSeenEventFingerprints || inventoryCostLedgerResult.seenEventFingerprints,
+        eventResultByFingerprint: inventoryCostLedgerResult.checkpointEventResultByFingerprint || inventoryCostLedgerResult.eventResultByFingerprint,
+        eventFingerprintCounts: inventoryCostLedgerResult.checkpointEventFingerprintCounts || inventoryCostLedgerResult.eventFingerprintCounts,
+        eventResultsByFingerprint: inventoryCostLedgerResult.checkpointEventResultsByFingerprint || inventoryCostLedgerResult.eventResultsByFingerprint,
         pendingInventoryBasisSnapshots,
       });
       ledgerCheckpointSavedAt = new Date().toISOString();
@@ -8360,11 +8360,11 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         await saveLedgerCheckpoint(checkpointPath, {
           faction: ledgerFaction,
           profile: profileName,
-          ledger: inventoryCostLedgerResult.ledger,
-          seenEventFingerprints: inventoryCostLedgerResult.seenEventFingerprints,
-          eventResultByFingerprint: inventoryCostLedgerResult.eventResultByFingerprint,
-          eventFingerprintCounts: inventoryCostLedgerResult.eventFingerprintCounts,
-          eventResultsByFingerprint: inventoryCostLedgerResult.eventResultsByFingerprint,
+          ledger: inventoryCostLedgerResult.checkpointLedger || inventoryCostLedgerResult.ledger,
+          seenEventFingerprints: inventoryCostLedgerResult.checkpointSeenEventFingerprints || inventoryCostLedgerResult.seenEventFingerprints,
+          eventResultByFingerprint: inventoryCostLedgerResult.checkpointEventResultByFingerprint || inventoryCostLedgerResult.eventResultByFingerprint,
+          eventFingerprintCounts: inventoryCostLedgerResult.checkpointEventFingerprintCounts || inventoryCostLedgerResult.eventFingerprintCounts,
+          eventResultsByFingerprint: inventoryCostLedgerResult.checkpointEventResultsByFingerprint || inventoryCostLedgerResult.eventResultsByFingerprint,
           pendingInventoryBasisSnapshots,
         });
         ledgerCheckpointSavedAt = new Date().toISOString();

@@ -271,6 +271,8 @@ test('production ledger loads and atomically saves a per-faction checkpoint', ()
   assert.match(main, /initialLedger: checkpoint\.status === 'loaded' \? checkpoint\.ledger : null/);
   assert.match(main, /seenEventFingerprints: checkpoint\.seenEventFingerprints/);
   assert.match(main, /await saveLedgerCheckpoint\(checkpointPath,/);
+  assert.match(main, /ledger: inventoryCostLedgerResult\.checkpointLedger \|\| inventoryCostLedgerResult\.ledger/);
+  assert.match(main, /eventFingerprintCounts: inventoryCostLedgerResult\.checkpointEventFingerprintCounts/);
   assert.match(main, /ledgerCheckpointStatus/);
 });
 

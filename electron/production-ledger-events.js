@@ -269,6 +269,9 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
   const inventoryBasisSnapshots = [];
   const currentCounts = {};
   const currentResults = {};
+  let checkpointLedger = InventoryCostLedger.fromSnapshot(ledger.snapshot());
+  let checkpointEventFingerprintCounts = {};
+  let checkpointEventResultsByFingerprint = {};
   const attemptEvent = (event) => {
     const fingerprint = eventFingerprint(event);
     const occurrence = (currentCounts[fingerprint] || 0) + 1;
@@ -329,7 +332,17 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
     if (!eventsByDay.has(day)) eventsByDay.set(day, []);
     eventsByDay.get(day).push(event);
   }
-  for (const dayEvents of eventsByDay.values()) {
+  const activityDays = [...eventsByDay.keys()];
+  const replayDay = activityDays.at(-1) || '';
+  for (const [day, dayEvents] of eventsByDay.entries()) {
+    if (day === replayDay) {
+      checkpointLedger = InventoryCostLedger.fromSnapshot(ledger.snapshot());
+      checkpointEventFingerprintCounts = { ...currentCounts };
+      checkpointEventResultsByFingerprint = Object.fromEntries(Object.entries(currentResults)
+        .map(([fingerprint, results]) => [fingerprint, results.map((result) => (
+          result == null ? result : JSON.parse(JSON.stringify(result))
+        ))]));
+    }
     let pending = orderSameDayProductionDependencies(dayEvents).map((event) => ({ event, error: '' }));
     while (pending.length) {
       const deferred = [];
@@ -350,12 +363,18 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
   }
   return {
     ledger,
+    checkpointLedger,
     events,
     appliedEvents,
     appliedEventResults,
     rejectedEvents,
     skippedDuplicateEvents,
     inventoryBasisSnapshots,
+    checkpointEventFingerprintCounts,
+    checkpointEventResultsByFingerprint,
+    checkpointSeenEventFingerprints: Object.keys(checkpointEventFingerprintCounts).sort(),
+    checkpointEventResultByFingerprint: Object.fromEntries(Object.entries(checkpointEventResultsByFingerprint)
+      .map(([fingerprint, results]) => [fingerprint, results[0]])),
     eventFingerprintCounts: currentCounts,
     eventResultsByFingerprint: currentResults,
     seenEventFingerprints: Object.keys(currentCounts).sort(),

@@ -294,6 +294,36 @@ test('same-day multistep crafting establishes intermediate pool basis through ar
   assert.equal(electronics.knownCosts.crafting, 4);
 });
 
+test('latest activity day is replayable when a late upstream craft arrives after checkpointing', () => {
+  const common = {
+    currentInventoryRows: [{ starbase: 'MRZ-22', asset: 'Magnet', quantity: 100 }],
+    miningRows: [{ isoDate: '2026-09-03', starbase: 'MRZ-22', rawMaterial: 'Iron Ore', mined: 100, totalCostsAtlas: 20 }],
+  };
+  const electromagnet = { isoDate: '2026-09-04', starbase: 'MRZ-22', output: 'Electromagnet', crafted: 1,
+    ingredients: [{ input: 'Magnet', amount: 10 }], feeCostsAtlas: 1, txsCostsAtlas: 0 };
+  const first = buildCostLedgerResult({ ...common, craftingRows: [electromagnet] });
+  assert.equal(first.ledger.get('MRZ-22', 'Electromagnet').uncostedQuantity, 1);
+  assert.ok(first.checkpointLedger instanceof (require('../electron/inventory-cost-ledger').InventoryCostLedger));
+  assert.equal(first.checkpointLedger.get('MRZ-22', 'Electromagnet').quantity, 0);
+
+  const second = buildCostLedgerResult({
+    initialLedger: first.checkpointLedger,
+    eventFingerprintCounts: first.checkpointEventFingerprintCounts,
+    eventResultsByFingerprint: first.checkpointEventResultsByFingerprint,
+    ...common,
+    craftingRows: [electromagnet, {
+      isoDate: '2026-09-04', starbase: 'MRZ-22', output: 'Magnet', crafted: 10,
+      ingredients: [{ input: 'Iron Ore', amount: 100 }], feeCostsAtlas: 2, txsCostsAtlas: 0,
+    }],
+  });
+  const output = second.ledger.get('MRZ-22', 'Electromagnet');
+  assert.equal(second.rejectedEvents.length, 0);
+  assert.equal(output.quantity, 1);
+  assert.equal(output.uncostedQuantity, 0);
+  assert.equal(output.knownCosts.mining, 20);
+  assert.equal(output.knownCosts.crafting, 3);
+});
+
 test('crafting adapter rejects incomplete telemetry rather than inventing ingredients or cost', () => {
   assert.deepEqual(buildCraftingEvents([
     { isoDate: '2026-07-25', starbase: 'UST-1', output: 'Framework', crafted: 2, ingredients: [], feeCostsAtlas: 1, txsCostsAtlas: 2 },
