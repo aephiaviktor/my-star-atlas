@@ -171,6 +171,8 @@ const earningsCraftingBestRevenueNote = document.querySelector('#earnings-crafti
 const earningsCraftingDateFilter = document.querySelector('#earnings-crafting-date-filter');
 const earningsCraftingStarbaseFilter = document.querySelector('#earnings-crafting-starbase-filter');
 const earningsCraftingAssetFilter = document.querySelector('#earnings-crafting-asset-filter');
+const earningsScanningPerUnitButton = document.querySelector('[data-earnings-per-unit="scanning"]');
+const earningsMiningPerUnitButton = document.querySelector('[data-earnings-per-unit="mining"]');
 const earningsCraftingPerUnitButton = document.querySelector('[data-earnings-per-unit="crafting"]');
 const earningsUpgradingSyncStatus = document.querySelector('#earnings-upgrading-sync-status');
 const earningsUpgradingTableHead = document.querySelector('#earnings-upgrading-table-head');
@@ -702,7 +704,6 @@ const scanningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
   Object.freeze({ id: 'npPerCrew', label: 'NP per crew' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
-  Object.freeze({ id: 'costsPerUnit', label: 'Cost per Unit' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
 
@@ -725,7 +726,6 @@ const miningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'netProfit', label: 'Net Profit' }),
   Object.freeze({ id: 'npPerCrew', label: 'NP per crew' }),
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
-  Object.freeze({ id: 'costsPerUnit', label: 'Cost per Unit' }),
   Object.freeze({ id: 'account', label: 'Account' }),
 ]);
 
@@ -902,8 +902,8 @@ const earningsColumnsBySubtab = Object.freeze({
 });
 
 const earningsColumnState = {
-  scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
-  mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin', 'costsPerUnit']),
+  scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
+  mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   cargo: new Set(['txsDaily', 'cargoCycles', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
@@ -987,16 +987,14 @@ const earningsMetricGuideBySubtab = Object.freeze({
     sduFound: ['Total Survey Data Units found during the UTC day.', 'Σ SDU from successful scans.', 'The primary scanning output used to estimate Revenue.'],
     foodCosts: ['ATLAS value of food consumed while scanning.', 'Food burned × current food price.', 'Lower cost improves profit, but price changes also affect historical estimates.'],
     fuelCosts: ['ATLAS value of fuel consumed while scanning.', 'Fuel burned × current fuel price.', 'Use it to compare operating efficiency between fleets.'],
-    costsPerUnit: ['Estimated cost for each SDU found.', 'Total Costs ÷ SDU Found.', 'Lower is better; compare with the current SDU price to judge unit profitability.'],
   }),
   mining: Object.freeze({
     starbase: ['Starbase associated with the mining activity.', 'Recorded mining starbase.', 'Use it to compare routes, deposits, and fleet placement.'],
     rawMaterial: ['Resource produced by this row.', 'Recorded mined resource.', 'Prices differ by material, so equal quantities can generate different Revenue.'],
-    mined: ['Total units mined during the UTC day.', 'Σ recorded mined quantity.', 'Use with Cost per Unit and resource price to compare output efficiency.'],
+    mined: ['Total units mined during the UTC day.', 'Σ recorded mined quantity.', 'Use with Per Unit mode and resource price to compare output efficiency.'],
     ammoCosts: ['ATLAS value of ammunition consumed while mining.', 'Ammunition burned × current ammunition price.', 'Often a major variable cost; lower cost per mined unit improves efficiency.'],
     foodCosts: ['ATLAS value of food consumed while mining.', 'Food burned × current food price.', 'Part of the operating cost used in Total Costs.'],
     fuelCosts: ['ATLAS value of fuel consumed while mining.', 'Fuel burned × current fuel price.', 'Part of the operating cost used in Total Costs.'],
-    costsPerUnit: ['Estimated cost per unit of this material.', 'Total costs for fleet/date/material ÷ total units mined.', 'Lower is better; compare with the material’s current ATLAS price.'],
   }),
   cargo: Object.freeze({
     cargoCycles: ['Completed cargo cycles recorded during the UTC day.', 'Count of explicit SLYA round-trip completion events for the fleet and assignment.', 'A cycle closes only when the final configured route leg wraps to the beginning; intermediate visits to the first starbase do not count.'],
@@ -1091,7 +1089,7 @@ const earningsPerUnitModeByFaction = new Map();
 
 function getEarningsPerUnitState(faction = normalizeFaction(latestSettings?.faction)) {
   if (!earningsPerUnitModeByFaction.has(faction)) {
-    earningsPerUnitModeByFaction.set(faction, { crafting: false, upgrading: false, inventoryLedger: false });
+    earningsPerUnitModeByFaction.set(faction, { scanning: false, mining: false, crafting: false, upgrading: false, inventoryLedger: false });
   }
   return earningsPerUnitModeByFaction.get(faction);
 }
@@ -1099,6 +1097,10 @@ function getEarningsPerUnitState(faction = normalizeFaction(latestSettings?.fact
 function resolveEarningsMonetaryDisplayValue(entry, subtab, columnId, perUnit) {
   const fieldByColumn = {
     revenue: 'revenueAtlasPerDay',
+    ammoCosts: 'ammoCostsAtlas',
+    foodCosts: 'foodCostsAtlas',
+    fuelCosts: 'fuelCostsAtlas',
+    rental: 'rentalRateAtlasPerDay',
     ingCosts: 'ingCostsAtlas',
     feeCosts: 'feeCostsAtlas',
     upgCosts: 'upgradingCostsAtlas',
@@ -1111,16 +1113,26 @@ function resolveEarningsMonetaryDisplayValue(entry, subtab, columnId, perUnit) {
   const value = Number(rawValue);
   if (!Number.isFinite(value)) return null;
   if (!perUnit) return value;
-  const denominator = Number(subtab === 'crafting' ? entry?.crafted : entry?.installed);
+  const denominatorBySubtab = {
+    scanning: entry?.sduFound,
+    mining: entry?.mined,
+    crafting: entry?.crafted,
+    upgrading: entry?.installed,
+  };
+  const denominator = Number(denominatorBySubtab[subtab]);
   return Number.isFinite(denominator) && denominator > 0 ? value / denominator : null;
 }
 
 function isEarningsPerUnitColumn(subtab, columnId) {
-  const columns = subtab === 'crafting'
-    ? ['revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit']
-    : subtab === 'upgrading'
-      ? ['revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit']
-      : [];
+  const columns = subtab === 'scanning'
+    ? ['revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit']
+    : subtab === 'mining'
+      ? ['revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit']
+      : subtab === 'crafting'
+        ? ['revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit']
+        : subtab === 'upgrading'
+          ? ['revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit']
+          : [];
   return columns.includes(columnId);
 }
 
@@ -1129,9 +1141,11 @@ function isEarningsPerUnitEnabled(subtab) {
 }
 
 function applyEarningsPerUnitButtonState(subtab) {
-  const button = subtab === 'crafting' ? earningsCraftingPerUnitButton
-    : subtab === 'upgrading' ? earningsUpgradingPerUnitButton
-      : subtab === 'inventoryLedger' ? earningsInventoryLedgerPerUnitButton : null;
+  const button = subtab === 'scanning' ? earningsScanningPerUnitButton
+    : subtab === 'mining' ? earningsMiningPerUnitButton
+      : subtab === 'crafting' ? earningsCraftingPerUnitButton
+        : subtab === 'upgrading' ? earningsUpgradingPerUnitButton
+          : subtab === 'inventoryLedger' ? earningsInventoryLedgerPerUnitButton : null;
   if (!button) return;
   const active = isEarningsPerUnitEnabled(subtab);
   button.classList.toggle('active', active);
@@ -1552,6 +1566,8 @@ function restoreFactionFilterState(faction) {
   selectedConsTotalStarbase = getCachedFactionResult(faction, 'selectedConsTotalStarbase') || '';
   selectedConsTotalAsset = getCachedFactionResult(faction, 'selectedConsTotalAsset') || '';
   invSelectedStarbase = getCachedFactionResult(faction, 'selectedInvStarbase') || '__all__';
+  applyEarningsPerUnitButtonState('scanning');
+  applyEarningsPerUnitButtonState('mining');
   applyEarningsPerUnitButtonState('crafting');
   applyEarningsPerUnitButtonState('upgrading');
 }
@@ -6496,7 +6512,6 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
   if (entry.isFleetTotal && (columnId === 'color' || columnId === 'ships' || columnId === 'account')) return createTextCell('--');
   if (columnId === 'color') return createColorCell(entry, colorMap);
   if (columnId === 'ownership') return createOwnershipCell(entry);
-  if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
   if (columnId === 'ships') return createShipsCell(entry);
   if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
   if (columnId === 'sduMax') return createTextCell(entry.expectedSduPerScan == null ? '--' : formatWholeNumber(entry.expectedSduPerScan));
@@ -6506,15 +6521,9 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'scanSuccessRate') return createTextCell(formatPercentNumber(entry.scanSuccessRatePercent, 1));
   if (columnId === 'averageChance') return createTextCell(formatPercentNumber(entry.averageChancePercent, 1));
   if (columnId === 'sduFound') return createTextCell(formatWholeNumber(entry.sduFound || 0));
-  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasWhole(entry.revenueAtlasPerDay));
-  if (columnId === 'foodCosts') return createTextCell(entry.foodCostsAtlas == null ? '--' : formatAtlasWhole(entry.foodCostsAtlas));
-  if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas));
-  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
-  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
-  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
+  if (isEarningsPerUnitColumn('scanning', columnId)) return createPerUnitAwareEarningsCell(entry, 'scanning', columnId);
   if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
   if (columnId === 'profitMargin') return createTextCell(entry.profitMarginPercent == null ? '--' : formatPercentNumber(entry.profitMarginPercent, 1));
-  if (columnId === 'costsPerUnit') return createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
 }
@@ -6529,17 +6538,9 @@ function createMiningEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'starbase') return createTextCell(entry.starbase);
   if (columnId === 'rawMaterial') return createTextCell(entry.rawMaterial);
   if (columnId === 'mined') return createTextCell(formatWholeNumber(entry.mined || 0));
-  if (columnId === 'revenue') return createTextCell(entry.revenueAtlasPerDay == null ? '--' : formatAtlasWhole(entry.revenueAtlasPerDay));
-  if (columnId === 'ammoCosts') return createTextCell(entry.ammoCostsAtlas == null ? '--' : formatAtlasWhole(entry.ammoCostsAtlas));
-  if (columnId === 'foodCosts') return createTextCell(entry.foodCostsAtlas == null ? '--' : formatAtlasWhole(entry.foodCostsAtlas));
-  if (columnId === 'fuelCosts') return createTextCell(entry.fuelCostsAtlas == null ? '--' : formatAtlasWhole(entry.fuelCostsAtlas));
-  if (columnId === 'rental') return createTextCell(entry.rentalRateAtlasPerDay == null ? '--' : formatAtlasNumber(entry.rentalRateAtlasPerDay, 2));
-  if (columnId === 'txsCosts') return createTextCell(entry.txsCostsAtlas == null ? '--' : formatAtlasWhole(entry.txsCostsAtlas));
-  if (columnId === 'totalCosts') return createTextCell(entry.totalCostsAtlas == null ? '--' : formatAtlasWhole(entry.totalCostsAtlas));
-  if (columnId === 'netProfit') return createTextCell(entry.netProfitAtlas == null ? '--' : formatAtlasWhole(entry.netProfitAtlas));
+  if (isEarningsPerUnitColumn('mining', columnId)) return createPerUnitAwareEarningsCell(entry, 'mining', columnId);
   if (columnId === 'npPerCrew') return createTextCell(entry.netProfitPerCrew == null ? '--' : formatAtlasWhole(entry.netProfitPerCrew));
   if (columnId === 'profitMargin') return createTextCell(entry.profitMarginPercent == null ? '--' : formatPercentNumber(entry.profitMarginPercent, 1));
-  if (columnId === 'costsPerUnit') return createTextCell(entry.costsPerUnitAtlas == null ? '--' : formatAtlasNumber(entry.costsPerUnitAtlas, 6));
   if (columnId === 'account') return createAccountCell(entry.fleetAccount);
   return createTextCell('--');
 }
@@ -6593,6 +6594,7 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
 
 function renderEarnings(result) {
   latestEarningsResult = result;
+  applyEarningsPerUnitButtonState('scanning');
   if (!result?.ok) {
     renderEarningsEmpty(result?.error || 'Earnings sync failed');
     renderEarningsMiningEmpty(result?.error || 'Earnings sync failed');
@@ -6689,6 +6691,7 @@ function renderEarnings(result) {
 }
 
 function renderEarningsMining(result) {
+  applyEarningsPerUnitButtonState('mining');
   if (!result?.ok) {
     renderEarningsMiningEmpty(result?.error || 'Mining earnings sync failed');
     setEarningsMiningStatus('Mining earnings sync failed');
@@ -10651,11 +10654,13 @@ for (const button of document.querySelectorAll('[data-earnings-cost-basis]')) {
 for (const button of document.querySelectorAll('[data-earnings-per-unit]')) {
   button.addEventListener('click', () => {
     const subtab = button.dataset.earningsPerUnit;
-    if (!['crafting', 'upgrading', 'inventoryLedger'].includes(subtab)) return;
+    if (!['scanning', 'mining', 'crafting', 'upgrading', 'inventoryLedger'].includes(subtab)) return;
     const state = getEarningsPerUnitState();
     state[subtab] = !state[subtab];
     applyEarningsPerUnitButtonState(subtab);
-    if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
+    if (subtab === 'scanning') renderEarnings(latestEarningsResult);
+    else if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
+    else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
     else if (subtab === 'upgrading') renderEarningsUpgrading(latestUpgradingResult);
     else renderInventoryCostLedger(latestBreakevenResult);
   });
