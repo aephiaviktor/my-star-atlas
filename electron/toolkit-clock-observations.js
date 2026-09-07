@@ -17,6 +17,28 @@ function compareToolkitClocks(rawAnchor, rawTarget) {
     downtimeSeconds: seconds - activeSeconds };
 }
 
+// A post-boundary account can recover midnight only if its upkeep state has not
+// been updated after midnight. Never project a pre-midnight observation forward.
+function splitToolkitClockWindow({ anchor, target }) {
+  const whole = compareToolkitClocks(anchor, target);
+  const day = 86400;
+  const boundaries = [];
+  for (let at = (Math.floor(anchor.observedAt / day) + 1) * day; at < target.observedAt; at += day) {
+    if (target.globalTime > at) return [whole];
+    boundaries.push(at);
+  }
+  if (!boundaries.length) return [whole];
+  const points = [{ at: anchor.observedAt, clock: projectClock(anchor, anchor.observedAt).localTime },
+    ...boundaries.map(at => ({ at, clock: projectClock(target, at).localTime })),
+    { at: target.observedAt, clock: projectClock(target, target.observedAt).localTime }];
+  const windows = points.slice(1).map((point, i) => ({
+    start: new Date(points[i].at * 1000).toISOString(), stop: new Date(point.at * 1000).toISOString(),
+    downtimeSeconds: point.at - points[i].at - (point.clock - points[i].clock),
+  }));
+  if (windows.some(w => w.downtimeSeconds < 0 || w.downtimeSeconds > (Date.parse(w.stop)-Date.parse(w.start))/1000)) return [whole];
+  return windows;
+}
+
 async function observeToolkitClock({ load, save, latest }) {
   let journal = await load();
   if (journal && (journal.version !== 1 || !normalizeState(journal.latest) || !Array.isArray(journal.pairs))) throw new Error('upkeep_observations_invalid');
@@ -45,6 +67,6 @@ async function observeToolkitClock({ load, save, latest }) {
     try { await save(journal); } // Independent of Influx writes and signature availability.
     catch (_) { status = 'upkeep_observations_save_failed'; }
   } else status = 'upkeep_snapshot_unavailable';
-  return { clockWindows: pairs.map(pair => compareToolkitClocks(pair.anchor, pair.target)), clockStatus: status };
+  return { clockWindows: pairs.flatMap(splitToolkitClockWindow), clockStatus: status };
 }
-module.exports = { compareToolkitClocks, observeToolkitClock };
+module.exports = { compareToolkitClocks, observeToolkitClock, splitToolkitClockWindow };

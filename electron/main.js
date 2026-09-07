@@ -34,6 +34,8 @@ const { calculateUpgradingSelectionUtilization } = require('./upgrading-selectio
 const SAGE2_UPKEEP_IDL = require('./sage2-upkeep-idl.json');
 const { syncUpkeepHistory } = require('./starbase-upkeep-sync');
 const { observeToolkitClock } = require('./toolkit-clock-observations');
+const { syncSharedToolkitClocks, MEASUREMENT: TOOLKIT_CLOCK_MEASUREMENT } = require('./toolkit-clock-sharing');
+const { createToolkitBoundaryScheduler } = require('./toolkit-boundary-scheduler');
 const { summarizeToolkitDowntime } = require('./toolkit-downtime');
 const { projectDecodedUpkeepState, reconcileToolkitHistory, mergeToolkitIntervals, decodeToolkitDepositsFromTransactions, splitCapacityIntervalsByUtcHour, formatCapacityHourLine } = require('./starbase-upkeep-capacity');
 const { createTelemetryLedger } = require('./telemetry-ledger');
@@ -1336,8 +1338,79 @@ async function decodePhantomUpkeepDeposits(connection, signatures, address) {
   return deposits;
 }
 
+const toolkitObservationFlights = new Map();
+async function recordPhantomToolkitObservation(file, faction, address, latest, settings, readShared = true) {
+  // Serialize read/modify/write against Analytics and the boundary collector.
+  const previous = toolkitObservationFlights.get(file) || Promise.resolve();
+  const run = previous.catch(() => {}).then(async () => {
+    let localJournal;
+    let observations;
+    try { observations = await observeToolkitClock({ latest,
+    load: async () => {
+      try {
+        const value = JSON.parse(await fs.readFile(file + '.observations', 'utf8'));
+        if (value.latest?.faction !== faction || value.latest?.starbasePublicKey !== address.toBase58()) throw new Error('upkeep_scope_mismatch');
+        localJournal = value; return value;
+      }
+      catch (error) { if (error.code !== 'ENOENT') throw new Error('upkeep_observations_invalid'); return null; }
+    },
+    save: value => { localJournal = value; return writeJsonAtomic(file + '.observations', value); },
+    }); } catch (error) {
+      if (!settings) throw error;
+      localJournal = null;
+      observations = { clockWindows: [], clockStatus: 'upkeep_observations_invalid' };
+    }
+    if (!settings) return observations;
+    try {
+      const shared = await syncSharedToolkitClocks({
+        scope: { faction, starbase: PHANTOM_STARBASE_COORDINATES[faction].name, starbasePublicKey: address.toBase58() },
+        local: [latest, localJournal?.latest, ...(localJournal?.pairs || []).flatMap(pair => [pair.anchor, pair.target])].filter(Boolean),
+        load: async () => {
+          try { return JSON.parse(await fs.readFile(file + '.shared', 'utf8')); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; return null; }
+        },
+        save: value => writeJsonAtomic(file + '.shared', value),
+        readRemote: readShared ? async () => {
+          const flux = `from(bucket: "${escapeFluxString(settings.influxBucket)}")
+  |> range(start: -35d)
+  |> filter(fn: (r) => r._measurement == "${TOOLKIT_CLOCK_MEASUREMENT}" and r.faction == "${faction}" and r.address == "${address.toBase58()}" and r._field == "record")
+  |> group()`;
+          return parseInfluxCsv(await queryInfluxFlux(settings, flux)).flatMap(row => {
+            try { return [JSON.parse(row._value)]; } catch (_) { return []; }
+          });
+        } : undefined,
+        publish: lines => writeUpkeepStateLineToInflux(settings, lines),
+      });
+      return { ...observations, ...shared, clockStatus: shared.clockWindows.length && observations.clockStatus === 'baseline_only' ? 'clock_observed' : observations.clockStatus };
+    } catch (_) { return { ...observations, sharedWriteStatus: 'upkeep_shared_cache_invalid' }; }
+  });
+  toolkitObservationFlights.set(file, run);
+  try { return await run; }
+  finally { if (toolkitObservationFlights.get(file) === run) toolkitObservationFlights.delete(file); }
+}
+function phantomUpkeepScope(settings, faction) {
+  return crypto.createHash('sha256').update(JSON.stringify([getInfluxBaseUrl(settings.influxUrl), settings.influxBucket, settings.influxOrganization || '', faction])).digest('hex');
+}
+const toolkitBoundaryScheduler = createToolkitBoundaryScheduler({
+  capture: () => collectPhantomToolkitClocks(true), retry: () => collectPhantomToolkitClocks(false),
+});
+async function collectPhantomToolkitClocks(capture) {
+  const settings = await readSettings();
+  for (const faction of ['MUD', 'ONI', 'USTUR']) {
+    try {
+      let latest = null;
+      if (capture) {
+        try { latest = await capturePhantomUpkeepState(settings, faction); }
+        catch (_) { /* Still retry saved observations if RPC is unavailable. */ }
+      }
+      const file = path.join(app.getPath('userData'), 'starbase-upkeep-v2', `${phantomUpkeepScope(settings, faction)}.json`);
+      await recordPhantomToolkitObservation(file, faction, phantomStarbaseAddress(faction), latest, settings, false);
+    } catch (_) { /* Each faction retries independently; never scan transaction history here. */ }
+  }
+}
+
 async function fetchPhantomUpkeepCapacity(settings, faction) {
-  const scope = crypto.createHash('sha256').update(JSON.stringify([getInfluxBaseUrl(settings.influxUrl), settings.influxBucket, settings.influxOrganization || '', faction])).digest('hex');
+  const scope = phantomUpkeepScope(settings, faction);
   if (phantomUpkeepFlights.has(scope)) return phantomUpkeepFlights.get(scope);
   const run = (async () => {
     const file = path.join(app.getPath('userData'), 'starbase-upkeep-v2', `${scope}.json`);
@@ -1348,21 +1421,8 @@ async function fetchPhantomUpkeepCapacity(settings, faction) {
     const safeStatus = error => /^upkeep_[a-z0-9_]+$/.test(String(error?.message)) ? error.message : 'upkeep_sync_unavailable';
     try { latest = await capturePhantomUpkeepState(settings, faction); }
     catch (error) { snapshotStatus = safeStatus(error); }
-    {
-      try {
-        observations = await observeToolkitClock({ latest,
-          load: async () => {
-            try {
-              const value = JSON.parse(await fs.readFile(file + '.observations', 'utf8'));
-              if (value.latest?.faction !== faction || value.latest?.starbasePublicKey !== address.toBase58()) throw new Error('upkeep_scope_mismatch');
-              return value;
-            }
-            catch (error) { if (error.code !== 'ENOENT') throw new Error('upkeep_observations_invalid'); return null; }
-          },
-          save: value => writeJsonAtomic(file + '.observations', value),
-        });
-      } catch (error) { observations.clockStatus = safeStatus(error) === 'upkeep_sync_unavailable' ? 'upkeep_observations_save_failed' : safeStatus(error); }
-    }
+    try { observations = await recordPhantomToolkitObservation(file, faction, address, latest, settings); }
+    catch (error) { observations.clockStatus = safeStatus(error) === 'upkeep_sync_unavailable' ? 'upkeep_observations_save_failed' : safeStatus(error); }
     const read = async () => {
       try { return JSON.parse(await fs.readFile(file, 'utf8')); }
       catch (error) { if (error.code !== 'ENOENT') throw new Error('upkeep_checkpoint_invalid'); }
@@ -9343,6 +9403,7 @@ handleTrustedIpc('optimization:upgrading', async (_event, payload) => {
 
 app.whenReady().then(async () => {
   void telemetryLedger.start().catch(() => {});
+  void toolkitBoundaryScheduler.start();
   const powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension')
   console.log(`[MSA] prevent-app-suspension blocker=${powerSaveBlockerId} active=${powerSaveBlocker.isStarted(powerSaveBlockerId)}`)
 
@@ -9353,6 +9414,7 @@ app.whenReady().then(async () => {
 
 let telemetryQuitFlushStarted = false;
 app.on('before-quit', (event) => {
+  toolkitBoundaryScheduler.stop();
   if (telemetryQuitFlushStarted) return;
   telemetryQuitFlushStarted = true;
   event.preventDefault();

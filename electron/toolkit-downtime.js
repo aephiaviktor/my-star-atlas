@@ -1,7 +1,7 @@
 'use strict';
 
 // Read-only diagnostic projection. Never supplies inputs to chart calculations.
-function summarizeToolkitDowntime({ intervals = [], clockWindows = [], clockStatus, diagnostic, faction, starbase, start, stop, status } = {}) {
+function summarizeToolkitDowntime({ intervals = [], clockWindows = [], clockStatus, sharedReadStatus, sharedWriteStatus, pendingObservations, diagnostic, faction, starbase, start, stop, status } = {}) {
   const from = Date.parse(start), until = Date.parse(stop), dayMs = 86400000;
   if (!Number.isFinite(from) || !Number.isFinite(until) || until <= from || until - from > 35 * dayMs) return { rows: [], status };
   const windows = [], unallocatedClockWindows = [];
@@ -47,7 +47,7 @@ function summarizeToolkitDowntime({ intervals = [], clockWindows = [], clockStat
     row.coveredSeconds += window.seconds; row.unknownSeconds -= window.seconds;
     row.downtimeSeconds += window.downtimeSeconds; row.clockMeasured = true;
   }
-  return { status, clockStatus, diagnostic, unallocatedClockWindows, latestClockWindow: clockWindows.at(-1), rows: [...rows.values()].reverse().map(row => ({ ...row,
+  return { status, clockStatus, sharedReadStatus, sharedWriteStatus, pendingObservations, diagnostic, unallocatedClockWindows, latestClockWindow: clockWindows.at(-1), rows: [...rows.values()].reverse().map(row => ({ ...row,
     downtimeSeconds: row.coveredSeconds > 0 ? row.downtimeSeconds : null,
     // Optional full-period estimate uses this day's observed downtime share only.
     estimatedDowntimeSeconds: row.coveredSeconds > 0 && row.unknownSeconds > 0

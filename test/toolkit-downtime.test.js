@@ -41,6 +41,8 @@ test('table renders unknown versus observed zero and clears stale rows on refres
  context.renderToolkitDowntime({toolkitDowntime:summarizeToolkitDowntime({...options,clockStatus:'clock_observed',status:'upkeep_influx_http_401',diagnostic:{stage:'history_publish'},clockWindows:[{start:'2026-09-06T00:00:00Z',stop:'2026-09-06T02:00:00Z',downtimeSeconds:1800}]})});
  assert.equal(body.children[0].children[3].textContent,'0h 30m 0s');
  assert.match(status.textContent,/Account-clock measurements available/);assert.match(status.textContent,/History publication: Storage returned HTTP 401/);
+ context.renderToolkitDowntime({toolkitDowntime:summarizeToolkitDowntime({...options,sharedReadStatus:'upkeep_shared_read_failed',sharedWriteStatus:'upkeep_shared_publish_failed',pendingObservations:3})});
+ assert.match(status.textContent,/Shared clock read failed/);assert.match(status.textContent,/retry automatically/);assert.match(status.textContent,/3 clock observations awaiting upload/);
  context.renderToolkitDowntime({});assert.equal(body.children.length,1);assert.equal(body.children[0].children[0].colSpan,7);
 });
 

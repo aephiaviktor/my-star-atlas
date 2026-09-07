@@ -9514,16 +9514,22 @@ function renderToolkitDowntime(result) {
     : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m ${Math.floor(seconds % 60)}s`;
   if (status) {
     const stages = { snapshot: 'Account capture', history_read: 'History read', history_replay: 'Transaction replay', history_publish: 'History publication' };
-    const clockText = { clock_observed: 'Account-clock measurements available.', baseline_only: 'First clock observation saved; refresh later for a measured window.',
+    const clockText = { clock_observed: 'Account-clock measurements available.', baseline_only: 'First clock observation saved; automatic UTC-boundary captures collect daily evidence while MSA is running. Refresh to view new measurements.',
       upkeep_observations_invalid: 'Local clock observations could not be read.', upkeep_observations_save_failed: 'Local clock observations could not be saved.',
       upkeep_snapshot_unavailable: 'A fresh finalized account snapshot is unavailable.', upkeep_configuration_changed: 'Clock comparison skipped a changed-configuration window.',
       upkeep_clock_reconciliation_failed: 'Clock comparison skipped an inconsistent window; other measurements remain available.' }[data?.clockStatus] || '';
+    const sharingText = [
+      data?.sharedReadStatus === 'shared_read_ok' ? 'Shared Influx clock observations loaded.' : data?.sharedReadStatus === 'upkeep_shared_read_failed' ? 'Shared clock read failed; cached/local measurements remain available.' : '',
+      ({ upkeep_shared_publish_failed: 'Clock upload failed; saved observations will retry automatically.',
+        upkeep_shared_save_failed: 'Shared clock cache could not be saved.', upkeep_shared_cache_invalid: 'Shared clock cache could not be read; local measurements remain available.' })[data?.sharedWriteStatus] || '',
+      data?.pendingObservations > 0 ? `${data.pendingObservations} clock observations awaiting upload.` : '',
+    ].filter(Boolean).join(' ');
     const last = data?.latestClockWindow;
     const windowText = last ? ` Latest clock window ${last.start}–${last.stop}: ${duration(last.downtimeSeconds)} stopped.` : '';
     const pending = data?.unallocatedClockWindows?.length ? ' Some clock windows cross a day/filter boundary; their totals are not assigned to daily rows.' : '';
     const stageText = stages[data?.diagnostic?.stage];
     const httpStatus = /^upkeep_influx_http_([0-9]{3})$/.exec(data?.status || '');
-    status.textContent = data ? `${clockText}${windowText} ${stageText ? stageText + ': ' : ''}${httpStatus ? 'Storage returned HTTP ' + httpStatus[1] + '.' : statusText}${pending}`.trim() : 'Awaiting Toolkit observations';
+    status.textContent = data ? `${clockText}${windowText} ${sharingText} ${stageText ? stageText + ': ' : ''}${httpStatus ? 'Storage returned HTTP ' + httpStatus[1] + '.' : statusText}${pending}`.trim() : 'Awaiting Toolkit observations';
   }
   for (const row of data?.rows || []) {
     const tr = document.createElement('tr');
