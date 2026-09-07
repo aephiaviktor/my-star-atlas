@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const { Connection, PublicKey } = require('@solana/web3.js');
-const { BorshAccountsCoder } = require('@staratlas/anchor');
+const { BorshAccountsCoder, BorshInstructionCoder } = require('@staratlas/anchor');
 const { IDL: SAGE_IDL } = require('@staratlas/sage/dist/src/idl/sage');
 const { getOpenOrdersForPlayer } = require('@staratlas/factory');
 const bs58Module = require('bs58');
@@ -31,6 +31,9 @@ const { createEarningsErrorDiagnostic } = require('./earnings-error-diagnostic')
 const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher } = require('./rpc-resilience');
 const { calculateUpgradingSelectionUtilization } = require('./upgrading-selection-utilization');
+const SAGE2_UPKEEP_IDL = require('./sage2-upkeep-idl.json');
+const { syncUpkeepHistory } = require('./starbase-upkeep-sync');
+const { projectDecodedUpkeepState, reconcileToolkitHistory, mergeToolkitIntervals, decodeToolkitDepositsFromTransactions, splitCapacityIntervalsByUtcHour, formatCapacityHourLine } = require('./starbase-upkeep-capacity');
 const { createTelemetryLedger } = require('./telemetry-ledger');
 const { createRpcUsageReader } = require('./telemetry-day-summary');
 const {
@@ -1256,6 +1259,141 @@ function summarizeUpgradingProcessHistory(rows) {
   };
 }
 
+const PHANTOM_STARBASE_COORDINATES = Object.freeze({
+  MUD: Object.freeze({ name: 'MUD-PHANTOM', x: 0, y: -24 }),
+  ONI: Object.freeze({ name: 'ONI-PHANTOM', x: -28, y: 21 }),
+  USTUR: Object.freeze({ name: 'UST-PHANTOM', x: 28, y: 21 }),
+});
+
+function signedI64Seed(value) {
+  const seed = Buffer.alloc(8);
+  seed.writeBigInt64LE(BigInt(value));
+  return seed;
+}
+
+function phantomStarbaseAddress(faction) {
+  const phantom = PHANTOM_STARBASE_COORDINATES[faction];
+  if (!phantom) return null;
+  return PublicKey.findProgramAddressSync([
+    Buffer.from('Starbase'), SAGE_GAME_ID.toBuffer(), signedI64Seed(phantom.x), signedI64Seed(phantom.y),
+  ], SAGE_PROGRAM_ID)[0];
+}
+
+async function writeUpkeepStateLineToInflux(settings, line) {
+  const token = String(settings.influxAuthToken || '').trim().replace(/^(?:Token|Bearer)\s+/i, '');
+  const bucket = String(settings.influxBucket || '').trim();
+  const organization = await resolveMarketplacePublicationOrganization(settings);
+  if (!settings.influxUrl || !bucket || !organization || !token) throw new Error('upkeep_influx_not_configured');
+  const url = `${getInfluxBaseUrl(settings.influxUrl)}/api/v2/write?org=${encodeURIComponent(organization)}&bucket=${encodeURIComponent(bucket)}&precision=ns`;
+  const response = await fetchWithInfluxRetry(({ signal }) => fetch(url, {
+    method: 'POST', headers: { Authorization: `Token ${token}`, 'Content-Type': 'text/plain; charset=utf-8' }, body: line, signal,
+  }), { timeoutMs: 15_000, retries: 1, retryDelayMs: 250 });
+  if (!response.ok) throw new Error(`upkeep_influx_http_${response.status}`);
+}
+
+const phantomUpkeepFlights = new Map();
+
+async function capturePhantomUpkeepState(settings, faction) {
+  const address = phantomStarbaseAddress(faction), connection = createSolanaConnection(settings);
+  const coder = new BorshAccountsCoder(SAGE2_UPKEEP_IDL);
+  const gameInfo = await connection.getAccountInfo(SAGE_GAME_ID, 'finalized');
+  if (!gameInfo || !gameInfo.owner.equals(SAGE_PROGRAM_ID)) throw new Error('upkeep_game_not_observed');
+  const gameStateAddress = new PublicKey(coder.decode('game', gameInfo.data).gameState);
+  // Read chain Clock, Game, GameState and Starbase from the same finalized bank.
+  const context = await connection.getMultipleAccountsInfoAndContext([
+    address, gameStateAddress, SAGE_GAME_ID, new PublicKey('SysvarC1ock11111111111111111111111111111111'),
+  ], 'finalized');
+  const [sb, gs, game, clock] = context.value || [];
+  if (![sb, gs, game].every(info => info?.owner.equals(SAGE_PROGRAM_ID)) || !clock || clock.data.length < 40) throw new Error('upkeep_accounts_not_observed');
+  if (!new PublicKey(coder.decode('game', game.data).gameState).equals(gameStateAddress)) throw new Error('upkeep_game_state_changed');
+  if (Number(clock.data.readBigUInt64LE(0)) !== context.context.slot) throw new Error('upkeep_clock_slot_mismatch');
+  const state = projectDecodedUpkeepState({ faction, starbase: PHANTOM_STARBASE_COORDINATES[faction].name,
+    starbasePublicKey: address.toBase58(), observedSlot: context.context.slot, observedAt: Number(clock.data.readBigInt64LE(32)),
+    decodedStarbase: coder.decode('starbase', sb.data), decodedGameState: coder.decode('gameState', gs.data) });
+  if (!state) throw new Error('upkeep_snapshot_invalid');
+  return state;
+}
+
+async function decodePhantomUpkeepDeposits(connection, signatures, address) {
+  const coder = new BorshInstructionCoder(SAGE2_UPKEEP_IDL), deposits = [];
+  for (let offset = 0; offset < signatures.length; offset += 50) {
+    const batch = signatures.slice(offset, offset + 50);
+    const transactions = await connection.getParsedTransactions(batch.map(r => r.signature), { commitment: 'finalized', maxSupportedTransactionVersion: 0 });
+    deposits.push(...decodeToolkitDepositsFromTransactions({ signatures: batch, transactions,
+      starbasePublicKey: address.toBase58(), programId: SAGE_PROGRAM_ID.toBase58(), coder }));
+  }
+  // RPC signature order is insufficient for same-slot transactions, including page boundaries.
+  for (const slot of new Set(deposits.map(r => r.slot))) {
+    const block = await connection.getBlock(slot, { commitment: 'finalized', transactionDetails: 'signatures', rewards: false });
+    if (!Array.isArray(block?.signatures)) throw new Error('upkeep_transaction_order_not_observed');
+    for (const deposit of deposits.filter(r => r.slot === slot)) {
+      deposit.transactionIndex = block.signatures.indexOf(deposit.signature);
+      if (deposit.transactionIndex < 0) throw new Error('upkeep_transaction_order_not_observed');
+    }
+  }
+  return deposits;
+}
+
+async function fetchPhantomUpkeepCapacity(settings, faction) {
+  const scope = crypto.createHash('sha256').update(JSON.stringify([getInfluxBaseUrl(settings.influxUrl), settings.influxBucket, settings.influxOrganization || '', faction])).digest('hex');
+  if (phantomUpkeepFlights.has(scope)) return phantomUpkeepFlights.get(scope);
+  const run = (async () => {
+    const file = path.join(app.getPath('userData'), 'starbase-upkeep-v2', `${scope}.json`);
+    const address = phantomStarbaseAddress(faction), connection = createSolanaConnection(settings);
+    let stored = null, trustedBatches = [];
+    const read = async () => {
+      try { return JSON.parse(await fs.readFile(file, 'utf8')); }
+      catch (error) { if (error.code !== 'ENOENT') throw new Error('upkeep_checkpoint_invalid'); }
+      const flux = `from(bucket: "${escapeFluxString(settings.influxBucket)}")
+  |> range(start: -35d)
+  |> filter(fn: (r) => r._measurement == "starbase_upkeep_state" and r.model == "toolkit-stop-v2" and r.faction == "${escapeFluxString(faction)}" and r.starbase == "${PHANTOM_STARBASE_COORDINATES[faction].name}" and r._field == "record")
+  |> group()
+  |> sort(columns: ["_time"])`;
+      const records = parseInfluxCsv(await queryInfluxFlux(settings, flux)).map(row => JSON.parse(row._value));
+      if (!records.length) return null;
+      records.sort((a,b) => a.target.slot - b.target.slot);
+      const batches = records.filter(r => r.target.slot > r.anchor.slot).map(r => ({ ...r, ...reconcileToolkitHistory({ anchor: r.anchor, target: r.target, deposits: r.events }) }));
+      return { version: 2, anchor: records.at(-1).target, pending: null, batches };
+    };
+    try {
+      stored = await read();
+      if (stored) {
+        if (stored.version !== 2 || stored.anchor?.starbasePublicKey !== address.toBase58() || stored.anchor?.faction !== faction || !Array.isArray(stored.batches)) throw new Error('upkeep_checkpoint_invalid');
+        // Recompute from canonical snapshots/events; cached derived percentages are not evidence.
+        stored.batches = stored.batches.map(r => {
+          if (r.anchor.faction !== faction || r.anchor.starbasePublicKey !== address.toBase58()) throw new Error('upkeep_scope_mismatch');
+          return { ...r, ...reconcileToolkitHistory({ anchor: r.anchor, target: r.target, deposits: r.events }) };
+        });
+      }
+      trustedBatches = stored?.batches || [];
+      const journal = await syncUpkeepHistory({ load: async () => stored,
+        save: async value => { await writeJsonAtomic(file, value); stored = value; },
+        capture: () => capturePhantomUpkeepState(settings, faction),
+        signatures: before => connection.getSignaturesForAddress(address, { limit: 1000, ...(before ? { before } : {}) }, 'finalized'),
+        decode: rows => decodePhantomUpkeepDeposits(connection, rows, address),
+        publish: async record => {
+          const text = JSON.stringify(record).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+          const point = `starbase_upkeep_state,model=toolkit-stop-v2,faction=${faction},starbase=${record.target.starbase},fromSlot=${record.anchor.slot},toSlot=${record.target.slot} record="${text}" ${BigInt(record.target.observedAt) * 1000000000n}`;
+          const intervals = mergeToolkitIntervals([...(stored?.batches || []).flatMap(r => r.intervals), ...record.intervals]);
+          const touchedHours = new Set(splitCapacityIntervalsByUtcHour(record.intervals).map(r => r.hour));
+          const hours = splitCapacityIntervalsByUtcHour(intervals).filter(r => touchedHours.has(r.hour)).map(row => formatCapacityHourLine({ ...row, faction, starbase: record.target.starbase }));
+          if (hours.some(line => !line)) throw new Error('upkeep_capacity_line_invalid');
+          await writeUpkeepStateLineToInflux(settings, [point, ...hours].join('\n'));
+        },
+      });
+      return { intervals: mergeToolkitIntervals(journal.batches.flatMap(r => r.intervals)), status: journal.status };
+    } catch (error) {
+      // Do not expose transport/settings exceptions or turn them into a full-speed fallback.
+      const status = /^upkeep_[a-z_]+$/.test(String(error?.message)) ? error.message : 'upkeep_sync_unavailable';
+      let intervals = [];
+      try { intervals = mergeToolkitIntervals(trustedBatches.flatMap(r => r.intervals)); } catch (_) { /* Conflicting evidence remains unavailable. */ }
+      return { intervals, status };
+    }
+  })();
+  phantomUpkeepFlights.set(scope, run);
+  try { return await run; } finally { if (phantomUpkeepFlights.get(scope) === run) phantomUpkeepFlights.delete(scope); }
+}
+
 async function fetchUpgradingOptimization(payload = {}) {
   const settings = await readSettings();
   const bucket = String(settings.influxOptimizationBucket || 'optimization').trim();
@@ -1293,9 +1431,10 @@ async function fetchUpgradingOptimization(payload = {}) {
     if (name && Number.isFinite(price) && price > 0) componentPricesAtl[name] = price;
   }
   const factionSettings = { ...settings, faction: aephiaFaction };
-  const [netAtlasDaily, neutralUpgradingDaily] = await Promise.all([
+  const [netAtlasDaily, neutralUpgradingDaily, upkeepCapacity] = await Promise.all([
     fetchDailyUpgradingNetAtlas(factionSettings, redemptionRates),
     fetchDailyNeutralUpgradingPlan(factionSettings),
+    fetchPhantomUpkeepCapacity(settings, aephiaFaction),
   ]);
   const playerProfile = String(settings.playerProfiles?.[aephiaFaction] || settings.playerProfile || '');
   const configuredCrewByHour = {};
@@ -1309,7 +1448,8 @@ async function fetchUpgradingOptimization(payload = {}) {
   for (const [date, values] of Object.entries(netAtlasDaily.componentPricesByDate || {})) {
     historicalComponentPricesByDate[date] = { ...(historicalComponentPricesByDate[date] || {}), ...values };
   }
-  const selectionUtilizationV1 = calculateUpgradingSelectionUtilization({ jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations, configuredCrewByHour, prices: componentPricesAtl, pricesByDate: historicalComponentPricesByDate, atlasPerLpByDate, faction, profile: playerProfile, priceSnapshotAt: netAtlasDaily.priceSnapshotAt });
+  const selectionUtilizationV1 = calculateUpgradingSelectionUtilization({ jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations, configuredCrewByHour, capacityIntervals: upkeepCapacity.intervals, capacityEvidenceRequired: true, prices: componentPricesAtl, pricesByDate: historicalComponentPricesByDate, atlasPerLpByDate, faction, profile: playerProfile, priceSnapshotAt: netAtlasDaily.priceSnapshotAt });
+  selectionUtilizationV1.toolkit_capacity.sync_status = upkeepCapacity.status;
   return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, neutralUpgradingDaily, selectionUtilizationV1, playerProfile, componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 

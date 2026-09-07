@@ -123,7 +123,7 @@ test('V1.1 renderer contains real scatter, trend, zero line, five-state stack, a
   assert.match(renderer, /yLabel:'Selection uplift ATLAS \/ active crew-day'/);
   assert.match(renderer, /optimization-zero-line/);
   assert.match(renderer, /optimization-trend-line/);
-  for (const label of ['Protocol active','Claim locked','Proven eligible idle','Proven hard unavailable','Capacity not observed']) assert.match(renderer, new RegExp(label));
+  for (const label of ['Protocol active','Claim locked','Proven eligible idle','Capacity not observed']) assert.match(renderer, new RegExp(label));
   assert.match(renderer, /filter\(\(row\) => row\.evidence_complete/);
   assert.match(css, /optimization-upgrading-v1-chart svg[^}]+width:\s*100%/s);
   assert.match(css, /grid-template-columns:\s*minmax\(0, 1fr\)/);
@@ -136,8 +136,44 @@ test('production integration reuses existing acquisition functions and exposes f
   assert.match(main, /calculateUpgradingSelectionUtilization/);
   assert.match(main, /netAtlasDaily\.jobs/);
   assert.match(main, /neutralUpgradingDaily\.hourlyAllocations/);
-  for (const wording of ['Component Selection Uplift — Matched Active Capacity', 'UTC-Calendar Crew-State Utilization', 'Claim-Locked Capacity', 'Operational Result vs Configured 24h Neutral']) assert.match(html, new RegExp(wording));
+  for (const wording of ['Component Selection Uplift — Matched Active Capacity', 'Supply-Adjusted Utilization', 'Claim-Locked Capacity', 'Supply-Adjusted Capacity Summary']) assert.match(html, new RegExp(wording));
   assert.doesNotMatch(renderer, /This measures selection, not uptime/);
   assert.doesNotMatch(renderer, /Unknown time is shown, never silently assigned/);
   assert.match(renderer, /attempts\/retries\/failures: NOT OBSERVED/);
+});
+
+test('supply-adjusted utilization stops running jobs and excludes Toolkit downtime from claim lock', () => {
+  const day = '2026-09-06';
+  const result = calculateUpgradingSelectionUtilization({
+    jobs: [{ component: 'Framework', amount: 300, crew: 1, startedAt: `${day}T00:00:00Z`, completedAt: `${day}T02:30:00Z` }],
+    configuredCrewByHour: Object.fromEntries(Array.from({length:24}, (_,h) => [`${day}T${String(h).padStart(2,'0')}`, h < 3 ? 1 : 0])),
+    capacityEvidenceRequired: true,
+    capacityIntervals: [
+      { start: `${day}T00:00:00Z`, stop: `${day}T00:30:00Z`, multiplier: 1 },
+      { start: `${day}T00:30:00Z`, stop: `${day}T01:30:00Z`, multiplier: 0 },
+      { start: `${day}T01:30:00Z`, stop: '2026-09-07T00:00:00Z', multiplier: 1 },
+    ],
+  });
+  const row = result.utilization[0];
+  assert.equal(row.configured_crew_hours, 2);
+  assert.equal(row.protocol_active_crew_hours, 1);
+  assert.equal(row.claim_locked_crew_hours, .5);
+  assert.equal(row.toolkit_degraded_crew_hours, 1);
+  assert.equal(row.protocol_active_percent, 50);
+  assert.equal(result.claim_lock.median_claim_delay_seconds, 1800);
+});
+test('unknown Toolkit history never becomes zero claim delay or a percentage', () => {
+  const value = input(); value.capacityEvidenceRequired = true;
+  const result = calculateUpgradingSelectionUtilization(value);
+  assert.equal(result.selection[0].evidence_complete, false);
+  assert.equal(result.claim_lock.claim_locked_crew_hours, null);
+  assert.equal(result.claim_lock.median_claim_delay_seconds, null);
+  assert.ok(result.utilization.every(r => !r.identity_complete && r.protocol_active_percent == null));
+});
+test('known configured days with no completed jobs remain represented; overlapping evidence is rejected', () => {
+  const configuredCrewByHour = { '2026-09-06T00': 1 };
+  const interval = {start:'2026-09-06T00:00:00Z',stop:'2026-09-07T00:00:00Z',multiplier:1};
+  const result = calculateUpgradingSelectionUtilization({ configuredCrewByHour, capacityEvidenceRequired:true, capacityIntervals:[interval,interval] });
+  assert.equal(result.utilization.length, 1);
+  assert.equal(result.utilization[0].identity_complete, false);
 });
