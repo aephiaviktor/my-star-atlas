@@ -1,6 +1,6 @@
 'use strict';
 
-const CALCULATION_VERSION = 'upgrading-selection-utilization-toolkit-stop-v2';
+const CALCULATION_VERSION = 'upgrading-selection-utilization-estimated-v3';
 const DATA_VERSION = 1;
 const CURRENT_PRICE_WARNING = 'Indicative reconstruction — valued at current component prices';
 const COMPONENT_SECONDS = Object.freeze({
@@ -92,10 +92,21 @@ function normalizeJob(raw, capacityIntervals = []) {
   const secondsPerUnit = COMPONENT_SECONDS[component];
   if (!component || !(amount > 0) || !(crew > 0) || !Number.isFinite(startedMs) || !Number.isFinite(completedMs) || completedMs < startedMs || !secondsPerUnit) return null;
   const requiredMs = amount * secondsPerUnit / crew * 1000;
-  const activeEndMs = capacityIntervals.length ? advanceByEffectiveDuration(startedMs, requiredMs, completedMs, capacityIntervals) : Math.min(completedMs, startedMs + requiredMs);
+  let activeEndMs = capacityIntervals.length ? advanceByEffectiveDuration(startedMs, requiredMs, completedMs, capacityIntervals) : Math.min(completedMs, startedMs + requiredMs);
+  let workScale = 1, jobIntervals = capacityIntervals;
+  if (raw.estimateTiming && activeEndMs == null && completedMs > startedMs) {
+    activeEndMs = completedMs;
+    let availableMs = 0;
+    visitCapacitySegments(startedMs, completedMs, jobIntervals, (start, end, multiplier) => { availableMs += (end - start) * multiplier; });
+    if (!availableMs) {
+      jobIntervals = [{ startMs: startedMs, endMs: completedMs, multiplier: 1 }];
+      availableMs = completedMs - startedMs;
+    }
+    workScale = requiredMs / availableMs;
+  }
   let claimDelaySeconds = activeEndMs == null ? null : Math.max(0, (completedMs - activeEndMs) / 1000);
 
-  return { ...raw, component, amount, crew, startedMs, activeEndMs, completedMs, date: new Date(completedMs).toISOString().slice(0, 10), claimDelaySeconds };
+  return { ...raw, component, amount, crew, workScale, jobIntervals, startedMs, activeEndMs, completedMs, date: new Date(completedMs).toISOString().slice(0, 10), claimDelaySeconds };
 }
 function buildNeutralHours(rows) {
   const byHour = new Map();
@@ -110,7 +121,7 @@ function buildNeutralHours(rows) {
   }
   return byHour;
 }
-function calculateUpgradingSelectionUtilization({ jobs = [], neutralHours = [], configuredCrewByHour = {}, capacityIntervals = [], capacityEvidenceRequired = false, prices = {}, pricesByDate = null, atlasPerLpByDate = {}, faction = '', profile = '', priceSnapshotAt = null } = {}) {
+function calculateStrictUpgradingSelectionUtilization({ jobs = [], neutralHours = [], configuredCrewByHour = {}, capacityIntervals = [], capacityEvidenceRequired = false, prices = {}, pricesByDate = null, atlasPerLpByDate = {}, faction = '', profile = '', priceSnapshotAt = null } = {}) {
   let normalizedCapacityIntervals = normalizeCapacityIntervals(capacityIntervals);
   if (!capacityEvidenceRequired && !capacityIntervals.length) normalizedCapacityIntervals = [{ startMs: 0, endMs: 8640000000000000, multiplier: 1 }];
   const normalizedJobs = jobs.map((job) => normalizeJob(job, normalizedCapacityIntervals)).filter(Boolean).map((job) => ({
@@ -127,13 +138,13 @@ function calculateUpgradingSelectionUtilization({ jobs = [], neutralHours = [], 
       splitInterval(job.startedMs, job.completedMs, job.crew, (hour) => { ensureCalendar(hour.slice(0, 10)).job_evidence_incomplete = true; });
       continue;
     }
-    splitEffectiveInterval(job.startedMs, job.activeEndMs, job.crew, normalizedCapacityIntervals, (hour, crewHours) => { ensureCalendar(hour.slice(0, 10)).protocol_active_crew_hours += crewHours; });
+    splitEffectiveInterval(job.startedMs, job.activeEndMs, job.crew * job.workScale, job.jobIntervals, (hour, crewHours) => { ensureCalendar(hour.slice(0, 10)).protocol_active_crew_hours += crewHours; });
     splitEffectiveInterval(job.activeEndMs, job.completedMs, job.crew, normalizedCapacityIntervals, (hour, crewHours) => { ensureCalendar(hour.slice(0, 10)).claim_locked_crew_hours += crewHours; });
   }
   const selection = [...cohort].sort(([a], [b]) => a.localeCompare(b)).map(([date, dayJobs]) => {
     const valuationPrices = pricesByDate?.[date] || prices;
     const activeByHour = new Map();
-    for (const job of dayJobs.filter(job => job.capacityComplete)) splitEffectiveInterval(job.startedMs, job.activeEndMs, job.crew, normalizedCapacityIntervals, (hour, crewHours) => activeByHour.set(hour, (activeByHour.get(hour) || 0) + crewHours));
+    for (const job of dayJobs.filter(job => job.capacityComplete)) splitEffectiveInterval(job.startedMs, job.activeEndMs, job.crew * job.workScale, job.jobIntervals, (hour, crewHours) => activeByHour.set(hour, (activeByHour.get(hour) || 0) + crewHours));
     const missingHours = [...activeByHour.keys()].filter((hour) => {
       const hourStart = Date.parse(`${hour}:00:00.000Z`);
       return !neutralByHour.has(hour) || (capacityEvidenceRequired && capacityCoverageMs(hourStart, hourStart + hourMs, normalizedCapacityIntervals) < hourMs);
@@ -191,5 +202,92 @@ function calculateUpgradingSelectionUtilization({ jobs = [], neutralHours = [], 
   const claimLockedCrewHours = completeUtilization.reduce((sum, row) => sum + row.claim_locked_crew_hours, 0), configuredCrewHours = completeUtilization.reduce((sum, row) => sum + row.configured_crew_hours, 0);
   const toolkitDegradedCrewHours = utilization.reduce((sum, row) => sum + row.toolkit_degraded_crew_hours, 0);
   return { data_version: DATA_VERSION, calculation_version: CALCULATION_VERSION, faction, profile, price_basis: pricesByDate ? 'historical_at_or_before' : 'current_component_prices', price_snapshot_at: priceSnapshotAt, price_basis_complete: selection.every((row) => row.evidence_complete), component_prices_used: pricesByDate || prices, price_warning: pricesByDate ? null : CURRENT_PRICE_WARNING, selection, utilization, toolkit_capacity: { degraded_crew_hours: toolkitDegradedCrewHours, evidence_observed: capacityIntervals.length > 0 }, claim_lock: { capacity_evidence_complete: claimCapacityComplete, claim_locked_crew_hours: claimCapacityComplete ? claimLockedCrewHours : null, claim_locked_percent: claimCapacityComplete && configuredCrewHours > 0 ? claimLockedCrewHours / configuredCrewHours * 100 : null, median_claim_delay_seconds: claimCapacityComplete ? quantile(claimDelays, .5) : null, p90_claim_delay_seconds: claimCapacityComplete ? quantile(claimDelays, .9) : null, p95_claim_delay_seconds: claimCapacityComplete ? quantile(claimDelays, .95) : null, maximum_claim_delay_seconds: claimCapacityComplete && claimDelays.length ? Math.max(...claimDelays) : null, attempt_count: null, retry_count: null, failure_count: null, evidence_completeness: 'Attempt/retry/failure evidence NOT OBSERVED' } };
+}
+function calculateUpgradingSelectionUtilization(input = {}) {
+  if (!input.capacityEvidenceRequired) return calculateStrictUpgradingSelectionUtilization(input);
+  const observedIntervals = normalizeCapacityIntervals(input.capacityIntervals);
+  const jobs = (input.jobs || []).map(job => normalizeJob(job, observedIntervals)).filter(Boolean);
+  const configured = { ...(input.configuredCrewByHour || {}) };
+  const dates = new Set(Object.keys(configured).map(hour => hour.slice(0, 10)));
+  for (const job of jobs) splitInterval(job.startedMs, Math.max(job.startedMs + 1, job.completedMs), 1, hour => dates.add(hour.slice(0, 10)));
+  const observations = Object.entries(configured).filter(([hour, crew]) => Number.isFinite(Date.parse(`${hour}:00:00Z`)) && crew != null && Number.isFinite(Number(crew)) && Number(crew) >= 0)
+    .map(([hour, crew]) => ({ time: Date.parse(`${hour}:00:00Z`), crew: Number(crew) })).sort((a, b) => a.time - b.time);
+  const inferredDates = new Set(), missingToolkitDates = new Set(), timingDates = new Set();
+  const events = jobs.flatMap(job => [[job.startedMs, job.crew], [job.completedMs, -job.crew]]).sort((a,b) => a[0]-b[0] || a[1]-b[1]);
+  let peak = 0, active = 0;
+  for (const [, change] of events) { active += change; peak = Math.max(peak, active); }
+  const intervals = [];
+  for (const date of [...dates].sort()) {
+    const start = Date.parse(`${date}T00:00:00Z`), end = start + 24 * hourMs;
+    if (!Number.isFinite(start)) continue;
+    if (capacityCoverageMs(start, end, observedIntervals) < end - start) missingToolkitDates.add(date);
+    let cursor = start;
+    for (const interval of observedIntervals) {
+      const left = Math.max(start, interval.startMs), right = Math.min(end, interval.endMs);
+      if (right <= left) continue;
+      if (left > cursor) intervals.push({ start: cursor, stop: left, multiplier: 1 });
+      intervals.push({ start: left, stop: right, multiplier: interval.multiplier });
+      cursor = right;
+    }
+    if (cursor < end) intervals.push({ start: cursor, stop: end, multiplier: 1 });
+    for (let time = start; time < end; time += hourMs) {
+      const hour = new Date(time).toISOString().slice(0, 13);
+      if (configured[hour] != null && Number.isFinite(Number(configured[hour])) && Number(configured[hour]) >= 0) continue;
+      const nearest = observations.reduce((best, row) => !best || Math.abs(row.time - time) < Math.abs(best.time - time) ? row : best, null);
+      // With no configured observations, peak simultaneous job crew is only a lower-bound estimate.
+      configured[hour] = nearest ? nearest.crew : peak;
+      inferredDates.add(date);
+    }
+  }
+  const filled = normalizeCapacityIntervals(intervals);
+  const estimatedJobs = (input.jobs || []).map(raw => {
+    const job = normalizeJob(raw, filled);
+    if (job && job.activeEndMs == null) {
+      timingDates.add(job.date);
+      splitInterval(job.startedMs, job.completedMs, 1, hour => timingDates.add(hour.slice(0, 10)));
+    }
+    return { ...raw, estimateTiming: true };
+  });
+  const neutralHours = [...(input.neutralHours || [])], neutral = buildNeutralHours(neutralHours);
+  const neutralEstimates = new Set();
+  const neutralObservations = [...neutral].filter(([, allocation]) => [...allocation.values()].some(crew => crew > 0));
+  for (const job of jobs) splitInterval(job.startedMs, job.completedMs, 1, hour => {
+    if (neutral.has(hour) || !neutralObservations.length) return;
+    const time = Date.parse(`${hour}:00:00Z`);
+    const nearest = neutralObservations.reduce((best, row) => !best || Math.abs(Date.parse(`${row[0]}:00:00Z`) - time) < Math.abs(Date.parse(`${best[0]}:00:00Z`) - time) ? row : best, null);
+    for (const [component, crew] of nearest[1]) neutralHours.push({ time: `${hour}:00:00Z`, component, neutral_crew: crew });
+    neutral.set(hour, nearest[1]);
+    neutralEstimates.add(job.date);
+  });
+  const result = calculateStrictUpgradingSelectionUtilization({ ...input, jobs: estimatedJobs, neutralHours, configuredCrewByHour: configured, capacityIntervals: intervals, capacityEvidenceRequired: false });
+  for (const row of result.utilization) {
+    const observed = row.protocol_active_crew_hours + row.claim_locked_crew_hours;
+    if (observed > row.configured_crew_hours) {
+      row.configured_crew_hours = observed;
+      inferredDates.add(row.date);
+      row.capacity_not_observed_crew_hours = 0;
+      row.feasible_neutral_upper_crew_hours = row.protocol_active_crew_hours;
+    }
+    row.estimated = missingToolkitDates.has(row.date) || inferredDates.has(row.date) || timingDates.has(row.date);
+    row.display_available = row.configured_crew_hours > 0;
+    row.toolkit_capacity_complete = !missingToolkitDates.has(row.date);
+    row.configured_capacity_complete = !inferredDates.has(row.date);
+    row.evidence_complete = row.identity_complete = row.display_available && !row.estimated;
+    for (const key of ['protocol_active', 'claim_locked', 'proven_eligible_idle', 'proven_hard_unavailable', 'capacity_not_observed']) row[`${key}_percent`] = row.display_available ? row[`${key}_crew_hours`] / row.configured_crew_hours * 100 : null;
+  }
+  for (const row of result.selection) {
+    row.estimated = neutralEstimates.has(row.date) || timingDates.has(row.date) || jobs.some(job => job.date === row.date && capacityCoverageMs(job.startedMs, job.completedMs, observedIntervals) < job.completedMs - job.startedMs);
+    row.display_available = row.evidence_complete;
+    if (row.estimated) row.evidence_complete = false;
+  }
+  result.estimate_note = [...result.selection, ...result.utilization].some(row => row.estimated)
+    ? 'Estimated: unknown Toolkit periods assume full supply; missing crew uses the nearest configured observation (or observed job crew as a lower bound). Missing neutral allocation uses the nearest observed mix. Completed work is preserved; inconsistent timing/capacity is reconciled to that work.' : null;
+  const available = result.utilization.filter(row => row.display_available);
+  const configuredTotal = available.reduce((sum, row) => sum + row.configured_crew_hours, 0);
+  result.claim_lock.claim_locked_crew_hours = available.reduce((sum, row) => sum + row.claim_locked_crew_hours, 0);
+  result.claim_lock.claim_locked_percent = configuredTotal > 0 ? result.claim_lock.claim_locked_crew_hours / configuredTotal * 100 : null;
+  result.claim_lock.estimated = Boolean(result.estimate_note);
+  result.claim_lock.capacity_evidence_complete = !result.estimate_note;
+  return result;
 }
 module.exports = { calculateUpgradingSelectionUtilization, normalizeJob, splitInterval, normalizeCapacityIntervals, CURRENT_PRICE_WARNING };

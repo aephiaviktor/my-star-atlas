@@ -124,7 +124,7 @@ test('V1.1 renderer contains real scatter, trend, zero line, five-state stack, a
   assert.match(renderer, /optimization-zero-line/);
   assert.match(renderer, /optimization-trend-line/);
   for (const label of ['Protocol active','Claim locked','Proven eligible idle','Capacity not observed']) assert.match(renderer, new RegExp(label));
-  assert.match(renderer, /filter\(\(row\) => row\.evidence_complete/);
+  assert.match(renderer, /row\.display_available \?\? row\.evidence_complete/);
   assert.match(css, /optimization-upgrading-v1-chart svg[^}]+width:\s*100%/s);
   assert.match(css, /grid-template-columns:\s*minmax\(0, 1fr\)/);
 });
@@ -162,13 +162,39 @@ test('supply-adjusted utilization stops running jobs and excludes Toolkit downti
   assert.equal(row.protocol_active_percent, 50);
   assert.equal(result.claim_lock.median_claim_delay_seconds, 1800);
 });
-test('unknown Toolkit history never becomes zero claim delay or a percentage', () => {
+test('unknown Toolkit history renders labelled estimates and preserves completed work', () => {
   const value = input(); value.capacityEvidenceRequired = true;
   const result = calculateUpgradingSelectionUtilization(value);
   assert.equal(result.selection[0].evidence_complete, false);
-  assert.equal(result.claim_lock.claim_locked_crew_hours, null);
-  assert.equal(result.claim_lock.median_claim_delay_seconds, null);
-  assert.ok(result.utilization.every(r => !r.identity_complete && r.protocol_active_percent == null));
+  assert.equal(result.selection[0].display_available, true);
+  assert.equal(result.selection[0].completion_cohort_active_crew_hours, 100);
+  assert.equal(result.claim_lock.claim_locked_crew_hours, 25);
+  assert.equal(result.claim_lock.estimated, true);
+  assert.ok(result.utilization.every(r => r.display_available && r.estimated && Number.isFinite(r.protocol_active_percent)));
+  assert.match(result.estimate_note, /unknown Toolkit periods assume full supply/);
+});
+test('missing neutral hours use nearest observed mix only in best-effort mode', () => {
+  const value = input(); value.capacityEvidenceRequired = true; value.neutralHours.pop();
+  const result = calculateUpgradingSelectionUtilization(value);
+  assert.equal(result.selection[0].display_available, true);
+  assert.equal(result.selection[0].estimated, true);
+});
+test('partial Toolkit evidence retains a known outage while estimating uncovered hours', () => {
+  const value = input(); value.capacityEvidenceRequired = true;
+  value.capacityIntervals = [{start:'2026-08-16T04:00:00Z',stop:'2026-08-16T05:00:00Z',multiplier:0}];
+  const row = calculateUpgradingSelectionUtilization(value).utilization.find(row => row.date === '2026-08-16');
+  assert.equal(row.toolkit_degraded_crew_hours, 100);
+  assert.equal(row.configured_crew_hours, 2300);
+  assert.equal(row.estimated, true);
+});
+test('inconsistent job timing preserves required work and marks the capacity adjustment', () => {
+  const value = input(); value.capacityEvidenceRequired = true;
+  value.jobs[0].completedAt = '2026-08-16T00:00:00Z';
+  const result = calculateUpgradingSelectionUtilization(value);
+  assert.equal(result.selection[0].completion_cohort_active_crew_hours, 100);
+  assert.equal(result.selection[0].display_available, true);
+  assert.equal(result.selection[0].estimated, true);
+  assert.equal(result.utilization.reduce((sum,row) => sum + row.protocol_active_crew_hours,0),100);
 });
 test('known configured days with no completed jobs remain represented; overlapping evidence is rejected', () => {
   const configuredCrewByHour = { '2026-09-06T00': 1 };
@@ -176,4 +202,29 @@ test('known configured days with no completed jobs remain represented; overlappi
   const result = calculateUpgradingSelectionUtilization({ configuredCrewByHour, capacityEvidenceRequired:true, capacityIntervals:[interval,interval] });
   assert.equal(result.utilization.length, 1);
   assert.equal(result.utilization[0].identity_complete, false);
+  assert.equal(result.utilization[0].display_available, true);
+  assert.equal(result.utilization[0].estimated, true);
+});
+
+test('renderer draws both charts when estimates are available but evidence is incomplete', () => {
+  const vm = require('node:vm');
+  const source = fs.readFileSync('electron/renderer.js', 'utf8');
+  const element = () => ({ children: [], style: { setProperty() {} }, append(...nodes) { this.children.push(...nodes); }, replaceChildren() { this.children = []; } });
+  const selection = element(), utilization = element(), shapes = [];
+  const context = {
+    optimizationUpgradingSelectionV1: selection, optimizationUpgradingUtilizationV1: utilization,
+    optimizationUpgradingClaimLockV1: element(), optimizationUpgradingOperationalV1: element(),
+    document: { createElement: element }, getUpgradingV1ChartStartDate: () => '2026-08-14',
+    createOptimizationAnalyticsSvg: () => element(), upgradingSelectionChartView: {},
+    renderUpgradingChartAxes: () => ({ left: 0, top: 0, width: 760, height: 340, right: 0, bottom: 0, x: value => value, y: value => value }),
+    appendOptimizationSvg: (_, kind) => { shapes.push(kind); return element(); }, bindUpgradingAnalyticsChartNavigation() {},
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('function renderUpgradingSelectionUtilizationV1('), source.indexOf('function renderUpgradingOptimizationAnalytics()', source.indexOf('function renderUpgradingSelectionUtilizationV1('))), context);
+  const value = input(); value.capacityEvidenceRequired = true;
+  context.renderUpgradingSelectionUtilizationV1({ selectionUtilizationV1: calculateUpgradingSelectionUtilization(value) });
+  assert.ok(shapes.includes('circle'));
+  assert.ok(shapes.filter(kind => kind === 'rect').length > 1);
+  assert.ok(selection.children.some(node => String(node.textContent).includes('Estimated:')));
+  assert.ok(utilization.children.some(node => String(node.textContent).includes('Estimated:')));
 });

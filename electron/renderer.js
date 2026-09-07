@@ -9446,7 +9446,7 @@ function renderUpgradingSelectionUtilizationV1(result) {
   const upgradingV1ChartStartDate = getUpgradingV1ChartStartDate();
   const completeSelection = (data.selection || [])
     .filter((row) => row.date >= upgradingV1ChartStartDate)
-    .filter((row) => row.evidence_complete && Number.isFinite(row.atlas_per_lp) && Number.isFinite(row.selection_uplift_atlas_per_active_crew_day));
+    .filter((row) => (row.display_available ?? row.evidence_complete) && Number.isFinite(row.atlas_per_lp) && Number.isFinite(row.selection_uplift_atlas_per_active_crew_day));
   if (optimizationUpgradingSelectionV1) {
     optimizationUpgradingSelectionV1.replaceChildren();
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingSelectionV1,760,340);
@@ -9467,15 +9467,16 @@ function renderUpgradingSelectionUtilizationV1(result) {
       for(const row of completeSelection){appendOptimizationSvg(plot,'circle',{cx:axes.x(row.atlas_per_lp),cy:axes.y(row.selection_uplift_atlas_per_active_crew_day),r:5,fill:'#45d6c1',class:'mean-marker'});}
       bindUpgradingAnalyticsChartNavigation(svg, axes, null, 'selection', view, { xMin: autoMinX, xMax: autoMaxX, yMin: autoMinY, yMax: autoMaxY, xFloor: 0 });
     }
-    const warning=document.createElement('strong'); warning.className='optimization-v1-warning'; warning.textContent=data.price_warning; optimizationUpgradingSelectionV1.append(warning);
+    const warning=document.createElement('strong'); warning.className='optimization-v1-warning'; warning.textContent=[data.price_warning, data.estimate_note].filter(Boolean).join(' '); optimizationUpgradingSelectionV1.append(warning);
   }
   if (optimizationUpgradingUtilizationV1) {
     optimizationUpgradingUtilizationV1.replaceChildren();
     const series=[['Protocol active','protocol_active','#22c55e'],['Claim locked','claim_locked','#f59e0b'],['Proven eligible idle','proven_eligible_idle','#38bdf8'],['Capacity not observed','capacity_not_observed','#64748b']];
     const legend=document.createElement('div');legend.className='optimization-v1-legend';for(const [label,,color] of series){const item=document.createElement('span');item.textContent=label;item.style.setProperty('--legend-color',color);legend.append(item);}optimizationUpgradingUtilizationV1.append(legend);
     const allRows=(data.utilization||[]).filter((row) => row.date >= upgradingV1ChartStartDate);
-    const rows=allRows.filter(r=>r.identity_complete);
+    const rows=allRows.filter(r=>r.display_available ?? r.identity_complete);
     const missing=allRows.length-rows.length;
+    if(data.estimate_note){const note=document.createElement('div');note.textContent=data.estimate_note;optimizationUpgradingUtilizationV1.append(note);}
     if(missing){const note=document.createElement('div');note.textContent=`${missing} UTC day(s) unavailable: incomplete evidence or no effective capacity.`;optimizationUpgradingUtilizationV1.append(note);}
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingUtilizationV1,760,340);
     if(!rows.length) unavailable(optimizationUpgradingUtilizationV1,'Supply-adjusted utilization is unavailable: Toolkit history or configured crew coverage is incomplete.');
@@ -9483,11 +9484,11 @@ function renderUpgradingSelectionUtilizationV1(result) {
   }
   if (optimizationUpgradingClaimLockV1) { const claim=data.claim_lock||{}; optimizationUpgradingClaimLockV1.textContent=`${claim.claim_locked_crew_hours?.toLocaleString(undefined,{maximumFractionDigits:1}) ?? '--'} crew-hours · ${claim.claim_locked_percent?.toFixed(2) ?? '--'}% · delay median ${claim.median_claim_delay_seconds?.toFixed(1) ?? '--'}s · P90 ${claim.p90_claim_delay_seconds?.toFixed(1) ?? '--'}s · P95 ${claim.p95_claim_delay_seconds?.toFixed(1) ?? '--'}s · max ${claim.maximum_claim_delay_seconds?.toFixed(1) ?? '--'}s · attempts/retries/failures: NOT OBSERVED`; optimizationUpgradingClaimLockV1.title='Claim-locked capacity starts after the required Toolkit-clock work has finished. Crew-hours exclude Toolkit-empty time; delay statistics use wall-clock time after work finished.'; }
   if (optimizationUpgradingOperationalV1) {
-    const rows=(data.utilization||[]).filter(row=>row.identity_complete), status=data.toolkit_capacity?.sync_status;
+    const rows=(data.utilization||[]).filter(row=>row.display_available ?? row.identity_complete), status=data.toolkit_capacity?.sync_status;
     const active=rows.reduce((sum,row)=>sum+row.protocol_active_crew_hours,0), effective=rows.reduce((sum,row)=>sum+row.configured_crew_hours,0);
     const blocked=rows.reduce((sum,row)=>sum+(row.toolkit_degraded_crew_hours||0),0);
-    const statusText={baseline_only:'First reliable observation saved; earlier Toolkit history is unavailable.',catching_up:'Toolkit history catch-up is in progress.',reconciled:'Toolkit history reconciled.',unchanged:'No newer finalized observation.',history_gap:'A gap longer than the retained history requires a new baseline.',upkeep_clock_reconciliation_failed:'A Toolkit history interval failed reconciliation and remains unavailable.',upkeep_configuration_changed:'An upkeep configuration change requires a new baseline.'}[status] || 'Toolkit history sync is unavailable; only previously reconciled periods are shown.';
-    optimizationUpgradingOperationalV1.textContent=`Supply-adjusted utilization: ${effective>0?(active/effective*100).toFixed(2)+'%':'--'} across covered days. Toolkit downtime excluded: ${rows.length?blocked.toLocaleString(undefined,{maximumFractionDigits:1}):'--'} crew-hours. ${statusText} Unclassified capacity remains NOT OBSERVED, not proven idle.`;
+    const statusText={baseline_only:'First reliable observation saved; earlier Toolkit history is estimated.',catching_up:'Toolkit history catch-up is in progress.',reconciled:'Toolkit history reconciled.',unchanged:'No newer finalized observation.',history_gap:'A gap longer than the retained history requires a new baseline.',upkeep_clock_reconciliation_failed:'A Toolkit history interval failed reconciliation and uses estimated supply.',upkeep_configuration_changed:'An upkeep configuration change requires a new baseline.'}[status] || 'Toolkit history sync is unavailable; gaps use estimated supply.';
+    optimizationUpgradingOperationalV1.textContent=`Supply-adjusted utilization: ${effective>0?(active/effective*100).toFixed(2)+'%':'--'} across available days. Toolkit downtime excluded: ${rows.length?blocked.toLocaleString(undefined,{maximumFractionDigits:1}):'--'} crew-hours. ${statusText} ${data.estimate_note || ''} Unclassified capacity remains NOT OBSERVED, not proven idle.`;
   }
 }
 
