@@ -79,13 +79,16 @@ calls claim lock estimated (Toolkit pauses can inflate it), and the operational
 summary is named Feasible-Neutral Capacity Range rather than implying an ATLAS result.
 
 
-## UTC-boundary collector
+## Hourly and UTC-boundary collector
 
 While MSA is running, a main-process collector captures all three PHANTOM
 accounts every 30 seconds from 23:55 through 00:10 UTC, independently of the
-selected tab/faction. It also captures on startup and after a delayed timer
+selected tab/faction. Outside that window it captures once per UTC hour, on
+the first timer tick in that hour (normally within 30 seconds, plus any ongoing
+capture/upload delay). Midnight uses the same capture pass, not an extra hourly
+pass. It also captures on startup and after a delayed timer
 (suspension/resume or a wall-clock jump). Outside this window its timer checks
-only the clock, with no regular daytime RPC. Each faction fails independently;
+the clock between hourly captures and publication retries. Each faction fails independently;
 subsequent boundary ticks retry. No transaction scan is triggered by this collector.
 Clock observations are now published independently to Influx as described below. It uses the existing RPC provider and finalized bank
 capture. Quit stops scheduling; an offline/closed app cannot collect observations.

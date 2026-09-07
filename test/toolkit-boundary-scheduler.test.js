@@ -30,7 +30,7 @@ test('saved raw observations recover a complete UTC day without proration on res
   assert.equal(table.rows[0].unknownSeconds,0);
   assert.equal(table.rows[0].estimatedDowntimeSeconds,null);
 });
-test('scheduler captures startup, both sides of midnight, and suspension recovery without daytime polling', async () => {
+test('scheduler captures startup, both sides of midnight, and suspension recovery without recapturing between scheduled observations', async () => {
   let at=(midnight-3600)*1000, callback, calls=0, cleared=false;
   const scheduler=createToolkitBoundaryScheduler({now:()=>at,capture:async()=>{calls++;},
     setTimer:fn=>{callback=fn;return 1;},clearTimer:()=>{cleared=true;}});
@@ -58,4 +58,25 @@ test('daytime publication retries every five minutes without recapturing account
  await scheduler.start();
  for(let i=0;i<20;i++){at+=30000;await callback();}
  assert.equal(captures,1);assert.equal(retries,2);scheduler.stop();
+});
+
+test('hourly captures follow UTC hour changes without a second midnight pass', async () => {
+  let at = Date.parse('2026-09-07T20:59:45Z'), callback;
+  const captures = [], retries = [];
+  const scheduler = createToolkitBoundaryScheduler({ now: () => at,
+    capture: async () => { captures.push(at); }, retry: async () => { retries.push(at); },
+    setTimer: fn => { callback = fn; }, clearTimer: () => {} });
+  await scheduler.start();
+  // Continuous ticks: hour captures must not depend on suspension recovery.
+  while (at < Date.parse('2026-09-08T00:11:15Z')) { at += 30000; await callback(); }
+  const iso = captures.map(value => new Date(value).toISOString());
+  assert.deepEqual(iso.filter(value => value < '2026-09-07T23:55'), [
+    '2026-09-07T20:59:45.000Z', '2026-09-07T21:00:15.000Z',
+    '2026-09-07T22:00:15.000Z', '2026-09-07T23:00:15.000Z',
+  ]);
+  assert.equal(iso.filter(value => value === '2026-09-08T00:00:15.000Z').length, 1);
+  assert.equal(iso.filter(value => value >= '2026-09-07T23:55' && value < '2026-09-08T00:10').length, 30);
+  assert.equal(iso.filter(value => value >= '2026-09-08T00:10').length, 0);
+  assert.ok(retries.length > 0);
+  scheduler.stop();
 });
