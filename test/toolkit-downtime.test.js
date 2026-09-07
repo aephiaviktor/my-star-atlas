@@ -38,6 +38,9 @@ test('table renders unknown versus observed zero and clears stale rows on refres
  context.renderToolkitDowntime({toolkitDowntime:summarizeToolkitDowntime({...options,intervals:[interval('00:00','01:00',1)]})});
  assert.equal(body.children.length,1);assert.equal(body.children[0].children[3].textContent,'0h 0m 0s');
  assert.equal(body.children[0].children[5].textContent,'~0h 0m 0s');
+ context.renderToolkitDowntime({toolkitDowntime:summarizeToolkitDowntime({...options,clockStatus:'clock_observed',status:'upkeep_influx_http_401',diagnostic:{stage:'history_publish'},clockWindows:[{start:'2026-09-06T00:00:00Z',stop:'2026-09-06T02:00:00Z',downtimeSeconds:1800}]})});
+ assert.equal(body.children[0].children[3].textContent,'0h 30m 0s');
+ assert.match(status.textContent,/Account-clock measurements available/);assert.match(status.textContent,/History publication: Storage returned HTTP 401/);
  context.renderToolkitDowntime({});assert.equal(body.children.length,1);assert.equal(body.children[0].children[0].colSpan,7);
 });
 
@@ -47,4 +50,18 @@ test('Toolkit evidence is returned separately and is not passed into chart calcu
  assert.doesNotMatch(call,/upkeep|capacityIntervals|capacityEvidenceRequired|toolkit/i);
  assert.match(main,/selectionUtilizationV1, toolkitDowntime, playerProfile/);
  assert.match(main,/fetchPhantomUpkeepCapacity\(settings, aephiaFaction\)\.catch/);
+});
+
+test('same-day account clocks cover real stopped time without double-counting replay', () => {
+ const window={start:'2026-09-06T00:00:00Z',stop:'2026-09-06T02:00:00Z',downtimeSeconds:1800};
+ const out=summarizeToolkitDowntime({...options, clockWindows:[window,window], intervals:[interval('00:00','03:00',1)]});
+ const row=out.rows[0];assert.equal(row.coveredSeconds,10800);assert.equal(row.downtimeSeconds,1800);
+ assert.equal(row.unknownSeconds,75600);assert.equal(row.evidenceStatus,'Account clock · partial');
+});
+test('aggregate clock downtime is never silently prorated across midnight or filters', () => {
+ const window={start:'2026-09-06T23:00:00Z',stop:'2026-09-07T01:00:00Z',downtimeSeconds:1800};
+ const out=summarizeToolkitDowntime({...options,stop:'2026-09-07T02:00:00Z',clockWindows:[window]});
+ assert.equal(out.unallocatedClockWindows.length,1);assert.ok(out.rows.every(row=>row.downtimeSeconds===null));
+ const filtered=summarizeToolkitDowntime({...options,start:'2026-09-06T23:30:00Z',clockWindows:[window]});
+ assert.equal(filtered.rows[0].coveredSeconds,0);
 });

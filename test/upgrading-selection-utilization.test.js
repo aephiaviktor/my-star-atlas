@@ -137,7 +137,7 @@ test('production integration reuses existing acquisition functions and exposes f
   assert.match(main, /calculateUpgradingSelectionUtilization/);
   assert.match(main, /netAtlasDaily\.jobs/);
   assert.match(main, /neutralUpgradingDaily\.hourlyAllocations/);
-  for (const wording of ['Component Selection Uplift — Matched Active Capacity', 'UTC-Calendar Crew-State Utilization', 'Claim-Locked Capacity', 'Operational Result vs Configured 24h Neutral']) assert.match(html, new RegExp(wording));
+  for (const wording of ['Component Selection Uplift — Matched Active Capacity', 'UTC-Calendar Crew-State Utilization', 'Claim-Locked Capacity', 'Feasible-Neutral Capacity Range']) assert.match(html, new RegExp(wording));
   assert.doesNotMatch(renderer, /This measures selection, not uptime/);
   assert.doesNotMatch(renderer, /Unknown time is shown, never silently assigned/);
   assert.match(renderer, /attempts\/retries\/failures: NOT OBSERVED/);

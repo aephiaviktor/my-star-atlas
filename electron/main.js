@@ -33,6 +33,7 @@ const { createRpcFetcher } = require('./rpc-resilience');
 const { calculateUpgradingSelectionUtilization } = require('./upgrading-selection-utilization');
 const SAGE2_UPKEEP_IDL = require('./sage2-upkeep-idl.json');
 const { syncUpkeepHistory } = require('./starbase-upkeep-sync');
+const { observeToolkitClock } = require('./toolkit-clock-observations');
 const { summarizeToolkitDowntime } = require('./toolkit-downtime');
 const { projectDecodedUpkeepState, reconcileToolkitHistory, mergeToolkitIntervals, decodeToolkitDepositsFromTransactions, splitCapacityIntervalsByUtcHour, formatCapacityHourLine } = require('./starbase-upkeep-capacity');
 const { createTelemetryLedger } = require('./telemetry-ledger');
@@ -1341,7 +1342,27 @@ async function fetchPhantomUpkeepCapacity(settings, faction) {
   const run = (async () => {
     const file = path.join(app.getPath('userData'), 'starbase-upkeep-v2', `${scope}.json`);
     const address = phantomStarbaseAddress(faction), connection = createSolanaConnection(settings);
-    let stored = null, trustedBatches = [];
+    let stored = null, trustedBatches = [], stage = 'snapshot';
+    let latest = null, snapshotStatus = null;
+    let observations = { clockWindows: [], clockStatus: 'baseline_only' };
+    const safeStatus = error => /^upkeep_[a-z0-9_]+$/.test(String(error?.message)) ? error.message : 'upkeep_sync_unavailable';
+    try { latest = await capturePhantomUpkeepState(settings, faction); }
+    catch (error) { snapshotStatus = safeStatus(error); }
+    {
+      try {
+        observations = await observeToolkitClock({ latest,
+          load: async () => {
+            try {
+              const value = JSON.parse(await fs.readFile(file + '.observations', 'utf8'));
+              if (value.latest?.faction !== faction || value.latest?.starbasePublicKey !== address.toBase58()) throw new Error('upkeep_scope_mismatch');
+              return value;
+            }
+            catch (error) { if (error.code !== 'ENOENT') throw new Error('upkeep_observations_invalid'); return null; }
+          },
+          save: value => writeJsonAtomic(file + '.observations', value),
+        });
+      } catch (error) { observations.clockStatus = safeStatus(error) === 'upkeep_sync_unavailable' ? 'upkeep_observations_save_failed' : safeStatus(error); }
+    }
     const read = async () => {
       try { return JSON.parse(await fs.readFile(file, 'utf8')); }
       catch (error) { if (error.code !== 'ENOENT') throw new Error('upkeep_checkpoint_invalid'); }
@@ -1357,6 +1378,7 @@ async function fetchPhantomUpkeepCapacity(settings, faction) {
       return { version: 2, anchor: records.at(-1).target, pending: null, batches };
     };
     try {
+      stage = 'history_read';
       stored = await read();
       if (stored) {
         if (stored.version !== 2 || stored.anchor?.starbasePublicKey !== address.toBase58() || stored.anchor?.faction !== faction || !Array.isArray(stored.batches)) throw new Error('upkeep_checkpoint_invalid');
@@ -1367,12 +1389,14 @@ async function fetchPhantomUpkeepCapacity(settings, faction) {
         });
       }
       trustedBatches = stored?.batches || [];
+      stage = 'history_replay';
       const journal = await syncUpkeepHistory({ load: async () => stored,
         save: async value => { await writeJsonAtomic(file, value); stored = value; },
-        capture: () => capturePhantomUpkeepState(settings, faction),
+        capture: async () => { if (!latest) { stage = 'snapshot'; throw new Error(snapshotStatus); } return latest; },
         signatures: before => connection.getSignaturesForAddress(address, { limit: 1000, ...(before ? { before } : {}) }, 'finalized'),
         decode: rows => decodePhantomUpkeepDeposits(connection, rows, address),
         publish: async record => {
+          stage = 'history_publish';
           const text = JSON.stringify(record).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
           const point = `starbase_upkeep_state,model=toolkit-stop-v2,faction=${faction},starbase=${record.target.starbase},fromSlot=${record.anchor.slot},toSlot=${record.target.slot} record="${text}" ${BigInt(record.target.observedAt) * 1000000000n}`;
           const intervals = mergeToolkitIntervals([...(stored?.batches || []).flatMap(r => r.intervals), ...record.intervals]);
@@ -1382,13 +1406,13 @@ async function fetchPhantomUpkeepCapacity(settings, faction) {
           await writeUpkeepStateLineToInflux(settings, [point, ...hours].join('\n'));
         },
       });
-      return { intervals: mergeToolkitIntervals(journal.batches.flatMap(r => r.intervals)), status: journal.status };
+      return { ...observations, intervals: mergeToolkitIntervals(journal.batches.flatMap(r => r.intervals)), status: journal.status };
     } catch (error) {
       // Do not expose transport/settings exceptions or turn them into a full-speed fallback.
-      const status = /^upkeep_[a-z_]+$/.test(String(error?.message)) ? error.message : 'upkeep_sync_unavailable';
+      const status = safeStatus(error);
       let intervals = [];
       try { intervals = mergeToolkitIntervals(trustedBatches.flatMap(r => r.intervals)); } catch (_) { /* Conflicting evidence remains unavailable. */ }
-      return { intervals, status };
+      return { ...observations, intervals, status, diagnostic: { stage, code: status } };
     }
   })();
   phantomUpkeepFlights.set(scope, run);

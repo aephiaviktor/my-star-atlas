@@ -9,17 +9,18 @@ const { PublicKey } = require('@solana/web3.js');
 const { BN, BorshInstructionCoder } = require('@staratlas/anchor');
 const capacity = require('../electron/starbase-upkeep-capacity');
 const { syncUpkeepHistory } = require('../electron/starbase-upkeep-sync');
+const { observeToolkitClock } = require('../electron/toolkit-clock-observations');
 const source = fs.readFileSync('electron/main.js','utf8');
 const t = Date.parse('2026-09-07T00:00:00Z')/1000;
 const address = new PublicKey('11111111111111111111111111111111');
 const anchor = { faction:'MUD',starbase:'MUD-PHANTOM',starbasePublicKey:address.toBase58(),slot:10,observedAt:t,globalTime:t,localTime:t,balance:600,depletionRate:100,reserve:3600,level:6 };
 test('production wrapper round-trips scoped replenishment evidence through local and Influx recovery', async () => {
- let saved=null, current=anchor, remote=[]; const writes=[];
- const context = { ...capacity, syncUpkeepHistory, crypto, path,
+ let saved=null, observationSaved=null, current=anchor, remote=[]; const writes=[];
+ const context = { ...capacity, syncUpkeepHistory, observeToolkitClock, crypto, path,
    phantomUpkeepFlights:new Map(), app:{getPath:()=>'/unused'},
    PHANTOM_STARBASE_COORDINATES:{MUD:{name:'MUD-PHANTOM'}}, phantomStarbaseAddress:()=>address,
-   fs:{readFile:async()=>{if(saved)return JSON.stringify(saved);throw Object.assign(new Error(),{code:'ENOENT'});}},
-   writeJsonAtomic:async(_,value)=>{saved=structuredClone(value);},
+   fs:{readFile:async file=>{const value=file.endsWith('.observations')?observationSaved:saved;if(value)return JSON.stringify(value);throw Object.assign(new Error(),{code:'ENOENT'});}},
+   writeJsonAtomic:async(file,value)=>{if(file.endsWith('.observations'))observationSaved=structuredClone(value);else saved=structuredClone(value);},
    getInfluxBaseUrl:()=> 'scope', escapeFluxString:v=>v,
    queryInfluxFlux:async()=>remote, parseInfluxCsv:v=>v,
    capturePhantomUpkeepState:async()=>current,
@@ -32,12 +33,23 @@ test('production wrapper round-trips scoped replenishment evidence through local
  const settings={influxBucket:'bucket'};
  let out=await context.fetchPhantomUpkeepCapacity(settings,'MUD');assert.equal(out.status,'baseline_only');
  current={...anchor,slot:20,observedAt:t+3600,globalTime:t+1200,localTime:t+600,balance:1200};
- out=await context.fetchPhantomUpkeepCapacity(settings,'MUD');assert.equal(out.status,'reconciled');assert.equal(out.intervals.length,4);
+ out=await context.fetchPhantomUpkeepCapacity(settings,'MUD');assert.equal(out.status,'reconciled');assert.equal(out.intervals.length,4);assert.equal(out.clockWindows[0].downtimeSeconds,1800);
  assert.equal(saved.batches[0].events[0].faction,'MUD');assert.equal(saved.batches[0].events[0].starbase,'MUD-PHANTOM');
  assert.match(writes.at(-1),/effectiveCapacitySeconds=1800\.0/);
  saved=null;out=await context.fetchPhantomUpkeepCapacity(settings,'MUD');assert.equal(out.status,'unchanged');assert.equal(out.intervals.length,4);
  saved={version:2,anchor,batches:[{intervals:out.intervals}]};
  out=await context.fetchPhantomUpkeepCapacity(settings,'MUD');assert.equal(out.intervals.length,0);
+ assert.equal(out.clockWindows[0].downtimeSeconds,1800);assert.equal(out.diagnostic.stage,'history_read');
+ saved=null; remote=[];context.queryInfluxFlux=async()=>{throw new Error('raw URL or secret must never be returned');};
+ out=await context.fetchPhantomUpkeepCapacity(settings,'MUD');assert.equal(out.clockWindows[0].downtimeSeconds,1800);
+ assert.equal(out.status,'upkeep_sync_unavailable');assert.equal(out.diagnostic.stage,'history_read');
+ assert.doesNotMatch(JSON.stringify(out),/raw URL|secret/);
+ context.queryInfluxFlux=async()=>[];context.writeUpkeepStateLineToInflux=async()=>{throw new Error('upkeep_influx_http_401');};
+ out=await context.fetchPhantomUpkeepCapacity(settings,'MUD');assert.equal(out.clockWindows[0].downtimeSeconds,1800);
+ assert.equal(out.status,'upkeep_influx_http_401');assert.equal(out.diagnostic.stage,'history_publish');
+ context.capturePhantomUpkeepState=async()=>{throw new Error('provider unavailable');};
+ out=await context.fetchPhantomUpkeepCapacity(settings,'MUD');assert.equal(out.clockWindows[0].downtimeSeconds,1800);
+ assert.equal(out.clockStatus,'upkeep_snapshot_unavailable');assert.equal(out.diagnostic.stage,'snapshot');
 });
 test('decoder matches the exact Starbase account position and preserves CPI order',()=>{
  const coder=new BorshInstructionCoder(require('../electron/sage2-upkeep-idl.json'));
@@ -54,7 +66,7 @@ test('overlapping independent captures merge agreement but refuse conflicting cl
  assert.throws(()=>capacity.mergeToolkitIntervals([interval,{...interval,multiplier:0}]),/history_conflict/);
 });
 test('public finalized PHANTOM accounts decode coherently with the bundled SAGE2 layout', () => {
-  const fixture = require('./fixtures/phantom-upkeep-mainnet-20260907.json');
+  for (const fixture of [require('./fixtures/phantom-upkeep-mainnet-20260907.json'), require('./fixtures/phantom-upkeep-mainnet-20260907-later.json')]) {
   const { BorshAccountsCoder } = require('@staratlas/anchor');
   const coder = new BorshAccountsCoder(require('../electron/sage2-upkeep-idl.json'));
   const data = fixture.raw.value.map(row => Buffer.from(row.data[0], 'base64'));
@@ -66,5 +78,6 @@ test('public finalized PHANTOM accounts decode coherently with the bundled SAGE2
       starbasePublicKey:expected.starbasePublicKey, observedSlot:fixture.raw.context.slot,
       observedAt:Number(data[4].readBigInt64LE(32)), decodedStarbase:coder.decode('starbase', data[i]), decodedGameState:gs });
     assert.deepEqual(actual,expected); assert.equal(actual.depletionRate,7700);
+  }
   }
 });

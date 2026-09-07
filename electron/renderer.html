@@ -935,17 +935,17 @@
                   <div id="optimization-upgrading-utilization-v1" class="optimization-analytics-chart optimization-upgrading-v1-chart">Awaiting UTC-calendar crew-state evidence</div>
                 </section>
                 <section class="optimization-analytics-card optimization-analytics-summary-card">
-                  <h3>Claim-Locked Capacity</h3>
+                  <h3>Estimated Claim-Locked Capacity</h3>
                   <p id="optimization-upgrading-claim-lock-v1" class="optimization-analytics-note">Awaiting claim evidence</p>
                 </section>
                 <section class="optimization-analytics-card optimization-analytics-summary-card">
-                  <h3>Operational Result vs Configured 24h Neutral</h3>
+                  <h3>Feasible-Neutral Capacity Range</h3>
                   <p id="optimization-upgrading-operational-v1" class="optimization-analytics-note">Awaiting UTC-calendar operational evidence</p>
                 </section>
                 <section class="optimization-analytics-card optimization-analytics-summary-card">
                   <h3>Toolkit Downtime — Validation</h3>
                   <p id="optimization-upgrading-toolkit-status" class="optimization-analytics-note" role="status">Awaiting Toolkit observations</p>
-                  <p class="optimization-analytics-note">Independent of the charts. Covered time and downtime are reconstructed from reconciled account and refill evidence; historical shortage/refill validation is still pending. Unknown time is not zero downtime. Estimated total extrapolates that UTC day's covered downtime share across its unknown time; short coverage can make this estimate unreliable. No estimate is made without coverage. Today includes elapsed time only.</p>
+                  <p class="optimization-analytics-note">Independent of the charts. Covered time and downtime come from finalized account-clock differences or reconciled refill timelines. Account-clock differences measure total stopped time assuming unchanged upkeep rules, not exact outage start/end times; independent refill-timeline validation is still pending. Unknown time is not zero downtime. Estimated total extrapolates that UTC day's covered downtime share across its unknown time; short coverage can make this estimate unreliable. No estimate is made without coverage. Today includes elapsed time only. Clock windows crossing midnight or a date-filter boundary are reported separately until their downtime can be assigned to a day. Two local observations are needed; opening or refreshing this view captures the next observation.</p>
                   <div class="optimization-toolkit-table-wrap">
                     <table class="fleet-table"><thead><tr><th scope="col">UTC Date</th><th scope="col">Starbase</th><th scope="col">Covered</th><th scope="col">Toolkit Downtime</th><th scope="col">Unknown</th><th scope="col">Estimated Total</th><th scope="col">Evidence</th></tr></thead>
                       <tbody id="optimization-upgrading-toolkit-body"><tr><td colspan="7">Awaiting Toolkit observations</td></tr></tbody>

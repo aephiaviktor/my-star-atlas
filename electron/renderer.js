@@ -9485,8 +9485,8 @@ function renderUpgradingSelectionUtilizationV1(result) {
       bindOptimizationAnalyticsTooltip(bar, `${row.date} UTC · ${label}: ${tooltipNumber(row[`${key}_percent`])}% · ${tooltipNumber(row[`${key}_crew_hours`])} crew-hours · configured capacity ${tooltipNumber(row.configured_crew_hours)} crew-hours${key === 'capacity_not_observed' ? ' · Unclassified capacity; not measured idle time or Toolkit downtime.' : ''}`);
       bottom+=percent;}});}
   }
-  if (optimizationUpgradingClaimLockV1) { const claim=data.claim_lock||{}; optimizationUpgradingClaimLockV1.textContent=`${claim.claim_locked_crew_hours?.toLocaleString(undefined,{maximumFractionDigits:1}) ?? '--'} crew-hours · ${claim.claim_locked_percent?.toFixed(2) ?? '--'}% · delay median ${claim.median_claim_delay_seconds?.toFixed(1) ?? '--'}s · P90 ${claim.p90_claim_delay_seconds?.toFixed(1) ?? '--'}s · P95 ${claim.p95_claim_delay_seconds?.toFixed(1) ?? '--'}s · max ${claim.maximum_claim_delay_seconds?.toFixed(1) ?? '--'}s · attempts/retries/failures: NOT OBSERVED`; optimizationUpgradingClaimLockV1.title='Crew whose protocol work ended but whose completion/claim had not succeeded. This is not active or idle and is not presumed unavoidable.'; }
-  if (optimizationUpgradingOperationalV1) { const rows=data.utilization||[]; const lower=rows.reduce((s,r)=>s+r.feasible_neutral_lower_crew_hours,0), upper=rows.reduce((s,r)=>s+r.feasible_neutral_upper_crew_hours,0); optimizationUpgradingOperationalV1.textContent=`UTC-calendar operational measurement combines selection and utilization; it is not component-selection uplift. Feasible-neutral capacity: ${lower.toLocaleString(undefined,{maximumFractionDigits:1})}–${upper.toLocaleString(undefined,{maximumFractionDigits:1})} crew-hours. Residual NOT OBSERVED remains uncertainty.`; }
+  if (optimizationUpgradingClaimLockV1) { const claim=data.claim_lock||{}; optimizationUpgradingClaimLockV1.textContent=`${claim.claim_locked_crew_hours?.toLocaleString(undefined,{maximumFractionDigits:1}) ?? '--'} crew-hours · ${claim.claim_locked_percent?.toFixed(2) ?? '--'}% · delay median ${claim.median_claim_delay_seconds?.toFixed(1) ?? '--'}s · P90 ${claim.p90_claim_delay_seconds?.toFixed(1) ?? '--'}s · P95 ${claim.p95_claim_delay_seconds?.toFixed(1) ?? '--'}s · max ${claim.maximum_claim_delay_seconds?.toFixed(1) ?? '--'}s · attempts/retries/failures: NOT OBSERVED. Estimated finish assumes uninterrupted upgrading; Toolkit pauses can be included in this delay.`; optimizationUpgradingClaimLockV1.title='Estimated capacity between calculated finish and recorded claim. Toolkit pauses are not removed; this is not a pure measure of claim performance.'; }
+  if (optimizationUpgradingOperationalV1) { const rows=data.utilization||[]; const lower=rows.reduce((s,r)=>s+r.feasible_neutral_lower_crew_hours,0), upper=rows.reduce((s,r)=>s+r.feasible_neutral_upper_crew_hours,0); optimizationUpgradingOperationalV1.textContent=`UTC-calendar capacity bounds, not an ATLAS profit result. Feasible-neutral capacity: ${lower.toLocaleString(undefined,{maximumFractionDigits:1})}–${upper.toLocaleString(undefined,{maximumFractionDigits:1})} crew-hours. Lower bound: classified productive work; upper bound: configured capacity minus classified claim lock and proven unavailability. Toolkit downtime is not applied; residual NOT OBSERVED remains uncertainty.`; }
 }
 
 function renderToolkitDowntime(result) {
@@ -9498,14 +9498,33 @@ function renderToolkitDowntime(result) {
     baseline_only: 'First observation saved; earlier periods remain unknown.',
     catching_up: 'History catch-up in progress; available intervals are shown.',
     reconciled: 'Available history reconciled.', unchanged: 'No newer finalized observation.',
-    history_gap: 'History gap; a new baseline is needed.',
+    history_gap: 'History gap; a new baseline was saved.',
     upkeep_clock_reconciliation_failed: 'Some history could not be reconciled; available intervals remain shown.',
-    upkeep_configuration_changed: 'Upkeep configuration changed; a new baseline is needed.',
+    upkeep_configuration_changed: 'Upkeep configuration changed; a new baseline was saved.',
+    upkeep_anchor_history_not_observed: 'The RPC provider did not return history back to the saved snapshot.',
+    upkeep_transaction_not_observed: 'A required transaction is unavailable from the RPC provider.',
+    upkeep_transaction_order_not_observed: 'The RPC provider could not establish refill transaction order.',
+    upkeep_checkpoint_invalid: 'The saved replay checkpoint could not be validated.',
+    upkeep_influx_not_configured: 'Toolkit history storage is not configured.',
+    upkeep_snapshot_invalid: 'The account snapshot could not be decoded with the supported upkeep rules.',
+    upkeep_clock_slot_mismatch: 'The RPC account snapshot and chain Clock were not at the same slot.',
   }[data?.status] || 'Toolkit history unavailable or incomplete; retained intervals are shown when available.';
-  if (status) status.textContent = data ? statusText : 'Awaiting Toolkit observations';
   body.replaceChildren();
   const duration = seconds => seconds == null || !Number.isFinite(seconds) ? '--'
     : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m ${Math.floor(seconds % 60)}s`;
+  if (status) {
+    const stages = { snapshot: 'Account capture', history_read: 'History read', history_replay: 'Transaction replay', history_publish: 'History publication' };
+    const clockText = { clock_observed: 'Account-clock measurements available.', baseline_only: 'First clock observation saved; refresh later for a measured window.',
+      upkeep_observations_invalid: 'Local clock observations could not be read.', upkeep_observations_save_failed: 'Local clock observations could not be saved.',
+      upkeep_snapshot_unavailable: 'A fresh finalized account snapshot is unavailable.', upkeep_configuration_changed: 'Clock comparison skipped a changed-configuration window.',
+      upkeep_clock_reconciliation_failed: 'Clock comparison skipped an inconsistent window; other measurements remain available.' }[data?.clockStatus] || '';
+    const last = data?.latestClockWindow;
+    const windowText = last ? ` Latest clock window ${last.start}–${last.stop}: ${duration(last.downtimeSeconds)} stopped.` : '';
+    const pending = data?.unallocatedClockWindows?.length ? ' Some clock windows cross a day/filter boundary; their totals are not assigned to daily rows.' : '';
+    const stageText = stages[data?.diagnostic?.stage];
+    const httpStatus = /^upkeep_influx_http_([0-9]{3})$/.exec(data?.status || '');
+    status.textContent = data ? `${clockText}${windowText} ${stageText ? stageText + ': ' : ''}${httpStatus ? 'Storage returned HTTP ' + httpStatus[1] + '.' : statusText}${pending}`.trim() : 'Awaiting Toolkit observations';
+  }
   for (const row of data?.rows || []) {
     const tr = document.createElement('tr');
     for (const value of [row.date, row.starbase, duration(row.coveredSeconds), duration(row.downtimeSeconds), duration(row.unknownSeconds),
