@@ -9151,6 +9151,7 @@ const upgradingDurationSeconds = Object.freeze({ 'Power Source': 15, Framework: 
 const upgradingCargoWeight = Object.freeze({ 'Power Source': 2, Framework: 1, Electromagnet: 4, Electronics: 2, 'Field Stabilizer': 6, 'Particle Accelerator': 6, 'Radiation Absorber': 6, 'Survey Data Unit': 1, Ink: 1 });
 const selectedUpgradingRedemptionComponents = new Set(upgradingMarginComponents.map(([name]) => name).filter((name) => name !== 'Ink'));
 const upgradingRedemptionChartView = { xMin: 10_000_000_000, xMax: 50_000_000_000, netYMin: null, netYMax: null, marginYMin: null, marginYMax: null };
+const upgradingSelectionChartView = { xMin: null, xMax: null, selectionYMin: null, selectionYMax: null };
 const upgradingScatterChartView = { xMin: null, xMax: null, scatterYMin: null, scatterYMax: null };
 const upgradingLpPerCrewByRateChartView = { xMin: null, xMax: null, lpPerCrewByRateYMin: null, lpPerCrewByRateYMax: null };
 const upgradingComponentCostByRateChartView = { xMin: null, xMax: null, componentCostByRateYMin: null, componentCostByRateYMax: null };
@@ -9451,12 +9452,20 @@ function renderUpgradingSelectionUtilizationV1(result) {
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingSelectionV1,760,340);
     if (!completeSelection.length) unavailable(optimizationUpgradingSelectionV1, data.selection?.[0]?.incomplete_reason || 'Matched completion-cohort evidence is incomplete.');
     else if(svg){
-      const xs=completeSelection.map(r=>r.atlas_per_lp),ys=completeSelection.map(r=>r.selection_uplift_atlas_per_active_crew_day),minX=Math.min(...xs)*.96,maxX=Math.max(...xs)*1.04,pad=Math.max(.05,(Math.max(...ys)-Math.min(...ys))*.12),minY=Math.min(0,...ys)-pad,maxY=Math.max(0,...ys)+pad;
+      const xs=completeSelection.map(r=>r.atlas_per_lp),ys=completeSelection.map(r=>r.selection_uplift_atlas_per_active_crew_day),autoMinX=Math.min(...xs)*.96,autoMaxX=Math.max(...xs)*1.04,pad=Math.max(.05,(Math.max(...ys)-Math.min(...ys))*.12),autoMinY=Math.min(0,...ys)-pad,autoMaxY=Math.max(0,...ys)+pad;
+      const view = upgradingSelectionChartView;
+      const minX = Number.isFinite(view.xMin) ? view.xMin : autoMinX, maxX = Number.isFinite(view.xMax) ? view.xMax : autoMaxX;
+      const minY = Number.isFinite(view.selectionYMin) ? view.selectionYMin : autoMinY, maxY = Number.isFinite(view.selectionYMax) ? view.selectionYMax : autoMaxY;
       const axes=renderUpgradingChartAxes(svg,{minY,maxY,xMin:minX,xMax:maxX,xTicks:[minX,minX+(maxX-minX)/2,maxX],xLabel:'ATLAS / LP',yLabel:'Selection uplift ATLAS / active crew-day',height:340,xFormatter:v=>v.toFixed(8),yFormatter:v=>v.toFixed(2)});
-      appendOptimizationSvg(svg,'line',{x1:axes.left,x2:axes.width-axes.right,y1:axes.y(0),y2:axes.y(0),class:'optimization-zero-line'});
+      const defs = appendOptimizationSvg(svg, 'defs');
+      const clip = appendOptimizationSvg(defs, 'clipPath', { id: 'optimization-upgrading-selection-clip' });
+      appendOptimizationSvg(clip, 'rect', { x: axes.left, y: axes.top, width: axes.width - axes.left - axes.right, height: axes.height - axes.top - axes.bottom });
+      const plot = appendOptimizationSvg(svg, 'g', { 'clip-path': 'url(#optimization-upgrading-selection-clip)' });
+      appendOptimizationSvg(plot,'line',{x1:axes.left,x2:axes.width-axes.right,y1:axes.y(0),y2:axes.y(0),class:'optimization-zero-line'});
       const meanX=xs.reduce((a,b)=>a+b,0)/xs.length,meanY=ys.reduce((a,b)=>a+b,0)/ys.length,cov=completeSelection.reduce((s,r)=>s+(r.atlas_per_lp-meanX)*(r.selection_uplift_atlas_per_active_crew_day-meanY),0),variance=xs.reduce((s,x)=>s+(x-meanX)**2,0);
-      if(variance){const slope=cov/variance,intercept=meanY-slope*meanX;appendOptimizationSvg(svg,'line',{x1:axes.x(minX),x2:axes.x(maxX),y1:axes.y(intercept+slope*minX),y2:axes.y(intercept+slope*maxX),class:'optimization-trend-line'});}
-      for(const row of completeSelection){appendOptimizationSvg(svg,'circle',{cx:axes.x(row.atlas_per_lp),cy:axes.y(row.selection_uplift_atlas_per_active_crew_day),r:5,fill:'#45d6c1',class:'mean-marker'});}
+      if(variance){const slope=cov/variance,intercept=meanY-slope*meanX;appendOptimizationSvg(plot,'line',{x1:axes.x(minX),x2:axes.x(maxX),y1:axes.y(intercept+slope*minX),y2:axes.y(intercept+slope*maxX),class:'optimization-trend-line'});}
+      for(const row of completeSelection){appendOptimizationSvg(plot,'circle',{cx:axes.x(row.atlas_per_lp),cy:axes.y(row.selection_uplift_atlas_per_active_crew_day),r:5,fill:'#45d6c1',class:'mean-marker'});}
+      bindUpgradingAnalyticsChartNavigation(svg, axes, null, 'selection', view, { xMin: autoMinX, xMax: autoMaxX, yMin: autoMinY, yMax: autoMaxY, xFloor: 0 });
     }
     const warning=document.createElement('strong'); warning.className='optimization-v1-warning'; warning.textContent=data.price_warning; optimizationUpgradingSelectionV1.append(warning);
   }
