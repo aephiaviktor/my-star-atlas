@@ -21,7 +21,7 @@ test('Crafting and Upgrading expose internal/external cost-basis toggles', () =>
   assert.match(html, /data-earnings-cost-basis="upgrading"/);
   assert.match(html, /Internal Cost Basis/);
   assert.match(html, /External Cost Basis/);
-  assert.match(renderer, /const earningsCostBasisMode = \{\s*crafting: 'internal',\s*upgrading: 'internal'/);
+  assert.match(renderer, /const earningsCostBasisMode = \{\s*scanning: 'internal',\s*mining: 'internal',\s*crafting: 'internal',\s*upgrading: 'internal'/);
   assert.match(renderer, /Ingredient External Value/);
   assert.match(renderer, /Component External Value/);
 });

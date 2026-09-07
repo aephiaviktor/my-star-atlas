@@ -1080,7 +1080,11 @@ const earningsChartMode = {
   upgrading: 'total',
 };
 
+const earningsResourceFallbackColumns = { scanning: [], mining: [] };
+
 const earningsCostBasisMode = {
+  scanning: 'internal',
+  mining: 'internal',
   crafting: 'internal',
   upgrading: 'internal',
 };
@@ -5311,6 +5315,7 @@ function setEarningsCraftingStatus(message) {
 }
 
 function renderEarningsEmpty(message) {
+  earningsResourceFallbackColumns.scanning = [];
   latestEarningsResult = null;
   renderEarningsHeader('scanning');
   renderEarningsNetProfitChart(null, new Map(), { target: earningsNetProfitChart, label: 'Scanning net profit by fleet in ATLAS by day' });
@@ -5334,6 +5339,7 @@ function renderEarningsEmpty(message) {
 }
 
 function renderEarningsMiningEmpty(message) {
+  earningsResourceFallbackColumns.mining = [];
   renderEarningsHeader('mining');
   renderEarningsNetProfitChart(null, new Map(), { target: earningsMiningNetProfitChart, label: 'Mining fleet net profit in ATLAS by day' });
   renderEarningsNetProfitChart(null, new Map(), { target: earningsMiningMaterialNetProfitChart, label: 'Mining raw material net profit in ATLAS by day' });
@@ -5958,6 +5964,9 @@ function getMarketplaceTradeColumnLabel(column) {
 }
 
 function getEarningsMetricGuideEntry(subtab, columnId) {
+  if ((subtab === 'scanning' || subtab === 'mining') && ['foodCosts', 'fuelCosts', 'ammoCosts'].includes(columnId)) {
+    return ['Value of the resource consumed by this activity.', 'Consumed quantity × selected unit cost: current same-starbase Inventory Ledger basis or historical GM price.', 'A header asterisk in Internal mode means this entire resource-cost column uses external prices for the filtered selection.'];
+  }
   return earningsMetricGuideBySubtab[subtab]?.[columnId] || earningsMetricGuideCommon[columnId] || null;
 }
 
@@ -5965,6 +5974,11 @@ function renderEarningsMetricGuide(subtab = currentEarningsSubtab) {
   const container = document.querySelector(`#earnings-${subtab}-metric-guide`);
   if (!container) return;
   container.textContent = '';
+  if (subtab === 'scanning' || subtab === 'mining') {
+    const note = document.createElement('p');
+    note.textContent = 'Internal Cost Basis uses the current Inventory Ledger total cost per unit (including delivery costs) for each asset at its recorded supply starbase, within the active faction/profile. This current basis is applied to all displayed dates, so past profit estimates may change as inventory basis changes. If any consumed quantity in the filtered selection lacks a supply starbase or usable internal basis, the entire affected resource-cost column uses historical GM prices and its header is marked *. A genuine zero internal cost remains valid. Total Costs and profit metrics include the selected resource valuations; an asterisk does not mean every cost component is external. External Cost Basis uses the latest GM price at or before each row’s UTC day start. Per Unit independently divides the selected monetary values by output quantity.';
+    container.appendChild(note);
+  }
   const guideColumns = getVisibleEarningsColumns(subtab);
   for (const column of guideColumns) {
     const guide = getEarningsMetricGuideEntry(subtab, column.id);
@@ -6484,6 +6498,7 @@ function renderEarningsHeader(subtab = 'scanning') {
     if (earningsCostBasisMode[subtab] === 'external' && column.id === 'upgCosts') label = 'Component External Value';
     const perUnit = isEarningsPerUnitEnabled(subtab) && isEarningsPerUnitColumn(subtab, column.id);
     if (perUnit) label = `${label} / Unit`;
+    if (earningsResourceFallbackColumns[subtab]?.includes(column.id)) label += '*';
     appendEarningsHeaderCell(row, column.id, label, sortState, perUnit);
   }
   tableHead.textContent = '';
@@ -6592,6 +6607,25 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   return createTextCell('--');
 }
 
+function resourceProfitLeader(rows, checkedAt, daysAgo, perCrew = false) {
+  const day = new Date(checkedAt || Date.now());
+  if (!Number.isFinite(day.getTime())) return null;
+  day.setUTCDate(day.getUTCDate() - daysAgo);
+  const isoDate = day.toISOString().slice(0, 10);
+  const fleets = new Map();
+  for (const row of rows.filter((entry) => entry.isoDate === isoDate)) {
+    const key = row.fleetAccount || row.fleetName || row.fleet;
+    const total = fleets.get(key) || { fleetName: row.fleetName || row.fleet, netProfitAtlas: 0, crew: 0, complete: true };
+    total.complete &&= Number.isFinite(row.netProfitAtlas);
+    total.netProfitAtlas += Number(row.netProfitAtlas) || 0;
+    total.crew = Math.max(total.crew, Number(row.totalRequiredCrew) || 0);
+    fleets.set(key, total);
+  }
+  const field = perCrew ? 'netProfitPerCrew' : 'netProfitAtlas';
+  return [...fleets.values()].filter((row) => row.complete).map((row) => ({ ...row, netProfitPerCrew: row.crew > 0 ? row.netProfitAtlas / row.crew : null }))
+    .filter((row) => Number.isFinite(row[field])).sort((a, b) => b[field] - a[field] || String(a.fleetName).localeCompare(String(b.fleetName)))[0] || null;
+}
+
 function renderEarnings(result) {
   latestEarningsResult = result;
   applyEarningsPerUnitButtonState('scanning');
@@ -6607,11 +6641,19 @@ function renderEarnings(result) {
     return;
   }
   setCachedFactionResult(normalizeFaction(latestSettings?.faction), 'earnings', result);
-  const rows = Array.isArray(result.rows) ? result.rows : [];
-  populateEarningsFilterOptions('scanning', rows);
+  const sourceRows = Array.isArray(result.rows) ? result.rows : [];
+  populateEarningsFilterOptions('scanning', sourceRows);
+  const valuation = ResourceCostBasis.selectRows(getFilteredEarningsRows('scanning', sourceRows), 'scanning', earningsCostBasisMode.scanning);
+  const rows = valuation.rows;
+  earningsResourceFallbackColumns.scanning = valuation.fallbackColumns;
+  renderEarningsMetricGuide('scanning');
+  result = { ...result,
+    topScanNetProfitFleetYesterday: resourceProfitLeader(rows, result.checkedAt, 1),
+    topScanNetProfitPerCrewFleetYesterday: resourceProfitLeader(rows, result.checkedAt, 1, true),
+  };
   renderEarningsHeader('scanning');
   const colorMap = buildEarningsFleetColorMap(rows, 0);
-  renderEarningsNetProfitChart(result, colorMap, {
+  renderEarningsNetProfitChart({ ...result, rows }, colorMap, {
     target: earningsNetProfitChart,
     label: 'Scanning net profit by fleet in ATLAS by day',
     mode: earningsChartMode.scanning,
@@ -6698,9 +6740,18 @@ function renderEarningsMining(result) {
     return;
   }
 
-  const rows = Array.isArray(result.miningRows) ? result.miningRows : [];
+  const sourceRows = Array.isArray(result.miningRows) ? result.miningRows : [];
+  populateEarningsFilterOptions('mining', sourceRows);
+  const valuation = ResourceCostBasis.selectRows(getFilteredEarningsRows('mining', sourceRows), 'mining', earningsCostBasisMode.mining);
+  const rows = valuation.rows;
+  earningsResourceFallbackColumns.mining = valuation.fallbackColumns;
+  renderEarningsMetricGuide('mining');
+  result = { ...result,
+    topMiningNetProfitFleetToday: resourceProfitLeader(rows, result.checkedAt, 0),
+    topMiningNetProfitFleetYesterday: resourceProfitLeader(rows, result.checkedAt, 1),
+    topMiningNetProfitPerCrewFleetYesterday: resourceProfitLeader(rows, result.checkedAt, 1, true),
+  };
   const colorMap = buildEarningsFleetColorMap(rows, 7);
-  populateEarningsFilterOptions('mining', rows);
   renderEarningsHeader('mining');
   const miningMode = earningsChartMode.mining;
   const miningGetCrew = (row) => row.totalRequiredCrew;
@@ -10646,7 +10697,9 @@ for (const button of document.querySelectorAll('[data-earnings-cost-basis]')) {
       sibling.classList.toggle('active', active);
       sibling.setAttribute('aria-pressed', String(active));
     }
-    if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
+    if (subtab === 'scanning') renderEarnings(latestEarningsResult);
+    else if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
+    else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
     else renderEarningsUpgrading(latestUpgradingResult);
   });
 }

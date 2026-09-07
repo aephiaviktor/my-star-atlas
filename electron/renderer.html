@@ -1078,6 +1078,10 @@
                   </select>
                 </label>
                 <span class="activity-filter-note">Filters combine with AND</span>
+                <div class="earnings-cost-basis-switch" role="group" aria-label="Scanning valuation basis" title="Internal uses current Inventory Ledger total cost per unit at the recorded supply starbase. External uses historical Galactic Marketplace prices. An asterisk marks whole-column external fallback.">
+                  <button class="earnings-chart-mode-btn active" type="button" data-earnings-cost-basis="scanning" data-cost-basis-mode="internal" aria-pressed="true">Internal Cost Basis</button>
+                  <button class="earnings-chart-mode-btn" type="button" data-earnings-cost-basis="scanning" data-cost-basis-mode="external" aria-pressed="false">External Cost Basis</button>
+                </div>
                 <button class="earnings-per-unit-btn" type="button" data-earnings-per-unit="scanning" aria-pressed="false">Per Unit</button>
               </div>
               <div id="earnings-sync-status" class="fleet-sync-status" role="status">Awaiting earnings data</div>
@@ -1206,6 +1210,10 @@
                   </select>
                 </label>
                 <span class="activity-filter-note">Filters combine with AND</span>
+                <div class="earnings-cost-basis-switch" role="group" aria-label="Mining valuation basis" title="Internal uses current Inventory Ledger total cost per unit at the recorded supply starbase. External uses historical Galactic Marketplace prices. An asterisk marks whole-column external fallback.">
+                  <button class="earnings-chart-mode-btn active" type="button" data-earnings-cost-basis="mining" data-cost-basis-mode="internal" aria-pressed="true">Internal Cost Basis</button>
+                  <button class="earnings-chart-mode-btn" type="button" data-earnings-cost-basis="mining" data-cost-basis-mode="external" aria-pressed="false">External Cost Basis</button>
+                </div>
                 <button class="earnings-per-unit-btn" type="button" data-earnings-per-unit="mining" aria-pressed="false">Per Unit</button>
               </div>
               <div id="earnings-mining-sync-status" class="fleet-sync-status" role="status">Awaiting mining earnings data</div>
@@ -1791,6 +1799,7 @@
     <script src="./request-guard.js"></script>
     <script src="./rpc-usage-model.js"></script>
     <script src="./cargo-allocation-renderer.js"></script>
+    <script src="./resource-cost-basis.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

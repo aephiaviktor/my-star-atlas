@@ -78,6 +78,7 @@ const {
 } = require('./inventory-basis-read');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { projectInventoryCostLedgerRows } = require('./inventory-cost-ledger-view');
+const { enrichRows: enrichResourceCostBasisRows } = require('./resource-cost-basis');
 const {
   formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
   diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux, buildHistoricalBreakevenBasisStateFlux,
@@ -6760,11 +6761,13 @@ async function fetchScanningEarningsRows(settings) {
   |> filter(fn: (r) => r._field == "amount" or r._field == "burnedFood" or r._field == "txCostSol")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
+  |> map(fn: (r) => ({r with starbase: if exists r.starbase then r.starbase else ""}))
+  |> group(columns: ["fleet", "starbase", "_measurement", "_field"])
   |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["fleet", "_measurement", "_field", "_time"])
+  |> group(columns: ["fleet", "starbase", "_measurement", "_field", "_time"])
   |> sum(column: "_value")
   |> group()
-  |> keep(columns: ["fleet", "_measurement", "_field", "_time", "_value"])
+  |> keep(columns: ["fleet", "starbase", "_measurement", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
 
   const sduProductionByStarbaseFlux = `from(bucket: "${bucket}")
@@ -6785,11 +6788,13 @@ ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.assignment and r.assignment == "Scan")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
+  |> map(fn: (r) => ({r with starbase: if exists r.starbase then r.starbase else ""}))
+  |> group(columns: ["fleet", "starbase", "_measurement", "_field"])
   |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["fleet", "_measurement", "_field", "_time"])
+  |> group(columns: ["fleet", "starbase", "_measurement", "_field", "_time"])
   |> sum(column: "_value")
   |> group()
-  |> keep(columns: ["fleet", "_measurement", "_field", "_time", "_value"])
+  |> keep(columns: ["fleet", "starbase", "_measurement", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
 
   const chanceSumFlux = `from(bucket: "${bucket}")
@@ -6845,6 +6850,7 @@ ${scopeFilterFlux}
         successfulScans: 0,
         chanceSumPercent: 0,
         productionByStarbase: [],
+        resourceConsumptionByStarbase: { burnedFood: [], burnedFuel: [] },
       });
     }
     return rowsByDayFleet.get(key);
@@ -6871,6 +6877,11 @@ ${scopeFilterFlux}
     if (row._measurement === 'sdu' && row._field === 'burnedFood') entry.burnedFood += value;
     if (row._measurement === 'sdu' && row._field === 'txCostSol') entry.txCostSol += value;
     if (row._measurement === 'movement' && row._field === 'burnedFuel') entry.burnedFuel += value;
+    if ((row._measurement === 'sdu' && row._field === 'burnedFood')
+      || (row._measurement === 'movement' && row._field === 'burnedFuel')) {
+      const starbase = resolveStarbaseName(row, coordinateMap);
+      entry.resourceConsumptionByStarbase[row._field].push({ starbase, quantity: value });
+    }
   }
 
   for (const row of parseInfluxCsv(sduProductionByStarbaseCsv)) {
@@ -8693,6 +8704,12 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     .map(([fleetName, netProfitAtlas]) => ({ fleetName, netProfitAtlas }))
     .sort((a, b) => b.netProfitAtlas - a.netProfitAtlas || a.fleetName.localeCompare(b.fleetName))[0] || null;
 
+  const projectedInventoryCostLedgerRows = projectInventoryCostLedgerRows({
+    ledgerRows: inventoryCostLedgerRows,
+    valuationRows: breakevenRows,
+    poolBasisRows: inventoryDepositPoolBasisRows,
+  });
+
   return {
     ok: true,
     checkedAt: new Date().toISOString(),
@@ -8769,8 +8786,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     upgradingError,
     upgradingRowCount: upgrading.length,
     fleets: fleetRows,
-    rows,
-    miningRows: mining,
+    rows: enrichResourceCostBasisRows(rows, 'scanning', projectedInventoryCostLedgerRows),
+    miningRows: enrichResourceCostBasisRows(mining, 'mining', projectedInventoryCostLedgerRows),
     cargoRows: cargo,
     craftingRows: crafting,
     upgradingRows: upgrading,
@@ -8785,11 +8802,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     inventoryCostLedgerEvents,
     inventoryCostLedgerAppliedEventResults,
     inventoryReconciliationEvents,
-    inventoryCostLedgerRows: projectInventoryCostLedgerRows({
-      ledgerRows: inventoryCostLedgerRows,
-      valuationRows: breakevenRows,
-      poolBasisRows: inventoryDepositPoolBasisRows,
-    }),
+    inventoryCostLedgerRows: projectedInventoryCostLedgerRows,
     inventoryCostLedgerRejectedEvents,
     openingInventoryCount: openingInventoryRows.length,
     openingInventoryError,
