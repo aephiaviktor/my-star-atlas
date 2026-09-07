@@ -33,6 +33,7 @@ const { createRpcFetcher } = require('./rpc-resilience');
 const { calculateUpgradingSelectionUtilization } = require('./upgrading-selection-utilization');
 const SAGE2_UPKEEP_IDL = require('./sage2-upkeep-idl.json');
 const { syncUpkeepHistory } = require('./starbase-upkeep-sync');
+const { summarizeToolkitDowntime } = require('./toolkit-downtime');
 const { projectDecodedUpkeepState, reconcileToolkitHistory, mergeToolkitIntervals, decodeToolkitDepositsFromTransactions, splitCapacityIntervalsByUtcHour, formatCapacityHourLine } = require('./starbase-upkeep-capacity');
 const { createTelemetryLedger } = require('./telemetry-ledger');
 const { createRpcUsageReader } = require('./telemetry-day-summary');
@@ -1434,7 +1435,7 @@ async function fetchUpgradingOptimization(payload = {}) {
   const [netAtlasDaily, neutralUpgradingDaily, upkeepCapacity] = await Promise.all([
     fetchDailyUpgradingNetAtlas(factionSettings, redemptionRates),
     fetchDailyNeutralUpgradingPlan(factionSettings),
-    fetchPhantomUpkeepCapacity(settings, aephiaFaction),
+    fetchPhantomUpkeepCapacity(settings, aephiaFaction).catch(() => ({ intervals: [], status: 'upkeep_sync_unavailable' })),
   ]);
   const playerProfile = String(settings.playerProfiles?.[aephiaFaction] || settings.playerProfile || '');
   const configuredCrewByHour = {};
@@ -1448,9 +1449,14 @@ async function fetchUpgradingOptimization(payload = {}) {
   for (const [date, values] of Object.entries(netAtlasDaily.componentPricesByDate || {})) {
     historicalComponentPricesByDate[date] = { ...(historicalComponentPricesByDate[date] || {}), ...values };
   }
-  const selectionUtilizationV1 = calculateUpgradingSelectionUtilization({ jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations, configuredCrewByHour, capacityIntervals: upkeepCapacity.intervals, capacityEvidenceRequired: true, prices: componentPricesAtl, pricesByDate: historicalComponentPricesByDate, atlasPerLpByDate, faction, profile: playerProfile, priceSnapshotAt: netAtlasDaily.priceSnapshotAt });
-  selectionUtilizationV1.toolkit_capacity.sync_status = upkeepCapacity.status;
-  return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, neutralUpgradingDaily, selectionUtilizationV1, playerProfile, componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
+  const selectionUtilizationV1 = calculateUpgradingSelectionUtilization({ jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations, configuredCrewByHour, prices: componentPricesAtl, pricesByDate: historicalComponentPricesByDate, atlasPerLpByDate, faction, profile: playerProfile, priceSnapshotAt: netAtlasDaily.priceSnapshotAt });
+  const now = Date.now();
+  const toolkitDowntime = summarizeToolkitDowntime({ ...upkeepCapacity, faction: aephiaFaction,
+    starbase: PHANTOM_STARBASE_COORDINATES[aephiaFaction].name,
+    start: new Date(Math.max(Date.parse(start), Date.parse('2026-08-14T00:00:00Z'), Math.floor(now / 86400000) * 86400000 - 30 * 86400000)).toISOString(),
+    stop: new Date(Math.min(now, stop ? Date.parse(stop) : now)).toISOString(),
+  });
+  return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, neutralUpgradingDaily, selectionUtilizationV1, toolkitDowntime, playerProfile, componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 
 function getInfluxScopeNote(settings) {

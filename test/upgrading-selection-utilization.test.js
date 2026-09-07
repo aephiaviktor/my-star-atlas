@@ -123,8 +123,8 @@ test('V1.1 renderer contains real scatter, trend, zero line, five-state stack, a
   assert.match(renderer, /yLabel:'Selection uplift ATLAS \/ active crew-day'/);
   assert.match(renderer, /optimization-zero-line/);
   assert.match(renderer, /optimization-trend-line/);
-  for (const label of ['Protocol active','Claim locked','Proven eligible idle','Capacity not observed']) assert.match(renderer, new RegExp(label));
-  assert.match(renderer, /row\.display_available \?\? row\.evidence_complete/);
+  for (const label of ['Protocol active','Claim locked','Proven eligible idle','Proven hard unavailable','Capacity not observed']) assert.match(renderer, new RegExp(label));
+  assert.match(renderer, /filter\(\(row\) => row\.evidence_complete/);
   assert.match(css, /optimization-upgrading-v1-chart svg[^}]+width:\s*100%/s);
   assert.match(css, /grid-template-columns:\s*minmax\(0, 1fr\)/);
 });
@@ -136,95 +136,8 @@ test('production integration reuses existing acquisition functions and exposes f
   assert.match(main, /calculateUpgradingSelectionUtilization/);
   assert.match(main, /netAtlasDaily\.jobs/);
   assert.match(main, /neutralUpgradingDaily\.hourlyAllocations/);
-  for (const wording of ['Component Selection Uplift — Matched Active Capacity', 'Supply-Adjusted Utilization', 'Claim-Locked Capacity', 'Supply-Adjusted Capacity Summary']) assert.match(html, new RegExp(wording));
+  for (const wording of ['Component Selection Uplift — Matched Active Capacity', 'UTC-Calendar Crew-State Utilization', 'Claim-Locked Capacity', 'Operational Result vs Configured 24h Neutral']) assert.match(html, new RegExp(wording));
   assert.doesNotMatch(renderer, /This measures selection, not uptime/);
   assert.doesNotMatch(renderer, /Unknown time is shown, never silently assigned/);
   assert.match(renderer, /attempts\/retries\/failures: NOT OBSERVED/);
-});
-
-test('supply-adjusted utilization stops running jobs and excludes Toolkit downtime from claim lock', () => {
-  const day = '2026-09-06';
-  const result = calculateUpgradingSelectionUtilization({
-    jobs: [{ component: 'Framework', amount: 300, crew: 1, startedAt: `${day}T00:00:00Z`, completedAt: `${day}T02:30:00Z` }],
-    configuredCrewByHour: Object.fromEntries(Array.from({length:24}, (_,h) => [`${day}T${String(h).padStart(2,'0')}`, h < 3 ? 1 : 0])),
-    capacityEvidenceRequired: true,
-    capacityIntervals: [
-      { start: `${day}T00:00:00Z`, stop: `${day}T00:30:00Z`, multiplier: 1 },
-      { start: `${day}T00:30:00Z`, stop: `${day}T01:30:00Z`, multiplier: 0 },
-      { start: `${day}T01:30:00Z`, stop: '2026-09-07T00:00:00Z', multiplier: 1 },
-    ],
-  });
-  const row = result.utilization[0];
-  assert.equal(row.configured_crew_hours, 2);
-  assert.equal(row.protocol_active_crew_hours, 1);
-  assert.equal(row.claim_locked_crew_hours, .5);
-  assert.equal(row.toolkit_degraded_crew_hours, 1);
-  assert.equal(row.protocol_active_percent, 50);
-  assert.equal(result.claim_lock.median_claim_delay_seconds, 1800);
-});
-test('unknown Toolkit history renders labelled estimates and preserves completed work', () => {
-  const value = input(); value.capacityEvidenceRequired = true;
-  const result = calculateUpgradingSelectionUtilization(value);
-  assert.equal(result.selection[0].evidence_complete, false);
-  assert.equal(result.selection[0].display_available, true);
-  assert.equal(result.selection[0].completion_cohort_active_crew_hours, 100);
-  assert.equal(result.claim_lock.claim_locked_crew_hours, 25);
-  assert.equal(result.claim_lock.estimated, true);
-  assert.ok(result.utilization.every(r => r.display_available && r.estimated && Number.isFinite(r.protocol_active_percent)));
-  assert.match(result.estimate_note, /unknown Toolkit periods assume full supply/);
-});
-test('missing neutral hours use nearest observed mix only in best-effort mode', () => {
-  const value = input(); value.capacityEvidenceRequired = true; value.neutralHours.pop();
-  const result = calculateUpgradingSelectionUtilization(value);
-  assert.equal(result.selection[0].display_available, true);
-  assert.equal(result.selection[0].estimated, true);
-});
-test('partial Toolkit evidence retains a known outage while estimating uncovered hours', () => {
-  const value = input(); value.capacityEvidenceRequired = true;
-  value.capacityIntervals = [{start:'2026-08-16T04:00:00Z',stop:'2026-08-16T05:00:00Z',multiplier:0}];
-  const row = calculateUpgradingSelectionUtilization(value).utilization.find(row => row.date === '2026-08-16');
-  assert.equal(row.toolkit_degraded_crew_hours, 100);
-  assert.equal(row.configured_crew_hours, 2300);
-  assert.equal(row.estimated, true);
-});
-test('inconsistent job timing preserves required work and marks the capacity adjustment', () => {
-  const value = input(); value.capacityEvidenceRequired = true;
-  value.jobs[0].completedAt = '2026-08-16T00:00:00Z';
-  const result = calculateUpgradingSelectionUtilization(value);
-  assert.equal(result.selection[0].completion_cohort_active_crew_hours, 100);
-  assert.equal(result.selection[0].display_available, true);
-  assert.equal(result.selection[0].estimated, true);
-  assert.equal(result.utilization.reduce((sum,row) => sum + row.protocol_active_crew_hours,0),100);
-});
-test('known configured days with no completed jobs remain represented; overlapping evidence is rejected', () => {
-  const configuredCrewByHour = { '2026-09-06T00': 1 };
-  const interval = {start:'2026-09-06T00:00:00Z',stop:'2026-09-07T00:00:00Z',multiplier:1};
-  const result = calculateUpgradingSelectionUtilization({ configuredCrewByHour, capacityEvidenceRequired:true, capacityIntervals:[interval,interval] });
-  assert.equal(result.utilization.length, 1);
-  assert.equal(result.utilization[0].identity_complete, false);
-  assert.equal(result.utilization[0].display_available, true);
-  assert.equal(result.utilization[0].estimated, true);
-});
-
-test('renderer draws both charts when estimates are available but evidence is incomplete', () => {
-  const vm = require('node:vm');
-  const source = fs.readFileSync('electron/renderer.js', 'utf8');
-  const element = () => ({ children: [], style: { setProperty() {} }, append(...nodes) { this.children.push(...nodes); }, replaceChildren() { this.children = []; } });
-  const selection = element(), utilization = element(), shapes = [];
-  const context = {
-    optimizationUpgradingSelectionV1: selection, optimizationUpgradingUtilizationV1: utilization,
-    optimizationUpgradingClaimLockV1: element(), optimizationUpgradingOperationalV1: element(),
-    document: { createElement: element }, getUpgradingV1ChartStartDate: () => '2026-08-14',
-    createOptimizationAnalyticsSvg: () => element(), upgradingSelectionChartView: {},
-    renderUpgradingChartAxes: () => ({ left: 0, top: 0, width: 760, height: 340, right: 0, bottom: 0, x: value => value, y: value => value }),
-    appendOptimizationSvg: (_, kind) => { shapes.push(kind); return element(); }, bindUpgradingAnalyticsChartNavigation() {},
-  };
-  vm.createContext(context);
-  vm.runInContext(source.slice(source.indexOf('function renderUpgradingSelectionUtilizationV1('), source.indexOf('function renderUpgradingOptimizationAnalytics()', source.indexOf('function renderUpgradingSelectionUtilizationV1('))), context);
-  const value = input(); value.capacityEvidenceRequired = true;
-  context.renderUpgradingSelectionUtilizationV1({ selectionUtilizationV1: calculateUpgradingSelectionUtilization(value) });
-  assert.ok(shapes.includes('circle'));
-  assert.ok(shapes.filter(kind => kind === 'rect').length > 1);
-  assert.ok(selection.children.some(node => String(node.textContent).includes('Estimated:')));
-  assert.ok(utilization.children.some(node => String(node.textContent).includes('Estimated:')));
 });

@@ -2989,3 +2989,5 @@ label {
 }
 th[aria-sort="ascending"] [data-marketplace-table-sort],
 th[aria-sort="descending"] [data-marketplace-table-sort] { color: #67b7ff; }
+
+.optimization-toolkit-table-wrap { max-height: 240px; overflow: auto; }

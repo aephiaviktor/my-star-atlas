@@ -9446,7 +9446,7 @@ function renderUpgradingSelectionUtilizationV1(result) {
   const upgradingV1ChartStartDate = getUpgradingV1ChartStartDate();
   const completeSelection = (data.selection || [])
     .filter((row) => row.date >= upgradingV1ChartStartDate)
-    .filter((row) => (row.display_available ?? row.evidence_complete) && Number.isFinite(row.atlas_per_lp) && Number.isFinite(row.selection_uplift_atlas_per_active_crew_day));
+    .filter((row) => row.evidence_complete && Number.isFinite(row.atlas_per_lp) && Number.isFinite(row.selection_uplift_atlas_per_active_crew_day));
   if (optimizationUpgradingSelectionV1) {
     optimizationUpgradingSelectionV1.replaceChildren();
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingSelectionV1,760,340);
@@ -9467,34 +9467,56 @@ function renderUpgradingSelectionUtilizationV1(result) {
       for(const row of completeSelection){appendOptimizationSvg(plot,'circle',{cx:axes.x(row.atlas_per_lp),cy:axes.y(row.selection_uplift_atlas_per_active_crew_day),r:5,fill:'#45d6c1',class:'mean-marker'});}
       bindUpgradingAnalyticsChartNavigation(svg, axes, null, 'selection', view, { xMin: autoMinX, xMax: autoMaxX, yMin: autoMinY, yMax: autoMaxY, xFloor: 0 });
     }
-    const warning=document.createElement('strong'); warning.className='optimization-v1-warning'; warning.textContent=[data.price_warning, data.estimate_note].filter(Boolean).join(' '); optimizationUpgradingSelectionV1.append(warning);
+    const warning=document.createElement('strong'); warning.className='optimization-v1-warning'; warning.textContent=data.price_warning; optimizationUpgradingSelectionV1.append(warning);
   }
   if (optimizationUpgradingUtilizationV1) {
     optimizationUpgradingUtilizationV1.replaceChildren();
-    const series=[['Protocol active','protocol_active','#22c55e'],['Claim locked','claim_locked','#f59e0b'],['Proven eligible idle','proven_eligible_idle','#38bdf8'],['Capacity not observed','capacity_not_observed','#64748b']];
+    const series=[['Protocol active','protocol_active','#22c55e'],['Claim locked','claim_locked','#f59e0b'],['Proven eligible idle','proven_eligible_idle','#38bdf8'],['Proven hard unavailable','proven_hard_unavailable','#ef4444'],['Capacity not observed','capacity_not_observed','#64748b']];
     const legend=document.createElement('div');legend.className='optimization-v1-legend';for(const [label,,color] of series){const item=document.createElement('span');item.textContent=label;item.style.setProperty('--legend-color',color);legend.append(item);}optimizationUpgradingUtilizationV1.append(legend);
-    const allRows=(data.utilization||[]).filter((row) => row.date >= upgradingV1ChartStartDate);
-    const rows=allRows.filter(r=>r.display_available ?? r.identity_complete);
-    const missing=allRows.length-rows.length;
-    if(data.estimate_note){const note=document.createElement('div');note.textContent=data.estimate_note;optimizationUpgradingUtilizationV1.append(note);}
-    if(missing){const note=document.createElement('div');note.textContent=`${missing} UTC day(s) unavailable: incomplete evidence or no effective capacity.`;optimizationUpgradingUtilizationV1.append(note);}
+    const rows=(data.utilization||[]).filter((row) => row.date >= upgradingV1ChartStartDate).filter(r=>r.identity_complete);
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingUtilizationV1,760,340);
-    if(!rows.length) unavailable(optimizationUpgradingUtilizationV1,'Supply-adjusted utilization is unavailable: Toolkit history or configured crew coverage is incomplete.');
-    else if(svg){const axes=renderUpgradingChartAxes(svg,{minY:0,maxY:100,xMin:0,xMax:rows.length,xTicks:rows.map((_,i)=>i+.5),xLabel:'UTC date',yLabel:'Supply-adjusted capacity (%)',height:340,xFormatter:v=>rows[Math.max(0,Math.min(rows.length-1,Math.floor(v)))]?.date.slice(5)||''});rows.forEach((row,index)=>{let bottom=0;for(const [,key,color] of series){const percent=Number(row[`${key}_percent`]||0);appendOptimizationSvg(svg,'rect',{x:axes.x(index+.12),y:axes.y(bottom+percent),width:Math.max(1,axes.x(index+.88)-axes.x(index+.12)),height:Math.max(0,axes.y(bottom)-axes.y(bottom+percent)),fill:color});bottom+=percent;}});}
+    if(!rows.length) unavailable(optimizationUpgradingUtilizationV1,'UTC-calendar identity evidence is incomplete.');
+    else if(svg){const axes=renderUpgradingChartAxes(svg,{minY:0,maxY:100,xMin:0,xMax:rows.length,xTicks:rows.map((_,i)=>i+.5),xLabel:'UTC date',yLabel:'Configured capacity (%)',height:340,xFormatter:v=>rows[Math.max(0,Math.min(rows.length-1,Math.floor(v)))]?.date.slice(5)||''});rows.forEach((row,index)=>{let bottom=0;for(const [,key,color] of series){const percent=Number(row[`${key}_percent`]||0);appendOptimizationSvg(svg,'rect',{x:axes.x(index+.12),y:axes.y(bottom+percent),width:Math.max(1,axes.x(index+.88)-axes.x(index+.12)),height:Math.max(0,axes.y(bottom)-axes.y(bottom+percent)),fill:color});bottom+=percent;}});}
   }
-  if (optimizationUpgradingClaimLockV1) { const claim=data.claim_lock||{}; optimizationUpgradingClaimLockV1.textContent=`${claim.claim_locked_crew_hours?.toLocaleString(undefined,{maximumFractionDigits:1}) ?? '--'} crew-hours · ${claim.claim_locked_percent?.toFixed(2) ?? '--'}% · delay median ${claim.median_claim_delay_seconds?.toFixed(1) ?? '--'}s · P90 ${claim.p90_claim_delay_seconds?.toFixed(1) ?? '--'}s · P95 ${claim.p95_claim_delay_seconds?.toFixed(1) ?? '--'}s · max ${claim.maximum_claim_delay_seconds?.toFixed(1) ?? '--'}s · attempts/retries/failures: NOT OBSERVED`; optimizationUpgradingClaimLockV1.title='Claim-locked capacity starts after the required Toolkit-clock work has finished. Crew-hours exclude Toolkit-empty time; delay statistics use wall-clock time after work finished.'; }
-  if (optimizationUpgradingOperationalV1) {
-    const rows=(data.utilization||[]).filter(row=>row.display_available ?? row.identity_complete), status=data.toolkit_capacity?.sync_status;
-    const active=rows.reduce((sum,row)=>sum+row.protocol_active_crew_hours,0), effective=rows.reduce((sum,row)=>sum+row.configured_crew_hours,0);
-    const blocked=rows.reduce((sum,row)=>sum+(row.toolkit_degraded_crew_hours||0),0);
-    const statusText={baseline_only:'First reliable observation saved; earlier Toolkit history is estimated.',catching_up:'Toolkit history catch-up is in progress.',reconciled:'Toolkit history reconciled.',unchanged:'No newer finalized observation.',history_gap:'A gap longer than the retained history requires a new baseline.',upkeep_clock_reconciliation_failed:'A Toolkit history interval failed reconciliation and uses estimated supply.',upkeep_configuration_changed:'An upkeep configuration change requires a new baseline.'}[status] || 'Toolkit history sync is unavailable; gaps use estimated supply.';
-    optimizationUpgradingOperationalV1.textContent=`Supply-adjusted utilization: ${effective>0?(active/effective*100).toFixed(2)+'%':'--'} across available days. Toolkit downtime excluded: ${rows.length?blocked.toLocaleString(undefined,{maximumFractionDigits:1}):'--'} crew-hours. ${statusText} ${data.estimate_note || ''} Unclassified capacity remains NOT OBSERVED, not proven idle.`;
+  if (optimizationUpgradingClaimLockV1) { const claim=data.claim_lock||{}; optimizationUpgradingClaimLockV1.textContent=`${claim.claim_locked_crew_hours?.toLocaleString(undefined,{maximumFractionDigits:1}) ?? '--'} crew-hours · ${claim.claim_locked_percent?.toFixed(2) ?? '--'}% · delay median ${claim.median_claim_delay_seconds?.toFixed(1) ?? '--'}s · P90 ${claim.p90_claim_delay_seconds?.toFixed(1) ?? '--'}s · P95 ${claim.p95_claim_delay_seconds?.toFixed(1) ?? '--'}s · max ${claim.maximum_claim_delay_seconds?.toFixed(1) ?? '--'}s · attempts/retries/failures: NOT OBSERVED`; optimizationUpgradingClaimLockV1.title='Crew whose protocol work ended but whose completion/claim had not succeeded. This is not active or idle and is not presumed unavoidable.'; }
+  if (optimizationUpgradingOperationalV1) { const rows=data.utilization||[]; const lower=rows.reduce((s,r)=>s+r.feasible_neutral_lower_crew_hours,0), upper=rows.reduce((s,r)=>s+r.feasible_neutral_upper_crew_hours,0); optimizationUpgradingOperationalV1.textContent=`UTC-calendar operational measurement combines selection and utilization; it is not component-selection uplift. Feasible-neutral capacity: ${lower.toLocaleString(undefined,{maximumFractionDigits:1})}–${upper.toLocaleString(undefined,{maximumFractionDigits:1})} crew-hours. Residual NOT OBSERVED remains uncertainty.`; }
+}
+
+function renderToolkitDowntime(result) {
+  const body = document.querySelector('#optimization-upgrading-toolkit-body');
+  const status = document.querySelector('#optimization-upgrading-toolkit-status');
+  if (!body) return;
+  const data = result?.toolkitDowntime;
+  const statusText = {
+    baseline_only: 'First observation saved; earlier periods remain unknown.',
+    catching_up: 'History catch-up in progress; available intervals are shown.',
+    reconciled: 'Available history reconciled.', unchanged: 'No newer finalized observation.',
+    history_gap: 'History gap; a new baseline is needed.',
+    upkeep_clock_reconciliation_failed: 'Some history could not be reconciled; available intervals remain shown.',
+    upkeep_configuration_changed: 'Upkeep configuration changed; a new baseline is needed.',
+  }[data?.status] || 'Toolkit history unavailable or incomplete; retained intervals are shown when available.';
+  if (status) status.textContent = data ? statusText : 'Awaiting Toolkit observations';
+  body.replaceChildren();
+  const duration = seconds => seconds == null || !Number.isFinite(seconds) ? '--'
+    : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m ${Math.floor(seconds % 60)}s`;
+  for (const row of data?.rows || []) {
+    const tr = document.createElement('tr');
+    for (const value of [row.date, row.starbase, duration(row.coveredSeconds), duration(row.downtimeSeconds), duration(row.unknownSeconds),
+      row.estimatedDowntimeSeconds == null ? '--' : `~${duration(row.estimatedDowntimeSeconds)}`, row.evidenceStatus]) {
+      const cell = document.createElement('td'); cell.textContent = value; tr.append(cell);
+    }
+    body.append(tr);
+  }
+  if (!body.children.length) {
+    const row = document.createElement('tr'), cell = document.createElement('td');
+    cell.colSpan = 7; cell.textContent = 'No Toolkit observations in this window'; row.append(cell); body.append(row);
   }
 }
 
 function renderUpgradingOptimizationAnalytics() {
   const analytics = buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {});
   renderUpgradingSelectionUtilizationV1(latestUpgradingOptimizationResult || {});
+  renderToolkitDowntime(latestUpgradingOptimizationResult || {});
   const comparisonScales = getUpgradingComparisonScales(latestUpgradingComparisonResults.length ? latestUpgradingComparisonResults : [latestUpgradingOptimizationResult || {}]);
   const normalizedFaction = normalizeFaction(latestSettings?.faction);
   const factionLabel = normalizedFaction === 'USTUR' ? 'UST' : normalizedFaction;
