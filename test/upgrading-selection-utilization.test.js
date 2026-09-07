@@ -98,14 +98,15 @@ test('accepted UTC-calendar stacks are exhaustive and preserve the two outliers'
   assert.ok(Math.abs(aug20.claimLocked / 960 - 13.070729166666666) < 1e-9);
 });
 
-test('V1 analytics charts sit side by side without chart tooltips', () => {
+test('V1 analytics charts sit side by side with shared dot and bar tooltips', () => {
   const renderer = fs.readFileSync('electron/renderer.js', 'utf8');
   const html = fs.readFileSync('electron/renderer.html', 'utf8');
   const css = fs.readFileSync('electron/renderer.css', 'utf8');
   assert.equal((html.match(/optimization-upgrading-v1-card/g) || []).length, 2);
   assert.match(css, /\.optimization-upgrading-v1-card\s*\{\s*grid-column:\s*span 1/);
   const v1 = renderer.slice(renderer.indexOf('function renderUpgradingSelectionUtilizationV1'), renderer.indexOf('function renderUpgradingOptimizationAnalytics'));
-  assert.doesNotMatch(v1, /bindOptimizationAnalyticsTooltip/);
+  assert.match(v1, /bindOptimizationAnalyticsTooltip\(dot,/);
+  assert.match(v1, /bindOptimizationAnalyticsTooltip\(bar,/);
   assert.doesNotMatch(v1, /optimizationUpgrading(?:Selection|Utilization)V1\.title/);
 });
 

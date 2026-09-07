@@ -9440,6 +9440,8 @@ function getUpgradingV1ChartStartDate(now = Date.now()) {
 }
 
 function renderUpgradingSelectionUtilizationV1(result) {
+  hideOptimizationAnalyticsTooltip();
+  const tooltipNumber = (value, digits = 2) => Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : '--';
   const data = result?.selectionUtilizationV1;
   const unavailable = (container, reason) => { if (container) container.textContent = reason || 'Required cohort, hourly allocation, identity, or provenance evidence is incomplete.'; };
   if (!data) { for (const container of [optimizationUpgradingSelectionV1, optimizationUpgradingUtilizationV1, optimizationUpgradingClaimLockV1, optimizationUpgradingOperationalV1]) unavailable(container, 'Selection/utilization evidence is not available.'); return; }
@@ -9464,7 +9466,10 @@ function renderUpgradingSelectionUtilizationV1(result) {
       appendOptimizationSvg(plot,'line',{x1:axes.left,x2:axes.width-axes.right,y1:axes.y(0),y2:axes.y(0),class:'optimization-zero-line'});
       const meanX=xs.reduce((a,b)=>a+b,0)/xs.length,meanY=ys.reduce((a,b)=>a+b,0)/ys.length,cov=completeSelection.reduce((s,r)=>s+(r.atlas_per_lp-meanX)*(r.selection_uplift_atlas_per_active_crew_day-meanY),0),variance=xs.reduce((s,x)=>s+(x-meanX)**2,0);
       if(variance){const slope=cov/variance,intercept=meanY-slope*meanX;appendOptimizationSvg(plot,'line',{x1:axes.x(minX),x2:axes.x(maxX),y1:axes.y(intercept+slope*minX),y2:axes.y(intercept+slope*maxX),class:'optimization-trend-line'});}
-      for(const row of completeSelection){appendOptimizationSvg(plot,'circle',{cx:axes.x(row.atlas_per_lp),cy:axes.y(row.selection_uplift_atlas_per_active_crew_day),r:5,fill:'#45d6c1',class:'mean-marker'});}
+      for (const row of completeSelection) {
+        const dot = appendOptimizationSvg(plot,'circle',{cx:axes.x(row.atlas_per_lp),cy:axes.y(row.selection_uplift_atlas_per_active_crew_day),r:5,fill:'#45d6c1',class:'mean-marker'});
+        bindOptimizationAnalyticsTooltip(dot, `${row.date} UTC · ATLAS/LP ${tooltipNumber(row.atlas_per_lp, 8)} · selection uplift ${tooltipNumber(row.selection_uplift_atlas_per_active_crew_day)} ATLAS / active crew-day · actual ${tooltipNumber(row.actual_cohort_lp)} LP · neutral ${tooltipNumber(row.neutral_cohort_lp)} LP · active ${tooltipNumber(row.completion_cohort_active_crew_hours)} crew-hours · ${tooltipNumber(row.completed_job_count, 0)} completed jobs`);
+      }
       bindUpgradingAnalyticsChartNavigation(svg, axes, null, 'selection', view, { xMin: autoMinX, xMax: autoMaxX, yMin: autoMinY, yMax: autoMaxY, xFloor: 0 });
     }
     const warning=document.createElement('strong'); warning.className='optimization-v1-warning'; warning.textContent=data.price_warning; optimizationUpgradingSelectionV1.append(warning);
@@ -9476,7 +9481,9 @@ function renderUpgradingSelectionUtilizationV1(result) {
     const rows=(data.utilization||[]).filter((row) => row.date >= upgradingV1ChartStartDate).filter(r=>r.identity_complete);
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingUtilizationV1,760,340);
     if(!rows.length) unavailable(optimizationUpgradingUtilizationV1,'UTC-calendar identity evidence is incomplete.');
-    else if(svg){const axes=renderUpgradingChartAxes(svg,{minY:0,maxY:100,xMin:0,xMax:rows.length,xTicks:rows.map((_,i)=>i+.5),xLabel:'UTC date',yLabel:'Configured capacity (%)',height:340,xFormatter:v=>rows[Math.max(0,Math.min(rows.length-1,Math.floor(v)))]?.date.slice(5)||''});rows.forEach((row,index)=>{let bottom=0;for(const [,key,color] of series){const percent=Number(row[`${key}_percent`]||0);appendOptimizationSvg(svg,'rect',{x:axes.x(index+.12),y:axes.y(bottom+percent),width:Math.max(1,axes.x(index+.88)-axes.x(index+.12)),height:Math.max(0,axes.y(bottom)-axes.y(bottom+percent)),fill:color});bottom+=percent;}});}
+    else if(svg){const axes=renderUpgradingChartAxes(svg,{minY:0,maxY:100,xMin:0,xMax:rows.length,xTicks:rows.map((_,i)=>i+.5),xLabel:'UTC date',yLabel:'Configured capacity (%)',height:340,xFormatter:v=>rows[Math.max(0,Math.min(rows.length-1,Math.floor(v)))]?.date.slice(5)||''});rows.forEach((row,index)=>{let bottom=0;for(const [label,key,color] of series){const percent=Number(row[`${key}_percent`]||0);const bar=appendOptimizationSvg(svg,'rect',{x:axes.x(index+.12),y:axes.y(bottom+percent),width:Math.max(1,axes.x(index+.88)-axes.x(index+.12)),height:Math.max(0,axes.y(bottom)-axes.y(bottom+percent)),fill:color});
+      bindOptimizationAnalyticsTooltip(bar, `${row.date} UTC · ${label}: ${tooltipNumber(row[`${key}_percent`])}% · ${tooltipNumber(row[`${key}_crew_hours`])} crew-hours · configured capacity ${tooltipNumber(row.configured_crew_hours)} crew-hours${key === 'capacity_not_observed' ? ' · Unclassified capacity; not measured idle time or Toolkit downtime.' : ''}`);
+      bottom+=percent;}});}
   }
   if (optimizationUpgradingClaimLockV1) { const claim=data.claim_lock||{}; optimizationUpgradingClaimLockV1.textContent=`${claim.claim_locked_crew_hours?.toLocaleString(undefined,{maximumFractionDigits:1}) ?? '--'} crew-hours · ${claim.claim_locked_percent?.toFixed(2) ?? '--'}% · delay median ${claim.median_claim_delay_seconds?.toFixed(1) ?? '--'}s · P90 ${claim.p90_claim_delay_seconds?.toFixed(1) ?? '--'}s · P95 ${claim.p95_claim_delay_seconds?.toFixed(1) ?? '--'}s · max ${claim.maximum_claim_delay_seconds?.toFixed(1) ?? '--'}s · attempts/retries/failures: NOT OBSERVED`; optimizationUpgradingClaimLockV1.title='Crew whose protocol work ended but whose completion/claim had not succeeded. This is not active or idle and is not presumed unavoidable.'; }
   if (optimizationUpgradingOperationalV1) { const rows=data.utilization||[]; const lower=rows.reduce((s,r)=>s+r.feasible_neutral_lower_crew_hours,0), upper=rows.reduce((s,r)=>s+r.feasible_neutral_upper_crew_hours,0); optimizationUpgradingOperationalV1.textContent=`UTC-calendar operational measurement combines selection and utilization; it is not component-selection uplift. Feasible-neutral capacity: ${lower.toLocaleString(undefined,{maximumFractionDigits:1})}–${upper.toLocaleString(undefined,{maximumFractionDigits:1})} crew-hours. Residual NOT OBSERVED remains uncertainty.`; }
