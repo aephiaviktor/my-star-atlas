@@ -207,6 +207,7 @@ class InventoryCostLedger {
       lot.cargoCost += addedCargoCost;
       lot.uncostedCargoCost += addedCargoCost * (lot.uncostedQuantity / lot.quantity);
     }
+    lot.origins = (lot.origins || []).map((part) => ({ ...part, cargoCost: part.cargoCost + addedCargoCost * part.quantity / units }));
     this.addLot(destination, asset, lot);
     return cloneLot(lot);
   }

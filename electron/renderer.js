@@ -790,6 +790,8 @@ const upgradingEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'profitMargin', label: 'Profit Margin' }),
 ]);
 
+let inventoryLedgerView = 'breakdown';
+
 const breakevenEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'starbase', label: 'Starbase' }),
   Object.freeze({ id: 'asset', label: 'Asset' }),
@@ -6024,6 +6026,7 @@ function renderEarningsColumnControls() {
   const selected = earningsColumnState[subtab] || earningsColumnState.scanning;
   earningsColumnControlsContainer.textContent = '';
   for (const column of getEarningsColumns(subtab)) {
+    if (subtab === 'breakeven' && inventoryLedgerView === 'acquisition' && ['scanning', 'mining', 'crafting', 'gm', 'lm', 'cargo'].includes(column.id)) continue;
     const label = document.createElement('label');
     const input = document.createElement('input');
     input.type = 'checkbox';
@@ -7617,7 +7620,7 @@ function inventoryLedgerValues(row, perUnit) {
   const cargo = Number(row?.cargoCost || 0);
   const totalBasis = Object.values(costs).reduce((sum, value) => sum + Number(value || 0), cargo);
   const basisValue = (value) => perUnit && quantity > 0 ? Number(value || 0) / quantity : Number(value || 0);
-  const sourceValue = (source) => perUnit ? row?.sourceUnitCosts?.[source] ?? null : basisValue(costs[source]);
+  const sourceValue = (source) => row?.basisStatus === 'unpriced' ? null : basisValue(costs[source]);
   const status = quantity <= 0 ? 'Empty'
     : row?.basisStatus === 'priced' ? 'Priced'
       : row?.basisStatus === 'estimated' ? 'Estimated' : 'Unpriced';
@@ -7627,7 +7630,12 @@ function inventoryLedgerValues(row, perUnit) {
     uncostedQuantity: Number(row?.uncostedQuantity || 0),
     scanning: sourceValue('scanning'), mining: sourceValue('mining'), crafting: sourceValue('crafting'),
     lm: sourceValue('lm'), gm: sourceValue('gm'), cargo: basisValue(cargo),
-    totalBasis: basisValue(totalBasis), status,
+    purchasedQuantity: row?.acquisition?.purchased?.quantity ?? 0,
+    producedQuantity: row?.acquisition?.produced?.quantity ?? 0,
+    purchased: perUnit ? row?.acquisition?.purchased?.unitCost ?? null : row?.acquisition?.purchased?.cost ?? null,
+    produced: perUnit ? row?.acquisition?.produced?.unitCost ?? null : row?.acquisition?.produced?.cost ?? null,
+    producedPercent: row?.producedPercent ?? null,
+    totalBasis: row?.basisStatus === 'unpriced' ? null : basisValue(totalBasis), status,
   };
 }
 
@@ -7645,13 +7653,22 @@ function formatInventoryLedgerBasisValue(value, perUnit) {
 function renderInventoryCostLedger(result) {
   if (!earningsCostLedgerTableBody) return;
   const perUnit = isEarningsPerUnitEnabled('inventoryLedger');
-  const visibleColumns = getVisibleEarningsColumns('breakeven');
+  const selectedColumns = getVisibleEarningsColumns('breakeven');
+  const visibleColumns = selectedColumns.filter((column) => inventoryLedgerView === 'breakdown' || !['scanning', 'mining', 'crafting', 'lm', 'gm', 'cargo'].includes(column.id));
+  if (inventoryLedgerView === 'acquisition') {
+    const index = visibleColumns.findIndex((column) => column.id === 'totalBasis');
+    visibleColumns.splice(index < 0 ? visibleColumns.length : index, 0,
+      { id: 'purchasedQuantity', label: 'Purchased Qty' }, { id: 'purchased', label: 'Purchased (incl. cargo)' },
+      { id: 'producedQuantity', label: 'Produced Qty' }, { id: 'produced', label: 'Produced (incl. cargo)' });
+  }
+  const totalIndex = visibleColumns.findIndex((column) => column.id === 'totalBasis');
+  visibleColumns.splice(totalIndex < 0 ? visibleColumns.length : totalIndex + 1, 0, { id: 'producedPercent', label: 'Produced %' });
   const sortState = earningsSort.breakeven;
   applyEarningsPerUnitButtonState('inventoryLedger');
   if (earningsCostLedgerTableHead) {
     const tr = document.createElement('tr');
     for (const column of visibleColumns) {
-      const basisColumn = !['starbase', 'asset', 'quantity', 'costedQuantity', 'uncostedQuantity', 'status'].includes(column.id);
+      const basisColumn = !['starbase', 'asset', 'quantity', 'costedQuantity', 'uncostedQuantity', 'purchasedQuantity', 'producedQuantity', 'producedPercent', 'status'].includes(column.id);
       const label = basisColumn && perUnit
         ? (column.id === 'totalBasis' ? 'Total / Unit' : `${column.label} / Unit`)
         : column.label;
@@ -7686,13 +7703,16 @@ function renderInventoryCostLedger(result) {
     const tr = document.createElement('tr');
     for (const column of visibleColumns) {
       const value = values[column.id];
-      const formatted = ['quantity', 'costedQuantity', 'uncostedQuantity'].includes(column.id) ? formatWholeNumber(value)
+      const formatted = ['quantity', 'costedQuantity', 'uncostedQuantity', 'purchasedQuantity', 'producedQuantity'].includes(column.id) ? formatWholeNumber(value)
+        : column.id === 'producedPercent' ? (value == null ? '--' : formatPercentNumber(value, 1))
         : ['starbase', 'asset', 'status'].includes(column.id) ? value
           : formatInventoryLedgerBasisValue(value, perUnit);
       const cell = createTextCell(formatted);
       if (perUnit && ['gm', 'lm', 'mining', 'crafting', 'scanning'].includes(column.id)) {
-        cell.title = `Weighted source cost; ${formatWholeNumber(row.sourceQuantities?.[column.id] || 0)} remaining units with known source basis. Source unit costs do not sum to Total / Unit.`;
+        cell.title = 'Contribution to the blended inventory cost. All cost components use the same quantity denominator and sum to Total / Unit.';
       }
+      if (['purchased', 'produced'].includes(column.id)) cell.title = `Complete landed cost of ${formatWholeNumber(row.acquisition?.[column.id]?.quantity || 0)} remaining costed units from this route, including ingredients and cargo. Route unit prices do not add together.`;
+      if (column.id === 'producedPercent') cell.title = `Internally produced costed quantity / total costed quantity. Purchased: ${formatWholeNumber(row.acquisition?.purchased?.quantity || 0)}; produced: ${formatWholeNumber(row.acquisition?.produced?.quantity || 0)}; unknown/other origin: ${formatWholeNumber(row.unknownOriginQuantity || 0)}. Uncosted stock excluded.`;
       tr.appendChild(cell);
     }
     earningsCostLedgerTableBody.appendChild(tr);
@@ -10874,3 +10894,17 @@ loadInitialState().catch((error) => {
   console.error(error);
   saveStatus.textContent = 'Load failed';
 });
+
+for (const button of document.querySelectorAll('[data-inventory-ledger-view]')) {
+  button.addEventListener('click', () => {
+    inventoryLedgerView = button.dataset.inventoryLedgerView;
+    for (const option of document.querySelectorAll('[data-inventory-ledger-view]')) {
+      const active = option.dataset.inventoryLedgerView === inventoryLedgerView;
+      option.classList.toggle('active', active);
+      option.setAttribute('aria-pressed', String(active));
+    }
+    earningsSort.breakeven = { column: null, direction: null };
+    renderEarningsColumnControls();
+    renderInventoryCostLedger(latestBreakevenResult);
+  });
+}

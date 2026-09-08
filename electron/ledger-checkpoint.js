@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 16 rebuilds baselines affected by incomplete overdraft recovery.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 16;
+// Version 17 rebuilds acquisition-route cargo attribution.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 17;
 
 function emptyResult(status, error = '') {
   return {

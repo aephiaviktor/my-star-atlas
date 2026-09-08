@@ -89,15 +89,15 @@ test('inferred surplus is placed after an authoritative baseline without changin
   assert.deepEqual(again.ledger.snapshot(),result.ledger.snapshot());
   assert.equal(options.inventoryReconciliationRows[0].quantity,0);
 });
-test('renderer uses source denominators, preserves blended total and shows genuine zero', () => {
+test('renderer breakdown uses a common denominator, preserves blended total and shows genuine zero', () => {
   const fs=require('node:fs'), vm=require('node:vm');
   const source=fs.readFileSync(require.resolve('../electron/renderer.js'),'utf8');
   const context={Intl};
   vm.runInNewContext(source.slice(source.indexOf('const costLedgerBasisFormatter'),source.indexOf('function renderInventoryCostLedger')),context);
   const row={quantity:1000,costs:{gm:2,crafting:1},cargoCost:1,sourceUnitCosts:{gm:0.003,crafting:0},basisStatus:'estimated'};
   const values=context.inventoryLedgerValues(row,true);
-  assert.equal(values.gm,0.003); assert.equal(values.crafting,0); assert.equal(values.totalBasis,0.004);
-  assert.equal(values.mining,null);
+  assert.equal(values.gm,0.002); assert.equal(values.crafting,0.001); assert.equal(values.totalBasis,0.004);
+  assert.equal(values.mining,0);
   assert.equal(context.formatInventoryLedgerBasisValue(null,true),'--');
   assert.notEqual(context.formatInventoryLedgerBasisValue(0,true),'--');
   assert.equal(context.inventoryLedgerValues(row,false).gm,2);

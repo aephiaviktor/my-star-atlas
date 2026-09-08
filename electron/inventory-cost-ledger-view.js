@@ -56,9 +56,21 @@ function projectInventoryCostLedgerRows({ ledgerRows = [], valuationRows = [], p
     const cargoCost = cargoCostPerUnit * quantity;
     const totalBasis = Object.values(costs).reduce((sum, value) => sum + value, cargoCost);
 
+    const origins = scaleOrigins(ledger.origins,
+      ledgerKnown > 0 ? Math.min(1, knownCostQuantity / ledgerKnown) : 0, 0);
+    const acquisition = {};
+    for (const [route, sources] of Object.entries({ purchased: ['gm', 'lm'], produced: ['scanning', 'mining', 'crafting'] })) {
+      const parts = origins.filter((part) => !part.uncosted && sources.includes(part.source));
+      const qty = parts.reduce((sum, part) => sum + part.quantity, 0);
+      const cost = parts.reduce((sum, part) => sum + Object.values(part.costs).reduce((a, b) => a + b, part.cargoCost), 0);
+      acquisition[route] = { quantity: qty, cost, unitCost: qty > 0 ? cost / qty : null };
+    }
+    const unknownOriginQuantity = Math.max(0, knownCostQuantity - acquisition.purchased.quantity - acquisition.produced.quantity);
     return {
-      ...sourceUnitMetrics(scaleOrigins(ledger.origins,
-        ledgerKnown > 0 ? Math.min(1, knownCostQuantity / ledgerKnown) : 0, 0)),
+      acquisition,
+      unknownOriginQuantity,
+      producedPercent: knownCostQuantity > 0 ? acquisition.produced.quantity / knownCostQuantity * 100 : null,
+      ...sourceUnitMetrics(origins),
       location,
       asset,
       quantity,
