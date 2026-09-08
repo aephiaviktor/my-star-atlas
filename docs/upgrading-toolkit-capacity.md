@@ -1,5 +1,9 @@
 # Toolkit downtime validation (separate from charts)
 
+**Current ownership: SLYA collects; Influx stores; MSA reads and analyses.**
+See [Collector ownership](#collector-ownership-slya-current-migration) for the current
+behavior. Earlier collection sections below document the superseded MSA implementation.
+
 The upper Selection Uplift and UTC-Calendar Crew-State Utilization charts and calculation module are restored to **v0.6.285**. Axis navigation remains as in that version. Toolkit evidence and estimates do not modify chart inputs, productive work, claim lock, or configured capacity. The v0.6.286/287 supply-adjusted chart model is removed.
 
 ## Validation table
@@ -151,3 +155,40 @@ shows shared-read/upload failures and pending uploads without transport secrets.
 The charts and their v285 calculations remain unchanged. Cross-installation and
 failure recovery are tested with injected transports; no live Influx write or
 real overnight deployment has been performed for this local patch.
+
+## Collector ownership: SLYA (current migration)
+
+MSA no longer schedules, captures, scans transaction history, or publishes Toolkit
+observations. Analytics refresh reads `starbase_toolkit_clock_v1` and existing
+`starbase_upkeep_state` records from its primary Influx bucket. It recomputes clock
+windows and validates old replay records locally, retaining a disposable `.reader`
+cache for network outages. Old `.observations`, `.shared`, and replay journals are
+read for continuity but never drained, rewritten, or deleted. Unsynchronized data
+on an old MSA installation remains available on that installation only.
+
+SLYA now owns hourly and 23:55–00:10 UTC (30-second) captures, startup/resume
+collection, and five-minute upload-only retries. A single SLYA collects all three
+PHANTOM factions, independent of the selected faction or upgrade automation.
+It uses its configured read RPC providers with finalized, consistent-slot snapshots,
+not the periodic inventory `curAmount` feed. Raw observations use the unchanged
+measurement, canonical fields, identity hash and chain timestamp. Multiple SLYAs
+or old MSA collectors therefore do not multiply downtime.
+
+Configure SLYA's normal Influx write destination to the same organization and
+primary bucket that MSA reads. Nothing is automatically copied between settings.
+SLYA's destination-scoped GM storage retains 35 days of observations and publication
+confirmations, persisting before HTTP and retrying identical point bytes. Changing
+destination isolates old queues; it does not send them to a new bucket. Token
+rotation does not change queue identity. HTTP requests are bounded to 15 seconds;
+batches remain at most 128 points and 512 per faction per pass. An outage beyond
+35 days exceeds the retained retry history. Local storage failure prevents upload.
+
+The old scheduler/replay implementation remains only as tested historical utilities,
+not wired into MSA's production acquisition path. The prior sections describing
+MSA background capture are historical. No chart calculations changed. Exact daily
+coverage still requires sufficient boundary evidence; missed boundaries remain
+unknown. This migration has automated fixture validation, not live overnight proof.
+
+Toolkit RPC uses at most two configured read providers per request, with automatic
+429 retries disabled and a 15-second deadline per HTTP response (including body).
+It does not enter the automation proxy’s indefinitely retrying fallback loop.

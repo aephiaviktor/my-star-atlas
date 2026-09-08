@@ -9495,6 +9495,8 @@ function renderToolkitDowntime(result) {
   if (!body) return;
   const data = result?.toolkitDowntime;
   const statusText = {
+    shared_read_only: 'Collection is handled by SLYA; MSA reads saved evidence only.',
+    upkeep_history_read_failed: 'Legacy replay history could not be read; available clock measurements remain shown.',
     baseline_only: 'First observation saved; earlier periods remain unknown.',
     catching_up: 'History catch-up in progress; available intervals are shown.',
     reconciled: 'Available history reconciled.', unchanged: 'No newer finalized observation.',
@@ -9514,7 +9516,7 @@ function renderToolkitDowntime(result) {
     : `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m ${Math.floor(seconds % 60)}s`;
   if (status) {
     const stages = { snapshot: 'Account capture', history_read: 'History read', history_replay: 'Transaction replay', history_publish: 'History publication' };
-    const clockText = { clock_observed: 'Account-clock measurements available.', baseline_only: 'First clock observation saved; automatic UTC-boundary captures collect daily evidence while MSA is running. Refresh to view new measurements.',
+    const clockText = { clock_observed: 'Account-clock measurements available.', baseline_only: 'Waiting for shared clock observations from SLYA. MSA reads evidence only; refresh to view new measurements.',
       upkeep_observations_invalid: 'Local clock observations could not be read.', upkeep_observations_save_failed: 'Local clock observations could not be saved.',
       upkeep_snapshot_unavailable: 'A fresh finalized account snapshot is unavailable.', upkeep_configuration_changed: 'Clock comparison skipped a changed-configuration window.',
       upkeep_clock_reconciliation_failed: 'Clock comparison skipped an inconsistent window; other measurements remain available.' }[data?.clockStatus] || '';
