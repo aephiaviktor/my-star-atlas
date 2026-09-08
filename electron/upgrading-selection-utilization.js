@@ -47,10 +47,15 @@ function normalizeJob(raw) {
   const activeEndMs = Math.min(completedMs, startedMs + amount * secondsPerUnit / crew * 1000);
   return { ...raw, component, amount, crew, startedMs, activeEndMs, completedMs, date: new Date(completedMs).toISOString().slice(0, 10), claimDelaySeconds: Math.max(0, (completedMs - activeEndMs) / 1000) };
 }
-function buildNeutralHours(rows) {
+function buildNeutralHours(rows, { faction = '', profile = '' } = {}) {
   const byHour = new Map();
-  for (const raw of rows || []) {
-    const time = String(raw.time ?? raw._time ?? '');
+  const canonicalFaction = value => String(value || '').toUpperCase().replace(/^UST$/, 'USTUR');
+  const scoped = (rows || []).filter(raw => (!faction || !raw.faction || canonicalFaction(raw.faction) === canonicalFaction(faction)) && (!profile || !(raw.profile || raw.player_profile) || (raw.profile || raw.player_profile) === profile));
+  // Newest recording wins within an intended hour, independent of response order.
+  scoped.sort((a, b) => String(a.recorded_at ?? a._time ?? a.time).localeCompare(String(b.recorded_at ?? b._time ?? b.time)) || JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  for (const raw of scoped) {
+    const intendedMs = Date.parse(raw.snapshot_for_hour || '');
+    const time = Number.isFinite(intendedMs) ? new Date(intendedMs).toISOString() : String(raw.time ?? raw._time ?? '');
     const ms = Date.parse(time), component = componentKey(raw.component);
     const crew = finite(raw.neutral_crew ?? raw.neutralCrew);
     if (!Number.isFinite(ms) || !component || !(crew >= 0)) continue;
@@ -63,11 +68,28 @@ function buildNeutralHours(rows) {
   }
   return byHour;
 }
+// Fill only a single missing hour from an observed preceding allocation. Never
+// chain estimates, borrow future plans, or replace an observed zero allocation.
+function recoverNeutralHours(rows, jobs, scope = {}) {
+  const byHour = buildNeutralHours(rows, scope), estimated = new Map();
+  const observed = new Map(byHour);
+  for (const raw of jobs) {
+    const job = normalizeJob(raw); if (!job) continue;
+    splitInterval(job.startedMs, job.activeEndMs, job.crew, hour => {
+      if (byHour.has(hour)) return;
+      const previous = new Date(Date.parse(hour + ':00:00Z') - hourMs).toISOString().slice(0, 13);
+      const allocation = observed.get(previous);
+      if (!allocation?.size) return;
+      byHour.set(hour, new Map(allocation)); estimated.set(hour, previous);
+    });
+  }
+  return { byHour, estimated };
+}
 // Resolve the prices the completion-cohort comparison actually consumes. A
 // previous-day neutral component may never appear in the completion day's plan.
-async function recoverSelectionComponentPrices({ jobs = [], neutralHours = [], pricesByDate = {}, resolvePrice }) {
+async function recoverSelectionComponentPrices({ jobs = [], neutralHours = [], pricesByDate = {}, resolvePrice, faction = '', profile = '' }) {
   const result = Object.fromEntries(Object.entries(pricesByDate).map(([date, prices]) => [date, { ...prices }]));
-  const byHour = buildNeutralHours(neutralHours);
+  const { byHour } = recoverNeutralHours(neutralHours, jobs, { faction, profile });
   const required = new Map();
   for (const raw of jobs) {
     const job = normalizeJob(raw);
@@ -95,7 +117,7 @@ async function recoverSelectionComponentPrices({ jobs = [], neutralHours = [], p
 }
 function calculateUpgradingSelectionUtilization({ jobs = [], neutralHours = [], configuredCrewByHour = {}, prices = {}, pricesByDate = null, atlasPerLpByDate = {}, faction = '', profile = '', priceSnapshotAt = null } = {}) {
   const normalizedJobs = jobs.map(normalizeJob).filter(Boolean);
-  const neutralByHour = buildNeutralHours(neutralHours);
+  const { byHour: neutralByHour, estimated } = recoverNeutralHours(neutralHours, jobs, { faction, profile });
   const cohort = new Map(), calendar = new Map();
   const ensureCalendar = (date) => { if (!calendar.has(date)) calendar.set(date, { date, protocol_active_crew_hours: 0, claim_locked_crew_hours: 0, proven_eligible_idle_crew_hours: 0, proven_hard_unavailable_crew_hours: 0 }); return calendar.get(date); };
   for (const job of normalizedJobs) {
@@ -136,7 +158,8 @@ function calculateUpgradingSelectionUtilization({ jobs = [], neutralHours = [], 
     const actualCost = dayJobs.reduce((sum, job) => sum + job.amount * (priceValue(valuationPrices[job.component]) || 0), 0);
     const upliftLp = complete ? actualLp - neutralLp : null;
     const upliftAtlas = complete ? upliftLp * finite(atlasPerLpByDate[date]) - (actualCost - neutralCost) : null;
-    return { date, time_basis: 'completion_cohort', atlas_per_lp: priceValue(atlasPerLpByDate[date]), price_basis: pricesByDate ? 'historical_at_or_before' : 'current_component_prices', price_basis_complete: actualCostComplete && neutralCostComplete, actual_cohort_lp: actualLp, neutral_cohort_lp: complete ? neutralLp : null, selection_uplift_lp: upliftLp, selection_uplift_lp_per_active_crew_hour: complete && activeCrewHours > 0 ? upliftLp / activeCrewHours : null, selection_uplift_lp_per_active_crew_day: complete && activeCrewDays > 0 ? upliftLp / activeCrewDays : null, selection_uplift_atlas: upliftAtlas, selection_uplift_atlas_per_active_crew_day: complete && activeCrewDays > 0 ? upliftAtlas / activeCrewDays : null, completion_cohort_active_crew_hours: activeCrewHours, active_crew_days: activeCrewDays, completed_job_count: dayJobs.length, cohort_complete: !missingHours.length, neutral_allocation_complete: !missingHours.length, evidence_complete: complete, incomplete_reason: complete ? null : incompleteReasons.join('; ') };
+    const estimatedHours = [...activeByHour.keys()].filter(hour => estimated.has(hour)).sort();
+    return { date, estimated: estimatedHours.length > 0, estimated_neutral_hours: estimatedHours.map(hour => ({ hour, source_hour: estimated.get(hour) })), time_basis: 'completion_cohort', atlas_per_lp: priceValue(atlasPerLpByDate[date]), price_basis: pricesByDate ? 'historical_at_or_before' : 'current_component_prices', price_basis_complete: actualCostComplete && neutralCostComplete, actual_cohort_lp: actualLp, neutral_cohort_lp: complete ? neutralLp : null, selection_uplift_lp: upliftLp, selection_uplift_lp_per_active_crew_hour: complete && activeCrewHours > 0 ? upliftLp / activeCrewHours : null, selection_uplift_lp_per_active_crew_day: complete && activeCrewDays > 0 ? upliftLp / activeCrewDays : null, selection_uplift_atlas: upliftAtlas, selection_uplift_atlas_per_active_crew_day: complete && activeCrewDays > 0 ? upliftAtlas / activeCrewDays : null, completion_cohort_active_crew_hours: activeCrewHours, active_crew_days: activeCrewDays, completed_job_count: dayJobs.length, cohort_complete: !missingHours.length, neutral_allocation_complete: !missingHours.length, evidence_complete: complete && !estimatedHours.length, display_available: complete, incomplete_reason: complete ? null : incompleteReasons.join('; ') };
   });
   const utilization = [...calendar].sort(([a], [b]) => a.localeCompare(b)).map(([date, row]) => {
     const hours = Object.entries(configuredCrewByHour).filter(([hour]) => hour.startsWith(date));
@@ -156,4 +179,4 @@ function calculateUpgradingSelectionUtilization({ jobs = [], neutralHours = [], 
   const claimLockedCrewHours = utilization.reduce((sum, row) => sum + row.claim_locked_crew_hours, 0), configuredCrewHours = utilization.reduce((sum, row) => sum + row.configured_crew_hours, 0);
   return { data_version: DATA_VERSION, calculation_version: CALCULATION_VERSION, faction, profile, price_basis: pricesByDate ? 'historical_at_or_before' : 'current_component_prices', price_snapshot_at: priceSnapshotAt, price_basis_complete: selection.every((row) => row.evidence_complete), component_prices_used: pricesByDate || prices, price_warning: pricesByDate ? null : CURRENT_PRICE_WARNING, selection, utilization, claim_lock: { claim_locked_crew_hours: claimLockedCrewHours, claim_locked_percent: configuredCrewHours > 0 ? claimLockedCrewHours / configuredCrewHours * 100 : null, median_claim_delay_seconds: quantile(claimDelays, .5), p90_claim_delay_seconds: quantile(claimDelays, .9), p95_claim_delay_seconds: quantile(claimDelays, .95), maximum_claim_delay_seconds: claimDelays.length ? Math.max(...claimDelays) : null, attempt_count: null, retry_count: null, failure_count: null, evidence_completeness: 'Attempt/retry/failure evidence NOT OBSERVED' } };
 }
-module.exports = { recoverSelectionComponentPrices, COMPONENT_SECONDS, COMPONENT_LP, calculateUpgradingSelectionUtilization, normalizeJob, splitInterval, CURRENT_PRICE_WARNING };
+module.exports = { buildNeutralHours, recoverSelectionComponentPrices, COMPONENT_SECONDS, COMPONENT_LP, calculateUpgradingSelectionUtilization, normalizeJob, splitInterval, CURRENT_PRICE_WARNING };

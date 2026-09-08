@@ -9458,7 +9458,7 @@ function renderUpgradingSelectionUtilizationV1(result) {
   const currentUtcDate = new Date(chartNow).toISOString().slice(0, 10);
   const completeSelection = (data.selection || [])
     .filter((row) => row.date >= upgradingV1ChartStartDate && row.date < currentUtcDate)
-    .filter((row) => row.evidence_complete && Number.isFinite(row.atlas_per_lp) && Number.isFinite(row.selection_uplift_atlas_per_active_crew_day));
+    .filter((row) => (row.display_available ?? row.evidence_complete) && Number.isFinite(row.atlas_per_lp) && Number.isFinite(row.selection_uplift_atlas_per_active_crew_day));
   if (optimizationUpgradingSelectionV1) {
     optimizationUpgradingSelectionV1.replaceChildren();
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingSelectionV1,760,340);
@@ -9478,7 +9478,7 @@ function renderUpgradingSelectionUtilizationV1(result) {
       if(variance){const slope=cov/variance,intercept=meanY-slope*meanX;appendOptimizationSvg(plot,'line',{x1:axes.x(minX),x2:axes.x(maxX),y1:axes.y(intercept+slope*minX),y2:axes.y(intercept+slope*maxX),class:'optimization-trend-line'});}
       for (const row of completeSelection) {
         const dot = appendOptimizationSvg(plot,'circle',{cx:axes.x(row.atlas_per_lp),cy:axes.y(row.selection_uplift_atlas_per_active_crew_day),r:5,fill:'#45d6c1',class:'mean-marker'});
-        bindOptimizationAnalyticsTooltip(dot, `${row.date} UTC · ATLAS/LP ${tooltipNumber(row.atlas_per_lp, 8)} · selection uplift ${tooltipNumber(row.selection_uplift_atlas_per_active_crew_day)} ATLAS / active crew-day · actual ${tooltipNumber(row.actual_cohort_lp)} LP · neutral ${tooltipNumber(row.neutral_cohort_lp)} LP · active ${tooltipNumber(row.completion_cohort_active_crew_hours)} crew-hours · ${tooltipNumber(row.completed_job_count, 0)} completed jobs`);
+        bindOptimizationAnalyticsTooltip(dot, `${row.date} UTC · ATLAS/LP ${tooltipNumber(row.atlas_per_lp, 8)} · selection uplift ${tooltipNumber(row.selection_uplift_atlas_per_active_crew_day)} ATLAS / active crew-day · actual ${tooltipNumber(row.actual_cohort_lp)} LP · neutral ${tooltipNumber(row.neutral_cohort_lp)} LP · active ${tooltipNumber(row.completion_cohort_active_crew_hours)} crew-hours · ${tooltipNumber(row.completed_job_count, 0)} completed jobs${row.estimated_neutral_hours?.length ? ` · Estimated neutral allocation: ${row.estimated_neutral_hours.map(item => `${item.hour} UTC from ${item.source_hour} UTC`).join('; ')}` : ''}`);
       }
       bindUpgradingAnalyticsChartNavigation(svg, axes, null, 'selection', view, { xMin: autoMinX, xMax: autoMaxX, yMin: autoMinY, yMax: autoMaxY, xFloor: 0 });
     }

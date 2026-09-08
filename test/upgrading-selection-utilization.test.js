@@ -63,8 +63,8 @@ test('five-state identity is exhaustive and claim locked is not active or idle',
   assert.match(result.claim_lock.evidence_completeness, /NOT OBSERVED/);
 });
 
-test('missing neutral allocation fails closed without legacy fallback', () => {
-  const value = input(); value.neutralHours = value.neutralHours.slice(0, 1);
+test('absent neutral history remains unavailable without invented allocation', () => {
+  const value = input(); value.neutralHours = [];
   const row = calculateUpgradingSelectionUtilization(value).selection[0];
   assert.equal(row.evidence_complete, false);
   assert.equal(row.selection_uplift_atlas, null);
@@ -125,7 +125,7 @@ test('V1.1 renderer contains real scatter, trend, zero line, five-state stack, a
   assert.match(renderer, /optimization-zero-line/);
   assert.match(renderer, /optimization-trend-line/);
   for (const label of ['Protocol active','Claim locked','Proven eligible idle','Proven hard unavailable','Capacity not observed']) assert.match(renderer, new RegExp(label));
-  assert.match(renderer, /filter\(\(row\) => row\.evidence_complete/);
+  assert.match(renderer, /row\.display_available \?\? row\.evidence_complete/);
   assert.match(css, /optimization-upgrading-v1-chart svg[^}]+width:\s*100%/s);
   assert.match(css, /grid-template-columns:\s*minmax\(0, 1fr\)/);
 });

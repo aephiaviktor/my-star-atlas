@@ -1,18 +1,11 @@
 'use strict';
 // Read-only economic projection. Existing cohort charts and stored evidence are untouched.
-const { COMPONENT_SECONDS, COMPONENT_LP, normalizeJob, splitInterval } = require('./upgrading-selection-utilization');
+const { COMPONENT_SECONDS, COMPONENT_LP, normalizeJob, splitInterval, buildNeutralHours } = require('./upgrading-selection-utilization');
 const { project } = require('./toolkit-capacity-chart');
 const number = value => value != null && Number.isFinite(Number(value)) ? Number(value) : null;
 function calculateManagementImpact({ jobs = [], neutralHours = [], configuredCrewByHour = {}, pricesByDate = {}, atlasPerLpByDate = {}, utilization = [], toolkitDowntime = {}, faction = '', profile = '', now = Date.now() } = {}) {
   const today = new Date(now).toISOString().slice(0, 10);
-  const allocations = new Map(), work = new Map();
-  for (const row of neutralHours || []) {
-    const ms = Date.parse(row.time ?? row._time), component = String(row.component || '').trim().toLowerCase(), crew = number(row.neutral_crew ?? row.neutralCrew);
-    if (!Number.isFinite(ms) || crew == null || crew < 0) continue;
-    const hour = new Date(ms).toISOString().slice(0, 13);
-    if (!allocations.has(hour)) allocations.set(hour, new Map());
-    allocations.get(hour).set(component, crew);
-  }
+  const allocations = buildNeutralHours(neutralHours, { faction, profile }), work = new Map();
   for (const raw of jobs || []) {
     const job = normalizeJob(raw); if (!job) continue;
     splitInterval(job.startedMs, job.activeEndMs, job.crew, (hour, hours) => {

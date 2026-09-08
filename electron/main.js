@@ -1120,20 +1120,22 @@ async function fetchDailyNeutralUpgradingPlan(settings) {
   |> range(start: -30d)
   |> filter(fn: (r) => r._measurement == "lp_auto_comp")
 ${scopeFilterFlux}
-  |> filter(fn: (r) => r._field == "neutral_upgrading_hour" or r._field == "neutral_crew")
+  |> filter(fn: (r) => r._field == "neutral_upgrading_hour" or r._field == "neutral_crew" or r._field == "snapshot_for_hour")
   |> pivot(rowKey: ["_time", "component"], columnKey: ["_field"], valueColumn: "_value")
-  |> keep(columns: ["_time", "component", "neutral_upgrading_hour", "neutral_crew"])
+  |> keep(columns: ["_time", "component", "neutral_upgrading_hour", "neutral_crew", "snapshot_for_hour"])
   |> sort(columns: ["_time", "component"])`;
   const latestByComponentHour = new Map();
   for (const row of parseInfluxCsv(await queryInfluxFlux({ ...settings, influxBucket: settings.influxBucket }, flux))) {
-    const time = String(row._time || '');
+    const recordedAt = String(row._time || '');
+    const intendedMs = Date.parse(row.snapshot_for_hour || '');
+    const time = Number.isFinite(intendedMs) ? new Date(intendedMs).toISOString() : recordedAt;
     const component = normalizeShipName(row.component);
     const rate = row.neutral_upgrading_hour == null || row.neutral_upgrading_hour === '' ? null : Number(row.neutral_upgrading_hour);
     const neutralCrew = row.neutral_crew == null || row.neutral_crew === '' ? null : Number(row.neutral_crew);
     const ms = Date.parse(time);
     if (!component || !Number.isFinite(ms) || (!(Number.isFinite(rate) && rate >= 0) && !(Number.isFinite(neutralCrew) && neutralCrew >= 0))) continue;
     const key = `${time.slice(0, 13)}|${component}`;
-    if (!latestByComponentHour.has(key) || time > latestByComponentHour.get(key).time) latestByComponentHour.set(key, { time, component, rate, neutralCrew });
+    if (!latestByComponentHour.has(key) || recordedAt > latestByComponentHour.get(key).recordedAt) latestByComponentHour.set(key, { time, recordedAt, component, rate, neutralCrew });
   }
   const byDay = new Map();
   for (const row of latestByComponentHour.values()) {
@@ -1166,7 +1168,7 @@ ${scopeFilterFlux}
     }
     return { date, lp, componentCost, hours: hours.size, complete: true };
   }).filter(Boolean);
-  result.hourlyAllocations = [...latestByComponentHour.values()].map((row) => ({ time: row.time, component: row.component, neutral_crew: row.neutralCrew }));
+  result.hourlyAllocations = [...latestByComponentHour.values()].map((row) => ({ time: row.time, recorded_at: row.recordedAt, snapshot_for_hour: row.time, component: row.component, neutral_crew: row.neutralCrew }));
   result.componentPricesByDate = {};
   for (const [key, price] of historicalComponentPrices) {
     const [date, component] = key.split('\n');
@@ -1368,7 +1370,7 @@ async function fetchUpgradingOptimization(payload = {}) {
     historicalComponentPricesByDate[date] = { ...(historicalComponentPricesByDate[date] || {}), ...values };
   }
   historicalComponentPricesByDate = await recoverSelectionComponentPrices({
-    jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations,
+    jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations, faction, profile: playerProfile,
     pricesByDate: historicalComponentPricesByDate, resolvePrice: resolveHistoricalAtlasPrice,
   });
   const selectionUtilizationV1 = calculateUpgradingSelectionUtilization({ jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations, configuredCrewByHour, prices: componentPricesAtl, pricesByDate: historicalComponentPricesByDate, atlasPerLpByDate, faction, profile: playerProfile, priceSnapshotAt: netAtlasDaily.priceSnapshotAt });
