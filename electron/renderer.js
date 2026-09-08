@@ -9507,6 +9507,56 @@ function renderUpgradingSelectionUtilizationV1(result) {
   if (optimizationUpgradingOperationalV1) { const rows=data.utilization||[]; const lower=rows.reduce((s,r)=>s+r.feasible_neutral_lower_crew_hours,0), upper=rows.reduce((s,r)=>s+r.feasible_neutral_upper_crew_hours,0); optimizationUpgradingOperationalV1.textContent=`UTC-calendar capacity bounds, not an ATLAS profit result. Feasible-neutral capacity: ${lower.toLocaleString(undefined,{maximumFractionDigits:1})}–${upper.toLocaleString(undefined,{maximumFractionDigits:1})} crew-hours. Lower bound: classified productive work; upper bound: configured capacity minus classified claim lock and proven unavailability. Toolkit downtime is not applied; residual NOT OBSERVED remains uncertainty.`; }
 }
 
+const upgradingManagementViews = { loss: {}, combined: {} };
+function renderUpgradingManagementImpact(result) {
+  const today = new Date().toISOString().slice(0, 10);
+  const start = getUpgradingV1ChartStartDate(Date.now());
+  const allRows = (result?.managementImpact?.rows || []).filter(row => row.date >= start && row.date < today);
+  const format = (value, digits = 2) => Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : '--';
+  for (const [id, key, lowerKey, color, label] of [
+    ['optimization-upgrading-loss', 'loss', 'lossLower', '#f59e0b', 'Utilization loss ATLAS / net crew-day'],
+    ['optimization-upgrading-management', 'combined', 'combinedLower', '#45d6c1', 'Management impact ATLAS / net crew-day'],
+  ]) {
+    const container = document.querySelector(`#${id}`); if (!container) continue;
+    container.replaceChildren();
+    const points = allRows.filter(row => row.available && Number.isFinite(row.atlasPerLp) && Number.isFinite(row[key]) && Number.isFinite(row[lowerKey]));
+    if (!points.length) { container.textContent = allRows.length ? [...new Set(allRows.map(row => row.reason).filter(Boolean))].join('; ') : 'No completed UTC days with management valuation yet.'; continue; }
+    const svg = createOptimizationAnalyticsSvg(container, 760, 340); if (!svg) continue;
+    const xs = points.map(row => row.atlasPerLp), ys = points.flatMap(row => [row[key], row[lowerKey]]);
+    const autoMinX = Math.max(0, Math.min(...xs) * .96), autoMaxX = Math.max(autoMinX + 1e-9, Math.max(...xs) * 1.04);
+    const pad = Math.max(.05, (Math.max(0, ...ys) - Math.min(0, ...ys)) * .1);
+    const autoMinY = Math.min(0, ...ys) - pad, autoMaxY = Math.max(0, ...ys) + pad;
+    const view = upgradingManagementViews[key];
+    const minX = Number.isFinite(view.xMin) ? view.xMin : autoMinX, maxX = Number.isFinite(view.xMax) ? view.xMax : autoMaxX;
+    const minY = Number.isFinite(view[`${key}YMin`]) ? view[`${key}YMin`] : autoMinY, maxY = Number.isFinite(view[`${key}YMax`]) ? view[`${key}YMax`] : autoMaxY;
+    const axes = renderUpgradingChartAxes(svg, { minY, maxY, xMin: minX, xMax: maxX, xTicks: [minX, (minX + maxX) / 2, maxX], xLabel: 'ATLAS / LP', yLabel: label, height: 340, xFormatter: value => value.toFixed(8), yFormatter: value => format(value) });
+    const defs = appendOptimizationSvg(svg, 'defs'), clip = appendOptimizationSvg(defs, 'clipPath', { id: `${id}-clip` });
+    appendOptimizationSvg(clip, 'rect', { x: axes.left, y: axes.top, width: axes.width - axes.left - axes.right, height: axes.height - axes.top - axes.bottom });
+    const plot = appendOptimizationSvg(svg, 'g', { 'clip-path': `url(#${id}-clip)` });
+    appendOptimizationSvg(plot, 'line', { x1: axes.left, x2: axes.width - axes.right, y1: axes.y(0), y2: axes.y(0), class: 'optimization-zero-line' });
+    const meanX = xs.reduce((a,b) => a+b,0) / xs.length, meanY = points.reduce((s,r) => s+r[key],0) / points.length;
+    const variance = xs.reduce((sum,x) => sum+(x-meanX)**2,0);
+    if (variance) {
+      const slope = points.reduce((sum,r) => sum+(r.atlasPerLp-meanX)*(r[key]-meanY),0) / variance;
+      appendOptimizationSvg(plot, 'line', { x1: axes.x(minX), x2: axes.x(maxX), y1: axes.y(meanY+slope*(minX-meanX)), y2: axes.y(meanY+slope*(maxX-meanX)), class: 'optimization-trend-line' });
+    }
+    for (const row of points) {
+      const tip = `${row.date} UTC · ATLAS/LP ${format(row.atlasPerLp,8)} · selection ${format(row.selection)} + utilization ${format(row.loss)} = combined ${format(row.combined)} ATLAS / net crew-day · displayed range ${format(row[lowerKey])} to ${format(row[key])} · net capacity ${format(row.netCrewHours)} crew-hours (${format(row.netCrewDays)} crew-days) · corrected claim lock + eligible idle ${format(row.lostCrewHours)} crew-hours · unclassified ${format(row.unknownCrewHours)} crew-hours · neutral contribution ${format(row.benchmarkAtlasPerCrewHour)} ATLAS / crew-hour · Toolkit coverage ${format(row.coverage*100)}% · ${row.adjusted ? 'Toolkit adjusted (estimated)' : 'capacity unadjusted'}${row.warnings.length ? ` · ${row.warnings.join('; ')}` : ''}`;
+      const whisker = appendOptimizationSvg(plot, 'line', { x1: axes.x(row.atlasPerLp), x2: axes.x(row.atlasPerLp), y1: axes.y(row[key]), y2: axes.y(row[lowerKey]), stroke: color, 'stroke-width': 2, opacity: .6 });
+      bindOptimizationAnalyticsTooltip(whisker, tip);
+      appendOptimizationSvg(plot, 'line', { x1: axes.x(row.atlasPerLp)-4, x2: axes.x(row.atlasPerLp)+4, y1: axes.y(row[lowerKey]), y2: axes.y(row[lowerKey]), stroke: color });
+      const dot = appendOptimizationSvg(plot, 'circle', { cx: axes.x(row.atlasPerLp), cy: axes.y(row[key]), r: 5, fill: row.adjusted && !row.warnings.length ? color : 'transparent', stroke: color, 'stroke-width': 2, class: 'mean-marker' });
+      bindOptimizationAnalyticsTooltip(dot, tip);
+    }
+    bindUpgradingAnalyticsChartNavigation(svg, axes, null, key, view, { xMin: autoMinX, xMax: autoMaxX, yMin: autoMinY, yMax: autoMaxY, xFloor: 0 });
+    const note = document.createElement('p'); note.className = 'optimization-v1-warning';
+    const warningCounts = new Map();
+    for (const row of points) for (const warning of row.warnings) warningCounts.set(warning, (warningCounts.get(warning) || 0) + 1);
+    note.textContent = [`Estimated contribution, not realized profit. Hollow dots: incomplete or unadjusted evidence. ${points.length} completed days.`, ...allRows.filter(row => !row.available).map(row => `${row.date}: ${row.reason}`), ...[...warningCounts].map(([warning, count]) => `${count} day(s): ${warning}`)].join(' ');
+    container.append(note);
+  }
+}
+
 function renderToolkitDowntime(result) {
   const body = document.querySelector('#optimization-upgrading-toolkit-body');
   const status = document.querySelector('#optimization-upgrading-toolkit-status');
@@ -9568,6 +9618,7 @@ function renderToolkitDowntime(result) {
 function renderUpgradingOptimizationAnalytics() {
   const analytics = buildUpgradingOptimizationAnalytics(latestUpgradingOptimizationResult || {});
   renderUpgradingSelectionUtilizationV1(latestUpgradingOptimizationResult || {});
+  renderUpgradingManagementImpact(latestUpgradingOptimizationResult || {});
   renderToolkitDowntime(latestUpgradingOptimizationResult || {});
   const comparisonScales = getUpgradingComparisonScales(latestUpgradingComparisonResults.length ? latestUpgradingComparisonResults : [latestUpgradingOptimizationResult || {}]);
   const normalizedFaction = normalizeFaction(latestSettings?.faction);

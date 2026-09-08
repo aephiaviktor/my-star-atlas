@@ -935,6 +935,20 @@
                   <div class="toolkit-capacity-heading"><h3>UTC-Calendar Crew-State Utilization</h3><button id="upgrading-net-capacity" class="earnings-per-unit-btn" type="button" aria-pressed="false">Net capacity</button></div>
                   <div id="optimization-upgrading-utilization-v1" class="optimization-analytics-chart optimization-upgrading-v1-chart">Awaiting UTC-calendar crew-state evidence</div>
                 </section>
+                <section class="optimization-analytics-card optimization-upgrading-v1-card">
+                  <h3>Estimated Utilization Loss</h3>
+                  <p class="optimization-v1-warning">Completed UTC days only · Negative ATLAS / net crew-day · Whiskers include potentially unused, unclassified capacity</p>
+                  <div id="optimization-upgrading-loss" class="optimization-analytics-chart optimization-upgrading-v1-chart">Awaiting utilization valuation</div>
+                </section>
+                <section class="optimization-analytics-card optimization-upgrading-v1-card">
+                  <h3>Estimated Capacity Management Impact</h3>
+                  <p class="optimization-v1-warning">Selection + utilization · UTC-calendar basis · ATLAS / net crew-day · Above zero: selection gains outweigh utilization losses</p>
+                  <div id="optimization-upgrading-management" class="optimization-analytics-chart optimization-upgrading-v1-chart">Awaiting management valuation</div>
+                </section>
+                <section class="optimization-analytics-card optimization-analytics-summary-card">
+                  <h3>How to read capacity management</h3>
+                  <p class="optimization-analytics-note">Utilization loss values corrected Claim locked + Proven eligible idle at the neutral mix’s historical ATLAS contribution per crew-hour (LP value minus consumed component cost). Fixed costs are not charged again; incremental transaction fees are not modeled. Loss is negative, or zero when no profitable opportunity is estimated. Vertical whiskers extend downward for additional unclassified capacity: they are a scenario range, not statistical confidence or proven idle time. Toolkit downtime is excluded using the same estimated correction as the capacity bars, from 8 September UTC; older or uncovered days remain unadjusted and are labelled. Missing hourly neutral mixes use the nearest same-day observation. Both new charts divide by net crew-hours / 24, regardless of the bar toggle. Combined impact adds calendar-day selection uplift to utilization loss using the same daily prices and neutral mix. Cross-midnight work is split across calendar days using reconstructed work intervals, not the upper-left chart’s completion cohorts. Outage attribution and hourly opportunity timing remain estimates. The original selection chart is unchanged.</p>
+                </section>
                 <section class="optimization-analytics-card optimization-analytics-summary-card">
                   <h3>Estimated Claim-Locked Capacity</h3>
                   <p id="optimization-upgrading-claim-lock-v1" class="optimization-analytics-note">Awaiting claim evidence</p>

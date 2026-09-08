@@ -214,3 +214,18 @@ explicitly labelled while retaining crew-hour values in tooltips.
 
 This is a display-only projection. The upper-left chart, summary calculations,
 raw observations, downtime table, SLYA collection, and publication are unchanged.
+
+## Capacity management economics (local follow-up to 0.6.295)
+
+Two additional scatter charts show completed UTC days only, against ATLAS/LP:
+
+- Utilization loss: negative contribution forgone from corrected claim-lock plus proven eligible-idle hours.
+- Combined management impact: UTC-calendar selection contribution plus utilization loss, both divided by net crew-hours / 24.
+
+These reuse the capacity bar's Toolkit estimate/cutover, independently of its Total/Net toggle. Missing Toolkit coverage leaves the day visible and unadjusted. Zero net capacity or missing historical valuation is explicitly unavailable, not zero profit. The existing upper-left completion-cohort/active-crew chart is unchanged.
+
+The neutral contribution is LP value minus historical component cost, per crew-hour. Daily configured-crew weights combine hourly neutral mixes; gaps in the mix use nearest same-day observations and are flagged. Selection compares actual and neutral work in reconstructed UTC-hour intervals at that calendar day's historical prices. Thus cross-midnight completion cohorts are not added to calendar-day utilization. The existing work-interval reconstruction assumes uninterrupted work before its calculated finish; precise outage/work timing remains uncertain. The daily rate used to value lost hours estimates opportunity timing rather than observing it.
+
+Whiskers extend downward for potentially unused unclassified capacity; they are scenario bounds, not confidence intervals. Proven hard-unavailable hours are not operational loss. Negative neutral contribution is floored at zero for forgone-profit loss and flagged. Incremental transaction fees are not modeled; fixed costs are not charged again. These are indicative component-contribution estimates, not realized accounting profit. Partial configured-hour coverage, unadjusted history, Toolkit coverage, and capacity mismatches are visible in notes/tooltips; no denominator inflation or productive-work discount is introduced.
+
+All computation is read-only over existing scoped data. No new queries, collection, publication, timers or SLYA changes.
