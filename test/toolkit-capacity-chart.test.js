@@ -56,6 +56,10 @@ test('real renderer click toggles axes and red bars; legend survives SVG creatio
   assert.ok(container.children[0].children.some(e=>e.fill==='#ef4444' && e.height>0));
   assert.ok(container.children.some(e=>e.className==='optimization-v1-legend'));
   assert.ok(tips.some(t=>t.includes('coverage 99%')));
+  const legend = container.children.find(e=>e.className==='optimization-v1-legend');
+  assert.equal(legend.children.length,6);
+  assert.ok(legend.children.every(item=>item.title.length>30));
+  assert.match(legend.children[0].title,/modeled productive upgrading work/);
   button.click({currentTarget:button});
   assert.equal(button['aria-pressed'],'true');
   assert.equal(axis.yLabel,'% of net capacity');

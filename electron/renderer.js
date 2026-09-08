@@ -98,8 +98,6 @@ const optimizationAnalyticsTooltip = document.querySelector('#optimization-analy
 const optimizationUpgradingAnalyticsStatus = document.querySelector('#optimization-upgrading-analytics-status');
 const optimizationUpgradingSelectionV1 = document.querySelector('#optimization-upgrading-selection-v1');
 const optimizationUpgradingUtilizationV1 = document.querySelector('#optimization-upgrading-utilization-v1');
-const optimizationUpgradingClaimLockV1 = document.querySelector('#optimization-upgrading-claim-lock-v1');
-const optimizationUpgradingOperationalV1 = document.querySelector('#optimization-upgrading-operational-v1');
 const optimizationUpgradingRedemptionLegend = document.querySelector('#optimization-upgrading-redemption-legend');
 const optimizationUpgradingNetAtlasChart = document.querySelector('#optimization-upgrading-net-atlas-chart');
 const optimizationUpgradingLpPerCrewByRateChart = document.querySelector('#optimization-upgrading-lp-per-crew-by-rate-chart');
@@ -9454,7 +9452,7 @@ function renderUpgradingSelectionUtilizationV1(result) {
   const tooltipNumber = (value, digits = 2) => Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : '--';
   const data = result?.selectionUtilizationV1;
   const unavailable = (container, reason) => { if (container) container.textContent = reason || 'Required cohort, hourly allocation, identity, or provenance evidence is incomplete.'; };
-  if (!data) { for (const container of [optimizationUpgradingSelectionV1, optimizationUpgradingUtilizationV1, optimizationUpgradingClaimLockV1, optimizationUpgradingOperationalV1]) unavailable(container, 'Selection/utilization evidence is not available.'); return; }
+  if (!data) { for (const container of [optimizationUpgradingSelectionV1, optimizationUpgradingUtilizationV1]) unavailable(container, 'Selection/utilization evidence is not available.'); return; }
   const chartNow = Date.now();
   const upgradingV1ChartStartDate = getUpgradingV1ChartStartDate(chartNow);
   const currentUtcDate = new Date(chartNow).toISOString().slice(0, 10);
@@ -9489,7 +9487,15 @@ function renderUpgradingSelectionUtilizationV1(result) {
   if (optimizationUpgradingUtilizationV1) {
     optimizationUpgradingUtilizationV1.replaceChildren();
     const series=[['Protocol active','protocol_active','#22c55e'],['Claim locked','claim_locked','#f59e0b'],['Proven eligible idle','proven_eligible_idle','#38bdf8'],['Proven hard unavailable','proven_hard_unavailable','#a855f7'],...(!upgradingNetCapacity ? [['Toolkit downtime (estimated)','toolkit_downtime','#ef4444']] : []),['Capacity not observed','capacity_not_observed','#64748b']];
-    const legend=document.createElement('div');legend.className='optimization-v1-legend';for(const [label,,color] of series){const item=document.createElement('span');item.textContent=label;item.style.setProperty('--legend-color',color);legend.append(item);}
+    const legendDescriptions = {
+      protocol_active: 'Protocol active: crew-hours of modeled productive upgrading work, calculated from component work requirements. Not simply time since job start; productive work is not reduced again by the Toolkit estimate.',
+      claim_locked: 'Claim locked: crew tied up between calculated work completion and recorded claim. From 8 September, estimated Toolkit downtime is removed here first; remaining claim delay is approximate.',
+      proven_eligible_idle: 'Proven eligible idle: capacity explicitly evidenced as eligible to upgrade but not working. Missing evidence is not proof of idle time.',
+      proven_hard_unavailable: 'Proven hard unavailable: capacity explicitly evidenced as unable to work because of protocol constraints; distinct from estimated Toolkit downtime.',
+      toolkit_downtime: 'Toolkit downtime: estimated stopped share (downtime divided by covered time) applied to configured crew capacity. Red appears only in Total capacity mode.',
+      capacity_not_observed: 'Capacity not observed: remaining capacity whose state cannot be classified. Not proven idle time or measured Toolkit downtime.',
+    };
+    const legend=document.createElement('div');legend.className='optimization-v1-legend';for(const [label,key,color] of series){const item=document.createElement('span');item.textContent=label;item.style.setProperty('--legend-color',color);bindOptimizationAnalyticsTooltip(item, legendDescriptions[key]);item.title = legendDescriptions[key];legend.append(item);}
     const rows=(data.utilization||[]).filter((row) => row.date >= upgradingV1ChartStartDate).filter(r=>r.identity_complete || r.date >= '2026-09-08').map(row => ToolkitCapacityChart.project(row, result?.toolkitDowntime?.rows?.find(day => day.date === row.date), upgradingNetCapacity, result?.toolkitCapacityContext));
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingUtilizationV1,760,340);
     if(!rows.length) unavailable(optimizationUpgradingUtilizationV1,'UTC-calendar identity evidence is incomplete.');
@@ -9500,18 +9506,18 @@ function renderUpgradingSelectionUtilizationV1(result) {
     const notices = rows.flatMap(row => (row.warnings || []).map(warning => `${row.date}: ${warning}`));
     if (upgradingNetCapacity && rows.some(row => !row.adjusted)) notices.push('Unadjusted days (including dates before 8 September) retain total capacity.');
     const note = document.createElement('p'); note.className = 'optimization-v1-warning';
-    note.textContent = ['From 8 September UTC: estimated Toolkit downtime is removed from claim lock first, then unclassified capacity. Productive work is unchanged.', ...notices].join(' ');
-    optimizationUpgradingUtilizationV1.append(note);
+    note.textContent = notices.join(' ');
+    if (notices.length) optimizationUpgradingUtilizationV1.append(note);
   }
-  if (optimizationUpgradingClaimLockV1) { const claim=data.claim_lock||{}; optimizationUpgradingClaimLockV1.textContent=`${claim.claim_locked_crew_hours?.toLocaleString(undefined,{maximumFractionDigits:1}) ?? '--'} crew-hours · ${claim.claim_locked_percent?.toFixed(2) ?? '--'}% · delay median ${claim.median_claim_delay_seconds?.toFixed(1) ?? '--'}s · P90 ${claim.p90_claim_delay_seconds?.toFixed(1) ?? '--'}s · P95 ${claim.p95_claim_delay_seconds?.toFixed(1) ?? '--'}s · max ${claim.maximum_claim_delay_seconds?.toFixed(1) ?? '--'}s · attempts/retries/failures: NOT OBSERVED. Estimated finish assumes uninterrupted upgrading; Toolkit pauses can be included in this delay.`; optimizationUpgradingClaimLockV1.title='Estimated capacity between calculated finish and recorded claim. Toolkit pauses are not removed; this is not a pure measure of claim performance.'; }
-  if (optimizationUpgradingOperationalV1) { const rows=data.utilization||[]; const lower=rows.reduce((s,r)=>s+r.feasible_neutral_lower_crew_hours,0), upper=rows.reduce((s,r)=>s+r.feasible_neutral_upper_crew_hours,0); optimizationUpgradingOperationalV1.textContent=`UTC-calendar capacity bounds, not an ATLAS profit result. Feasible-neutral capacity: ${lower.toLocaleString(undefined,{maximumFractionDigits:1})}–${upper.toLocaleString(undefined,{maximumFractionDigits:1})} crew-hours. Lower bound: classified productive work; upper bound: configured capacity minus classified claim lock and proven unavailability. Toolkit downtime is not applied; residual NOT OBSERVED remains uncertainty.`; }
 }
 
 const upgradingManagementViews = { loss: {}, combined: {} };
 function renderUpgradingManagementImpact(result) {
   const today = new Date().toISOString().slice(0, 10);
-  const start = getUpgradingV1ChartStartDate(Date.now());
+  const start = [getUpgradingV1ChartStartDate(Date.now()), '2026-09-08'].sort().pop();
   const allRows = (result?.managementImpact?.rows || []).filter(row => row.date >= start && row.date < today);
+  const guideNotes = document.querySelector('#optimization-upgrading-management-notes');
+  if (guideNotes) guideNotes.textContent = [...new Set(allRows.flatMap(row => [!row.available ? `${row.date}: ${row.reason}` : '', ...(row.warnings || []).map(warning => `${row.date}: ${warning}`)]).filter(Boolean))].join(' ');
   const format = (value, digits = 2) => Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : '--';
   for (const [id, key, lowerKey, color, label] of [
     ['optimization-upgrading-loss', 'loss', 'lossLower', '#f59e0b', 'Utilization loss ATLAS / net crew-day'],
@@ -9549,11 +9555,6 @@ function renderUpgradingManagementImpact(result) {
       bindOptimizationAnalyticsTooltip(dot, tip);
     }
     bindUpgradingAnalyticsChartNavigation(svg, axes, null, key, view, { xMin: autoMinX, xMax: autoMaxX, yMin: autoMinY, yMax: autoMaxY, xFloor: 0 });
-    const note = document.createElement('p'); note.className = 'optimization-v1-warning';
-    const warningCounts = new Map();
-    for (const row of points) for (const warning of row.warnings) warningCounts.set(warning, (warningCounts.get(warning) || 0) + 1);
-    note.textContent = [`Estimated contribution, not realized profit. Hollow dots: incomplete or unadjusted evidence. ${points.length} completed days.`, ...allRows.filter(row => !row.available).map(row => `${row.date}: ${row.reason}`), ...[...warningCounts].map(([warning, count]) => `${count} day(s): ${warning}`)].join(' ');
-    container.append(note);
   }
 }
 

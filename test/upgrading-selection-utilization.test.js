@@ -137,8 +137,12 @@ test('production integration reuses existing acquisition functions and exposes f
   assert.match(main, /calculateUpgradingSelectionUtilization/);
   assert.match(main, /netAtlasDaily\.jobs/);
   assert.match(main, /neutralUpgradingDaily\.hourlyAllocations/);
-  for (const wording of ['Component Selection Uplift — Matched Active Capacity', 'UTC-Calendar Crew-State Utilization', 'Claim-Locked Capacity', 'Feasible-Neutral Capacity Range']) assert.match(html, new RegExp(wording));
+  for (const wording of ['Selection Uplift', 'UTC-Calendar Crew-State Utilization', 'Toolkit Downtime']) assert.match(html, new RegExp(wording));
   assert.doesNotMatch(renderer, /This measures selection, not uptime/);
   assert.doesNotMatch(renderer, /Unknown time is shown, never silently assigned/);
-  assert.match(renderer, /attempts\/retries\/failures: NOT OBSERVED/);
+  assert.doesNotMatch(html, /Estimated Claim-Locked Capacity|Feasible-Neutral Capacity Range|Toolkit Downtime — Validation/);
+  const guide = html.slice(html.indexOf('optimization-upgrading-page-guide'));
+  assert.match(guide, /Completed UTC days only/);
+  assert.match(guide, /From 8 September UTC/);
+  assert.match(guide, /Account-clock differences/);
 });

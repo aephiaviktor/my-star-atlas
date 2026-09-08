@@ -59,19 +59,26 @@ test('actual rendering keeps loss below zero, adds ranges, hover details, indepe
   const fs=require('node:fs'),vm=require('node:vm');const source=fs.readFileSync('electron/renderer.js','utf8');
   const element=()=>({children:[],replaceChildren(){this.children=[];},append(...nodes){this.children.push(...nodes);}});
   const containers={'#optimization-upgrading-loss':element(),'#optimization-upgrading-management':element()};let tips=[],nav=[];
-  const context={document:{querySelector:id=>containers[id],createElement:element},getUpgradingV1ChartStartDate:()=> '2026-08-14',
+  let clock = '2026-09-09T00:00:00Z';
+  class FixedDate extends Date { constructor(...args) { super(...(args.length ? args : [clock])); } static now() { return Date.parse(clock); } }
+  containers['#optimization-upgrading-management-notes'] = element();
+  const context={Date:FixedDate,document:{querySelector:id=>containers[id],createElement:element},getUpgradingV1ChartStartDate:()=> '2026-08-14',
     createOptimizationAnalyticsSvg(c){c.replaceChildren();const svg=element();c.append(svg);return svg;},
     renderUpgradingChartAxes(_,a){return {...a,left:60,right:20,top:20,bottom:50,width:760,height:340,x:x=>x*100,y:y=>150-y};},
     appendOptimizationSvg(parent,tag,attrs){const e={...element(),tag,...attrs};parent.append(e);return e;},
     bindOptimizationAnalyticsTooltip(_,tip){tips.push(tip);},bindUpgradingAnalyticsChartNavigation(...args){nav.push(args);}};
   vm.createContext(context); vm.runInContext(source.slice(source.indexOf('const upgradingManagementViews ='),source.indexOf('function renderToolkitDowntime(')),context);
-  const input=fixture(); input.now=Date.now()+86400000;
+  const input=fixture(); input.now=Date.parse('2026-09-10T00:00:00Z');
   // Use definitely completed dates even if run on an earlier clock.
-  const data=calculate(input); const today=new Date().toISOString().slice(0,10);data.rows[0].date='2026-08-20'; data.rows.push({...data.rows[0],date:today,loss:999999});
+  const data=calculate(input); const today='2026-09-09'; data.rows.push({...data.rows[0],date:'2026-09-07',loss:999999}, {...data.rows[0],date:today,loss:999999});
   context.renderUpgradingManagementImpact({managementImpact:data});
   const walk=e=>[e,...e.children.flatMap(walk)];
   const dots=walk(containers['#optimization-upgrading-loss']).filter(e=>e.tag==='circle');
   assert.equal(dots.length,1);assert.ok(dots[0].cy>=150);assert.ok(tips.some(t=>t.includes('unclassified')));assert.equal(nav.length,2);assert.notEqual(nav[0][4],nav[1][4]);
   assert.ok(walk(containers['#optimization-upgrading-loss']).some(e=>e.tag==='line'&&e.y2>e.y1));
+  clock = '2026-09-08T23:59:59Z';
+  context.renderUpgradingManagementImpact({managementImpact:data});
+  assert.equal(walk(containers['#optimization-upgrading-loss']).filter(e=>e.tag==='circle').length,0);
+  assert.match(containers['#optimization-upgrading-loss'].textContent,/No completed/);
   context.renderUpgradingManagementImpact({});assert.match(containers['#optimization-upgrading-loss'].textContent,/No completed/);
 });
