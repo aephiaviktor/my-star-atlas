@@ -9439,7 +9439,17 @@ function getUpgradingV1ChartStartDate(now = Date.now()) {
   return rollingThirtyDayStart > UPGRADING_V1_LOGIC_START_DATE ? rollingThirtyDayStart : UPGRADING_V1_LOGIC_START_DATE;
 }
 
+let upgradingNetCapacity = false;
+let upgradingCapacityChartResult = null;
+document.querySelector('#upgrading-net-capacity')?.addEventListener('click', (event) => {
+  upgradingNetCapacity = !upgradingNetCapacity;
+  event.currentTarget.classList.toggle('active', upgradingNetCapacity);
+  event.currentTarget.setAttribute('aria-pressed', String(upgradingNetCapacity));
+  renderUpgradingSelectionUtilizationV1(upgradingCapacityChartResult);
+});
+
 function renderUpgradingSelectionUtilizationV1(result) {
+  upgradingCapacityChartResult = result;
   hideOptimizationAnalyticsTooltip();
   const tooltipNumber = (value, digits = 2) => Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: digits }) : '--';
   const data = result?.selectionUtilizationV1;
@@ -9476,14 +9486,20 @@ function renderUpgradingSelectionUtilizationV1(result) {
   }
   if (optimizationUpgradingUtilizationV1) {
     optimizationUpgradingUtilizationV1.replaceChildren();
-    const series=[['Protocol active','protocol_active','#22c55e'],['Claim locked','claim_locked','#f59e0b'],['Proven eligible idle','proven_eligible_idle','#38bdf8'],['Proven hard unavailable','proven_hard_unavailable','#ef4444'],['Capacity not observed','capacity_not_observed','#64748b']];
-    const legend=document.createElement('div');legend.className='optimization-v1-legend';for(const [label,,color] of series){const item=document.createElement('span');item.textContent=label;item.style.setProperty('--legend-color',color);legend.append(item);}optimizationUpgradingUtilizationV1.append(legend);
-    const rows=(data.utilization||[]).filter((row) => row.date >= upgradingV1ChartStartDate).filter(r=>r.identity_complete);
+    const series=[['Protocol active','protocol_active','#22c55e'],['Claim locked','claim_locked','#f59e0b'],['Proven eligible idle','proven_eligible_idle','#38bdf8'],['Proven hard unavailable','proven_hard_unavailable','#a855f7'],...(!upgradingNetCapacity ? [['Toolkit downtime (estimated)','toolkit_downtime','#ef4444']] : []),['Capacity not observed','capacity_not_observed','#64748b']];
+    const legend=document.createElement('div');legend.className='optimization-v1-legend';for(const [label,,color] of series){const item=document.createElement('span');item.textContent=label;item.style.setProperty('--legend-color',color);legend.append(item);}
+    const rows=(data.utilization||[]).filter((row) => row.date >= upgradingV1ChartStartDate).filter(r=>r.identity_complete || r.date >= '2026-09-08').map(row => ToolkitCapacityChart.project(row, result?.toolkitDowntime?.rows?.find(day => day.date === row.date), upgradingNetCapacity, result?.toolkitCapacityContext));
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingUtilizationV1,760,340);
     if(!rows.length) unavailable(optimizationUpgradingUtilizationV1,'UTC-calendar identity evidence is incomplete.');
-    else if(svg){const axes=renderUpgradingChartAxes(svg,{minY:0,maxY:100,xMin:0,xMax:rows.length,xTicks:rows.map((_,i)=>i+.5),xLabel:'UTC date',yLabel:'Configured capacity (%)',height:340,xFormatter:v=>rows[Math.max(0,Math.min(rows.length-1,Math.floor(v)))]?.date.slice(5)||''});rows.forEach((row,index)=>{let bottom=0;for(const [label,key,color] of series){const percent=Number(row[`${key}_percent`]||0);const bar=appendOptimizationSvg(svg,'rect',{x:axes.x(index+.12),y:axes.y(bottom+percent),width:Math.max(1,axes.x(index+.88)-axes.x(index+.12)),height:Math.max(0,axes.y(bottom)-axes.y(bottom+percent)),fill:color});
-      bindOptimizationAnalyticsTooltip(bar, `${row.date} UTC · ${label}: ${tooltipNumber(row[`${key}_percent`])}% · ${tooltipNumber(row[`${key}_crew_hours`])} crew-hours · configured capacity ${tooltipNumber(row.configured_crew_hours)} crew-hours${key === 'capacity_not_observed' ? ' · Unclassified capacity; not measured idle time or Toolkit downtime.' : ''}`);
+    else if(svg){const axes=renderUpgradingChartAxes(svg,{minY:0,maxY:Math.max(100,...rows.map(row => series.reduce((sum,[,key]) => sum + (row[`${key}_percent`] || 0),0))),xMin:0,xMax:rows.length,xTicks:rows.map((_,i)=>i+.5),xLabel:'UTC date',yLabel:upgradingNetCapacity ? '% of net capacity' : '% of total capacity',height:340,xFormatter:v=>rows[Math.max(0,Math.min(rows.length-1,Math.floor(v)))]?.date.slice(5)||''});rows.forEach((row,index)=>{let bottom=0;for(const [label,key,color] of series){const percent=Number(row[`${key}_percent`]||0);const bar=appendOptimizationSvg(svg,'rect',{x:axes.x(index+.12),y:axes.y(bottom+percent),width:Math.max(1,axes.x(index+.88)-axes.x(index+.12)),height:Math.max(0,axes.y(bottom)-axes.y(bottom+percent)),fill:color});
+      bindOptimizationAnalyticsTooltip(bar, `${row.date} UTC · ${label}: ${tooltipNumber(row[`${key}_percent`])}% · ${tooltipNumber(row[`${key}_crew_hours`])} crew-hours · total capacity ${tooltipNumber(row.configured_crew_hours)} crew-hours${row.adjusted ? ` · net capacity ${tooltipNumber(row.net_capacity_crew_hours)} crew-hours · estimated Toolkit downtime ${tooltipNumber(row.toolkit_downtime_crew_hours)} crew-hours · coverage ${tooltipNumber(row.coverage * 100)}% · daily downtime fraction applied to configured crew; claim-lock correction is approximate` : ' · capacity unadjusted'}${row.warnings?.length ? ` · ${row.warnings.join('; ')}` : ''}${key === 'capacity_not_observed' ? ' · Unclassified capacity; not measured idle time or Toolkit downtime.' : ''}`);
       bottom+=percent;}});}
+    optimizationUpgradingUtilizationV1.append(legend);
+    const notices = rows.flatMap(row => (row.warnings || []).map(warning => `${row.date}: ${warning}`));
+    if (upgradingNetCapacity && rows.some(row => !row.adjusted)) notices.push('Unadjusted days (including dates before 8 September) retain total capacity.');
+    const note = document.createElement('p'); note.className = 'optimization-v1-warning';
+    note.textContent = ['From 8 September UTC: estimated Toolkit downtime is removed from claim lock first, then unclassified capacity. Productive work is unchanged.', ...notices].join(' ');
+    optimizationUpgradingUtilizationV1.append(note);
   }
   if (optimizationUpgradingClaimLockV1) { const claim=data.claim_lock||{}; optimizationUpgradingClaimLockV1.textContent=`${claim.claim_locked_crew_hours?.toLocaleString(undefined,{maximumFractionDigits:1}) ?? '--'} crew-hours · ${claim.claim_locked_percent?.toFixed(2) ?? '--'}% · delay median ${claim.median_claim_delay_seconds?.toFixed(1) ?? '--'}s · P90 ${claim.p90_claim_delay_seconds?.toFixed(1) ?? '--'}s · P95 ${claim.p95_claim_delay_seconds?.toFixed(1) ?? '--'}s · max ${claim.maximum_claim_delay_seconds?.toFixed(1) ?? '--'}s · attempts/retries/failures: NOT OBSERVED. Estimated finish assumes uninterrupted upgrading; Toolkit pauses can be included in this delay.`; optimizationUpgradingClaimLockV1.title='Estimated capacity between calculated finish and recorded claim. Toolkit pauses are not removed; this is not a pure measure of claim performance.'; }
   if (optimizationUpgradingOperationalV1) { const rows=data.utilization||[]; const lower=rows.reduce((s,r)=>s+r.feasible_neutral_lower_crew_hours,0), upper=rows.reduce((s,r)=>s+r.feasible_neutral_upper_crew_hours,0); optimizationUpgradingOperationalV1.textContent=`UTC-calendar capacity bounds, not an ATLAS profit result. Feasible-neutral capacity: ${lower.toLocaleString(undefined,{maximumFractionDigits:1})}–${upper.toLocaleString(undefined,{maximumFractionDigits:1})} crew-hours. Lower bound: classified productive work; upper bound: configured capacity minus classified claim lock and proven unavailability. Toolkit downtime is not applied; residual NOT OBSERVED remains uncertainty.`; }

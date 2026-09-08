@@ -2991,3 +2991,6 @@ th[aria-sort="ascending"] [data-marketplace-table-sort],
 th[aria-sort="descending"] [data-marketplace-table-sort] { color: #67b7ff; }
 
 .optimization-toolkit-table-wrap { max-height: 240px; overflow: auto; }
+
+.toolkit-capacity-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.toolkit-capacity-heading h3 { margin-right: auto; }

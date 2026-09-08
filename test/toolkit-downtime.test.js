@@ -50,7 +50,7 @@ test('Toolkit evidence is returned separately and is not passed into chart calcu
  const fs=require('node:fs'); const main=fs.readFileSync('electron/main.js','utf8');
  const call=main.match(/const selectionUtilizationV1 = calculateUpgradingSelectionUtilization\(([^\n]+)\);/)[1];
  assert.doesNotMatch(call,/upkeep|capacityIntervals|capacityEvidenceRequired|toolkit/i);
- assert.match(main,/selectionUtilizationV1, toolkitDowntime, playerProfile/);
+ assert.match(main,/selectionUtilizationV1, toolkitDowntime, toolkitCapacityContext:/);
  assert.match(main,/fetchPhantomUpkeepCapacity\(settings, aephiaFaction\)\.catch/);
 });
 

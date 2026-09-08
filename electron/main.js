@@ -1371,7 +1371,7 @@ async function fetchUpgradingOptimization(payload = {}) {
     start: new Date(Math.max(Date.parse(start), Date.parse('2026-08-14T00:00:00Z'), Math.floor(now / 86400000) * 86400000 - 30 * 86400000)).toISOString(),
     stop: new Date(Math.min(now, stop ? Date.parse(stop) : now)).toISOString(),
   });
-  return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, neutralUpgradingDaily, selectionUtilizationV1, toolkitDowntime, playerProfile, componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
+  return { ok: true, rows, playerDaily, factionDaily, redemptionRates, netAtlasDaily, neutralUpgradingDaily, selectionUtilizationV1, toolkitDowntime, toolkitCapacityContext: { configuredCrewByHour, stop: new Date(Math.min(now, stop ? Date.parse(stop) : now)).toISOString() }, playerProfile, componentPricesAtl, atlasPool: UPGRADE_ATLAS_POOLS[aephiaFaction] || null, columns: Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), bucket, start, checkedAt: new Date().toISOString() };
 }
 
 function getInfluxScopeNote(settings) {

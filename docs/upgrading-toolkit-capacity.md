@@ -192,3 +192,25 @@ unknown. This migration has automated fixture validation, not live overnight pro
 Toolkit RPC uses at most two configured read providers per request, with automatic
 429 retries disabled and a 15-second deadline per HTTP response (including body).
 It does not enter the automation proxy’s indefinitely retrying fallback loop.
+
+## Upper-right capacity display (local September 8 follow-up)
+
+From 2026-09-08 UTC, the chart estimates downtime crew-hours as the day's
+observed stopped/covered fraction times configured crew-hours. Hourly crew
+observations are summed with the current hour clipped to the same elapsed UTC
+cutoff as the downtime table. This assumes the observed downtime fraction is
+representative; exact correlation of outages with changing crew is not known.
+Estimated downtime is reclassified from claim lock first, then unclassified
+capacity. Productive crew-hours are never reduced. Inconsistent totals are
+warned and allowed to exceed 100%, not forced to fit by inventing capacity.
+
+Total capacity is the default, with downtime in red. The Net capacity toggle
+excludes red and divides remaining states by total minus estimated downtime.
+Tooltips retain both capacities, downtime crew-hours, and coverage. Below 90%
+coverage a warning is displayed. No coverage leaves an unadjusted bar; dates
+before September 8 also retain their original bars. These exceptions are
+labelled in net view. Zero net capacity has no defined percentages and is
+explicitly labelled while retaining crew-hour values in tooltips.
+
+This is a display-only projection. The upper-left chart, summary calculations,
+raw observations, downtime table, SLYA collection, and publication are unchanged.
