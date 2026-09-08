@@ -9455,14 +9455,16 @@ function renderUpgradingSelectionUtilizationV1(result) {
   const data = result?.selectionUtilizationV1;
   const unavailable = (container, reason) => { if (container) container.textContent = reason || 'Required cohort, hourly allocation, identity, or provenance evidence is incomplete.'; };
   if (!data) { for (const container of [optimizationUpgradingSelectionV1, optimizationUpgradingUtilizationV1, optimizationUpgradingClaimLockV1, optimizationUpgradingOperationalV1]) unavailable(container, 'Selection/utilization evidence is not available.'); return; }
-  const upgradingV1ChartStartDate = getUpgradingV1ChartStartDate();
+  const chartNow = Date.now();
+  const upgradingV1ChartStartDate = getUpgradingV1ChartStartDate(chartNow);
+  const currentUtcDate = new Date(chartNow).toISOString().slice(0, 10);
   const completeSelection = (data.selection || [])
-    .filter((row) => row.date >= upgradingV1ChartStartDate)
+    .filter((row) => row.date >= upgradingV1ChartStartDate && row.date < currentUtcDate)
     .filter((row) => row.evidence_complete && Number.isFinite(row.atlas_per_lp) && Number.isFinite(row.selection_uplift_atlas_per_active_crew_day));
   if (optimizationUpgradingSelectionV1) {
     optimizationUpgradingSelectionV1.replaceChildren();
     const svg=createOptimizationAnalyticsSvg(optimizationUpgradingSelectionV1,760,340);
-    if (!completeSelection.length) unavailable(optimizationUpgradingSelectionV1, data.selection?.[0]?.incomplete_reason || 'Matched completion-cohort evidence is incomplete.');
+    if (!completeSelection.length) unavailable(optimizationUpgradingSelectionV1, data.selection?.[0]?.incomplete_reason || 'No completed UTC days with matched completion-cohort evidence.');
     else if(svg){
       const xs=completeSelection.map(r=>r.atlas_per_lp),ys=completeSelection.map(r=>r.selection_uplift_atlas_per_active_crew_day),autoMinX=Math.min(...xs)*.96,autoMaxX=Math.max(...xs)*1.04,pad=Math.max(.05,(Math.max(...ys)-Math.min(...ys))*.12),autoMinY=Math.min(0,...ys)-pad,autoMaxY=Math.max(0,...ys)+pad;
       const view = upgradingSelectionChartView;
