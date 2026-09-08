@@ -382,39 +382,52 @@ function replayCostLedgerResult({ initialLedger = null, eventFingerprintCounts =
   };
 }
 
-// Current inventory is an endpoint observation, not a dated acquisition. Infer
-// unexplained stock as opening uncosted stock for the replayable window, once.
-// The second replay preserves that stock in the pre-last-day checkpoint.
+// Endpoint surplus is estimated opening stock, not a dated acquisition. Recovering
+// an overdraft can make previously rejected events apply, exposing more surplus.
+// Re-run from the immutable baseline until that feedback has settled; never
+// commit an intermediate replay that consumed known stock before replenishment.
 function buildCostLedgerResult(options = {}) {
   const initialRows = options.initialLedger?.snapshot() || [];
-  const run = (rows) => replayCostLedgerResult({ ...options,
-    initialLedger: (options.initialLedger || rows.length) ? InventoryCostLedger.fromSnapshot(rows) : null });
-  const first = run(initialRows);
-  const surplus = [];
-  for (const row of options.currentInventoryRows || []) {
-    const location = String(row.starbase || '').trim();
-    const asset = canonicalAssetName(row.asset);
-    const target = Number(row.quantity);
-    if (!location || !asset || !Number.isFinite(target) || target < 0) continue;
-    const boundaries = (options.inventoryReconciliationRows || []).filter((baseline) =>
-      String(baseline.starbase || baseline.location || '').trim() === location
-      && canonicalAssetName(baseline.asset) === asset && Number.isFinite(Date.parse(baseline.timestamp)));
-    const boundary = boundaries.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0];
-    const missing = target - first.ledger.get(location, asset).quantity;
-    if (missing > 1e-9) surplus.push({ location, asset, quantity: missing,
-      ...(boundary ? { timestamp: normalizeTimestamp(boundary.timestamp) } : {}) });
-  }
-  if (!surplus.length) return first;
-  const seeded = InventoryCostLedger.fromSnapshot(initialRows);
-  for (const row of surplus.filter((row) => !row.timestamp)) seeded.acquire(row);
-  // Keep original opening events when seeding an otherwise fresh replay.
+  const surplusByPool = new Map();
   const openingInventoryRows = options.initialLedger ? options.openingInventoryRows
     : completeOpeningInventoryRows(options.openingInventoryRows, options.currentInventoryRows);
-  const result = replayCostLedgerResult({ ...options, openingInventoryRows, initialLedger: seeded,
-    assetFlowEvents: [...(options.assetFlowEvents || []), ...surplus.filter((row) => row.timestamp)
-      .map((row) => ({ ...row, type: 'acquire', purpose: 'inferred-uncosted-surplus' }))] });
-  result.inferredOpeningInventory = surplus;
-  return result;
+  let result = replayCostLedgerResult({ ...options,
+    initialLedger: options.initialLedger ? InventoryCostLedger.fromSnapshot(initialRows) : null });
+  for (let pass = 0; pass < 32; pass += 1) {
+    let changed = false;
+    for (const row of options.currentInventoryRows || []) {
+      const location = String(row.starbase || '').trim();
+      const asset = canonicalAssetName(row.asset);
+      const target = Number(row.quantity);
+      if (!location || !asset || !Number.isFinite(target) || target < 0) continue;
+      const missing = target - result.ledger.get(location, asset).quantity;
+      if (missing <= Math.max(1e-9, target * Number.EPSILON * 8)) continue;
+      const key = poolKey(location, asset);
+      const existing = surplusByPool.get(key);
+      if (existing) existing.quantity += missing;
+      else {
+        const boundary = (options.inventoryReconciliationRows || []).filter((baseline) =>
+          String(baseline.starbase || baseline.location || '').trim() === location
+          && canonicalAssetName(baseline.asset) === asset && Number.isFinite(Date.parse(baseline.timestamp)))
+          .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0];
+        surplusByPool.set(key, { location, asset, quantity: missing,
+          ...(boundary ? { timestamp: normalizeTimestamp(boundary.timestamp) } : {}) });
+      }
+      changed = true;
+    }
+    if (!changed) {
+      if (surplusByPool.size) result.inferredOpeningInventory = [...surplusByPool.values()];
+      return result;
+    }
+    const surplus = [...surplusByPool.values()];
+    const seeded = InventoryCostLedger.fromSnapshot(initialRows);
+    for (const row of surplus.filter((row) => !row.timestamp)) seeded.acquire(row);
+    result = replayCostLedgerResult({ ...options, openingInventoryRows, initialLedger: seeded,
+      assetFlowEvents: [...(options.assetFlowEvents || []), ...surplus.filter((row) => row.timestamp)
+        .map((row) => ({ ...row, type: 'acquire', purpose: 'inferred-uncosted-surplus' }))] });
+  }
+  // Do not persist a partially converged ledger or its intermediate basis points.
+  throw new Error('Inventory opening-stock recovery did not converge');
 }
 
 function buildProductionLedger(options = {}) {

@@ -22,14 +22,22 @@ therefore do not sum to Total / Unit. Hover values show known remaining quantiti
 missing source evidence displays --, while observed zero displays numeric zero.
 
 Replay first measures the positive difference between current inventory and the
-chronological result. It then replays once with that unexplained quantity uncosted
+chronological result. It then replays with that unexplained quantity uncosted
 at the start of the replayable window, or immediately after the latest dated
 inventory reconciliation for the pool. This is an explicit timing estimate, not a
 claim that today's balance was historically observed. Dated observations are not
-rewritten. The pre-latest-day checkpoint includes inferred stock when appropriate;
+rewritten. A recovered overdraft can enable previously rejected consumption, so
+recovery repeats from the immutable starting checkpoint until there is no remaining
+endpoint shortfall (maximum 32 recovery passes). Only the converged replay's event
+results, basis snapshots and checkpoint are returned. A nonconverging replay raises
+an error before any checkpoint or basis publication, rather than saving a partial
+result and adding replacement uncosted units afterward. This is not a rule that
+freezes costed quantities: they still decrease when available uncosted stock really
+is exhausted, or when authoritative historical inventory evidence requires it.
+The pre-latest-day checkpoint includes inferred stock when appropriate;
 latest-day stock is deterministically reconstructed on refresh. Final current
 reconciliation is retained. Negative variances still deplete uncosted stock first.
 
-Checkpoint schema 15 rebuilds schema 14 locally from available source history when
+Checkpoint schema 16 rebuilds schema 15 and older locally from available source history when
 the patched app next loads a ledger. No data migration or Influx rewriting was run
 while developing this patch. Unknown history cannot establish purchase provenance.

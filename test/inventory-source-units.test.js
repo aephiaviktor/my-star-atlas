@@ -102,3 +102,47 @@ test('renderer uses source denominators, preserves blended total and shows genui
   assert.notEqual(context.formatInventoryLedgerBasisValue(0,true),'--');
   assert.equal(context.inventoryLedgerValues(row,false).gm,2);
 });
+
+test('overdraft recovery converges before consumption is committed, including checkpoint rollover', () => {
+  const base = new InventoryCostLedger();
+  base.acquire({location,asset,quantity:1000,source:'gm',totalCost:3});
+  const upgrade = (installed, timestamp='2026-09-08T10:00:00Z') => ({timestamp,starbase:location,asset,installed});
+  const run = (extra={}) => buildCostLedgerResult({initialLedger:base,
+    currentInventoryRows:[{starbase:location,asset,quantity:9900}],
+    upgradingRows:[upgrade(9500)], ...extra});
+  const first = run();
+  const check = (result, quantity) => {
+    const row=result.ledger.get(location,asset);
+    assert.equal(result.rejectedEvents.length,0);
+    assert.equal(row.quantity,quantity, 'replay must reach endpoint before final reconciliation');
+    assert.equal(row.quantity-row.uncostedQuantity,1000);
+    assert.equal(row.sourceQuantities.gm,1000);
+    near(row.sourceUnitCosts.gm,0.003);
+  };
+  check(first,9900);
+  const replay = {initialLedger:InventoryCostLedger.fromSnapshot(first.checkpointLedger.snapshot()),
+    eventFingerprintCounts:first.checkpointEventFingerprintCounts,
+    eventResultsByFingerprint:first.checkpointEventResultsByFingerprint};
+  check(run({...replay, currentInventoryRows:[{starbase:location,asset,quantity:9800}],
+    upgradingRows:[upgrade(9500),upgrade(100,'2026-09-08T11:00:00Z')]}),9800);
+  const next=run({...replay,currentInventoryRows:[{starbase:location,asset,quantity:9700}],
+    upgradingRows:[upgrade(9500),upgrade(200,'2026-09-09T10:00:00Z')]});
+  check(next,9700);
+  check(run({initialLedger:next.checkpointLedger,eventFingerprintCounts:next.checkpointEventFingerprintCounts,
+    eventResultsByFingerprint:next.checkpointEventResultsByFingerprint,
+    currentInventoryRows:[{starbase:location,asset,quantity:9700}],
+    upgradingRows:[upgrade(9500),upgrade(200,'2026-09-09T10:00:00Z')]}),9700);
+  assert.equal(base.get(location,asset).quantity,1000);
+});
+
+test('overdraft recovery after dated baseline preserves known purchases and the observed baseline', () => {
+  const baseline={starbase:location,asset,quantity:0,timestamp:'2026-09-08T08:00:00Z'};
+  const result=buildCostLedgerResult({inventoryReconciliationRows:[baseline],
+    assetFlowEvents:[{type:'acquire',timestamp:'2026-09-08T08:00:01Z',location,asset,quantity:1000,source:'gm',totalCost:3}],
+    currentInventoryRows:[{starbase:location,asset,quantity:9900}],
+    upgradingRows:[{timestamp:'2026-09-08T10:00:00Z',starbase:location,asset,installed:9500}]});
+  const row=result.ledger.get(location,asset);
+  assert.equal(row.quantity,9900);
+  assert.equal(row.quantity-row.uncostedQuantity,1000);
+  assert.equal(baseline.quantity,0);
+});

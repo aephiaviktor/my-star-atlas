@@ -59,11 +59,11 @@ test('corrupt or mismatched checkpoint fails safely without loading basis', asyn
   }
 });
 
-test('legacy checkpoint is invalidated so corrected provenance is replayed', async () => {
+test('v0.6.300 checkpoint is invalidated so incomplete overdraft recovery is rebuilt', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'msa-ledger-checkpoint-'));
   const filePath = path.join(directory, 'ONI.json');
   try {
-    await fs.writeFile(filePath, JSON.stringify({ schemaVersion: 14, faction: 'ONI', profile: 'USTUR', ledgerRows: [], seenEventFingerprints: [] }));
+    await fs.writeFile(filePath, JSON.stringify({ schemaVersion: 15, faction: 'ONI', profile: 'USTUR', ledgerRows: [], seenEventFingerprints: [] }));
     const loaded = await loadLedgerCheckpoint(filePath, { faction: 'ONI', profile: 'USTUR' });
     assert.equal(loaded.status, 'invalid');
     assert.match(loaded.error, /schemaVersion/);

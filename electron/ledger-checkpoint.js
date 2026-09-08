@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 15 rebuilds source quantities and inferred uncosted replay baselines.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 15;
+// Version 16 rebuilds baselines affected by incomplete overdraft recovery.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 16;
 
 function emptyResult(status, error = '') {
   return {
