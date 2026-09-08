@@ -30,7 +30,7 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { createEarningsErrorDiagnostic } = require('./earnings-error-diagnostic');
 const { createSecureSettingsStore } = require('./secure-settings');
 const { createRpcFetcher } = require('./rpc-resilience');
-const { calculateUpgradingSelectionUtilization } = require('./upgrading-selection-utilization');
+const { calculateUpgradingSelectionUtilization, recoverSelectionComponentPrices } = require('./upgrading-selection-utilization');
 const { calculateManagementImpact } = require('./upgrading-management-impact');
 const { readToolkitEvidence } = require('./toolkit-evidence-reader');
 const { summarizeToolkitDowntime } = require('./toolkit-downtime');
@@ -1128,10 +1128,10 @@ ${scopeFilterFlux}
   for (const row of parseInfluxCsv(await queryInfluxFlux({ ...settings, influxBucket: settings.influxBucket }, flux))) {
     const time = String(row._time || '');
     const component = normalizeShipName(row.component);
-    const rate = Number(row.neutral_upgrading_hour);
-    const neutralCrew = Number(row.neutral_crew);
+    const rate = row.neutral_upgrading_hour == null || row.neutral_upgrading_hour === '' ? null : Number(row.neutral_upgrading_hour);
+    const neutralCrew = row.neutral_crew == null || row.neutral_crew === '' ? null : Number(row.neutral_crew);
     const ms = Date.parse(time);
-    if (!component || !Number.isFinite(ms) || !Number.isFinite(rate) || rate < 0) continue;
+    if (!component || !Number.isFinite(ms) || (!(Number.isFinite(rate) && rate >= 0) && !(Number.isFinite(neutralCrew) && neutralCrew >= 0))) continue;
     const key = `${time.slice(0, 13)}|${component}`;
     if (!latestByComponentHour.has(key) || time > latestByComponentHour.get(key).time) latestByComponentHour.set(key, { time, component, rate, neutralCrew });
   }
@@ -1158,6 +1158,8 @@ ${scopeFilterFlux}
     for (const rows of hours.values()) for (const row of rows) {
       const lpPerUnit = UPGRADE_LP_BY_COMPONENT[row.component];
       const price = historicalComponentPrices.get(`${date}\n${row.component}`);
+      if (!Number.isFinite(row.rate) || row.rate < 0) return null;
+      if (row.rate === 0) continue;
       if (!Number.isFinite(lpPerUnit) || !Number.isFinite(price)) return null;
       lp += row.rate * lpPerUnit;
       componentCost += row.rate * price;
@@ -1361,10 +1363,14 @@ async function fetchUpgradingOptimization(payload = {}) {
     if (Number.isFinite(Date.parse(time)) && Number.isFinite(crew) && crew >= 0) configuredCrewByHour[new Date(time).toISOString().slice(0, 13)] = crew;
   }
   const atlasPerLpByDate = Object.fromEntries(redemptionRates.map((row) => [row.date, row.atlasPerLp]));
-  const historicalComponentPricesByDate = { ...(neutralUpgradingDaily.componentPricesByDate || {}) };
+  let historicalComponentPricesByDate = { ...(neutralUpgradingDaily.componentPricesByDate || {}) };
   for (const [date, values] of Object.entries(netAtlasDaily.componentPricesByDate || {})) {
     historicalComponentPricesByDate[date] = { ...(historicalComponentPricesByDate[date] || {}), ...values };
   }
+  historicalComponentPricesByDate = await recoverSelectionComponentPrices({
+    jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations,
+    pricesByDate: historicalComponentPricesByDate, resolvePrice: resolveHistoricalAtlasPrice,
+  });
   const selectionUtilizationV1 = calculateUpgradingSelectionUtilization({ jobs: netAtlasDaily.jobs, neutralHours: neutralUpgradingDaily.hourlyAllocations, configuredCrewByHour, prices: componentPricesAtl, pricesByDate: historicalComponentPricesByDate, atlasPerLpByDate, faction, profile: playerProfile, priceSnapshotAt: netAtlasDaily.priceSnapshotAt });
   const now = Date.now();
   const toolkitDowntime = summarizeToolkitDowntime({ ...upkeepCapacity, faction: aephiaFaction,

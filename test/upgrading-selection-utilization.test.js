@@ -146,3 +146,22 @@ test('production integration reuses existing acquisition functions and exposes f
   assert.match(guide, /From 8 September UTC/);
   assert.match(guide, /Account-clock differences/);
 });
+
+
+test('selection diagnostics report every missing input, including cross-midnight hours and null prices', () => {
+  const value = input();
+  value.neutralHours.shift();
+  value.prices = { electronics: null };
+  value.atlasPerLpByDate = { '2026-08-16': null };
+  const row = calculateUpgradingSelectionUtilization(value).selection[0];
+  assert.equal(row.evidence_complete, false);
+  assert.equal(row.atlas_per_lp, null);
+  assert.match(row.incomplete_reason, /2026-08-15T23 UTC/);
+  assert.match(row.incomplete_reason, /Actual component prices missing for 2026-08-16: electronics/);
+  assert.match(row.incomplete_reason, /Neutral component prices missing for 2026-08-16: framework/);
+  assert.match(row.incomplete_reason, /ATLAS\/LP redemption value missing for 2026-08-16 UTC/);
+  const zero = input();
+  zero.prices = { electronics: 0, framework: 0 };
+  zero.atlasPerLpByDate['2026-08-16'] = 0;
+  assert.equal(calculateUpgradingSelectionUtilization(zero).selection[0].evidence_complete, true);
+});

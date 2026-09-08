@@ -58,7 +58,40 @@ function buildNeutralHours(rows) {
     if (!byHour.has(hour)) byHour.set(hour, new Map());
     byHour.get(hour).set(component, crew);
   }
+  for (const allocation of byHour.values()) {
+    for (const [component, crew] of allocation) if (crew === 0) allocation.delete(component);
+  }
   return byHour;
+}
+// Resolve the prices the completion-cohort comparison actually consumes. A
+// previous-day neutral component may never appear in the completion day's plan.
+async function recoverSelectionComponentPrices({ jobs = [], neutralHours = [], pricesByDate = {}, resolvePrice }) {
+  const result = Object.fromEntries(Object.entries(pricesByDate).map(([date, prices]) => [date, { ...prices }]));
+  const byHour = buildNeutralHours(neutralHours);
+  const required = new Map();
+  for (const raw of jobs) {
+    const job = normalizeJob(raw);
+    if (!job) continue;
+    if (!required.has(job.date)) required.set(job.date, new Set());
+    const components = required.get(job.date);
+    components.add(job.component);
+    splitInterval(job.startedMs, job.activeEndMs, job.crew, (hour) => {
+      for (const component of (byHour.get(hour) || new Map()).keys()) components.add(component);
+    });
+  }
+  // Sequential lookup uses the existing historical cache and bounds concurrency.
+  for (const [date, components] of required) {
+    if (!result[date]) result[date] = {};
+    for (const component of components) {
+      const existing = result[date][component];
+      if (existing != null && existing !== '' && Number.isFinite(Number(existing))) continue;
+      const evidence = await resolvePrice(component, date);
+      if (evidence?.status === 'complete' && evidence.priceATL != null && Number.isFinite(Number(evidence.priceATL))) {
+        result[date][component] = Number(evidence.priceATL);
+      }
+    }
+  }
+  return result;
 }
 function calculateUpgradingSelectionUtilization({ jobs = [], neutralHours = [], configuredCrewByHour = {}, prices = {}, pricesByDate = null, atlasPerLpByDate = {}, faction = '', profile = '', priceSnapshotAt = null } = {}) {
   const normalizedJobs = jobs.map(normalizeJob).filter(Boolean);
@@ -73,6 +106,7 @@ function calculateUpgradingSelectionUtilization({ jobs = [], neutralHours = [], 
   }
   const selection = [...cohort].sort(([a], [b]) => a.localeCompare(b)).map(([date, dayJobs]) => {
     const valuationPrices = pricesByDate?.[date] || prices;
+    const priceValue = (value) => value == null || value === '' ? null : finite(value);
     const activeByHour = new Map();
     for (const job of dayJobs) splitInterval(job.startedMs, job.activeEndMs, job.crew, (hour, crewHours) => activeByHour.set(hour, (activeByHour.get(hour) || 0) + crewHours));
     const missingHours = [...activeByHour.keys()].filter((hour) => !neutralByHour.has(hour));
@@ -85,17 +119,24 @@ function calculateUpgradingSelectionUtilization({ jobs = [], neutralHours = [], 
       for (const [component, crew] of allocation) {
         const units = activeCrewHours * (crew / totalCrew) * 3600 / COMPONENT_SECONDS[component];
         neutralLp += units * COMPONENT_LP[component];
-        const price = finite(valuationPrices[component]); if (price != null) neutralCost += units * price;
+        const price = priceValue(valuationPrices[component]); if (price != null) neutralCost += units * price;
       }
     }
-    const actualCostComplete = dayJobs.every((job) => finite(valuationPrices[job.component]) != null);
-    const neutralCostComplete = [...new Set([...activeByHour.keys()].flatMap((hour) => [...(neutralByHour.get(hour)?.keys() || [])]))].every((component) => finite(valuationPrices[component]) != null);
-    const complete = !missingHours.length && actualCostComplete && neutralCostComplete && Number.isFinite(finite(atlasPerLpByDate[date]));
+    const actualCostComplete = dayJobs.every((job) => priceValue(valuationPrices[job.component]) != null);
+    const neutralCostComplete = [...new Set([...activeByHour.keys()].flatMap((hour) => [...(neutralByHour.get(hour)?.keys() || [])]))].every((component) => priceValue(valuationPrices[component]) != null);
+    const missingActualPrices = [...new Set(dayJobs.map((job) => job.component))].filter((component) => priceValue(valuationPrices[component]) == null);
+    const missingNeutralPrices = [...new Set([...activeByHour.keys()].flatMap((hour) => [...(neutralByHour.get(hour)?.keys() || [])]))].filter((component) => priceValue(valuationPrices[component]) == null);
+    const incompleteReasons = [];
+    if (missingHours.length) incompleteReasons.push(`Hourly neutral allocation missing or zero for ${[...new Set(missingHours)].sort().join(', ')} UTC`);
+    if (missingActualPrices.length) incompleteReasons.push(`Actual component prices missing for ${date}: ${missingActualPrices.join(', ')}`);
+    if (missingNeutralPrices.length) incompleteReasons.push(`Neutral component prices missing for ${date}: ${missingNeutralPrices.join(', ')}`);
+    if (priceValue(atlasPerLpByDate[date]) == null) incompleteReasons.push(`ATLAS/LP redemption value missing for ${date} UTC`);
+    const complete = !missingHours.length && actualCostComplete && neutralCostComplete && Number.isFinite(priceValue(atlasPerLpByDate[date]));
     const activeCrewHours = [...activeByHour.values()].reduce((sum, value) => sum + value, 0), activeCrewDays = activeCrewHours / 24;
-    const actualCost = dayJobs.reduce((sum, job) => sum + job.amount * (finite(valuationPrices[job.component]) || 0), 0);
+    const actualCost = dayJobs.reduce((sum, job) => sum + job.amount * (priceValue(valuationPrices[job.component]) || 0), 0);
     const upliftLp = complete ? actualLp - neutralLp : null;
     const upliftAtlas = complete ? upliftLp * finite(atlasPerLpByDate[date]) - (actualCost - neutralCost) : null;
-    return { date, time_basis: 'completion_cohort', atlas_per_lp: finite(atlasPerLpByDate[date]), price_basis: pricesByDate ? 'historical_at_or_before' : 'current_component_prices', price_basis_complete: actualCostComplete && neutralCostComplete, actual_cohort_lp: actualLp, neutral_cohort_lp: complete ? neutralLp : null, selection_uplift_lp: upliftLp, selection_uplift_lp_per_active_crew_hour: complete && activeCrewHours > 0 ? upliftLp / activeCrewHours : null, selection_uplift_lp_per_active_crew_day: complete && activeCrewDays > 0 ? upliftLp / activeCrewDays : null, selection_uplift_atlas: upliftAtlas, selection_uplift_atlas_per_active_crew_day: complete && activeCrewDays > 0 ? upliftAtlas / activeCrewDays : null, completion_cohort_active_crew_hours: activeCrewHours, active_crew_days: activeCrewDays, completed_job_count: dayJobs.length, cohort_complete: !missingHours.length, neutral_allocation_complete: !missingHours.length, evidence_complete: complete, incomplete_reason: complete ? null : (missingHours.length ? `Hourly neutral allocation missing for ${[...new Set(missingHours)].join(', ')}` : 'Price or redemption evidence incomplete') };
+    return { date, time_basis: 'completion_cohort', atlas_per_lp: priceValue(atlasPerLpByDate[date]), price_basis: pricesByDate ? 'historical_at_or_before' : 'current_component_prices', price_basis_complete: actualCostComplete && neutralCostComplete, actual_cohort_lp: actualLp, neutral_cohort_lp: complete ? neutralLp : null, selection_uplift_lp: upliftLp, selection_uplift_lp_per_active_crew_hour: complete && activeCrewHours > 0 ? upliftLp / activeCrewHours : null, selection_uplift_lp_per_active_crew_day: complete && activeCrewDays > 0 ? upliftLp / activeCrewDays : null, selection_uplift_atlas: upliftAtlas, selection_uplift_atlas_per_active_crew_day: complete && activeCrewDays > 0 ? upliftAtlas / activeCrewDays : null, completion_cohort_active_crew_hours: activeCrewHours, active_crew_days: activeCrewDays, completed_job_count: dayJobs.length, cohort_complete: !missingHours.length, neutral_allocation_complete: !missingHours.length, evidence_complete: complete, incomplete_reason: complete ? null : incompleteReasons.join('; ') };
   });
   const utilization = [...calendar].sort(([a], [b]) => a.localeCompare(b)).map(([date, row]) => {
     const hours = Object.entries(configuredCrewByHour).filter(([hour]) => hour.startsWith(date));
@@ -115,4 +156,4 @@ function calculateUpgradingSelectionUtilization({ jobs = [], neutralHours = [], 
   const claimLockedCrewHours = utilization.reduce((sum, row) => sum + row.claim_locked_crew_hours, 0), configuredCrewHours = utilization.reduce((sum, row) => sum + row.configured_crew_hours, 0);
   return { data_version: DATA_VERSION, calculation_version: CALCULATION_VERSION, faction, profile, price_basis: pricesByDate ? 'historical_at_or_before' : 'current_component_prices', price_snapshot_at: priceSnapshotAt, price_basis_complete: selection.every((row) => row.evidence_complete), component_prices_used: pricesByDate || prices, price_warning: pricesByDate ? null : CURRENT_PRICE_WARNING, selection, utilization, claim_lock: { claim_locked_crew_hours: claimLockedCrewHours, claim_locked_percent: configuredCrewHours > 0 ? claimLockedCrewHours / configuredCrewHours * 100 : null, median_claim_delay_seconds: quantile(claimDelays, .5), p90_claim_delay_seconds: quantile(claimDelays, .9), p95_claim_delay_seconds: quantile(claimDelays, .95), maximum_claim_delay_seconds: claimDelays.length ? Math.max(...claimDelays) : null, attempt_count: null, retry_count: null, failure_count: null, evidence_completeness: 'Attempt/retry/failure evidence NOT OBSERVED' } };
 }
-module.exports = { COMPONENT_SECONDS, COMPONENT_LP, calculateUpgradingSelectionUtilization, normalizeJob, splitInterval, CURRENT_PRICE_WARNING };
+module.exports = { recoverSelectionComponentPrices, COMPONENT_SECONDS, COMPONENT_LP, calculateUpgradingSelectionUtilization, normalizeJob, splitInterval, CURRENT_PRICE_WARNING };
