@@ -1,5 +1,6 @@
 'use strict';
 
+const { mergeOrigins, scaleOrigins } = require('./inventory-source-units');
 const { canonicalAssetName } = require('./asset-name');
 const { resolveBreakevenBasisAtOrBefore } = require('./breakeven-basis-state');
 
@@ -24,7 +25,7 @@ function ledgerOrder(left, right) {
   return text(left?.movementId).localeCompare(text(right?.movementId));
 }
 function emptyLot(quantity = 0) {
-  return { quantity, principalAtlas: 0, marketplaceFeeAtlas: 0, transactionFeeAtlas: 0, gameOrigins: new Map() };
+  return { origins: [], quantity, principalAtlas: 0, marketplaceFeeAtlas: 0, transactionFeeAtlas: 0, gameOrigins: new Map() };
 }
 function basisAtlas(value) {
   return Number(value.principalAtlas || 0) + Number(value.marketplaceFeeAtlas || 0) + Number(value.transactionFeeAtlas || 0);
@@ -36,6 +37,7 @@ function copyOrigins(origins) {
 function copyPool(pool) {
   const basis = basisAtlas(pool);
   return {
+    origins: mergeOrigins(pool.origins),
     quantity: pool.quantity,
     principalAtlas: pool.principalAtlas,
     marketplaceFeeAtlas: pool.marketplaceFeeAtlas,
@@ -88,6 +90,8 @@ function replayMarketplaceInventoryLedger(movements = []) {
     if (!(quantity > 0) || pool.quantity + 1e-9 < quantity) return null;
     const ratio = pool.quantity > 0 ? quantity / pool.quantity : 0;
     const lot = emptyLot(quantity);
+    lot.origins = scaleOrigins(pool.origins, ratio, ratio);
+    pool.origins = scaleOrigins(pool.origins, 1 - ratio, 1 - ratio);
     for (const field of ['principalAtlas', 'marketplaceFeeAtlas', 'transactionFeeAtlas']) {
       lot[field] = pool[field] * ratio;
       pool[field] = Math.max(0, pool[field] - lot[field]);
@@ -107,6 +111,7 @@ function replayMarketplaceInventoryLedger(movements = []) {
   };
   const consume = (wallet, asset, quantity) => consumePool(getPool(wallet, asset), quantity);
   const addPool = (pool, lot) => {
+    pool.origins = mergeOrigins(pool.origins, lot.origins);
     pool.quantity += lot.quantity;
     for (const field of ['principalAtlas', 'marketplaceFeeAtlas', 'transactionFeeAtlas']) pool[field] += Number(lot[field] || 0);
     for (const origin of lot.gameOrigins.values()) addOrigin(pool.gameOrigins, origin);
@@ -116,6 +121,7 @@ function replayMarketplaceInventoryLedger(movements = []) {
   const consumeGame = (location, asset, quantity) => consumePool(getGamePool(location, asset), quantity);
   const addGame = (location, asset, lot) => addPool(getGamePool(location, asset), lot);
   const lotFields = (lot) => ({
+    origins: mergeOrigins(lot.origins),
     principalAtlas: lot.principalAtlas,
     marketplaceFeeAtlas: lot.marketplaceFeeAtlas,
     carriedMarketplaceFeeAtlas: lot.marketplaceFeeAtlas,
@@ -152,6 +158,8 @@ function replayMarketplaceInventoryLedger(movements = []) {
       if (!wallet || principal == null || principal < 0) { rows.push({ ...common, status: 'pending_basis' }); continue; }
       const lot = emptyLot(quantity);
       lot.principalAtlas = principal;
+      const source = text(movement.marketplace).toLowerCase();
+      if (['gm', 'lm'].includes(source)) lot.origins = [{ source, quantity, uncosted: false, costs: { [source]: principal }, cargoCost: 0 }];
       // Marketplace BUY fees are seller-paid and never enter buyer inventory basis.
       addFeeToLot(lot, movement.transactionFeeAtlas);
       const after = add(wallet, asset, lot);
@@ -501,7 +509,7 @@ function projectInventoryCostLedgerDepositEvents(ledgerRows = [], { faction = ''
     const asset = canonicalAssetName(row.asset);
     return [{
       type: 'acquire-lot', timestamp: timestamp.toISOString(), location: text(row.starbase), asset,
-      quantity, uncostedQuantity: 0,
+      quantity, uncostedQuantity: 0, ...(row.origins?.length ? { origins: mergeOrigins(row.origins) } : {}),
       costs: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: principalAtlas },
       cargoCost: basisMovedAtlas - principalAtlas,
       flowId: text(row.movementId), basisSource: 'marketplace-game-deposit',

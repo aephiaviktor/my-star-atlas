@@ -378,10 +378,10 @@ test('Inventory Ledger exposes one pool-basis table with a per-unit toggle', () 
   assert.match(mainSource, /poolBasisRows: inventoryDepositPoolBasisRows/);
 });
 
-test('Inventory Ledger suppresses zeroes, sorts every column, and exposes every column control', () => {
+test('Inventory Ledger distinguishes missing prices from zero, sorts every column, and exposes every column control', () => {
   const htmlSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
   const rendererSource = require('node:fs').readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
-  assert.match(rendererSource, /function formatInventoryLedgerBasisValue[\s\S]*Math\.abs\(number\) < 1e-12[\s\S]*return '--'/);
+  assert.match(rendererSource, /function formatInventoryLedgerBasisValue[\s\S]*value == null[\s\S]*return '--'/);
   assert.match(rendererSource, /handle\(earningsCostLedgerTableHead, 'breakeven'\)/);
   assert.match(rendererSource, /appendEarningsHeaderCell\(tr, column\.id, label, sortState/);
   assert.match(rendererSource, /sort\(\(left, right\) => sortState\?\.column[\s\S]*compareEarningsValues\(inventoryLedgerSortValue/);

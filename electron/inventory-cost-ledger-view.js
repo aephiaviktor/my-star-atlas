@@ -1,5 +1,7 @@
 'use strict';
 
+const { scaleOrigins, sourceUnitMetrics } = require('./inventory-source-units');
+
 const COST_SOURCES = Object.freeze(['scanning', 'mining', 'crafting', 'lm', 'gm']);
 
 function nonNegative(value) {
@@ -55,6 +57,8 @@ function projectInventoryCostLedgerRows({ ledgerRows = [], valuationRows = [], p
     const totalBasis = Object.values(costs).reduce((sum, value) => sum + value, cargoCost);
 
     return {
+      ...sourceUnitMetrics(scaleOrigins(ledger.origins,
+        ledgerKnown > 0 ? Math.min(1, knownCostQuantity / ledgerKnown) : 0, 0)),
       location,
       asset,
       quantity,

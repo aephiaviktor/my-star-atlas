@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 14 keeps the latest activity day replayable for late-arriving dependencies.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 14;
+// Version 15 rebuilds source quantities and inferred uncosted replay baselines.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 15;
 
 function emptyResult(status, error = '') {
   return {

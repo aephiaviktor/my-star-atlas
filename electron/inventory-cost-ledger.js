@@ -2,6 +2,7 @@
 
 const COST_SOURCES = Object.freeze(['scanning', 'mining', 'crafting', 'lm', 'gm']);
 const EPSILON = 1e-9;
+const { mergeOrigins, scaleOrigins, validateOrigins, sourceUnitMetrics } = require('./inventory-source-units');
 
 function emptyCosts() {
   return Object.fromEntries(COST_SOURCES.map((source) => [source, 0]));
@@ -27,6 +28,7 @@ function requireNonNegative(value, label) {
 
 function cloneLot(lot) {
   return {
+    origins: mergeOrigins(lot.origins),
     quantity: lot.quantity,
     uncostedQuantity: lot.uncostedQuantity,
     costs: { ...lot.costs },
@@ -62,7 +64,8 @@ class InventoryCostLedger {
       if (uncostedCargoCost > cargoCost + EPSILON) throw new Error('uncostedCargoCost cannot exceed cargoCost');
       const key = ledger.key(location, asset);
       if (ledger.entries.has(key)) throw new Error(`duplicate ledger row: ${asset} at ${location}`);
-      ledger.entries.set(key, { location, asset, quantity, uncostedQuantity, costs, uncostedCosts, cargoCost, uncostedCargoCost });
+      const origins = validateOrigins(row.origins, quantity, uncostedQuantity);
+      ledger.entries.set(key, { origins, location, asset, quantity, uncostedQuantity, costs, uncostedCosts, cargoCost, uncostedCargoCost });
     }
     return ledger;
   }
@@ -77,6 +80,7 @@ class InventoryCostLedger {
       this.entries.set(key, {
         location: String(location).trim(),
         asset: String(asset).trim(),
+        origins: [],
         quantity: 0,
         uncostedQuantity: 0,
         costs: emptyCosts(),
@@ -90,6 +94,7 @@ class InventoryCostLedger {
 
   addLot(location, asset, lot) {
     const entry = this.ensure(location, asset);
+    entry.origins = mergeOrigins(entry.origins, lot.origins);
     entry.quantity += lot.quantity;
     entry.uncostedQuantity += lot.uncostedQuantity;
     for (const source of COST_SOURCES) entry.costs[source] += lot.costs[source] || 0;
@@ -111,11 +116,12 @@ class InventoryCostLedger {
       if (!COST_SOURCES.includes(source)) throw new Error(`invalid cost source: ${source}`);
       lot.costs[source] = requireNonNegative(totalCost, 'totalCost');
     }
+    if (source) lot.origins = [{ source, quantity: units, uncosted: false, costs: { ...lot.costs }, cargoCost: cargo }];
     this.addLot(location, asset, lot);
     return this.get(location, asset);
   }
 
-  acquireLot({ location, asset, quantity, uncostedQuantity = 0, costs = {}, uncostedCosts = null, cargoCost = 0, uncostedCargoCost = null }) {
+  acquireLot({ location, asset, quantity, uncostedQuantity = 0, costs = {}, uncostedCosts = null, cargoCost = 0, uncostedCargoCost = null, origins = [] }) {
     const units = requirePositive(quantity, 'quantity');
     const uncosted = requireNonNegative(uncostedQuantity, 'uncostedQuantity');
     if (uncosted > units + EPSILON) throw new Error('uncostedQuantity cannot exceed quantity');
@@ -128,6 +134,7 @@ class InventoryCostLedger {
     }
     lot.uncostedCargoCost = requireNonNegative(uncostedCargoCost ?? lot.cargoCost * inferredUncostedRatio, 'uncostedCargoCost');
     if (lot.uncostedCargoCost > lot.cargoCost + EPSILON) throw new Error('uncostedCargoCost cannot exceed cargoCost');
+    lot.origins = validateOrigins(origins, units, uncosted);
     this.addLot(location, asset, lot);
     return this.get(location, asset);
   }
@@ -159,6 +166,8 @@ class InventoryCostLedger {
     lot.cargoCost = lot.uncostedCargoCost
       + (entry.cargoCost - entry.uncostedCargoCost) * costedRatio;
 
+    lot.origins = scaleOrigins(entry.origins, costedRatio, uncostedRatio);
+    entry.origins = scaleOrigins(entry.origins, 1 - costedRatio, 1 - uncostedRatio);
     entry.quantity = Math.max(0, entry.quantity - units);
     entry.uncostedQuantity = Math.max(0, entry.uncostedQuantity - lot.uncostedQuantity);
     entry.cargoCost = Math.max(0, entry.cargoCost - lot.cargoCost);
@@ -193,6 +202,7 @@ class InventoryCostLedger {
       cargoCost: addedCargoCost + originPool.cargoCostPerUnit * units,
       uncostedCargoCost: 0,
     } : consumed;
+    if (carryPoolRate && hasPoolRate) lot.origins = scaleOrigins(originPool.origins.filter((part) => !part.uncosted), units / (originPool.quantity - originPool.uncostedQuantity), 0);
     if (!(carryPoolRate && hasPoolRate)) {
       lot.cargoCost += addedCargoCost;
       lot.uncostedCargoCost += addedCargoCost * (lot.uncostedQuantity / lot.quantity);
@@ -238,6 +248,7 @@ class InventoryCostLedger {
       outputLot.uncostedCosts = { ...outputLot.costs };
       outputLot.uncostedCargoCost = outputLot.cargoCost;
     }
+    outputLot.origins = [{ source: 'crafting', quantity: outputUnits, uncosted: hasUncostedIngredient, costs: { ...outputLot.costs }, cargoCost: outputLot.cargoCost }];
     this.addLot(location, outputAsset, outputLot);
     return cloneLot(outputLot);
   }
@@ -277,6 +288,8 @@ class InventoryCostLedger {
     const baseCostPerUnit = knownQuantity > 0 ? baseTotalCost / knownQuantity : 0;
     const cargoCostPerUnit = knownQuantity > 0 ? knownCargoCost / knownQuantity : 0;
     return {
+      origins: mergeOrigins(entry.origins),
+      ...sourceUnitMetrics(entry.origins),
       location: entry.location,
       asset: entry.asset,
       quantity,

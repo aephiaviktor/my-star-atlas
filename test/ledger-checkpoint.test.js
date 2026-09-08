@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { InventoryCostLedger } = require('../electron/inventory-cost-ledger');
-const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('../electron/ledger-checkpoint');
+const { loadLedgerCheckpoint, saveLedgerCheckpoint, LEDGER_CHECKPOINT_SCHEMA_VERSION } = require('../electron/ledger-checkpoint');
 const { createInventoryBasisSnapshot } = require('../electron/inventory-basis-snapshot');
 
 test('ledger checkpoint round-trips basis and event fingerprints atomically', async () => {
@@ -50,7 +50,7 @@ test('corrupt or mismatched checkpoint fails safely without loading basis', asyn
     assert.equal(corrupt.status, 'invalid');
     assert.match(corrupt.error, /JSON|Unexpected|property name/i);
 
-    await fs.writeFile(filePath, JSON.stringify({ schemaVersion: 14, faction: 'MUD', profile: 'MUD', ledgerRows: [], seenEventFingerprints: [] }));
+    await fs.writeFile(filePath, JSON.stringify({ schemaVersion: LEDGER_CHECKPOINT_SCHEMA_VERSION, faction: 'MUD', profile: 'MUD', ledgerRows: [], seenEventFingerprints: [] }));
     const mismatch = await loadLedgerCheckpoint(filePath, { faction: 'USTUR', profile: 'USTUR' });
     assert.equal(mismatch.status, 'invalid');
     assert.match(mismatch.error, /faction/);
@@ -63,7 +63,7 @@ test('legacy checkpoint is invalidated so corrected provenance is replayed', asy
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'msa-ledger-checkpoint-'));
   const filePath = path.join(directory, 'ONI.json');
   try {
-    await fs.writeFile(filePath, JSON.stringify({ schemaVersion: 9, faction: 'ONI', profile: 'USTUR', ledgerRows: [], seenEventFingerprints: [] }));
+    await fs.writeFile(filePath, JSON.stringify({ schemaVersion: 14, faction: 'ONI', profile: 'USTUR', ledgerRows: [], seenEventFingerprints: [] }));
     const loaded = await loadLedgerCheckpoint(filePath, { faction: 'ONI', profile: 'USTUR' });
     assert.equal(loaded.status, 'invalid');
     assert.match(loaded.error, /schemaVersion/);

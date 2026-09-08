@@ -7617,6 +7617,7 @@ function inventoryLedgerValues(row, perUnit) {
   const cargo = Number(row?.cargoCost || 0);
   const totalBasis = Object.values(costs).reduce((sum, value) => sum + Number(value || 0), cargo);
   const basisValue = (value) => perUnit && quantity > 0 ? Number(value || 0) / quantity : Number(value || 0);
+  const sourceValue = (source) => perUnit ? row?.sourceUnitCosts?.[source] ?? null : basisValue(costs[source]);
   const status = quantity <= 0 ? 'Empty'
     : row?.basisStatus === 'priced' ? 'Priced'
       : row?.basisStatus === 'estimated' ? 'Estimated' : 'Unpriced';
@@ -7624,8 +7625,8 @@ function inventoryLedgerValues(row, perUnit) {
     starbase: row?.location || '', asset: row?.asset || '', quantity,
     costedQuantity: Number(row?.knownCostQuantity || 0),
     uncostedQuantity: Number(row?.uncostedQuantity || 0),
-    scanning: basisValue(costs.scanning), mining: basisValue(costs.mining), crafting: basisValue(costs.crafting),
-    lm: basisValue(costs.lm), gm: basisValue(costs.gm), cargo: basisValue(cargo),
+    scanning: sourceValue('scanning'), mining: sourceValue('mining'), crafting: sourceValue('crafting'),
+    lm: sourceValue('lm'), gm: sourceValue('gm'), cargo: basisValue(cargo),
     totalBasis: basisValue(totalBasis), status,
   };
 }
@@ -7635,8 +7636,9 @@ function inventoryLedgerSortValue(row, columnId, perUnit) {
 }
 
 function formatInventoryLedgerBasisValue(value, perUnit) {
+  if (value == null) return '--';
   const number = Number(value);
-  if (!Number.isFinite(number) || Math.abs(number) < 1e-12) return '--';
+  if (!Number.isFinite(number)) return '--';
   return perUnit ? costLedgerUnitFormatter.format(number) : costLedgerBasisFormatter.format(number);
 }
 
@@ -7687,7 +7689,11 @@ function renderInventoryCostLedger(result) {
       const formatted = ['quantity', 'costedQuantity', 'uncostedQuantity'].includes(column.id) ? formatWholeNumber(value)
         : ['starbase', 'asset', 'status'].includes(column.id) ? value
           : formatInventoryLedgerBasisValue(value, perUnit);
-      tr.appendChild(createTextCell(formatted));
+      const cell = createTextCell(formatted);
+      if (perUnit && ['gm', 'lm', 'mining', 'crafting', 'scanning'].includes(column.id)) {
+        cell.title = `Weighted source cost; ${formatWholeNumber(row.sourceQuantities?.[column.id] || 0)} remaining units with known source basis. Source unit costs do not sum to Total / Unit.`;
+      }
+      tr.appendChild(cell);
     }
     earningsCostLedgerTableBody.appendChild(tr);
   }

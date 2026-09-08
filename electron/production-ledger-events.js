@@ -238,7 +238,7 @@ function orderSameDayProductionDependencies(events) {
   return ordered;
 }
 
-function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], currentInventoryRows = [], inventoryReconciliationRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [], inventoryBasisFaction = '' } = {}) {
+function replayCostLedgerResult({ initialLedger = null, eventFingerprintCounts = {}, eventResultsByFingerprint = {}, seenEventFingerprints = [], eventResultByFingerprint = {}, openingInventoryRows = [], currentInventoryRows = [], inventoryReconciliationRows = [], scanningRows = [], miningRows = [], cargoRows = [], craftingRows = [], upgradingRows = [], localMarketTrades = [], assetFlowEvents = [], inventoryBasisFaction = '' } = {}) {
   const ledger = initialLedger || new InventoryCostLedger();
   const previousCounts = { ...(eventFingerprintCounts || {}) };
   for (const fingerprint of seenEventFingerprints || []) previousCounts[fingerprint] = Math.max(1, Number(previousCounts[fingerprint] || 0));
@@ -380,6 +380,41 @@ function buildCostLedgerResult({ initialLedger = null, eventFingerprintCounts = 
     seenEventFingerprints: Object.keys(currentCounts).sort(),
     eventResultByFingerprint: Object.fromEntries(Object.entries(currentResults).map(([fingerprint, results]) => [fingerprint, results[0]])),
   };
+}
+
+// Current inventory is an endpoint observation, not a dated acquisition. Infer
+// unexplained stock as opening uncosted stock for the replayable window, once.
+// The second replay preserves that stock in the pre-last-day checkpoint.
+function buildCostLedgerResult(options = {}) {
+  const initialRows = options.initialLedger?.snapshot() || [];
+  const run = (rows) => replayCostLedgerResult({ ...options,
+    initialLedger: (options.initialLedger || rows.length) ? InventoryCostLedger.fromSnapshot(rows) : null });
+  const first = run(initialRows);
+  const surplus = [];
+  for (const row of options.currentInventoryRows || []) {
+    const location = String(row.starbase || '').trim();
+    const asset = canonicalAssetName(row.asset);
+    const target = Number(row.quantity);
+    if (!location || !asset || !Number.isFinite(target) || target < 0) continue;
+    const boundaries = (options.inventoryReconciliationRows || []).filter((baseline) =>
+      String(baseline.starbase || baseline.location || '').trim() === location
+      && canonicalAssetName(baseline.asset) === asset && Number.isFinite(Date.parse(baseline.timestamp)));
+    const boundary = boundaries.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0];
+    const missing = target - first.ledger.get(location, asset).quantity;
+    if (missing > 1e-9) surplus.push({ location, asset, quantity: missing,
+      ...(boundary ? { timestamp: normalizeTimestamp(boundary.timestamp) } : {}) });
+  }
+  if (!surplus.length) return first;
+  const seeded = InventoryCostLedger.fromSnapshot(initialRows);
+  for (const row of surplus.filter((row) => !row.timestamp)) seeded.acquire(row);
+  // Keep original opening events when seeding an otherwise fresh replay.
+  const openingInventoryRows = options.initialLedger ? options.openingInventoryRows
+    : completeOpeningInventoryRows(options.openingInventoryRows, options.currentInventoryRows);
+  const result = replayCostLedgerResult({ ...options, openingInventoryRows, initialLedger: seeded,
+    assetFlowEvents: [...(options.assetFlowEvents || []), ...surplus.filter((row) => row.timestamp)
+      .map((row) => ({ ...row, type: 'acquire', purpose: 'inferred-uncosted-surplus' }))] });
+  result.inferredOpeningInventory = surplus;
+  return result;
 }
 
 function buildProductionLedger(options = {}) {

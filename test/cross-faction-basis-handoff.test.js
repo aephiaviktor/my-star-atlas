@@ -29,6 +29,8 @@ test('foreign withdrawal seeds an exact weighted wallet lot for the destination 
   const ledger = new InventoryCostLedger();
   ledger.applyEvents(result.events);
   assert.deepEqual(ledger.get('ONI-1', 'Framework'), {
+    origins: [], sourceQuantities: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: 0 },
+    sourceUnitCosts: { scanning: null, mining: null, crafting: null, lm: null, gm: null },
     location: 'ONI-1', asset: 'Framework', quantity: 40, uncostedQuantity: 8,
     costs: { scanning: 0, mining: 4, crafting: 2, lm: 0, gm: 10 },
     uncostedCosts: { scanning: 0, mining: 0.8, crafting: 0.4, lm: 0, gm: 2 },

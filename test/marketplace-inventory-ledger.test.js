@@ -98,6 +98,7 @@ test('legacy Ammo events form one Ammunition custody chain from GM purchase thro
   assert.deepEqual(projectInventoryCostLedgerDepositEvents(ledger.rows, { faction: 'MUD' }), [{
     type: 'acquire-lot', timestamp: '2026-09-01T18:35:43.000Z', location: 'MUD-1', asset: 'Ammunition',
     quantity: 5000000, uncostedQuantity: 0,
+    origins: [{ source: 'gm', uncosted: false, quantity: 5000000, costs: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: 5165.25 }, cargoCost: 0 }],
     costs: { scanning: 0, mining: 0, crafting: 0, lm: 0, gm: 5165.25 }, cargoCost: 0,
     flowId: 'deposit-5m', basisSource: 'marketplace-game-deposit',
   }]);
