@@ -1526,54 +1526,27 @@ function setCachedFilterResult(faction, section, value, ...filters) {
   setCachedFactionResult(faction, getFilterCacheKey(faction, section, ...filters), value);
 }
 
-function recordFactionFilterState(faction) {
-  setCachedFactionResult(faction, 'selectedScanningFleet', selectedScanningFleet);
-  setCachedFactionResult(faction, 'selectedMiningFleet', selectedMiningFleet);
-  setCachedFactionResult(faction, 'selectedMiningStarbase', selectedMiningStarbase);
-  setCachedFactionResult(faction, 'selectedCraftingStarbase', selectedCraftingStarbase);
-  setCachedFactionResult(faction, 'selectedCraftingRecipe', selectedCraftingRecipe);
-  setCachedFactionResult(faction, 'selectedProductionStarbase', selectedProductionStarbase);
-  setCachedFactionResult(faction, 'selectedProductionAsset', selectedProductionAsset);
-  setCachedFactionResult(faction, 'selectedConsMiningStarbase', selectedConsMiningStarbase);
-  setCachedFactionResult(faction, 'selectedConsMiningFleet', selectedConsMiningFleet);
-  setCachedFactionResult(faction, 'selectedConsCraftingStarbase', selectedConsCraftingStarbase);
-  setCachedFactionResult(faction, 'selectedConsCraftingRecipe', selectedConsCraftingRecipe);
-  setCachedFactionResult(faction, 'selectedConsUpgradingStarbase', selectedConsUpgradingStarbase);
-  setCachedFactionResult(faction, 'selectedConsUpgradingComponent', selectedConsUpgradingComponent);
-  setCachedFactionResult(faction, 'selectedConsScanningStarbase', selectedConsScanningStarbase);
-  setCachedFactionResult(faction, 'selectedConsScanningFleet', selectedConsScanningFleet);
-  setCachedFactionResult(faction, 'selectedConsCargoStarbase', selectedConsCargoStarbase);
-  setCachedFactionResult(faction, 'selectedConsCargoFleet', selectedConsCargoFleet);
-  setCachedFactionResult(faction, 'selectedConsTotalStarbase', selectedConsTotalStarbase);
-  setCachedFactionResult(faction, 'selectedConsTotalAsset', selectedConsTotalAsset);
-  setCachedFactionResult(faction, 'selectedInvStarbase', invSelectedStarbase);
-}
-
-function restoreFactionFilterState(faction) {
-  selectedScanningFleet = getCachedFactionResult(faction, 'selectedScanningFleet') || '';
-  selectedMiningFleet = getCachedFactionResult(faction, 'selectedMiningFleet') || '';
-  selectedMiningStarbase = getCachedFactionResult(faction, 'selectedMiningStarbase') || '';
-  selectedCraftingStarbase = getCachedFactionResult(faction, 'selectedCraftingStarbase') || '';
-  selectedCraftingRecipe = getCachedFactionResult(faction, 'selectedCraftingRecipe') || '';
-  selectedProductionStarbase = getCachedFactionResult(faction, 'selectedProductionStarbase') || '';
-  selectedProductionAsset = getCachedFactionResult(faction, 'selectedProductionAsset') || '';
-  selectedConsMiningStarbase = getCachedFactionResult(faction, 'selectedConsMiningStarbase') || '';
-  selectedConsMiningFleet = getCachedFactionResult(faction, 'selectedConsMiningFleet') || '';
-  selectedConsCraftingStarbase = getCachedFactionResult(faction, 'selectedConsCraftingStarbase') || '';
-  selectedConsCraftingRecipe = getCachedFactionResult(faction, 'selectedConsCraftingRecipe') || '';
-  selectedConsUpgradingStarbase = getCachedFactionResult(faction, 'selectedConsUpgradingStarbase') || '';
-  selectedConsUpgradingComponent = getCachedFactionResult(faction, 'selectedConsUpgradingComponent') || '';
-  selectedConsScanningStarbase = getCachedFactionResult(faction, 'selectedConsScanningStarbase') || '';
-  selectedConsScanningFleet = getCachedFactionResult(faction, 'selectedConsScanningFleet') || '';
-  selectedConsCargoStarbase = getCachedFactionResult(faction, 'selectedConsCargoStarbase') || '';
-  selectedConsCargoFleet = getCachedFactionResult(faction, 'selectedConsCargoFleet') || '';
-  selectedConsTotalStarbase = getCachedFactionResult(faction, 'selectedConsTotalStarbase') || '';
-  selectedConsTotalAsset = getCachedFactionResult(faction, 'selectedConsTotalAsset') || '';
-  invSelectedStarbase = getCachedFactionResult(faction, 'selectedInvStarbase') || '__all__';
-  applyEarningsPerUnitButtonState('scanning');
-  applyEarningsPerUnitButtonState('mining');
-  applyEarningsPerUnitButtonState('crafting');
-  applyEarningsPerUnitButtonState('upgrading');
+function resetFactionFilterState() {
+  selectedScanningFleet = '';
+  selectedMiningFleet = '';
+  selectedMiningStarbase = '';
+  selectedCraftingStarbase = '';
+  selectedCraftingRecipe = '';
+  selectedProductionStarbase = '';
+  selectedProductionAsset = '';
+  selectedConsMiningStarbase = '';
+  selectedConsMiningFleet = '';
+  selectedConsCraftingStarbase = '';
+  selectedConsCraftingRecipe = '';
+  selectedConsUpgradingStarbase = '';
+  selectedConsUpgradingComponent = '';
+  selectedConsScanningStarbase = '';
+  selectedConsScanningFleet = '';
+  selectedConsCargoStarbase = '';
+  selectedConsCargoFleet = '';
+  selectedConsTotalStarbase = '';
+  selectedConsTotalAsset = '';
+  invSelectedStarbase = '__all__';
 }
 
 function openSettings() {
@@ -1987,7 +1960,10 @@ function resetFactionScopedState() {
   earningsFilters.scanning = { date: '', fleet: '' };
   earningsFilters.mining = { date: '', fleet: '', rawMaterial: '' };
   earningsFilters.cargo = { date: '', fleet: '' };
+  earningsFilters.cargoAllocation = { date: '', fleet: '', asset: '' };
   earningsFilters.crafting = { date: '', starbase: '', asset: '' };
+  earningsFilters.upgrading = { date: '', starbase: '', asset: '' };
+  earningsFilters.breakeven = { starbase: '', asset: '', hideLowInventory: false };
   earningsSort.scanning = { column: null, direction: null };
   earningsSort.mining = { column: null, direction: null };
   earningsSort.cargo = { column: null, direction: null };
@@ -1996,7 +1972,7 @@ function resetFactionScopedState() {
   // per-asset visibility are keyed by faction, so wipe the cached
   // result and force a fresh fetch on the next render.
   latestInventoryResult = null;
-  invSelectedStarbase = '__all__';
+  resetFactionFilterState();
 }
 
 function resetLegacyFleetState() {
@@ -10406,12 +10382,9 @@ factionButtons.forEach((button) => {
     const clickedFaction = normalizeFaction(button.dataset.faction);
     if (latestSettings && normalizeFaction(latestSettings.faction) === clickedFaction) return;
 
-    // Cache current faction's filter state before switching
-    const oldFaction = normalizeFaction(latestSettings?.faction);
-    recordFactionFilterState(oldFaction);
-    // Clear the loaded-result guards from the previous faction. Without
-    // this, tab clicks see a non-null result and incorrectly skip both the
-    // new faction's prefetched cache and its on-demand request.
+    // Clear loaded-result guards and every faction-scoped filter. Without
+    // this, a prior starbase/fleet/asset/date can hide the new faction's rows,
+    // while stale result guards can skip both cache and on-demand loading.
     resetFactionScopedState();
 
     const nextSettings = mergeSettingsFromForm({ faction: clickedFaction });
@@ -10421,9 +10394,6 @@ factionButtons.forEach((button) => {
     earningsRefreshInFlight = null;
     updateFactionButtons(nextSettings);
     updateSettingsStatus(nextSettings);
-
-    // Restore cached filter selections for new faction
-    restoreFactionFilterState(clickedFaction);
 
     // Render cached data immediately if available (per-filter cache)
     const faction = clickedFaction;

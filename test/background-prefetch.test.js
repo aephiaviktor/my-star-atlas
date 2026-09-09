@@ -32,15 +32,37 @@ test('prefetch stores results under its captured faction instead of renderer glo
   assert.match(renderer, /faction === normalizeFaction\(\(latestSettings \|\| getFormPayload\(\)\)\.faction\)/);
 });
 
-test('faction switching clears previous-faction loaded-result guards before restoring filters', () => {
+test('faction switching clears loaded-result guards and starts without filters', () => {
   const handler = renderer.slice(
     renderer.indexOf('factionButtons.forEach((button) => {'),
     renderer.indexOf("scanningFleetFilter.addEventListener('change'"),
   );
-  const recordIndex = handler.indexOf('recordFactionFilterState(oldFaction)');
-  const resetIndex = handler.indexOf('resetFactionScopedState()');
-  const restoreIndex = handler.indexOf('restoreFactionFilterState(clickedFaction)');
-  assert.ok(recordIndex >= 0);
-  assert.ok(resetIndex > recordIndex);
-  assert.ok(restoreIndex > resetIndex);
+  assert.match(handler, /resetFactionScopedState\(\)/);
+  assert.doesNotMatch(handler, /recordFactionFilterState|restoreFactionFilterState/);
+
+  const reset = renderer.slice(
+    renderer.indexOf('function resetFactionScopedState()'),
+    renderer.indexOf('function resetLegacyFleetState'),
+  );
+  assert.match(reset, /earningsFilters\.upgrading = \{ date: '', starbase: '', asset: '' \}/);
+  assert.match(reset, /earningsFilters\.breakeven = \{ starbase: '', asset: '', hideLowInventory: false \}/);
+  assert.match(reset, /resetFactionFilterState\(\)/);
+
+  const filters = renderer.slice(
+    renderer.indexOf('function resetFactionFilterState()'),
+    renderer.indexOf('function openSettings()'),
+  );
+  for (const field of [
+    'selectedScanningFleet', 'selectedMiningFleet', 'selectedMiningStarbase',
+    'selectedCraftingStarbase', 'selectedCraftingRecipe', 'selectedProductionStarbase',
+    'selectedProductionAsset', 'selectedConsMiningStarbase', 'selectedConsMiningFleet',
+    'selectedConsCraftingStarbase', 'selectedConsCraftingRecipe',
+    'selectedConsUpgradingStarbase', 'selectedConsUpgradingComponent',
+    'selectedConsScanningStarbase', 'selectedConsScanningFleet',
+    'selectedConsCargoStarbase', 'selectedConsCargoFleet',
+    'selectedConsTotalStarbase', 'selectedConsTotalAsset',
+  ]) {
+    assert.match(filters, new RegExp(`${field} = '';`));
+  }
+  assert.match(filters, /invSelectedStarbase = '__all__'/);
 });
