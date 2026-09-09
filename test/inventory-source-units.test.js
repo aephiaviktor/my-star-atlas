@@ -146,3 +146,44 @@ test('overdraft recovery after dated baseline preserves known purchases and the 
   assert.equal(row.quantity-row.uncostedQuantity,1000);
   assert.equal(baseline.quantity,0);
 });
+
+
+test('opening recovery handles more than 32 newly enabled upgrades without losing costed stock', () => {
+  const base = new InventoryCostLedger();
+  base.acquire({location, asset, quantity:1000, source:'gm', totalCost:3});
+  const upgrades = Array.from({length:40}, (_, index) => ({
+    starbase:location, asset, installed:1000,
+    timestamp:new Date(Date.UTC(2026,8,8,10,index)).toISOString(),
+  }));
+  const options = {initialLedger:base, currentInventoryRows:[{starbase:location,asset,quantity:1000}], upgradingRows:upgrades};
+  const first = buildCostLedgerResult(options);
+  assert.equal(first.rejectedEvents.length,0);
+  assert.equal(first.appliedEventResults.filter(({event}) => event.purpose === 'upgrading').length,40);
+  assert.equal(first.ledger.get(location,asset).quantity,1000);
+  assert.equal(first.ledger.get(location,asset).sourceQuantities.gm,1000);
+  assert.equal(first.inferredOpeningInventory[0].quantity,40000);
+  assert.equal(base.get(location,asset).quantity,1000);
+  const repeat = buildCostLedgerResult({...options, initialLedger:first.checkpointLedger,
+    eventFingerprintCounts:first.checkpointEventFingerprintCounts,
+    eventResultsByFingerprint:first.checkpointEventResultsByFingerprint});
+  assert.deepEqual(repeat.ledger.snapshot(),first.ledger.snapshot());
+  const rollover = buildCostLedgerResult({...options, initialLedger:first.checkpointLedger,
+    eventFingerprintCounts:first.checkpointEventFingerprintCounts,
+    eventResultsByFingerprint:first.checkpointEventResultsByFingerprint,
+    upgradingRows:[...upgrades,{starbase:location,asset,installed:1000,timestamp:'2026-09-09T10:00:00Z'}]});
+  assert.equal(rollover.rejectedEvents.length,0);
+  assert.equal(rollover.ledger.get(location,asset).sourceQuantities.gm,1000);
+  assert.equal(rollover.ledger.get(location,asset).quantity,1000);
+});
+
+
+test('recovery remains bounded when a later reset erases every inferred opening adjustment', () => {
+  const base = new InventoryCostLedger();
+  base.acquire({location,asset,quantity:1000,source:'gm',totalCost:3});
+  const before=base.snapshot();
+  assert.throws(() => buildCostLedgerResult({initialLedger:base,
+    currentInventoryRows:[{starbase:location,asset,quantity:1000}],
+    assetFlowEvents:[{type:'reconcile',location,asset,quantity:0,timestamp:'2026-09-09T08:00:00Z'}],
+  }), /Inventory opening-stock recovery did not converge/);
+  assert.deepEqual(base.snapshot(),before);
+});

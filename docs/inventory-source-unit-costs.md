@@ -28,7 +28,9 @@ inventory reconciliation for the pool. This is an explicit timing estimate, not 
 claim that today's balance was historically observed. Dated observations are not
 rewritten. A recovered overdraft can enable previously rejected consumption, so
 recovery repeats from the immutable starting checkpoint until there is no remaining
-endpoint shortfall (maximum 32 recovery passes). Only the converged replay's event
+endpoint shortfall. The recovery bound is the larger of 32 and the replay event count plus two
+settlement passes, rather than a fixed 32: each pass can enable only one more
+previously rejected upgrade. The final replay is checked before declaring failure. Only the converged replay's event
 results, basis snapshots and checkpoint are returned. A nonconverging replay raises
 an error before any checkpoint or basis publication, rather than saving a partial
 result and adding replacement uncosted units afterward. This is not a rule that

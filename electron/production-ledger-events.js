@@ -393,7 +393,12 @@ function buildCostLedgerResult(options = {}) {
     : completeOpeningInventoryRows(options.openingInventoryRows, options.currentInventoryRows);
   let result = replayCostLedgerResult({ ...options,
     initialLedger: options.initialLedger ? InventoryCostLedger.fromSnapshot(initialRows) : null });
-  for (let pass = 0; pass < 32; pass += 1) {
+  // Each replenishment can enable just one previously rejected event. A fixed
+  // 32-pass cap therefore rejects valid, longer histories. Allow one recovery
+  // per event, plus endpoint settlement, and inspect the final replay too.
+  // Keep a finite guard: unchanged/contradictory replay inputs must not spin.
+  const recoveryLimit = Math.max(32, result.events.length + 2);
+  for (let pass = 0; pass <= recoveryLimit; pass += 1) {
     let changed = false;
     for (const row of options.currentInventoryRows || []) {
       const location = String(row.starbase || '').trim();
@@ -419,6 +424,7 @@ function buildCostLedgerResult(options = {}) {
       if (surplusByPool.size) result.inferredOpeningInventory = [...surplusByPool.values()];
       return result;
     }
+    if (pass === recoveryLimit) break;
     const surplus = [...surplusByPool.values()];
     const seeded = InventoryCostLedger.fromSnapshot(initialRows);
     for (const row of surplus.filter((row) => !row.timestamp)) seeded.acquire(row);
