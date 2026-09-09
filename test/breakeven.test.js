@@ -323,7 +323,8 @@ test('Crafting and Upgrading use consumed ledger basis instead of current GM pri
   assert.match(craftingBasis, /const craftingBasis = craftingBasisByDay\.get/);
   assert.match(craftingBasis, /craftingBasis && !craftingBasis\.uncosted/);
   assert.match(main, /const componentBasis = upgradingBasisByDay\.get/);
-  assert.match(main, /const upgradingCostsAtlas = componentBasis && !componentBasis\.uncosted \? componentBasis\.basis : null;/);
+  assert.match(main, /resolveUpgradingCostsAtlas\(\{/);
+  assert.match(main, /inventoryBasis: inventoryBasisByPool\.get\(poolKey\)/);
   assert.doesNotMatch(main, /const upgradingCostsAtlas = componentPriceAtl/);
 });
 

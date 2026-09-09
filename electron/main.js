@@ -81,6 +81,7 @@ const {
 } = require('./inventory-basis-read');
 const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { projectInventoryCostLedgerRows } = require('./inventory-cost-ledger-view');
+const { upgradingPoolKey, resolveUpgradingCostsAtlas } = require('./upgrading-cost-basis');
 const { enrichRows: enrichResourceCostBasisRows } = require('./resource-cost-basis');
 const {
   formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
@@ -8465,7 +8466,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const lot = applied.result;
     const isoDate = getUtcDateKey(new Date(event.timestamp));
     if (event.type === 'consume' && event.purpose === 'upgrading') {
-      const key = `${isoDate}\n${event.location}\n${event.asset}`;
+      const key = `${isoDate}\n${upgradingPoolKey(event.location, event.asset)}`;
       const entry = upgradingBasisByDay.get(key) || { basis: 0, uncosted: false };
       entry.basis += totalLotBasis(lot);
       entry.uncosted ||= Number(lot?.uncostedQuantity || 0) > 0;
@@ -8520,6 +8521,15 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     }
   }
 
+  const projectedInventoryCostLedgerRows = projectInventoryCostLedgerRows({
+    ledgerRows: inventoryCostLedgerRows,
+    valuationRows: breakevenRows,
+    poolBasisRows: inventoryDepositPoolBasisRows,
+  });
+  const inventoryBasisByPool = new Map(projectedInventoryCostLedgerRows.map((row) => [
+    upgradingPoolKey(row.location, row.asset), row,
+  ]));
+
   // Crafting per-row enrichment: each row is per (starbase, output, date).
   // Revenue = crafted * outputPriceAtl. IngCosts = sum over all
   // ingredients of (ingredientAmount * ingredientPriceAtl). FeeCosts is
@@ -8553,8 +8563,13 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const lpPerComponent = UPGRADE_LP_BY_COMPONENT[componentKey] ?? null;
     const lpValuePerComponentAtl = atlasPerLp != null && lpPerComponent != null ? atlasPerLp * lpPerComponent : null;
     const revenueAtlasPerDay = lpValuePerComponentAtl != null ? row.installed * lpValuePerComponentAtl : null;
-    const componentBasis = upgradingBasisByDay.get(`${row.isoDate}\n${row.starbase}\n${row.asset}`);
-    const upgradingCostsAtlas = componentBasis && !componentBasis.uncosted ? componentBasis.basis : null;
+    const poolKey = upgradingPoolKey(row.starbase, row.asset);
+    const componentBasis = upgradingBasisByDay.get(`${row.isoDate}\n${poolKey}`);
+    const upgradingCostsAtlas = resolveUpgradingCostsAtlas({
+      componentBasis,
+      installed: row.installed,
+      inventoryBasis: inventoryBasisByPool.get(poolKey),
+    });
     const componentPrice = historicalPriceFor(row.asset, row.isoDate);
     const componentPriceAtl = componentPrice?.status === 'complete' ? componentPrice.priceATL : null;
     const componentExternalValueAtlas = componentPriceAtl == null ? null : row.installed * componentPriceAtl;
@@ -8774,12 +8789,6 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const topMiningNetProfitFleetToday = Array.from(todayMiningNetProfitByFleet.entries())
     .map(([fleetName, netProfitAtlas]) => ({ fleetName, netProfitAtlas }))
     .sort((a, b) => b.netProfitAtlas - a.netProfitAtlas || a.fleetName.localeCompare(b.fleetName))[0] || null;
-
-  const projectedInventoryCostLedgerRows = projectInventoryCostLedgerRows({
-    ledgerRows: inventoryCostLedgerRows,
-    valuationRows: breakevenRows,
-    poolBasisRows: inventoryDepositPoolBasisRows,
-  });
 
   return {
     ok: true,

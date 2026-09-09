@@ -40,6 +40,11 @@ The pre-latest-day checkpoint includes inferred stock when appropriate;
 latest-day stock is deterministically reconstructed on refresh. Final current
 reconciliation is retained. Negative variances still deplete uncosted stock first.
 
+Upgrading uses the exact consumed-lot basis when that history is fully costed. If
+the consumed history is uncosted, Earnings values the installed quantity at the
+current Inventory Ledger Total / Unit for the same starbase and asset. This is a
+valuation fallback only: it does not reassign cohorts or reduce known costed stock.
+
 Checkpoint schema 16 rebuilds schema 15 and older locally from available source history when
 the patched app next loads a ledger. No data migration or Influx rewriting was run
 while developing this patch. Unknown history cannot establish purchase provenance.
