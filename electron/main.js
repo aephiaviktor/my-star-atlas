@@ -46,7 +46,7 @@ const {
 } = require('./telemetry-context');
 const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./telemetry-rpc-fetch');
 const { dependencyInstallRequired } = require('./update-dependencies');
-const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
+const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, buildCargoAllocationRecordsFromPivotRows, cargoAllocationUtcBatches, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
 const { buildCargoAllocationPivotFlux, createCargoAllocationSource } = require('./cargo-allocation-source');
 const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
 const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
@@ -68,7 +68,7 @@ const {
 } = require('./rental-history');
 const { buildCostLedgerResult } = require('./production-ledger-events');
 const { reconcileInventoryLedger } = require('./inventory-ledger-reconciliation');
-const { buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
+const { attachCurrentInventoryCraftingBasis, buildCraftingBasisByDay, enrichCraftingEarningsRows } = require('./crafting-cost-basis');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint } = require('./ledger-checkpoint');
 const {
   buildInventoryDepositBaselineQuery, projectInventoryDepositBaselineRows,
@@ -7573,10 +7573,9 @@ ${scopeFilterFlux}
   return { rows, durationMs: Date.now() - startedAt, returnedRecordCount: cycleRows.length };
 }
 
-async function fetchCargoCompletionEvidenceRows(settings) {
+async function fetchCargoCompletionEvidenceRows(settings, scopeFilterFlux = buildInstanceScopeFilter(settings)) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
   const bucket = escapeFluxString(settings.influxBucket);
-  const scopeFilterFlux = buildInstanceScopeFilter(settings);
   const flux = `from(bucket: "${bucket}")
   |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "cargo_cycle_completed" and r._field == "legCount")
@@ -7620,6 +7619,41 @@ async function fetchCargoAllocationSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   cargoAllocationSource.cancelExcept(settings);
   return cargoAllocationSource.load(settings, { retry: Boolean(payload?.retry) });
+}
+
+const crossFactionCargoLedgerCache = createAsyncTtlCache({ ttlMs: 15 * 60_000 });
+
+async function loadCrossFactionCargoLedgerRows(settings) {
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return [];
+  const bucket = escapeFluxString(settings.influxBucket);
+  const pivotRows = [];
+  for (const batch of cargoAllocationUtcBatches({ now: new Date() })) {
+    const flux = buildCargoAllocationPivotFlux(bucket, '', batch);
+    pivotRows.push(...parseInfluxCsv(await queryInfluxFlux(settings, flux)));
+  }
+  const completionRows = await fetchCargoCompletionEvidenceRows(settings, '');
+  const completedCycleIds = new Set(completionRows.map((row) => String(row?.cycleId || '').trim()).filter(Boolean));
+  const records = buildCargoAllocationRecordsFromPivotRows(pivotRows)
+    .filter((row) => completedCycleIds.has(String(row.cycleId || '').trim()));
+  return Promise.all(records.map(async (row) => {
+    const [fuelPrice, solPrice] = await Promise.all([
+      resolveHistoricalAtlasPrice('Fuel', row.isoDate),
+      resolveHistoricalAtlasPrice('SOL', row.isoDate),
+    ]);
+    const fuelCostsAtlas = fuelPrice?.status === 'complete' ? Number(row.allocatedFuel) * Number(fuelPrice.priceATL) : null;
+    const txsCostsAtlas = solPrice?.status === 'complete' ? Number(row.allocatedTxCostSol) * Number(solPrice.priceATL) : null;
+    return {
+      ...row,
+      totalCostsAtlas: Number.isFinite(fuelCostsAtlas) && Number.isFinite(txsCostsAtlas)
+        ? fuelCostsAtlas + txsCostsAtlas : null,
+    };
+  }));
+}
+
+async function fetchCrossFactionCargoLedgerRows(settings) {
+  const key = [getInfluxBaseUrl(settings?.influxUrl), settings?.influxBucket, settings?.influxOrganization]
+    .map((value) => String(value || '').trim()).join('|');
+  return crossFactionCargoLedgerCache.get(key, () => loadCrossFactionCargoLedgerRows(settings));
 }
 
 async function fetchCanonicalRawCargoCosts(settings) {
@@ -7846,6 +7880,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   let rentalHistoryError = '';
   let cargoAllocationLedgerRows = [];
   let cargoAllocationLedgerError = '';
+  let crossFactionCargoLedgerRows = [];
+  let crossFactionCargoLedgerError = '';
   // Each category already fans out into several Flux queries. Starting all
   // five categories at once overloads the Influx proxy (17+ concurrent
   // queries) and causes 504s, so use bounded category concurrency instead.
@@ -7859,6 +7895,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     () => fetchCargoVolumeEarningsRows(settings),
     () => fetchRentalHistoryIndex(settings, connection, sot),
     () => needsInventoryLedger ? cargoAllocationSource.load(settings) : Promise.resolve({ ok: true, rows: [] }),
+    () => needsInventoryLedger ? fetchCrossFactionCargoLedgerRows(settings) : Promise.resolve([]),
   ];
   const earningsCategoryNames = ['Scanning', 'Mining', 'Cargo', 'Crafting', 'Upgrading'];
   if (diagnosticContext) diagnosticContext.stage = 'category_collection';
@@ -7880,7 +7917,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       }
     }
   }));
-  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult, rentalHistoryResult, cargoAllocationLedgerResult] = earningsRowResults;
+  const [scanningResult, miningResult, cargoResult, craftingResult, upgradingResult, rawCargoCostResult, cargoVolumeResult, rentalHistoryResult, cargoAllocationLedgerResult, crossFactionCargoLedgerResult] = earningsRowResults;
   if (diagnosticContext) diagnosticContext.stage = 'projection';
   if (scanningResult.status === 'fulfilled') scanningRows = scanningResult.value;
   else scanningError = String(scanningResult.reason?.message || scanningResult.reason || 'scan_rows_unavailable');
@@ -7911,6 +7948,11 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     cargoAllocationLedgerError = cargoAllocationLedgerResult.value.refreshError || '';
   } else {
     cargoAllocationLedgerError = String(cargoAllocationLedgerResult.reason?.message || cargoAllocationLedgerResult.reason || cargoAllocationLedgerResult.value?.error || 'cargo_allocation_ledger_unavailable').slice(0, 240);
+  }
+  if (crossFactionCargoLedgerResult.status === 'fulfilled') {
+    crossFactionCargoLedgerRows = crossFactionCargoLedgerResult.value || [];
+  } else {
+    crossFactionCargoLedgerError = String(crossFactionCargoLedgerResult.reason?.message || crossFactionCargoLedgerResult.reason || 'cross_faction_cargo_ledger_unavailable').slice(0, 240);
   }
 
   const rentalForRow = (fleet, fleetLabel, isoDate, authoritativeFleetAccount = '') => resolveHistoricalRental(rentalHistoryIndex, {
@@ -8315,16 +8357,37 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     ? await fetchMarketplaceEventsFromInflux(settings)
     : { rows: [], error: '' };
   const marketplaceAssetFlowEvents = needsInventoryLedger ? await fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []) : [];
+  const crossFactionCargoCandidates = crossFactionCargoLedgerRows.filter((row) => {
+    if (!String(row?.faction || '').trim()) return false;
+    const sourceFaction = normalizeFaction(row?.faction);
+    return sourceFaction !== ledgerFaction
+      && isStarbaseIncluded(row?.destination, ledgerFactionStarbases, ledgerFaction);
+  });
+  const crossFactionCargoFlows = crossFactionCargoCandidates.flatMap((row) => {
+    const quantity = Number(row?.amount);
+    const cargoCost = Number(row?.totalCostsAtlas);
+    if (!(quantity > 0) || row?.totalCostsAtlas == null || !Number.isFinite(cargoCost) || cargoCost < 0) return [];
+    return [{
+      id: `cargo:${String(row.cycleId || '')}:${String(row.allocationIndex ?? '')}`,
+      flow: 'cargo-transfer', faction: normalizeFaction(row.faction), timestamp: row.timestamp,
+      origin: row.origin, destination: row.destination, starbase: row.origin,
+      asset: row.asset, quantity, cargoCost,
+    }];
+  });
+  if (crossFactionCargoCandidates.length !== crossFactionCargoFlows.length && !crossFactionCargoLedgerError) {
+    crossFactionCargoLedgerError = 'cross_faction_cargo_cost_unavailable';
+  }
   let inventoryBasisObservationError = '';
   const inventoryBasisObservations = needsInventoryLedger ? await readInventoryBasisSnapshots({
-    bucket: settings.influxBucket, scopes: inventoryBasisScopesFromAssetFlows(marketplaceAssetFlowEvents),
+    bucket: settings.influxBucket,
+    scopes: inventoryBasisScopesFromAssetFlows([...marketplaceAssetFlowEvents, ...crossFactionCargoFlows]),
     query: (flux) => queryInfluxFlux(settings, flux).then(parseInfluxCsv),
   }).catch((error) => {
     inventoryBasisObservationError = String(error?.message || error || 'inventory_basis_observation_read_failed');
     return [];
   }) : [];
   const factionCustodyLedger = buildFactionCustodyLedgerEvents({
-    flows: marketplaceAssetFlowEvents,
+    flows: [...marketplaceAssetFlowEvents, ...crossFactionCargoFlows],
     observations: inventoryBasisObservations,
     faction: ledgerFaction,
   });
@@ -8364,7 +8427,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       openingInventoryError = String(error?.message || error || 'opening_inventory_unavailable');
     }
   }
-  const inventoryCostLedgerResult = needsInventoryLedger ? buildCostLedgerResult({
+  const inventoryCostLedgerInput = {
     initialLedger: checkpoint.status === 'loaded' ? checkpoint.ledger : null,
     seenEventFingerprints: checkpoint.seenEventFingerprints,
     eventResultByFingerprint: checkpoint.eventResultByFingerprint,
@@ -8381,12 +8444,44 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     localMarketTrades: inventoryLedgerMarketTrades,
     assetFlowEvents: [...factionCustodyLedger.events, ...inventoryMarketplaceDepositEvents],
     inventoryBasisFaction: ledgerFaction,
-  }) : { events: [], appliedEventResults: [], ledger: { snapshot: () => [] }, rejectedEvents: [], seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {}, inventoryBasisSnapshots: [] };
-  const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
-  const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
-  const inventoryReconciliationEvents = needsInventoryLedger
+  };
+  const emptyInventoryCostLedgerResult = { events: [], appliedEventResults: [], ledger: { snapshot: () => [] }, rejectedEvents: [], seenEventFingerprints: [], eventResultByFingerprint: {}, eventFingerprintCounts: {}, eventResultsByFingerprint: {}, inventoryBasisSnapshots: [] };
+  const buildInventoryCostLedger = (craftingInput) => needsInventoryLedger
+    ? buildCostLedgerResult({ ...inventoryCostLedgerInput, craftingRows: craftingInput })
+    : emptyInventoryCostLedgerResult;
+  let inventoryCostLedgerResult = buildInventoryCostLedger(ledgerCraftingRows);
+  let inventoryReconciliationEvents = needsInventoryLedger
     ? reconcileInventoryLedger({ ledger: inventoryCostLedgerResult.ledger, inventoryRows: currentInventoryRows })
     : [];
+
+  // Strict chronological consumption remains authoritative. When it cannot
+  // price an ingredient, replay once with the current same-starbase weighted
+  // Inventory Ledger basis. Feeding the fallback into the craft event makes
+  // its output lot carry that basis through later cargo and upgrading events.
+  if (needsInventoryLedger && ledgerCraftingRows.length) {
+    const provisionalLedgerRows = inventoryCostLedgerResult.ledger.snapshot();
+    const provisionalValuationRows = buildLedgerBreakevenRows({
+      ledgerRows: provisionalLedgerRows, inventoryRows: currentInventoryRows, prices,
+    });
+    const provisionalProjectedRows = projectInventoryCostLedgerRows({
+      ledgerRows: provisionalLedgerRows,
+      valuationRows: provisionalValuationRows,
+      poolBasisRows: inventoryDepositPoolBasisRows,
+    });
+    const resolvedCraftingRows = attachCurrentInventoryCraftingBasis({
+      craftingRows: ledgerCraftingRows,
+      inventoryRows: provisionalProjectedRows,
+    });
+    if (resolvedCraftingRows.some((row) => row.ingredientBasis?.length)) {
+      inventoryCostLedgerResult = buildInventoryCostLedger(resolvedCraftingRows);
+      inventoryReconciliationEvents = reconcileInventoryLedger({
+        ledger: inventoryCostLedgerResult.ledger,
+        inventoryRows: currentInventoryRows,
+      });
+    }
+  }
+  const inventoryCostLedgerEvents = inventoryCostLedgerResult.events;
+  const inventoryCostLedgerAppliedEventResults = inventoryCostLedgerResult.appliedEventResults;
   for (const [index, event] of inventoryReconciliationEvents.entries()) {
     const row = inventoryCostLedgerResult.ledger.get(event.location, event.asset);
     const snapshot = createInventoryBasisSnapshot({
@@ -8872,7 +8967,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     craftingRows: crafting,
     upgradingRows: upgrading,
     breakevenRows,
-    breakevenError: [breakevenError, inventoryMarketplaceEvents.error, inventoryBasisObservationError, inventoryDepositBaselineError].filter(Boolean).join(' · '),
+    breakevenError: [breakevenError, inventoryMarketplaceEvents.error, inventoryBasisObservationError, inventoryDepositBaselineError, crossFactionCargoLedgerError].filter(Boolean).join(' · '),
     breakevenBasisStateSource,
     breakevenBasisStateWrittenCount,
     breakevenBasisStateError,
@@ -8896,6 +8991,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     inventoryBasisPublishedCount,
     inventoryBasisPublicationError,
     inventoryBasisObservationError,
+    crossFactionCargoLedgerError,
     inventoryMarketplaceEventError: inventoryMarketplaceEvents.error,
   };
 }

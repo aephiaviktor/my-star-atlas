@@ -428,3 +428,15 @@ test('GM basis follows the buying wallet through handler custody into CSS', () =
   assert.ok(Math.abs(css.cargoCost - 0.03) < 1e-12);
   assert.equal(result.rejectedEvents.length, 0);
 });
+
+test('craft fallback valuation does not change the underlying event identity', () => {
+  const event = {
+    type: 'craft', timestamp: '2026-09-10T10:00:00Z', location: 'MRZ-20',
+    outputAsset: 'Electronics', outputQuantity: 100,
+    ingredients: [{ asset: 'Copper', quantity: 200 }], craftingCost: 1,
+  };
+  assert.equal(eventFingerprint(event), eventFingerprint({
+    ...event,
+    ingredientBasis: [{ asset: 'Copper', unitCosts: { mining: 0.2 }, cargoCostPerUnit: 0.01 }],
+  }));
+});

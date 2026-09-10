@@ -15,7 +15,10 @@ function stableJson(value) {
 }
 
 function eventFingerprint(event) {
-  return crypto.createHash('sha256').update(stableJson(event)).digest('hex');
+  const identity = event?.type === 'craft' && event.ingredientBasis
+    ? Object.fromEntries(Object.entries(event).filter(([key]) => key !== 'ingredientBasis'))
+    : event;
+  return crypto.createHash('sha256').update(stableJson(identity)).digest('hex');
 }
 
 function eventTimestamp(isoDate) {
@@ -172,7 +175,9 @@ function buildCraftingEvents(rows) {
     if (!timestamp || !location || !outputAsset || !Number.isFinite(outputQuantity) || outputQuantity <= 0
       || !ingredients.length || ingredients.some((ingredient) => !ingredient.asset || !Number.isFinite(ingredient.quantity) || ingredient.quantity <= 0)
       || row.feeCostsAtlas == null || row.txsCostsAtlas == null || !Number.isFinite(fee) || fee < 0 || !Number.isFinite(txs) || txs < 0) continue;
-    events.push({ type: 'craft', timestamp, location, outputAsset, outputQuantity, ingredients, craftingCost: fee + txs });
+    const ingredientBasis = Array.isArray(row.ingredientBasis) ? row.ingredientBasis : [];
+    events.push({ type: 'craft', timestamp, location, outputAsset, outputQuantity, ingredients, craftingCost: fee + txs,
+      ...(ingredientBasis.length ? { ingredientBasis } : {}) });
   }
   return events;
 }

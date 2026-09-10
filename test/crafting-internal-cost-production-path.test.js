@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { buildCostLedgerResult } = require('../electron/production-ledger-events');
 const { InventoryCostLedger } = require('../electron/inventory-cost-ledger');
-const { buildCraftingBasisByDay, buildCurrentInventoryCraftingBasisByDay, enrichCraftingEarningsRows } = require('../electron/crafting-cost-basis');
+const { projectInventoryCostLedgerRows } = require('../electron/inventory-cost-ledger-view');
+const { attachCurrentInventoryCraftingBasis, buildCraftingBasisByDay, buildCurrentInventoryCraftingBasisByDay, enrichCraftingEarningsRows } = require('../electron/crafting-cost-basis');
 
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
 const renderer = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
@@ -93,6 +94,54 @@ test('current inventory basis remains unavailable across starbases or with uncos
   }).get('2026-08-08\nMRZ-20\nFramework').uncosted, true);
 });
 
+test('MRZ-20 Electronics events receive source-resolved current Inventory Ledger fallback basis', () => {
+  const [row] = attachCurrentInventoryCraftingBasis({
+    craftingRows: [craftRow({ starbase: 'MRZ-20', output: 'Electronics', ingredients: [{ input: 'Copper', amount: 200 }] })],
+    inventoryRows: [{
+      location: 'MRZ-20', asset: 'Copper', quantity: 1000, totalCostPerUnit: 0.36,
+      costs: { scanning: 0, mining: 200, crafting: 100, lm: 0, gm: 50 }, cargoCost: 10,
+    }],
+  });
+  assert.deepEqual(row.ingredientBasis, [{
+    asset: 'Copper',
+    unitCosts: { scanning: 0, mining: 0.2, crafting: 0.1, lm: 0, gm: 0.05 },
+    cargoCostPerUnit: 0.01,
+  }]);
+});
+
+test('MRZ-20 fallback basis enters Electronics output and survives delivery to ONI-PHANTOM', () => {
+  const craftingRows = [{
+    timestamp: '2026-09-10T10:00:00Z', isoDate: '2026-09-10', starbase: 'MRZ-20',
+    output: 'Electronics', crafted: 100, ingredients: [{ input: 'Copper', amount: 200 }],
+    feeCostsAtlas: 3, txsCostsAtlas: 1,
+  }];
+  const input = {
+    openingInventoryRows: [{ timestamp: '2026-09-09T00:00:00Z', starbase: 'MRZ-20', asset: 'Copper', quantity: 300 }],
+    cargoRows: [{ timestamp: '2026-09-10T11:00:00Z', origin: 'MRZ-20', destination: 'ONI-PHANTOM', asset: 'Electronics', amount: 100, totalCostsAtlas: 2 }],
+  };
+  const provisional = buildCostLedgerResult({ ...input, craftingRows });
+  const projected = projectInventoryCostLedgerRows({
+    ledgerRows: provisional.ledger.snapshot(),
+    valuationRows: [
+      { starbase: 'MRZ-20', asset: 'Copper', inventory: 100 },
+      { starbase: 'ONI-PHANTOM', asset: 'Electronics', inventory: 100 },
+    ],
+    poolBasisRows: [{
+      location: 'MRZ-20', asset: 'Copper', unitCosts: { scanning: 0, mining: 0.2, crafting: 0.1, lm: 0, gm: 0.05 },
+      cargoCostPerUnit: 0.01, timestamp: '2026-09-09T12:00:00Z',
+    }],
+  });
+  const resolved = attachCurrentInventoryCraftingBasis({ craftingRows, inventoryRows: projected });
+  const final = buildCostLedgerResult({ ...input, craftingRows: resolved });
+  const electronics = final.ledger.get('ONI-PHANTOM', 'Electronics');
+  assert.equal(electronics.quantity, 100);
+  assert.equal(electronics.uncostedQuantity, 0);
+  assert.equal(electronics.costs.mining, 40);
+  assert.equal(electronics.costs.crafting, 24);
+  assert.equal(electronics.costs.gm, 10);
+  assert.equal(electronics.cargoCost, 4);
+});
+
 test('crafting price resolvers receive the historical row date for assets and SOL', () => {
   const seen = [];
   const [row] = enrichCraftingEarningsRows({
@@ -144,4 +193,11 @@ test('automatic prefetch requests ledger-backed Crafting snapshot through IPC an
   assert.match(main, /needsInventoryLedger = \['breakeven', 'crafting', 'upgrading'\]\.includes\(snapshotScope\)/);
   assert.match(main, /buildCraftingBasisByDay\(inventoryCostLedgerAppliedEventResults\)/);
   assert.match(renderer, /columnId === 'profitMargin'\) return createTextCell\(entry\.profitMarginPercent == null \? '--'/);
+});
+
+test('production performs a fallback-aware second ledger replay so crafting basis reaches output inventory', () => {
+  assert.match(main, /const provisionalProjectedRows = projectInventoryCostLedgerRows\(\{/);
+  assert.match(main, /const resolvedCraftingRows = attachCurrentInventoryCraftingBasis\(\{/);
+  assert.match(main, /inventoryCostLedgerResult = buildInventoryCostLedger\(resolvedCraftingRows\)/);
+  assert.match(main, /Feeding the fallback into the craft event makes[\s\S]*output lot carry that basis through later cargo and upgrading events/);
 });

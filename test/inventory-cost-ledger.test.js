@@ -62,6 +62,40 @@ test('crafting carries upstream source and cargo costs and adds only direct conv
   close(framework.totalCostPerUnit, 0.94);
 });
 
+test('crafting uses an explicit same-starbase inventory basis when chronological ingredients are uncosted', () => {
+  const ledger = new InventoryCostLedger();
+  ledger.acquire({ location: 'MRZ-20', asset: 'Copper', quantity: 200 });
+
+  ledger.craft({
+    location: 'MRZ-20', outputAsset: 'Electronics', outputQuantity: 100,
+    ingredients: [{ asset: 'Copper', quantity: 200 }], craftingCost: 3,
+    ingredientBasis: [{
+      asset: 'Copper',
+      unitCosts: { scanning: 0, mining: 0.2, crafting: 0.1, lm: 0, gm: 0.05 },
+      cargoCostPerUnit: 0.01,
+    }],
+  });
+
+  const electronics = ledger.get('MRZ-20', 'Electronics');
+  assert.equal(electronics.quantity, 100);
+  assert.equal(electronics.uncostedQuantity, 0);
+  close(electronics.costs.mining, 40);
+  close(electronics.costs.crafting, 23);
+  close(electronics.costs.gm, 10);
+  close(electronics.cargoCost, 2);
+});
+
+test('chronological ingredient basis takes precedence over a fallback basis', () => {
+  const ledger = new InventoryCostLedger();
+  ledger.acquire({ location: 'MRZ-20', asset: 'Copper', quantity: 200, source: 'mining', totalCost: 20 });
+  ledger.craft({
+    location: 'MRZ-20', outputAsset: 'Electronics', outputQuantity: 100,
+    ingredients: [{ asset: 'Copper', quantity: 200 }], craftingCost: 0,
+    ingredientBasis: [{ asset: 'Copper', unitCosts: { scanning: 0, mining: 99, crafting: 0, lm: 0, gm: 0 }, cargoCostPerUnit: 0 }],
+  });
+  close(ledger.get('MRZ-20', 'Electronics').costs.mining, 20);
+});
+
 test('uncosted opening quantity is consumed before the costed weighted-average pool', () => {
   const ledger = new InventoryCostLedger();
   ledger.acquire({ location: 'ONI-1', asset: 'Iron', quantity: 80 });

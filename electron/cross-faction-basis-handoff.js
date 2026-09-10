@@ -40,24 +40,27 @@ function buildFactionCustodyLedgerEvents({ flows = [], observations = [], factio
   const events = [];
   const rejected = [];
   for (const flow of flows || []) {
-    const sourceFaction = normalizeFaction(flow?.faction || (flow?.flow === 'css-withdraw' ? inferStarbaseFaction(flow.origin) : ''));
-    if (flow?.flow !== 'css-withdraw' || !sourceFaction || sourceFaction === selectedFaction) {
+    const handoffFlow = flow?.flow === 'css-withdraw' || flow?.flow === 'cargo-transfer';
+    const sourceFaction = normalizeFaction(flow?.faction || (handoffFlow ? inferStarbaseFaction(flow.origin) : ''));
+    if (!handoffFlow || !sourceFaction || sourceFaction === selectedFaction) {
       events.push(transferEvent(flow));
       continue;
     }
     const observation = latestSourceObservation(observations, flow, maxLookbackMs);
     const snapshotQuantity = Number(observation?.quantity);
+    const snapshotKnownQuantity = Number(observation?.knownQuantity ?? (snapshotQuantity - Number(observation?.uncostedQuantity || 0)));
     const quantity = Number(flow.quantity);
-    if (!observation || !(snapshotQuantity > 0) || !(quantity > 0) || quantity > snapshotQuantity + 1e-9) {
-      rejected.push({ flow, reason: observation ? 'insufficient_source_snapshot_quantity' : 'source_basis_snapshot_unavailable' });
+    if (!observation || !(snapshotQuantity > 0) || !(snapshotKnownQuantity > 0) || !(quantity > 0)) {
+      rejected.push({ flow, reason: observation ? 'source_basis_snapshot_unpriced' : 'source_basis_snapshot_unavailable' });
       continue;
     }
-    const ratio = quantity / snapshotQuantity;
+    const knownCostRatio = quantity / snapshotKnownQuantity;
+    const uncostedRatio = Math.min(1, Number(observation.uncostedQuantity || 0) / snapshotQuantity);
     events.push({
       type: 'acquire-lot', timestamp: flow.timestamp, location: flow.destination, asset: flow.asset, quantity,
-      uncostedQuantity: Number(observation.uncostedQuantity || 0) * ratio,
-      costs: Object.fromEntries(SOURCE_COST_KEYS.map((key) => [key, Number(observation.sourceCosts[key]) * ratio])),
-      cargoCost: Number(observation.cargoCost || 0) * ratio + Number(flow.txFeeAtlas || flow.cargoCost || 0),
+      uncostedQuantity: quantity * uncostedRatio,
+      costs: Object.fromEntries(SOURCE_COST_KEYS.map((key) => [key, Number(observation.sourceCosts[key]) * knownCostRatio])),
+      cargoCost: Number(observation.cargoCost || 0) * knownCostRatio + Number(flow.txFeeAtlas || flow.cargoCost || 0),
       flowId: flow.id, handoffFromFaction: sourceFaction, handoffFromStarbase: flow.origin,
     });
   }

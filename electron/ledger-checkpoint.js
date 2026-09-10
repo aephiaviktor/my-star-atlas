@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 17 rebuilds acquisition-route cargo attribution.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 17;
+// Version 18 rebuilds crafting fallback and cross-faction cargo basis.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 18;
 
 function emptyResult(status, error = '') {
   return {

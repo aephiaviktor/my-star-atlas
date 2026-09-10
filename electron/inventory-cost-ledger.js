@@ -212,9 +212,20 @@ class InventoryCostLedger {
     return cloneLot(lot);
   }
 
-  craft({ location, outputAsset, outputQuantity, ingredients, craftingCost = 0 }) {
+  craft({ location, outputAsset, outputQuantity, ingredients, craftingCost = 0, ingredientBasis = [] }) {
     const outputUnits = requirePositive(outputQuantity, 'outputQuantity');
     if (!Array.isArray(ingredients) || ingredients.length === 0) throw new Error('ingredients are required');
+    if (!Array.isArray(ingredientBasis)) throw new Error('ingredientBasis must be an array');
+    const fallbackBasisByAsset = new Map();
+    for (const basis of ingredientBasis) {
+      const asset = requireText(basis?.asset, 'ingredient basis asset');
+      const unitCosts = emptyCosts();
+      for (const source of COST_SOURCES) unitCosts[source] = requireNonNegative(basis?.unitCosts?.[source] ?? 0, `${source} unit cost`);
+      fallbackBasisByAsset.set(asset, {
+        unitCosts,
+        cargoCostPerUnit: requireNonNegative(basis?.cargoCostPerUnit ?? 0, 'cargoCostPerUnit'),
+      });
+    }
 
     const requiredByAsset = new Map();
     for (const ingredient of ingredients) {
@@ -231,16 +242,22 @@ class InventoryCostLedger {
     let hasUncostedIngredient = false;
     for (const ingredient of ingredients) {
       const ingredientPool = this.get(location, ingredient.asset);
+      const fallbackBasis = fallbackBasisByAsset.get(String(ingredient.asset).trim());
       const hasPoolRate = ingredientPool.quantity - ingredientPool.uncostedQuantity > EPSILON;
+      const hasResolvedRate = hasPoolRate || Boolean(fallbackBasis);
       const consumed = this.consume({ location, asset: ingredient.asset, quantity: ingredient.quantity });
-      if (!hasPoolRate) hasUncostedIngredient = true;
+      if (!hasResolvedRate) hasUncostedIngredient = true;
       outputLot.cargoCost += hasPoolRate
         ? ingredientPool.cargoCostPerUnit * ingredient.quantity
-        : consumed.cargoCost;
+        : fallbackBasis
+          ? fallbackBasis.cargoCostPerUnit * ingredient.quantity
+          : consumed.cargoCost;
       for (const source of COST_SOURCES) {
         outputLot.costs[source] += hasPoolRate
           ? ingredientPool.costPerUnit[source] * ingredient.quantity
-          : consumed.costs[source];
+          : fallbackBasis
+            ? fallbackBasis.unitCosts[source] * ingredient.quantity
+            : consumed.costs[source];
       }
     }
     outputLot.uncostedQuantity = hasUncostedIngredient ? outputUnits : 0;

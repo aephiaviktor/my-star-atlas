@@ -66,6 +66,39 @@ function buildCurrentInventoryCraftingBasisByDay({ craftingRows = [], inventoryR
   return basisByDay;
 }
 
+function attachCurrentInventoryCraftingBasis({ craftingRows = [], inventoryRows = [] } = {}) {
+  const inventoryByPool = new Map((inventoryRows || []).flatMap((row) => {
+    const location = String(row?.location || row?.starbase || '').trim();
+    const asset = String(row?.asset || '').trim();
+    const quantity = finiteOrNull(row?.quantity ?? row?.inventory);
+    const totalCostPerUnit = finiteOrNull(row?.totalCostPerUnit ?? row?.landedCostPerUnit);
+    if (!location || !asset || !(quantity > 0) || totalCostPerUnit == null || totalCostPerUnit < 0) return [];
+    const unitCosts = Object.fromEntries(['scanning', 'mining', 'crafting', 'lm', 'gm'].map((source) => {
+      const total = finiteOrNull(row?.costs?.[source]);
+      const direct = finiteOrNull(row?.[`${source}CostPerUnit`]);
+      return [source, direct != null ? Math.max(0, direct) : total != null ? Math.max(0, total / quantity) : 0];
+    }));
+    const cargoTotal = finiteOrNull(row?.cargoCost);
+    const cargoDirect = finiteOrNull(row?.cargoCostPerUnit);
+    const cargoCostPerUnit = cargoDirect != null ? Math.max(0, cargoDirect)
+      : cargoTotal != null ? Math.max(0, cargoTotal / quantity) : 0;
+    return [[`${location}\n${asset}`, { asset, unitCosts, cargoCostPerUnit }]];
+  }));
+  return (craftingRows || []).map((row) => {
+    const location = String(row?.starbase || '').trim();
+    const ingredients = [];
+    const seen = new Set();
+    for (const ingredient of row?.ingredients || []) {
+      const asset = String(ingredient?.input || ingredient?.asset || '').trim();
+      if (!asset || seen.has(asset)) continue;
+      const basis = inventoryByPool.get(`${location}\n${asset}`);
+      if (basis) ingredients.push(basis);
+      seen.add(asset);
+    }
+    return ingredients.length ? { ...row, ingredientBasis: ingredients } : { ...row };
+  });
+}
+
 function enrichCraftingEarningsRows({ craftingRows = [], craftingBasisByDay = new Map(), resolvePrice = () => null, resolveSolPrice = null, atlasPerSol = null } = {}) {
   return craftingRows.map((craftingRow) => {
     const outputPriceAtl = finiteOrNull(resolvePrice(craftingRow.output, craftingRow.isoDate));
@@ -103,4 +136,4 @@ function enrichCraftingEarningsRows({ craftingRows = [], craftingBasisByDay = ne
   });
 }
 
-module.exports = { buildCraftingBasisByDay, buildCurrentInventoryCraftingBasisByDay, enrichCraftingEarningsRows };
+module.exports = { attachCurrentInventoryCraftingBasis, buildCraftingBasisByDay, buildCurrentInventoryCraftingBasisByDay, enrichCraftingEarningsRows };
