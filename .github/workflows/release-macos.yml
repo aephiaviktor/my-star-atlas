@@ -1,0 +1,150 @@
+name: macOS release build
+
+# Adds a macOS artifact to the SAME GitHub Release as the existing Windows
+# release, without touching how the Windows release itself is produced.
+#
+# This workflow does NOT build or publish anything for Windows. It only
+# builds the macOS .dmg from the exact tagged commit and attaches it to the
+# release for that tag.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to build and attach the macOS artifact to (e.g. v0.6.305)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    # Must run on a real macOS runner: the .dmg, code-signing tooling
+    # (lipo/codesign/spctl) and native module rebuilds are all macOS-only.
+    runs-on: macos-14
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            echo "No tag resolved from event." >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Record commit SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fail on version drift between the git tag and package.json
+        run: node scripts/check-version-matches-tag.js "${{ steps.tag.outputs.tag }}"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run test suite (Windows regression + updater isolation coverage included)
+        run: node --test
+
+      - name: Build universal macOS DMG (arm64 + x64)
+        run: npm run package:mac
+
+      - name: Locate build output
+        id: artifact
+        run: |
+          DMG_PATH="$(ls dist/My-Star-Atlas-v*-macOS-universal.dmg | head -n1)"
+          if [ -z "$DMG_PATH" ]; then
+            echo "No macOS DMG produced." >&2
+            exit 1
+          fi
+          echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
+          echo "dmg_name=$(basename "$DMG_PATH")" >> "$GITHUB_OUTPUT"
+
+      - name: Mount DMG and locate .app
+        id: mount
+        run: |
+          MOUNT_DIR="$(mktemp -d)"
+          hdiutil attach "${{ steps.artifact.outputs.dmg_path }}" -nobrowse -mountpoint "$MOUNT_DIR"
+          APP_PATH="$MOUNT_DIR/My Star Atlas.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "My Star Atlas.app not found inside the DMG." >&2
+            exit 1
+          fi
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "mount_dir=$MOUNT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Prove the executable actually contains both arm64 and x86_64
+        run: scripts/verify-mac-universal.sh "${{ steps.mount.outputs.app_path }}"
+
+      - name: Report signing/notarization status (do not fail the build if unsigned)
+        run: |
+          echo "codesign:"
+          codesign -dv "${{ steps.mount.outputs.app_path }}" 2>&1 || true
+          echo "Gatekeeper assessment (expected to reject an unsigned/unnotarized build):"
+          spctl -a -t exec -vv "${{ steps.mount.outputs.app_path }}" 2>&1 || true
+
+      - name: Smoke test — packaged executable initializes without crashing
+        run: |
+          BIN="${{ steps.mount.outputs.app_path }}/Contents/MacOS/My Star Atlas"
+          "$BIN" --disable-gpu --disable-software-rasterizer >/tmp/msa-smoke.log 2>&1 &
+          PID=$!
+          sleep 6
+          if kill -0 "$PID" 2>/dev/null; then
+            echo "OK: process still running after 6s (did not crash on startup)."
+            kill "$PID" || true
+          else
+            echo "FAIL: process exited within 6s of launch." >&2
+            cat /tmp/msa-smoke.log >&2
+            exit 1
+          fi
+          echo "--- captured output ---"
+          cat /tmp/msa-smoke.log
+          echo "NOTE: this proves process-level startup only (no crash on missing"
+          echo "module/resource/path or architecture mismatch). It does not verify"
+          echo "on-screen rendering; that still needs a manual/GUI check."
+
+      - name: Unmount DMG
+        if: always()
+        run: hdiutil detach "${{ steps.mount.outputs.mount_dir }}" || true
+
+      - name: Compute artifact evidence
+        id: evidence
+        run: |
+          SHA256="$(shasum -a 256 "${{ steps.artifact.outputs.dmg_path }}" | awk '{print $1}')"
+          SIZE="$(stat -f%z "${{ steps.artifact.outputs.dmg_path }}")"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          {
+            echo "### macOS release evidence — ${{ steps.tag.outputs.tag }}"
+            echo "- Artifact: \`${{ steps.artifact.outputs.dmg_name }}\`"
+            echo "- Size: ${SIZE} bytes"
+            echo "- SHA-256: \`${SHA256}\`"
+            echo "- Commit: \`${{ steps.sha.outputs.sha }}\`"
+            echo "- Architectures: arm64 + x86_64 (verified via lipo, universal build)"
+            echo "- Signed: no (no Developer ID Application certificate configured)"
+            echo "- Notarized: no"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach macOS artifact to the existing release (adds to it, never replaces Windows assets)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # No --clobber: fails rather than silently overwriting if an asset
+          # of this name is already attached, and never touches the
+          # existing Windows-related assets on the same release.
+          gh release upload "${{ steps.tag.outputs.tag }}" \
+            "${{ steps.artifact.outputs.dmg_path }}" \
+            --repo "${{ github.repository }}"
