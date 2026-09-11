@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker, safeStorage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs/promises');
 const fsSync = require('fs');
@@ -46,7 +46,12 @@ const {
 } = require('./telemetry-context');
 const { createTelemetryFetch, wrapRpcConnection, rawAttemptHooks } = require('./telemetry-rpc-fetch');
 const { dependencyInstallRequired } = require('./update-dependencies');
+<<<<<<< HEAD
 const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, buildCargoAllocationRecordsFromPivotRows, cargoAllocationUtcBatches, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
+=======
+const { isWindowsUpdatePlatform, performMacUpdateAction } = require('./mac-update');
+const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargoAllocationRows, enrichCargoAllocationRows, buildCargoAllocationRecords, mergeCargoRowsWithCompletedAllocations } = require('./influx-data');
+>>>>>>> 201b45f (Add macOS packaging via electron-builder (universal dmg))
 const { buildCargoAllocationPivotFlux, createCargoAllocationSource } = require('./cargo-allocation-source');
 const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
 const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
@@ -9077,7 +9082,11 @@ handleTrustedIpc('app:get-profile-name', () => profileName);
 handleTrustedIpc('app:get-version', () => packageJson.version);
 handleTrustedIpc('telemetry:rpc-usage-day', (_event, utcDate) => getRpcUsageDay(utcDate));
 handleTrustedIpc('updates:check', () => checkForUpdates());
-handleTrustedIpc('updates:download-and-restart', () => downloadUpdateAndRestart());
+handleTrustedIpc('updates:download-and-restart', () => (
+  isWindowsUpdatePlatform(process.platform)
+    ? downloadUpdateAndRestart()
+    : performMacUpdateAction({ openExternal: shell.openExternal })
+));
 handleTrustedIpc('settings:get', async () => redactSettings(await readSettings()));
 handleTrustedIpc('settings:save', async (_event, payload) => redactSettings(await writeSettings(payload)));
 handleTrustedIpc('rpc-limiter:get-status', () => getRpcLimiterStatus());

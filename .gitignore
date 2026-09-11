@@ -1,7 +1,8 @@
 node_modules/
 *.log
 dist/
-build/
+build/*
+!build/icon.icns
 .DS_Store
 analysis/*.pid
 analysis/*.log

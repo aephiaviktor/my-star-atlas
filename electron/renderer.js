@@ -10641,7 +10641,16 @@ updateConfirmButton.addEventListener('click', async () => {
   updateCancelButton.disabled = true;
   setText(updateMessage, `Downloading My Star Atlas v${availableUpdate.latestVersion}, preparing the update, and restarting...`);
   try {
-    await api.downloadUpdateAndRestart();
+    const result = await api.downloadUpdateAndRestart();
+    if (result?.opened) {
+      // macOS has no in-app updater yet: the main process opened the
+      // GitHub Releases page instead of restarting. Tell the user what
+      // happened and leave the modal usable rather than stuck on
+      // "Downloading...".
+      setText(updateMessage, `Opened the GitHub Releases page. Download the latest macOS build (v${availableUpdate.latestVersion}) and reinstall to update.`);
+      updateConfirmButton.disabled = false;
+      updateCancelButton.disabled = false;
+    }
   } catch (error) {
     console.error(error);
     setText(updateMessage, `Update failed: ${error?.message || String(error)}`);
