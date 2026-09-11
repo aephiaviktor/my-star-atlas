@@ -1,6 +1,8 @@
 {
   "name": "my-star-atlas",
   "version": "0.6.306",
+  "description": "Local Electron app for Star Atlas fleet performance dashboards.",
+  "author": "Aephia",
   "private": true,
   "main": "electron/main.js",
   "type": "commonjs",
@@ -8,7 +10,10 @@
     "start": "electron .",
     "start:electron": "electron .",
     "dev": "electron .",
-    "typecheck": "node --check electron/main.js && node --check electron/preload.js && node --check electron/renderer.js"
+    "typecheck": "node --check electron/main.js && node --check electron/preload.js && node --check electron/renderer.js",
+    "package:mac": "electron-builder --mac --universal",
+    "package:mac:arm64": "electron-builder --mac --arm64",
+    "package:mac:x64": "electron-builder --mac --x64"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
@@ -19,5 +24,52 @@
     "electron": "^42.5.1",
     "proper-lockfile": "^4.1.2",
     "rpc_limiter": "git+https://github.com/aephiaviktor/rpc-limiter.git#main"
+  },
+  "devDependencies": {
+    "electron": "^42.1.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.aephia.mystaratlas",
+    "productName": "My Star Atlas",
+    "copyright": "Copyright (c) Aephia",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "package.json",
+      "electron/**/*",
+      "!electron/restart-status.ps1",
+      "!electron/assets/my-star-atlas.ico",
+      "!node_modules/electron/**",
+      "!node_modules/electron-builder/**",
+      "!node_modules/.bin/**",
+      "!**/{test,tests,__tests__}/**",
+      "!**/*.md",
+      "!**/*.map"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.utilities",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "x64ArchFiles": "**/*.node",
+      "extendInfo": {
+        "NSHumanReadableCopyright": "Copyright (c) Aephia"
+      }
+    },
+    "dmg": {
+      "artifactName": "My-Star-Atlas-v${version}-macOS-${arch}.${ext}"
+    }
   }
 }
