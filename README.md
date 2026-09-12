@@ -1,13 +1,12 @@
 # My Star Atlas
 
 ## AI Install prompt
-Local Electron app for Star Atlas fleet performance dashboards.
-Help me install My Star Atlas on my system.
+"Help me install My Star Atlas on my system.
 Please first read the installation instructions here:
 https://raw.githubusercontent.com/aephiaviktor/my-star-atlas/master/README-FIRST.txt
 Then guide me through the installation one step at a time.
 Do not change, delete, install, or reconfigure anything on my system without first explaining exactly what you want to do and obtaining my approval.
-If something does not work, ask me for the exact error message or a screenshot and diagnose that specific problem before suggesting further changes.
+If something does not work, ask me for the exact error message or a screenshot and diagnose that specific problem before suggesting further changes."
 
 ## Commands
 
