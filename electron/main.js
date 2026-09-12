@@ -7020,10 +7020,13 @@ ${scopeFilterFlux}
   |> group()
   |> keep(columns: ["fleet", "starbase", "rss", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "starbase", "rss"])`;
+  // txCount is stored as an integer while txCostSol is a float. Normalize
+  // both before grouping so Influx does not reject the mixed _value schema.
   const transactionEventsFlux = `from(bucket: "${bucket}")
   |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "mining")
   |> filter(fn: (r) => r._field == "txCostSol" or r._field == "txCount")
+  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet and exists r.starbase and exists r.rss)
   |> group()
