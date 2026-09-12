@@ -60,7 +60,9 @@ jobs:
         run: node --test
 
       - name: Build universal macOS DMG (arm64 + x64)
-        run: npm run package:mac
+        # The workflow uploads the verified artifact itself below. Prevent
+        # electron-builder from trying an earlier implicit tag publication.
+        run: npm run package:mac -- --publish never
 
       - name: Locate build output
         id: artifact
