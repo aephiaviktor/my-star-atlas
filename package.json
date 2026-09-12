@@ -1,6 +1,6 @@
 {
   "name": "my-star-atlas",
-  "version": "0.6.307",
+  "version": "0.6.308",
   "description": "Local Electron app for Star Atlas fleet performance dashboards.",
   "author": "Aephia",
   "private": true,
@@ -21,12 +21,11 @@
     "@staratlas/factory": "^0.7.1",
     "@staratlas/sage": "^1.9.0-alpha.16",
     "bs58": "^6.0.0",
-    "electron": "^42.5.1",
     "proper-lockfile": "^4.1.2",
     "rpc_limiter": "git+https://github.com/aephiaviktor/rpc-limiter.git#main"
   },
   "devDependencies": {
-    "electron": "^42.1.0",
+    "electron": "^42.5.1",
     "electron-builder": "^26.15.3"
   },
   "build": {

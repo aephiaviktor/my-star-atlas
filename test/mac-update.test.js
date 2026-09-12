@@ -3,6 +3,13 @@ const assert = require('node:assert/strict');
 
 const { isWindowsUpdatePlatform, performMacUpdateAction, DEFAULT_RELEASES_URL } = require('../electron/mac-update');
 
+test('Electron is a development-only dependency so electron-builder can package the app', () => {
+  const packageJson = require('../package.json');
+
+  assert.equal(packageJson.dependencies?.electron, undefined);
+  assert.match(packageJson.devDependencies?.electron || '', /^\^\d+\.\d+\.\d+$/);
+});
+
 test('only win32 is treated as the Windows PowerShell/Scheduled Task updater platform', () => {
   assert.equal(isWindowsUpdatePlatform('win32'), true);
   assert.equal(isWindowsUpdatePlatform('darwin'), false);
