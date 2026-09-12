@@ -44,12 +44,12 @@ test('all automatic earnings and navigation paths share the scan-free snapshot I
   assert.doesNotMatch(renderer, /getSignatures|signatureDaily|historicalSignature/);
 });
 
-test('missing mining transaction counts remain unavailable in production data', () => {
+test('mining transaction counts come from explicit telemetry with a legacy event fallback', () => {
   const mining = sourceBetween(main, 'async function fetchMiningEarningsRows', 'async function fetchCraftingEarningsRows');
-  assert.match(mining, /txsDaily: null/);
-  assert.doesNotMatch(mining, /txsDaily:\s*0/);
-  const snapshot = sourceBetween(main, 'async function fetchEarningsSnapshot', 'const activeCargoFleetKeys');
-  assert.doesNotMatch(snapshot, /txsDaily\s*=|txsDaily\s*:\s*(?:0|Number\()/);
+  assert.match(mining, /r\._field == "txCostSol" or r\._field == "txCount"/);
+  assert.match(mining, /aggregateMiningTransactionEvents/);
+  assert.match(mining, /txsDaily: 0/);
+  assert.doesNotMatch(mining, /getSignaturesForAddress|fetchFleetSignatureDailyCounts/);
 });
 
 test('renderer distinguishes unavailable from genuine zero while preserving valid counts', () => {

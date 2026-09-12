@@ -84,6 +84,7 @@ const { buildLedgerBreakevenRows } = require('./ledger-breakeven');
 const { projectInventoryCostLedgerRows } = require('./inventory-cost-ledger-view');
 const { upgradingPoolKey, resolveUpgradingCostsAtlas } = require('./upgrading-cost-basis');
 const { enrichRows: enrichResourceCostBasisRows } = require('./resource-cost-basis');
+const { aggregateMiningTransactionEvents } = require('./mining-transaction-events');
 const {
   formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
   diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux, buildHistoricalBreakevenBasisStateFlux,
@@ -7008,7 +7009,7 @@ async function fetchMiningEarningsRows(settings) {
   const totalsFlux = `from(bucket: "${bucket}")
   |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "mining")
-  |> filter(fn: (r) => r._field == "amount" or r._field == "burnedAmmo" or r._field == "burnedFood" or r._field == "burnedFuel" or r._field == "txCostSol")
+  |> filter(fn: (r) => r._field == "amount" or r._field == "burnedAmmo" or r._field == "burnedFood" or r._field == "burnedFuel")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
   |> filter(fn: (r) => exists r.rss)
@@ -7019,19 +7020,16 @@ ${scopeFilterFlux}
   |> group()
   |> keep(columns: ["fleet", "starbase", "rss", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet", "starbase", "rss"])`;
-  const txDailyFlux = `from(bucket: "${bucket}")
+  const transactionEventsFlux = `from(bucket: "${bucket}")
   |> range(start: -31d)
-  |> filter(fn: (r) => r._measurement == "mining" and r._field == "txCostSol")
+  |> filter(fn: (r) => r._measurement == "mining")
+  |> filter(fn: (r) => r._field == "txCostSol" or r._field == "txCount")
 ${scopeFilterFlux}
-  |> filter(fn: (r) => exists r.fleet)
-  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false, timeSrc: "_start")
-  |> group(columns: ["fleet", "cycleId", "_time"])
-  |> sum(column: "_value")
+  |> filter(fn: (r) => exists r.fleet and exists r.starbase and exists r.rss)
   |> group()
-  |> keep(columns: ["fleet", "cycleId", "_time", "_value"])
-  |> sort(columns: ["_time", "fleet"])`;
+  |> keep(columns: ["fleet", "starbase", "rss", "_field", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet", "starbase", "rss"])`;
   const rowsByKey = new Map();
-  const txDailyByDayFleet = new Map();
   const ensureRow = (isoDate, fleet, starbase, rawMaterial, date) => {
     const key = `${isoDate}\n${fleet}\n${starbase}\n${rawMaterial}`;
     if (!rowsByKey.has(key)) {
@@ -7046,30 +7044,16 @@ ${scopeFilterFlux}
         burnedFood: 0,
         burnedFuel: 0,
         txCostSol: 0,
-        txsDaily: null,
+        txsDaily: 0,
       });
     }
     return rowsByKey.get(key);
   };
 
-  const [totalsCsv, txDailyCsv] = await Promise.all([
+  const [totalsCsv, transactionEventsCsv] = await Promise.all([
     queryInfluxFlux(settings, totalsFlux),
-    queryInfluxFlux(settings, txDailyFlux),
+    queryInfluxFlux(settings, transactionEventsFlux),
   ]);
-
-  for (const row of parseInfluxCsv(txDailyCsv)) {
-    const fleet = String(row.fleet || '').trim();
-    const date = new Date(row._time);
-    const value = Number(row._value || 0);
-    if (!fleet || isCargoCycleId(fleet) || Number.isNaN(date.getTime()) || !Number.isFinite(value)) continue;
-    const isoDate = getUtcDateKey(date);
-    if (!includedDays.has(isoDate)) continue;
-    const fleetAccount = cargoFleetAccountFromCycleId(row.cycleId);
-    const key = `${isoDate}\n${fleetAccount || `label:${fleet}`}`;
-    const current = txDailyByDayFleet.get(key) || { txCostSol: 0 };
-    current.txCostSol += value;
-    txDailyByDayFleet.set(key, current);
-  }
 
   for (const row of parseInfluxCsv(totalsCsv)) {
     const fleet = String(row.fleet || '').trim();
@@ -7085,12 +7069,13 @@ ${scopeFilterFlux}
     if (row._field === 'burnedAmmo') entry.burnedAmmo += value;
     if (row._field === 'burnedFood') entry.burnedFood += value;
     if (row._field === 'burnedFuel') entry.burnedFuel += value;
-    if (row._field === 'txCostSol') entry.txCostSol += value;
   }
 
-  for (const row of rowsByKey.values()) {
-    const txDaily = txDailyByDayFleet.get(`${row.isoDate}\n${row.fleetAccount || `label:${row.fleet}`}`) || { txCostSol: 0 };
-    row.txCostSol = txDaily.txCostSol;
+  for (const transaction of aggregateMiningTransactionEvents(parseInfluxCsv(transactionEventsCsv), { includedDays })) {
+    const date = new Date(`${transaction.isoDate}T00:00:00.000Z`);
+    const entry = ensureRow(transaction.isoDate, transaction.fleet, transaction.starbase, transaction.rawMaterial, date);
+    entry.txCostSol += transaction.txCostSol;
+    entry.txsDaily += transaction.txsDaily;
   }
 
   return Array.from(rowsByKey.values())
