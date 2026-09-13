@@ -86,6 +86,7 @@ const { upgradingPoolKey, resolveUpgradingCostsAtlas } = require('./upgrading-co
 const { enrichRows: enrichResourceCostBasisRows } = require('./resource-cost-basis');
 const { aggregateMiningTransactionEvents } = require('./mining-transaction-events');
 const { aggregateScanningTransactionEvents } = require('./scanning-transaction-events');
+const { aggregateFleetTransactionEvents, applyFleetTransactionTotals, unambiguousFleetDayKeys } = require('./fleet-transaction-events');
 const {
   formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
   diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux, buildHistoricalBreakevenBasisStateFlux,
@@ -7980,7 +7981,15 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const cutoverSelection = rawExporter
     ? selectLegacyRawCutover({ legacyRows: compatibilityCargoRows, rawRecords: rawCargoCosts.records, ...rawExporter })
     : { cutover: null, legacyRows: cargoRows, rawRecords: [], trackingDisabled: false };
-  const valuedCanonicalRawCosts = await valueCanonicalRawCosts(cutoverSelection.rawRecords, {
+  const canonicalMiningTransactions = rawExporter
+    ? aggregateFleetTransactionEvents(cutoverSelection.rawRecords, { assignments: ['Mine'], ...rawExporter })
+    : [];
+  const canonicalScanningTransactions = rawExporter
+    ? aggregateFleetTransactionEvents(cutoverSelection.rawRecords, { assignments: ['Scan'], ...rawExporter })
+    : [];
+  const canonicalCargoAssignments = ['Transport', 'Supply Chain'];
+  const canonicalCargoRawRecords = cutoverSelection.rawRecords.filter((record) => canonicalCargoAssignments.includes(record.assignment));
+  const valuedCanonicalRawCosts = await valueCanonicalRawCosts(canonicalCargoRawRecords, {
     resolvePrice: async (asset, date) => asset === 'Fuel'
       ? requireCargoFuelPrice(await resolveHistoricalAtlasPrice(asset, date), date)
       : requireSameDateCargoPrice(await resolveHistoricalAtlasPrice(asset, date), date),
@@ -8008,6 +8017,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   let totalSduFound = 0;
   const rows = await Promise.all(scanningRows.map(async (scanRow) => {
     const fleet = fleetByLabel.get(normalizeFleetLabel(scanRow.fleet));
+    const historicalRental = rentalForRow(fleet, scanRow.fleet, scanRow.isoDate);
+    scanRow = applyFleetTransactionTotals(scanRow, fleet?.key || historicalRental?.fleetAccount, canonicalScanningTransactions);
     const activeKey = fleet?.key || normalizeFleetLabel(scanRow.fleet);
     activeFleetKeys.add(activeKey);
     totalSduFound += scanRow.sduFound;
@@ -8020,12 +8031,13 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     ]);
     const foodCostsAtlas = foodPrice.status === 'complete' ? scanRow.burnedFood * foodPrice.priceATL : null;
     const fuelCostsAtlas = fuelPrice.status === 'complete' ? scanRow.burnedFuel * fuelPrice.priceATL : null;
-    const txsCostsAtlas = solPrice.status === 'complete' ? scanRow.txCostSol * solPrice.priceATL : null;
-    const historicalRental = rentalForRow(fleet, scanRow.fleet, scanRow.isoDate);
+    const hasTransactionEvidence = Number.isFinite(scanRow.txCostSol) && Number.isFinite(scanRow.txsDaily);
+    const txsCostsAtlas = hasTransactionEvidence && solPrice.status === 'complete' ? scanRow.txCostSol * solPrice.priceATL : null;
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
     const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
     const costParts = [foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
-    const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
+    const totalCostsAtlas = hasTransactionEvidence && Number.isFinite(txsCostsAtlas) && costParts.length
+      ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const revenueAtlasPerDay = sduPrice.status === 'complete' ? scanRow.sduFound * sduPrice.priceATL : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
       ? revenueAtlasPerDay - totalCostsAtlas
@@ -8077,8 +8089,17 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   let totalMined = 0;
   let totalMiningRevenueAtlas = 0;
   let totalMiningRevenueCount = 0;
+  const resolveMiningFleetAccount = (miningRow) => {
+    const fleet = fleetByLabel.get(normalizeFleetLabel(miningRow.fleet));
+    return fleet?.key || rentalForRow(fleet, miningRow.fleet, miningRow.isoDate)?.fleetAccount || '';
+  };
+  const unambiguousMiningFleetDays = unambiguousFleetDayKeys(miningRows, resolveMiningFleetAccount);
   const mining = await Promise.all(miningRows.map(async (miningRow) => {
     const fleet = fleetByLabel.get(normalizeFleetLabel(miningRow.fleet));
+    const historicalRental = rentalForRow(fleet, miningRow.fleet, miningRow.isoDate);
+    const resolvedFleetAccount = fleet?.key || historicalRental?.fleetAccount || '';
+    const transactionFleetAccount = unambiguousMiningFleetDays.has(`${miningRow.isoDate}\n${resolvedFleetAccount}`) ? resolvedFleetAccount : '';
+    miningRow = applyFleetTransactionTotals(miningRow, transactionFleetAccount, canonicalMiningTransactions);
     const activeKey = fleet?.key || normalizeFleetLabel(miningRow.fleet);
     activeMiningFleetKeys.add(activeKey);
     if (fleet) activeMappedMiningFleetKeys.add(fleet.key);
@@ -8095,12 +8116,13 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const ammoCostsAtlas = ammoPrice.status === 'complete' ? miningRow.burnedAmmo * ammoPrice.priceATL : null;
     const foodCostsAtlas = foodPrice.status === 'complete' ? miningRow.burnedFood * foodPrice.priceATL : null;
     const fuelCostsAtlas = fuelPrice.status === 'complete' ? miningRow.burnedFuel * fuelPrice.priceATL : null;
-    const txsCostsAtlas = solPrice.status === 'complete' ? miningRow.txCostSol * solPrice.priceATL : null;
-    const historicalRental = rentalForRow(fleet, miningRow.fleet, miningRow.isoDate);
+    const hasTransactionEvidence = Number.isFinite(miningRow.txCostSol) && Number.isFinite(miningRow.txsDaily);
+    const txsCostsAtlas = hasTransactionEvidence && solPrice.status === 'complete' ? miningRow.txCostSol * solPrice.priceATL : null;
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
     const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
     const costParts = [ammoCostsAtlas, foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
-    const totalCostsAtlas = costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
+    const totalCostsAtlas = hasTransactionEvidence && Number.isFinite(txsCostsAtlas) && costParts.length
+      ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const netProfitAtlas = Number.isFinite(revenueAtlasPerDay) && Number.isFinite(totalCostsAtlas)
       ? revenueAtlasPerDay - totalCostsAtlas
       : null;
@@ -8177,17 +8199,19 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const fuelCostsAtlas = fuelCanonical
       ? (cargoRow.fuelValuation?.amountATL ?? null)
       : (['complete', 'provisional'].includes(fuelPrice.status) ? cargoRow.burnedFuel * fuelPrice.priceATL : null);
-    const historicalSolPrice = feeCanonical ? null : await resolveHistoricalAtlasPrice('SOL', cargoRow.isoDate);
+    const hasTransactionEvidence = Number.isFinite(cargoRow.txCostSol) && Number.isFinite(cargoRow.txsDaily);
+    const historicalSolPrice = feeCanonical || !hasTransactionEvidence ? null : await resolveHistoricalAtlasPrice('SOL', cargoRow.isoDate);
     const solValuation = feeCanonical ? cargoRow.solValuation : historicalSolPrice;
     const txsCostsAtlas = feeCanonical
       ? (solValuation?.amountATL ?? null)
-      : (historicalSolPrice?.status === 'complete' ? cargoRow.txCostSol * historicalSolPrice.priceATL : null);
+      : (hasTransactionEvidence && historicalSolPrice?.status === 'complete' ? cargoRow.txCostSol * historicalSolPrice.priceATL : null);
     const historicalRental = rentalForRow(fleet, cargoRow.fleet, cargoRow.isoDate, authoritativeAccount);
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
     const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
     const incompleteRawValuation = (fuelCanonical && Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (feeCanonical && BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas));
     const costParts = [fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
-    const totalCostsAtlas = !incompleteRawValuation && costParts.length ? costParts.reduce((sum, value) => sum + value, 0) : null;
+    const totalCostsAtlas = hasTransactionEvidence && Number.isFinite(txsCostsAtlas) && !incompleteRawValuation && costParts.length
+      ? costParts.reduce((sum, value) => sum + value, 0) : null;
     const netProfitAtlas = Number.isFinite(totalCostsAtlas) ? -totalCostsAtlas : null;
     return {
       ...cargoRow,

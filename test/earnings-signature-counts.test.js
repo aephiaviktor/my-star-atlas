@@ -44,11 +44,13 @@ test('all automatic earnings and navigation paths share the scan-free snapshot I
   assert.doesNotMatch(renderer, /getSignatures|signatureDaily|historicalSignature/);
 });
 
-test('mining transaction counts come from explicit telemetry with a legacy event fallback', () => {
+test('mining retains legacy telemetry only as input before canonical fail-closed projection', () => {
   const mining = sourceBetween(main, 'async function fetchMiningEarningsRows', 'async function fetchCraftingEarningsRows');
+  const snapshot = sourceBetween(main, 'async function fetchEarningsSnapshot', "handleTrustedIpc('app:get-profile-name'");
   assert.match(mining, /r\._field == "txCostSol" or r\._field == "txCount"/);
   assert.match(mining, /aggregateMiningTransactionEvents/);
-  assert.match(mining, /txsDaily: 0/);
+  assert.match(snapshot, /applyFleetTransactionTotals\(miningRow/);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'electron', 'fleet-transaction-events.js'), 'utf8'), /transactionCostSource: 'unavailable'/);
   assert.doesNotMatch(mining, /getSignaturesForAddress|fetchFleetSignatureDailyCounts/);
 });
 
@@ -68,7 +70,7 @@ test('renderer distinguishes unavailable from genuine zero while preserving vali
   assert.doesNotMatch(source, /txsDaily\s*(?:\|\||\?\?)\s*0|Number\(entry\.txsDaily\s*\|\|\s*0\)/);
 });
 
-test('other earnings calculations and valid no-new-RPC transaction counts are unchanged', () => {
+test('other earnings calculations and canonical no-new-RPC transaction counts remain available', () => {
   const snapshot = sourceBetween(main, 'async function fetchEarningsSnapshot', "handleTrustedIpc('app:get-profile-name'");
   for (const token of [
     'revenueAtlasPerDay', 'totalCostsAtlas', 'netProfitAtlas', 'profitMarginPercent',

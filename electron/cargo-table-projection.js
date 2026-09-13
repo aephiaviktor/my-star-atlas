@@ -100,7 +100,7 @@ function emptyCanonicalCost(operation) {
     txFeeLamports: null,
     txCostSolExact: null,
     txCostSol: null,
-    txsDaily: finiteOrNull(operation.txsDaily) ?? 0,
+    txsDaily: null,
     fuelValuation: { status: 'unavailable', amountATLExact: null, amountATL: null, eventDay, priceDay: null, source: 'missing_raw_cost_evidence', provenance: 'No matching canonical Cargo fuel evidence', estimated: false },
     solValuation: { status: 'unavailable', amountATLExact: null, amountATL: null, eventDay, priceDay: null, source: 'missing_raw_cost_evidence', provenance: 'No matching canonical Cargo transaction-fee evidence', estimated: false },
     sourceIds: [],
@@ -122,16 +122,16 @@ function mergeComponentCosts(operation, cost) {
   return {
     ...(sourceMode === 'legacy' ? operation : { ...empty, ...cost }),
     sourceMode,
-    costEvidenceStatus: fuelCovered || feeCovered ? (fuelCovered && feeCovered ? 'available' : 'partial') : 'legacy_fallback',
-    costSourceSelection: { fuel: fuelCovered ? 'canonical' : 'legacy', fee: feeCovered ? 'canonical' : 'legacy' },
+    costEvidenceStatus: fuelCovered && feeCovered ? 'available' : (fuelCovered || feeCovered ? 'partial' : 'unavailable'),
+    costSourceSelection: { fuel: fuelCovered ? 'canonical' : 'legacy', fee: feeCovered ? 'canonical' : 'unavailable' },
     burnedFuelExact: fuelCovered ? cost.burnedFuelExact : operation.burnedFuelExact,
     burnedFuel: fuelCovered ? cost.burnedFuel : operation.burnedFuel,
     fuelValuation: fuelCovered ? cost.fuelValuation : null,
-    txFeeLamports: feeCovered ? cost.txFeeLamports : operation.txFeeLamports,
-    txCostSolExact: feeCovered ? cost.txCostSolExact : operation.txCostSolExact,
-    txCostSol: feeCovered ? cost.txCostSol : operation.txCostSol,
+    txFeeLamports: feeCovered ? cost.txFeeLamports : null,
+    txCostSolExact: feeCovered ? cost.txCostSolExact : null,
+    txCostSol: feeCovered ? cost.txCostSol : null,
     solValuation: feeCovered ? cost.solValuation : null,
-    txsDaily: feeCovered ? (finiteOrNull(cost.txsDaily) ?? 0) : (finiteOrNull(operation.txsDaily) ?? 0),
+    txsDaily: feeCovered ? (finiteOrNull(cost.txsDaily) ?? 0) : null,
     sourceIds: [...(fuelCovered || feeCovered ? cost.sourceIds || [] : [])],
   };
 }
@@ -201,7 +201,7 @@ function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [],
         isoDate: operation.isoDate,
         label: operation.label,
         assignment: operation.assignment,
-        txsDaily: finiteOrNull(cost.txsDaily) ?? finiteOrNull(operation.txsDaily) ?? 0,
+        txsDaily: cost.txsDaily,
         completedCycleIds: operation.completedCycleIds,
         cargoCycles: operation.cargoCycles ?? 0,
         cargoLegs: operation.cargoLegs ?? 0,
@@ -217,7 +217,18 @@ function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [],
       };
     })
     .sort((a, b) => clean(b.isoDate).localeCompare(clean(a.isoDate)) || clean(a.fleetAccount).localeCompare(clean(b.fleetAccount)));
-  return [...legacyRows.filter((row) => canonicalOperationalSection(row?.assignment) === 'cargo'), ...canonical];
+  const unavailableLegacy = legacyRows
+    .filter((row) => canonicalOperationalSection(row?.assignment) === 'cargo')
+    .map((row) => ({
+      ...row,
+      txsDaily: null,
+      txFeeLamports: null,
+      txCostSolExact: null,
+      txCostSol: null,
+      transactionCostSource: 'unavailable',
+      costSourceSelection: { ...(row.costSourceSelection || {}), fee: 'unavailable' },
+    }));
+  return [...unavailableLegacy, ...canonical];
 }
 
 function cargoCostSourceSelectionStats(rows = [], rejected = []) {

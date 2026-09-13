@@ -6171,6 +6171,14 @@ function sumFiniteEarningsFields(target, rows, fields) {
   }
 }
 
+function invalidateIncompleteTransactionTotal(target, rows) {
+  if (!rows.some((row) => row.txsDaily == null || row.txsCostsAtlas == null)) return;
+  target.txsDaily = null;
+  target.txsCostsAtlas = null;
+  target.totalCostsAtlas = null;
+  target.netProfitAtlas = null;
+}
+
 function aggregateTotalFleetRows(subtab, rows) {
   const groups = new Map();
   for (const row of rows) {
@@ -6201,6 +6209,7 @@ function aggregateTotalFleetRows(subtab, rows) {
         ...commonFields, 'expectedSduPerScan', 'expectedSduValueAtl', 'txsDaily', 'scanAttempts',
         'successfulScans', 'sduFound',
       ]);
+      invalidateIncompleteTransactionTotal(total, groupRows);
       total.scanSuccessRatePercent = total.scanAttempts > 0 ? (total.successfulScans / total.scanAttempts) * 100 : null;
       const chanceWeight = groupRows.reduce((sum, row) => sum + (Number(row.scanAttempts) || 0), 0);
       total.averageChancePercent = chanceWeight > 0
@@ -6211,6 +6220,7 @@ function aggregateTotalFleetRows(subtab, rows) {
         : null;
     } else {
       sumFiniteEarningsFields(total, groupRows, [...commonFields, 'txsDaily', 'mined', 'ammoCostsAtlas']);
+      invalidateIncompleteTransactionTotal(total, groupRows);
       total.costsPerUnitAtlas = total.mined > 0 && Number.isFinite(total.totalCostsAtlas)
         ? total.totalCostsAtlas / total.mined
         : null;
@@ -6253,6 +6263,7 @@ function aggregateTotalCargoRows(rows) {
       'txsDaily', 'cargoCycles', 'cargoLegs', 'fuelCostsAtlas', 'txsCostsAtlas',
       'totalCostsAtlas', 'cargoVolume', 'cargoCapacity',
     ]);
+    invalidateIncompleteTransactionTotal(total, groupRows);
     total.txsCostsPercent = total.totalCostsAtlas > 0 && Number.isFinite(total.txsCostsAtlas)
       ? (total.txsCostsAtlas / total.totalCostsAtlas) * 100
       : null;
@@ -6565,7 +6576,7 @@ function createCargoEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'ownership') return createOwnershipCell(entry);
   if (columnId === 'ships') return createShipsCell(entry);
   if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
-  if (columnId === 'txsDaily') return createTextCell(entry.txsDaily == null ? '--' : formatWholeNumber(entry.txsDaily));
+  if (columnId === 'txsDaily') return createTextCell(entry.txsDaily == null ? 'N/A' : formatWholeNumber(entry.txsDaily));
   if (columnId === 'cargoCycles') {
     const cycles = entry.cargoCycles == null ? 0 : Number(entry.cargoCycles);
     const legs = entry.cargoLegs == null ? 0 : Number(entry.cargoLegs);

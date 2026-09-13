@@ -106,12 +106,13 @@ test('actual ONI cutover overlap becomes one canonical fleet-day with conserved 
   });
 });
 
-test('operational Cargo row without canonical cost falls back to operational legacy costs', () => {
+test('operational Cargo row without canonical fee evidence exposes transaction totals as unavailable', () => {
   const [row] = joinCanonicalCostsWithOperationalRows({ operationalRows: [op()] });
   assert.equal(row.sourceMode, 'legacy');
-  assert.equal(row.txsDaily, 318);
-  assert.equal(row.costEvidenceStatus, 'legacy_fallback');
-  assert.deepEqual(row.costSourceSelection, { fuel: 'legacy', fee: 'legacy' });
+  assert.equal(row.txsDaily, null);
+  assert.equal(row.txCostSol, null);
+  assert.equal(row.costEvidenceStatus, 'unavailable');
+  assert.deepEqual(row.costSourceSelection, { fuel: 'legacy', fee: 'unavailable' });
 });
 
 test('partial canonical coverage suppresses only the matching component', () => {
@@ -121,10 +122,10 @@ test('partial canonical coverage suppresses only the matching component', () => 
     operationalRows: [legacy],
   });
   assert.equal(row.sourceMode, 'mixed_cost_source');
-  assert.deepEqual(row.costSourceSelection, { fuel: 'canonical', fee: 'legacy' });
+  assert.deepEqual(row.costSourceSelection, { fuel: 'canonical', fee: 'unavailable' });
   assert.equal(row.burnedFuel, 12.5);
-  assert.equal(row.txCostSol, 0.123);
-  assert.equal(row.txsDaily, 12);
+  assert.equal(row.txCostSol, null);
+  assert.equal(row.txsDaily, null);
   assert.equal(row.label, '08/05');
 });
 
@@ -134,8 +135,9 @@ test('canonical SOL fee without authoritative fleet account cannot suppress lega
     operationalRows: [op({ txCostSol: 0.111, txsDaily: 9 })],
   });
   assert.equal(row.sourceMode, 'legacy');
-  assert.equal(row.txCostSol, 0.111);
-  assert.deepEqual(row.costSourceSelection, { fuel: 'legacy', fee: 'legacy' });
+  assert.equal(row.txCostSol, null);
+  assert.equal(row.txsDaily, null);
+  assert.deepEqual(row.costSourceSelection, { fuel: 'legacy', fee: 'unavailable' });
 });
 
 test('observed canonical zero remains a genuine numeric zero', () => {

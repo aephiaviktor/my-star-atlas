@@ -72,9 +72,9 @@ test('Scanning, Mining, Crafting, and Upgrading monetary values use their own po
 test('Mining total-fleet rows remain resource-scoped for Per Unit values', () => {
   const aggregate = loadFleetAggregator();
   const rows = [
-    { isoDate: '2026-09-04', rawMaterial: 'Iron Ore', mined: 10, totalCostsAtlas: 20 },
-    { isoDate: '2026-09-04', rawMaterial: 'Iron Ore', mined: 30, totalCostsAtlas: 40 },
-    { isoDate: '2026-09-04', rawMaterial: 'Copper Ore', mined: 5, totalCostsAtlas: 15 },
+    { isoDate: '2026-09-04', rawMaterial: 'Iron Ore', mined: 10, txsDaily: 1, txsCostsAtlas: 1, totalCostsAtlas: 20 },
+    { isoDate: '2026-09-04', rawMaterial: 'Iron Ore', mined: 30, txsDaily: 1, txsCostsAtlas: 1, totalCostsAtlas: 40 },
+    { isoDate: '2026-09-04', rawMaterial: 'Copper Ore', mined: 5, txsDaily: 1, txsCostsAtlas: 1, totalCostsAtlas: 15 },
   ];
   const totals = aggregate('mining', rows);
   assert.equal(totals.length, 2);
