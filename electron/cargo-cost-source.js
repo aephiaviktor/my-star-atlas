@@ -4,6 +4,9 @@ const crypto = require('node:crypto');
 
 const RAW_COST_SCHEMA_VERSION = '1';
 const RAW_COST_HISTORY_WINDOW = '-31d';
+const RAW_COST_HISTORY_MS = 31 * 24 * 60 * 60 * 1000;
+const RAW_COST_BATCH_MS = 24 * 60 * 60 * 1000;
+const RAW_COST_MIN_BATCH_MS = 6 * 60 * 60 * 1000;
 const RAW_COST_CUTOVER_MANIFEST_VERSION = 1;
 const RAW_COST_CUTOVER_UTC = '2026-08-05T00:00:00.000Z';
 const RAW_COST_CUTOVERS = Object.freeze({
@@ -41,9 +44,67 @@ function canonicalRawCostIdentity(row) {
   return `cargo-cost-source:v${RAW_COST_SCHEMA_VERSION}:${clean(row.faction)}:${clean(row.instance)}:${clean(row.eventType)}:${clean(row.eventIdentity)}`;
 }
 
-function buildRawCostFluxQuery(bucket) {
-  const escaped = clean(bucket).replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-  return `from(bucket: "${escaped}")\n  |> range(start: ${RAW_COST_HISTORY_WINDOW})\n  |> filter(fn: (r) => r._measurement == "cargo_cost_source_event_v1")\n  |> filter(fn: (r) => exists r.schemaVersion and r.schemaVersion == "${RAW_COST_SCHEMA_VERSION}")\n  |> pivot(rowKey: ["_time", "eventType", "eventIdentity", "schemaVersion"], columnKey: ["_field"], valueColumn: "_value")\n  |> keep(columns: ["_time", "eventType", "eventIdentity", "schemaVersion", "fuelQuantity", "movementEventId", "cycleId", "movementIndex", "txFeeLamports", "transactionSignature", "eventPosition", "timestampProvenance", "sourceProvenance", "faction", "instance", "fleetAccount", "fleetLabel", "assignment"])\n  |> sort(columns: ["_time", "eventIdentity"])`;
+function buildRawCostFluxQuery(bucket, window = null, scope = null) {
+  const fluxString = (value) => clean(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  const escaped = fluxString(bucket);
+  let range = `range(start: ${RAW_COST_HISTORY_WINDOW})`;
+  if (window != null) {
+    const startMs = Date.parse(clean(window.start));
+    const stopMs = Date.parse(clean(window.stop));
+    if (!Number.isFinite(startMs) || !Number.isFinite(stopMs) || startMs >= stopMs) throw new TypeError('raw_cost_invalid_query_window');
+    range = `range(start: time(v: "${new Date(startMs).toISOString()}"), stop: time(v: "${new Date(stopMs).toISOString()}"))`;
+  }
+  let scopeFilter = '';
+  if (scope != null) {
+    const faction = fluxString(scope.faction);
+    const instance = fluxString(scope.instance);
+    if (!faction || !instance) throw new TypeError('raw_cost_invalid_query_scope');
+    scopeFilter = `\n  |> filter(fn: (r) => r.faction == "${faction}" and r.instance == "${instance}")`;
+  }
+  return `from(bucket: "${escaped}")\n  |> ${range}\n  |> filter(fn: (r) => r._measurement == "cargo_cost_source_event_v1")\n  |> filter(fn: (r) => exists r.schemaVersion and r.schemaVersion == "${RAW_COST_SCHEMA_VERSION}")\n  |> pivot(rowKey: ["_time", "eventType", "eventIdentity", "schemaVersion"], columnKey: ["_field"], valueColumn: "_value")${scopeFilter}\n  |> keep(columns: ["_time", "eventType", "eventIdentity", "schemaVersion", "fuelQuantity", "movementEventId", "cycleId", "movementIndex", "txFeeLamports", "transactionSignature", "eventPosition", "timestampProvenance", "sourceProvenance", "faction", "instance", "fleetAccount", "fleetLabel", "assignment"])\n  |> sort(columns: ["_time", "eventIdentity"])`;
+}
+
+function rawCostTimeBatches({ now = new Date(), historyMs = RAW_COST_HISTORY_MS, batchMs = RAW_COST_BATCH_MS } = {}) {
+  const stopMs = new Date(now).getTime();
+  if (!Number.isFinite(stopMs) || !Number.isFinite(historyMs) || historyMs <= 0 || !Number.isFinite(batchMs) || batchMs <= 0) {
+    throw new TypeError('raw_cost_invalid_time_window');
+  }
+  const startMs = stopMs - historyMs;
+  const batches = [];
+  for (let cursor = startMs; cursor < stopMs; cursor += batchMs) {
+    batches.push({
+      start: new Date(cursor).toISOString(),
+      stop: new Date(Math.min(cursor + batchMs, stopMs)).toISOString(),
+    });
+  }
+  return batches;
+}
+
+function isRawCostCapacityError(error) {
+  return /(?:\b413\b|request too large|resources exhausted|heap exhausted|\b504\b|(?:query|influx)_timeout|timed out)/i
+    .test(String(error?.message || error || ''));
+}
+
+async function queryRawCostRowsBatched({ bucket, scope = null, query, parseCsv, projectRows = projectRawCostEvents, now = new Date() } = {}) {
+  if (typeof query !== 'function' || typeof parseCsv !== 'function' || typeof projectRows !== 'function') {
+    throw new TypeError('raw_cost_query_dependencies_required');
+  }
+  const rows = [];
+  const queryWindow = async (window) => {
+    try {
+      const csv = await query(buildRawCostFluxQuery(bucket, window, scope), window);
+      for (const row of parseCsv(csv)) rows.push(row);
+    } catch (error) {
+      const startMs = Date.parse(window.start);
+      const stopMs = Date.parse(window.stop);
+      if (!isRawCostCapacityError(error) || stopMs - startMs <= RAW_COST_MIN_BATCH_MS) throw error;
+      const midpoint = startMs + Math.floor((stopMs - startMs) / 2);
+      await queryWindow({ start: window.start, stop: new Date(midpoint).toISOString() });
+      await queryWindow({ start: new Date(midpoint).toISOString(), stop: window.stop });
+    }
+  };
+  for (const window of rawCostTimeBatches({ now })) await queryWindow(window);
+  return projectRows(rows);
 }
 
 function projectRawCostEvents(rows = []) {
@@ -369,6 +430,7 @@ function rawCostDigest(records = []) {
 module.exports = {
   RAW_COST_SCHEMA_VERSION, RAW_COST_HISTORY_WINDOW, RAW_COST_CUTOVER_MANIFEST_VERSION,
   RAW_COST_CUTOVER_UTC, RAW_COST_CUTOVERS, buildRawCostFluxQuery, canonicalRawCostIdentity,
+  rawCostTimeBatches, queryRawCostRowsBatched,
   projectRawCostEvents, selectLegacyRawCutover, getRawCostCutover, lamportsToSolDecimal, rawCostDigest,
   exporterForFaction, aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
   buildCanonicalRawCostPool, valueNativeCost, multiplyExactDecimals,

@@ -6,7 +6,7 @@ const {
   RAW_COST_CUTOVER_UTC, RAW_COST_CUTOVERS, buildRawCostFluxQuery,
   projectRawCostEvents, selectLegacyRawCutover, lamportsToSolDecimal, rawCostDigest,
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
-  buildCanonicalRawCostPool,
+  buildCanonicalRawCostPool, queryRawCostRowsBatched, rawCostTimeBatches,
 } = require('../electron/cargo-cost-source');
 
 const fuel = (overrides = {}) => ({ _time: '2026-08-05T00:01:02.003Z', schemaVersion: '1', eventType: 'fuel', eventIdentity: 'fuel:cycle:0', fuelQuantity: '12.500000000000001', movementEventId: 'cycle:0', cycleId: 'cycle', movementIndex: '0', timestampProvenance: 'solana_block_time', sourceProvenance: 'confirmed_movement', faction: 'MUD', instance: 'MUD', fleetAccount: 'fleet', fleetLabel: 'Fleet', assignment: 'Transport', ...overrides });
@@ -92,6 +92,63 @@ test('CSV reconstruction ignores repeated table headers', () => {
   const rows = parseInfluxCsv(csv);
   assert.equal(rows.length, 2);
   assert.deepEqual(projectRawCostEvents(rows).records.map((row) => row.eventType), ['fuel', 'sol_fee']);
+});
+
+test('raw history query supports explicit half-open time windows and selected-faction scope', () => {
+  const flux = buildRawCostFluxQuery('bucket', {
+    start: '2026-09-12T00:00:00.000Z',
+    stop: '2026-09-13T00:00:00.000Z',
+  }, { faction: 'MUD', instance: 'MUD' });
+  assert.match(flux, /range\(start: time\(v: "2026-09-12T00:00:00.000Z"\), stop: time\(v: "2026-09-13T00:00:00.000Z"\)\)/);
+  assert.match(flux, /pivot[\s\S]*filter\(fn: \(r\) => r\.faction == "MUD" and r\.instance == "MUD"\)[\s\S]*keep/);
+  assert.throws(() => buildRawCostFluxQuery('bucket', { start: 'not-a-time', stop: '2026-09-13T00:00:00.000Z' }), /invalid_query_window/);
+});
+
+test('31-day raw history is fetched in contiguous one-day windows', () => {
+  const batches = rawCostTimeBatches({ now: new Date('2026-09-13T16:00:00.000Z') });
+  assert.equal(batches.length, 31);
+  assert.equal(batches[0].start, '2026-08-13T16:00:00.000Z');
+  assert.equal(batches.at(-1).stop, '2026-09-13T16:00:00.000Z');
+  assert.ok(batches.every((batch, index) => index === 0 || batches[index - 1].stop === batch.start));
+});
+
+test('oversized daily raw queries split to six-hour windows and merge before projection', async () => {
+  const calls = [];
+  let projectCalls = 0;
+  const result = await queryRawCostRowsBatched({
+    bucket: 'bucket',
+    scope: { faction: 'MUD', instance: 'MUD' },
+    now: new Date('2026-09-13T16:00:00.000Z'),
+    query: async (flux, batch) => {
+      assert.match(flux, /r\.faction == "MUD" and r\.instance == "MUD"/);
+      calls.push(batch);
+      if (Date.parse(batch.stop) - Date.parse(batch.start) > 6 * 60 * 60 * 1000) {
+        throw new Error('influx_flux_413:request too large: Resources exhausted: Heap exhausted');
+      }
+      return [{ batch: batch.start }];
+    },
+    parseCsv: (rows) => rows,
+    projectRows: (rows) => {
+      projectCalls += 1;
+      return { records: rows, rejected: [] };
+    },
+  });
+
+  assert.equal(calls.filter((batch) => Date.parse(batch.stop) - Date.parse(batch.start) === 6 * 60 * 60 * 1000).length, 124);
+  assert.equal(result.records.length, 124);
+  assert.equal(projectCalls, 1, 'deduplication/conflict handling must remain global across batches');
+});
+
+test('non-capacity raw query failures remain fail-closed instead of being multiplied', async () => {
+  let calls = 0;
+  await assert.rejects(queryRawCostRowsBatched({
+    bucket: 'bucket',
+    now: new Date('2026-09-13T16:00:00.000Z'),
+    query: async () => { calls += 1; throw new Error('influx_flux_401:unauthorized'); },
+    parseCsv: (rows) => rows,
+    projectRows: (rows) => ({ records: rows, rejected: [] }),
+  }), /401/);
+  assert.equal(calls, 1);
 });
 
 test('incremental projection equals full rebuild, including mutable metadata revisions', () => {

@@ -98,7 +98,7 @@ const {
 const { revalueMarketplaceScanWithHistoricalSol } = require('./marketplace-historical-fees');
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
 const {
-  RAW_COST_CUTOVER_MANIFEST_VERSION, buildRawCostFluxQuery, projectRawCostEvents,
+  RAW_COST_CUTOVER_MANIFEST_VERSION, queryRawCostRowsBatched,
   selectLegacyRawCutover, exporterForFaction, aggregateRawCostsByFleetDay,
   applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
   valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
@@ -7671,11 +7671,14 @@ async function fetchCrossFactionCargoLedgerRows(settings) {
 }
 
 async function fetchCanonicalRawCargoCosts(settings) {
-  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return { records: [], rejected: [], query: '' };
-  const query = buildRawCostFluxQuery(settings.influxBucket);
-  const rows = parseInfluxCsv(await queryInfluxFlux(settings, query));
-  const projected = projectRawCostEvents(rows);
-  return { ...projected, query };
+  if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return { records: [], rejected: [], queryMode: 'unconfigured' };
+  const projected = await queryRawCostRowsBatched({
+    bucket: settings.influxBucket,
+    scope: exporterForFaction(settings.faction),
+    query: (flux) => queryInfluxFlux(settings, flux),
+    parseCsv: parseInfluxCsv,
+  });
+  return { ...projected, queryMode: 'bounded_adaptive_batches' };
 }
 
 async function recoverMissingRentalCrew(records, connection, sot) {

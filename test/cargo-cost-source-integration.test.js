@@ -8,9 +8,12 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'electron/cargo-cost-s
 const price = fs.readFileSync(path.join(__dirname, '..', 'electron/atlas-price-resolver.js'), 'utf8');
 const projector = fs.readFileSync(path.join(__dirname, '..', 'electron/cargo-allocation-projector.js'), 'utf8');
 
-test('earnings snapshot uses existing Influx path and bounded worker cadence for raw points', () => {
+test('earnings snapshot fetches raw points through bounded adaptive Influx batches', () => {
   assert.match(main, /fetchCanonicalRawCargoCosts/);
-  assert.match(main, /queryInfluxFlux\(settings, query\)/);
+  assert.match(main, /queryRawCostRowsBatched\(\{/);
+  assert.match(main, /scope: exporterForFaction\(settings\.faction\)/);
+  assert.match(main, /query: \(flux\) => queryInfluxFlux\(settings, flux\)/);
+  assert.match(main, /queryMode: 'bounded_adaptive_batches'/);
   assert.match(main, /\(\) => fetchCanonicalRawCargoCosts\(settings\)/);
   assert.doesNotMatch(source, /fetch\(|Connection\(|setInterval|setTimeout|price.*fetch|RPC/i);
 });
