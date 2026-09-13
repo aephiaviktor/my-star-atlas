@@ -86,7 +86,7 @@ const { upgradingPoolKey, resolveUpgradingCostsAtlas } = require('./upgrading-co
 const { enrichRows: enrichResourceCostBasisRows } = require('./resource-cost-basis');
 const { aggregateMiningTransactionEvents } = require('./mining-transaction-events');
 const { aggregateScanningTransactionEvents } = require('./scanning-transaction-events');
-const { aggregateFleetTransactionEvents, applyFleetTransactionTotals, unambiguousFleetDayKeys } = require('./fleet-transaction-events');
+const { aggregateFleetTransactionEvents, applyFleetTransactionTotals, recoverFleetTransactionAssignments, unambiguousFleetDayKeys } = require('./fleet-transaction-events');
 const {
   formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
   diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux, buildHistoricalBreakevenBasisStateFlux,
@@ -7981,14 +7981,33 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const cutoverSelection = rawExporter
     ? selectLegacyRawCutover({ legacyRows: compatibilityCargoRows, rawRecords: rawCargoCosts.records, ...rawExporter })
     : { cutover: null, legacyRows: cargoRows, rawRecords: [], trackingDisabled: false };
+  const transactionAssignmentEvidence = [];
+  for (const row of scanningRows) {
+    const fleet = fleetByLabel.get(normalizeFleetLabel(row.fleet));
+    const fleetAccount = fleet?.key || rentalForRow(fleet, row.fleet, row.isoDate)?.fleetAccount || '';
+    transactionAssignmentEvidence.push({ isoDate: row.isoDate, fleetAccount, assignment: 'Scan' });
+  }
+  for (const row of miningRows) {
+    const fleet = fleetByLabel.get(normalizeFleetLabel(row.fleet));
+    const fleetAccount = fleet?.key || rentalForRow(fleet, row.fleet, row.isoDate)?.fleetAccount || '';
+    transactionAssignmentEvidence.push({ isoDate: row.isoDate, fleetAccount, assignment: 'Mine' });
+  }
+  for (const row of compatibilityCargoRows) {
+    transactionAssignmentEvidence.push({
+      isoDate: row.isoDate,
+      fleetAccount: String(row.fleetAccount || '').trim(),
+      assignment: row.assignment,
+    });
+  }
+  const assignmentRecoveredRawRecords = recoverFleetTransactionAssignments(cutoverSelection.rawRecords, transactionAssignmentEvidence);
   const canonicalMiningTransactions = rawExporter
-    ? aggregateFleetTransactionEvents(cutoverSelection.rawRecords, { assignments: ['Mine'], ...rawExporter })
+    ? aggregateFleetTransactionEvents(assignmentRecoveredRawRecords, { assignments: ['Mine'], ...rawExporter })
     : [];
   const canonicalScanningTransactions = rawExporter
-    ? aggregateFleetTransactionEvents(cutoverSelection.rawRecords, { assignments: ['Scan'], ...rawExporter })
+    ? aggregateFleetTransactionEvents(assignmentRecoveredRawRecords, { assignments: ['Scan'], ...rawExporter })
     : [];
   const canonicalCargoAssignments = ['Transport', 'Supply Chain'];
-  const canonicalCargoRawRecords = cutoverSelection.rawRecords.filter((record) => canonicalCargoAssignments.includes(record.assignment));
+  const canonicalCargoRawRecords = assignmentRecoveredRawRecords.filter((record) => canonicalCargoAssignments.includes(record.assignment));
   const valuedCanonicalRawCosts = await valueCanonicalRawCosts(canonicalCargoRawRecords, {
     resolvePrice: async (asset, date) => asset === 'Fuel'
       ? requireCargoFuelPrice(await resolveHistoricalAtlasPrice(asset, date), date)

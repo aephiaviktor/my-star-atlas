@@ -7,6 +7,7 @@ const path = require('node:path');
 const {
   aggregateFleetTransactionEvents,
   applyFleetTransactionTotals,
+  recoverFleetTransactionAssignments,
   unambiguousFleetDayKeys,
 } = require('../electron/fleet-transaction-events');
 
@@ -24,6 +25,35 @@ function fee(overrides = {}) {
     ...overrides,
   };
 }
+
+test('blank historical assignments recover only from unambiguous fleet-day telemetry evidence', () => {
+  const records = [
+    fee({ assignment: '', transactionSignature: 'recover-me' }),
+    fee({ assignment: '', fleetAccount: 'fleet-b', transactionSignature: 'ambiguous' }),
+    fee({ assignment: '', fleetAccount: 'fleet-c', transactionSignature: 'unknown' }),
+    fee({ assignment: 'Mine', transactionSignature: 'already-canonical' }),
+  ];
+  const recovered = recoverFleetTransactionAssignments(records, [
+    { isoDate: '2026-09-13', fleetAccount: 'fleet-a', assignment: 'Scan' },
+    { isoDate: '2026-09-13', fleetAccount: 'fleet-a', assignment: 'Scan' },
+    { isoDate: '2026-09-13', fleetAccount: 'fleet-b', assignment: 'Mine' },
+    { isoDate: '2026-09-13', fleetAccount: 'fleet-b', assignment: 'Scan' },
+    { isoDate: '2026-09-13', fleetAccount: 'fleet-c', assignment: 'Craft' },
+  ]);
+
+  assert.equal(recovered[0].assignment, 'Scan');
+  assert.equal(recovered[0].assignmentProvenance, 'telemetry_fleet_day');
+  const [total] = aggregateFleetTransactionEvents(recovered, { assignments: ['Scan'], faction: 'MUD', instance: 'MUD' });
+  assert.equal(total.txsDaily, 1);
+  assert.equal(total.assignmentProvenance, 'telemetry_fleet_day');
+  assert.equal(applyFleetTransactionTotals({ isoDate: '2026-09-13' }, 'fleet-a', [total]).transactionCostSource,
+    'canonical_signature_stream_with_recovered_assignment');
+  assert.equal(recovered[1].assignment, '');
+  assert.equal(recovered[2].assignment, '');
+  assert.equal(recovered[3].assignment, 'Mine');
+  assert.equal(recovered[3].assignmentProvenance, undefined);
+  assert.equal(records[0].assignment, '', 'source records remain immutable');
+});
 
 test('Mine totals deduplicate signatures and sum exact lamports by authoritative fleet and UTC day', () => {
   const totals = aggregateFleetTransactionEvents([
@@ -105,7 +135,8 @@ test('ambiguous multi-row fleet days fail closed instead of duplicating one cano
 
 test('Mining projection replaces its legacy totals from the shared canonical stream only', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /canonicalMiningTransactions = rawExporter[\s\S]*assignments: \['Mine'\]/);
+  assert.match(main, /assignmentRecoveredRawRecords = recoverFleetTransactionAssignments/);
+  assert.match(main, /canonicalMiningTransactions = rawExporter[\s\S]*assignmentRecoveredRawRecords[\s\S]*assignments: \['Mine'\]/);
   const miningProjection = main.slice(main.indexOf('const mining = await Promise.all'), main.indexOf('const cargo = await Promise.all'));
   assert.match(miningProjection, /unambiguousMiningFleetDays\.has/);
   assert.match(miningProjection, /applyFleetTransactionTotals\(miningRow, transactionFleetAccount, canonicalMiningTransactions\)/);
@@ -121,7 +152,7 @@ test('Scanning projection replaces its legacy totals from exact Scan-assignment 
 test('Cargo canonical costs include only Transport and Supply Chain source records', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
   assert.match(main, /canonicalCargoAssignments = \['Transport', 'Supply Chain'\]/);
-  assert.match(main, /canonicalCargoRawRecords = cutoverSelection\.rawRecords\.filter[\s\S]*canonicalCargoAssignments\.includes\(record\.assignment\)/);
+  assert.match(main, /canonicalCargoRawRecords = assignmentRecoveredRawRecords\.filter[\s\S]*canonicalCargoAssignments\.includes\(record\.assignment\)/);
   assert.match(main, /valueCanonicalRawCosts\(canonicalCargoRawRecords/);
 
   const totals = aggregateFleetTransactionEvents([

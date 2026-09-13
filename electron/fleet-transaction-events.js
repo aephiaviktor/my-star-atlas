@@ -21,6 +21,34 @@ function lamportsToSolDecimal(lamports) {
   return fraction ? `${whole}.${fraction}` : String(whole);
 }
 
+const OPERATIONAL_ASSIGNMENTS = new Set(['Mine', 'Scan', 'Transport', 'Supply Chain']);
+
+function recoverFleetTransactionAssignments(records = [], evidenceRows = []) {
+  const assignmentsByFleetDay = new Map();
+  for (const row of evidenceRows || []) {
+    const isoDate = clean(row?.isoDate || utcDay(row?.timestamp));
+    const fleetAccount = clean(row?.fleetAccount);
+    const assignment = clean(row?.assignment);
+    if (!isoDate || !fleetAccount || !OPERATIONAL_ASSIGNMENTS.has(assignment)) continue;
+    const key = `${isoDate}\n${fleetAccount}`;
+    if (!assignmentsByFleetDay.has(key)) assignmentsByFleetDay.set(key, new Set());
+    assignmentsByFleetDay.get(key).add(assignment);
+  }
+
+  return (records || []).map((record) => {
+    if (clean(record?.eventType) !== 'sol_fee' || clean(record?.assignment)) return record;
+    const isoDate = utcDay(record?.timestamp);
+    const fleetAccount = clean(record?.fleetAccount);
+    const candidates = assignmentsByFleetDay.get(`${isoDate}\n${fleetAccount}`);
+    if (!isoDate || !fleetAccount || !candidates || candidates.size !== 1) return record;
+    return {
+      ...record,
+      assignment: Array.from(candidates)[0],
+      assignmentProvenance: 'telemetry_fleet_day',
+    };
+  });
+}
+
 function aggregateFleetTransactionEvents(records = [], { assignments = [], faction = '', instance = '' } = {}) {
   const allowedAssignments = new Set(assignments.map(clean).filter(Boolean));
   const expectedFaction = clean(faction);
@@ -48,10 +76,12 @@ function aggregateFleetTransactionEvents(records = [], { assignments = [], facti
       fleetLabel: clean(record?.fleetLabel),
       txFeeLamports: 0n,
       txsDaily: 0,
+      assignmentRecovered: false,
     });
     const group = groups.get(key);
     group.txFeeLamports += lamports;
     group.txsDaily += 1;
+    if (clean(record?.assignmentProvenance) === 'telemetry_fleet_day') group.assignmentRecovered = true;
     const fleetLabel = clean(record?.fleetLabel);
     if (fleetLabel && (!group.fleetLabel || fleetLabel < group.fleetLabel)) group.fleetLabel = fleetLabel;
   }
@@ -69,6 +99,7 @@ function aggregateFleetTransactionEvents(records = [], { assignments = [], facti
         txCostSolExact,
         txCostSol: Number(txCostSolExact),
         txsDaily: group.txsDaily,
+        ...(group.assignmentRecovered ? { assignmentProvenance: 'telemetry_fleet_day' } : {}),
       };
     });
 }
@@ -101,12 +132,15 @@ function applyFleetTransactionTotals(row, fleetAccount, canonicalRows = []) {
     txsDaily: canonical.txsDaily,
     txCostSol: canonical.txCostSol,
     txFeeLamports: canonical.txFeeLamports,
-    transactionCostSource: 'canonical_signature_stream',
+    transactionCostSource: canonical.assignmentProvenance === 'telemetry_fleet_day'
+      ? 'canonical_signature_stream_with_recovered_assignment'
+      : 'canonical_signature_stream',
   };
 }
 
 module.exports = {
   aggregateFleetTransactionEvents,
   applyFleetTransactionTotals,
+  recoverFleetTransactionAssignments,
   unambiguousFleetDayKeys,
 };
