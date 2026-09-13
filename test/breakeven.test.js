@@ -392,7 +392,7 @@ test('Inventory Ledger distinguishes missing prices from zero, sorts every colum
   }
   assert.match(rendererSource, /breakeven: new Set\(breakevenEarningsOptionalColumns[\s\S]*\.map\(\(column\) => column\.id\)\)/);
   assert.match(rendererSource, /subtab === 'breakeven' && Number\(saved\.schemaVersion \|\| 1\) < 4[\s\S]*restoredIds = getEarningsColumns\(subtab\)[\s\S]*\.map\(\(column\) => column\.id\)/);
-  assert.match(rendererSource, /schemaVersion: 4/);
+  assert.match(rendererSource, /schemaVersion: 5/);
   assert.doesNotMatch(htmlSource, /0\.000000/);
 });
 

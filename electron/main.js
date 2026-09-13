@@ -85,6 +85,7 @@ const { projectInventoryCostLedgerRows } = require('./inventory-cost-ledger-view
 const { upgradingPoolKey, resolveUpgradingCostsAtlas } = require('./upgrading-cost-basis');
 const { enrichRows: enrichResourceCostBasisRows } = require('./resource-cost-basis');
 const { aggregateMiningTransactionEvents } = require('./mining-transaction-events');
+const { aggregateScanningTransactionEvents } = require('./scanning-transaction-events');
 const {
   formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
   diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux, buildHistoricalBreakevenBasisStateFlux,
@@ -6832,7 +6833,7 @@ async function fetchScanningEarningsRows(settings) {
   const sduCostsFlux = `from(bucket: "${bucket}")
   |> range(start: -31d)
   |> filter(fn: (r) => r._measurement == "sdu")
-  |> filter(fn: (r) => r._field == "amount" or r._field == "burnedFood" or r._field == "txCostSol")
+  |> filter(fn: (r) => r._field == "amount" or r._field == "burnedFood")
 ${scopeFilterFlux}
   |> filter(fn: (r) => exists r.fleet)
   |> map(fn: (r) => ({r with starbase: if exists r.starbase then r.starbase else ""}))
@@ -6869,6 +6870,21 @@ ${scopeFilterFlux}
   |> sum(column: "_value")
   |> group()
   |> keep(columns: ["fleet", "starbase", "_measurement", "_field", "_time", "_value"])
+  |> sort(columns: ["_time", "fleet"])`;
+
+  // Scan attempts and Scan-assigned movements are both part of scanning's
+  // transaction cost. Keep event timestamps so explicit txCount values can
+  // override the one-event fallback used for legacy fee-only points.
+  const transactionEventsFlux = `from(bucket: "${bucket}")
+  |> range(start: -31d)
+  |> filter(fn: (r) => r._measurement == "sdu" or r._measurement == "movement")
+  |> filter(fn: (r) => r._field == "txCostSol" or r._field == "txCount")
+  |> filter(fn: (r) => r._measurement == "sdu" or (exists r.assignment and r.assignment == "Scan"))
+  |> map(fn: (r) => ({ r with _value: float(v: r._value) }))
+${scopeFilterFlux}
+  |> filter(fn: (r) => exists r.fleet)
+  |> group()
+  |> keep(columns: ["fleet", "assignment", "_measurement", "_field", "_time", "_value"])
   |> sort(columns: ["_time", "fleet"])`;
 
   const chanceSumFlux = `from(bucket: "${bucket}")
@@ -6920,6 +6936,7 @@ ${scopeFilterFlux}
         burnedFood: 0,
         burnedFuel: 0,
         txCostSol: 0,
+        txsDaily: 0,
         scanAttempts: 0,
         successfulScans: 0,
         chanceSumPercent: 0,
@@ -6930,10 +6947,11 @@ ${scopeFilterFlux}
     return rowsByDayFleet.get(key);
   };
 
-  const [sduCostsCsv, sduProductionByStarbaseCsv, movementCostsCsv, chanceSumCsv, chanceCountCsv, successfulCountCsv] = await Promise.all([
+  const [sduCostsCsv, sduProductionByStarbaseCsv, movementCostsCsv, transactionEventsCsv, chanceSumCsv, chanceCountCsv, successfulCountCsv] = await Promise.all([
     queryInfluxFlux(settings, sduCostsFlux),
     queryInfluxFlux(settings, sduProductionByStarbaseFlux),
     queryInfluxFlux(settings, movementCostsFlux),
+    queryInfluxFlux(settings, transactionEventsFlux),
     queryInfluxFlux(settings, chanceSumFlux),
     queryInfluxFlux(settings, chanceCountFlux),
     queryInfluxFlux(settings, successfulCountFlux),
@@ -6949,13 +6967,19 @@ ${scopeFilterFlux}
     const entry = ensureRow(isoDate, fleet, date);
     if (row._measurement === 'sdu' && row._field === 'amount') entry.sduFound += value;
     if (row._measurement === 'sdu' && row._field === 'burnedFood') entry.burnedFood += value;
-    if (row._measurement === 'sdu' && row._field === 'txCostSol') entry.txCostSol += value;
     if (row._measurement === 'movement' && row._field === 'burnedFuel') entry.burnedFuel += value;
     if ((row._measurement === 'sdu' && row._field === 'burnedFood')
       || (row._measurement === 'movement' && row._field === 'burnedFuel')) {
       const starbase = resolveStarbaseName(row, coordinateMap);
       entry.resourceConsumptionByStarbase[row._field].push({ starbase, quantity: value });
     }
+  }
+
+  for (const transaction of aggregateScanningTransactionEvents(parseInfluxCsv(transactionEventsCsv), { includedDays })) {
+    const date = new Date(`${transaction.isoDate}T00:00:00.000Z`);
+    const entry = ensureRow(transaction.isoDate, transaction.fleet, date);
+    entry.txCostSol += transaction.txCostSol;
+    entry.txsDaily += transaction.txsDaily;
   }
 
   for (const row of parseInfluxCsv(sduProductionByStarbaseCsv)) {
@@ -6989,7 +7013,7 @@ ${scopeFilterFlux}
   applyDailyScanStat(successfulCountCsv, 'successfulScans');
 
   return Array.from(rowsByDayFleet.values())
-    .filter((row) => row.scanAttempts > 0 || row.sduFound > 0 || row.burnedFood > 0 || row.burnedFuel > 0 || row.txCostSol > 0)
+    .filter((row) => row.scanAttempts > 0 || row.sduFound > 0 || row.burnedFood > 0 || row.burnedFuel > 0 || row.txCostSol > 0 || row.txsDaily > 0)
     .map((row) => ({
       ...row,
       scanSuccessRatePercent: row.scanAttempts > 0 ? (row.successfulScans / row.scanAttempts) * 100 : null,

@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { enrichRows, selectRows } = require('../electron/resource-cost-basis');
+const { aggregateScanningTransactionEvents } = require('../electron/scanning-transaction-events');
 const pools = [{ location: 'A', asset: 'Food', totalCostPerUnit: 2 }, { location: 'B', asset: 'Food', totalCostPerUnit: 4 }, { location: 'A', asset: 'Fuel', totalCostPerUnit: 0 }];
 const scan = { burnedFood: 5, burnedFuel: 2, resourceConsumptionByStarbase: { burnedFood: [{ starbase: 'A', quantity: 2 }, { starbase: 'B', quantity: 3 }], burnedFuel: [{ starbase: 'A', quantity: 2 }] }, foodCostsAtlas: 50, fuelCostsAtlas: 20, revenueAtlasPerDay: 100, rentalRateAtlasPerDay: 3, txsCostsAtlas: 1, totalRequiredCrew: 2, sduFound: 10 };
 test('current ledger basis blends actual supply quantities across starbases and preserves zero', () => {
@@ -74,6 +75,7 @@ test('actual Scanning query preserves every source quantity, including untagged 
     escapeFluxString: (value) => value, buildInstanceScopeFilter: () => '',
     fetchStarbaseCoordinateMap: async () => new Map(), formatShortUtcDate: (date) => date.toISOString().slice(0, 10),
     resolveStarbaseName: (row) => row.starbase || '', parseInfluxCsv: (rows) => rows,
+    aggregateScanningTransactionEvents,
     queryInfluxFlux: async (_settings, flux) => {
       queries.push(flux);
       if (flux.includes('r._field == "amount" or')) return records.filter((row) => row._measurement === 'sdu');
@@ -83,11 +85,11 @@ test('actual Scanning query preserves every source quantity, including untagged 
   };
   vm.runInNewContext(sourceFunction(main, 'async function fetchScanningEarningsRows', 'async function fetchMiningEarningsRows') + '\nthis.fetchRows = fetchScanningEarningsRows;', scope);
   const rows = await scope.fetchRows({ influxUrl: 'fixture', influxAuthToken: 'fixture', influxBucket: 'fixture' });
-  assert.equal(queries.length, 6, 'no extra query added');
+  assert.equal(queries.length, 7, 'one bounded transaction-events query is added');
   const enriched = enrichRows(rows, 'scanning', pools);
   assert.equal(enriched.find((row) => row.fleet === 'S1').internalResourceCosts.foodCosts, 16);
   assert.equal(enriched.find((row) => row.fleet === 'S2').internalResourceCosts.foodCosts, null);
-  assert.ok(queries.filter((flux) => flux.includes('"_measurement", "_field", "_time"')).every((flux) => flux.includes('["fleet", "starbase", "_measurement"')));
+  assert.ok(queries.filter((flux) => flux.includes('"_measurement", "_field", "_time"') && !flux.includes('"txCount"')).every((flux) => flux.includes('["fleet", "starbase", "_measurement"')));
 });
 
 test('actual renderer applies filtered basis to charts/cards and independent tab state', () => {

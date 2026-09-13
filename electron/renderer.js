@@ -688,6 +688,7 @@ const scanningEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'requiredCrew', label: 'Required Crew' }),
   Object.freeze({ id: 'sduMax', label: 'SDU Max' }),
   Object.freeze({ id: 'atlasPerScan', label: 'Atlas / Scan' }),
+  Object.freeze({ id: 'txsDaily', label: 'Txs Daily' }),
   Object.freeze({ id: 'scanAttempts', label: 'Scan Attempts' }),
   Object.freeze({ id: 'successfulScans', label: 'Successful Scans' }),
   Object.freeze({ id: 'scanSuccessRate', label: 'Scan Success Rate' }),
@@ -902,7 +903,7 @@ const earningsColumnsBySubtab = Object.freeze({
 });
 
 const earningsColumnState = {
-  scanning: new Set(['sduMax', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
+  scanning: new Set(['sduMax', 'txsDaily', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   cargo: new Set(['txsDaily', 'cargoCycles', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
   cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
@@ -937,6 +938,7 @@ function restoreEarningsColumnState() {
           .filter((column) => !['costedQuantity', 'uncostedQuantity'].includes(column.id))
           .map((column) => column.id);
       }
+      if (subtab === 'scanning' && Number(saved.schemaVersion || 1) < 5) restoredIds.push('txsDaily');
       const validIds = new Set(getEarningsColumns(subtab).map((column) => column.id));
       earningsColumnState[subtab] = new Set(restoredIds.filter((id) => validIds.has(id)));
     }
@@ -948,7 +950,7 @@ function restoreEarningsColumnState() {
 function persistEarningsColumnState() {
   try {
     const serialized = {
-      schemaVersion: 4,
+      schemaVersion: 5,
       ...Object.fromEntries(Object.entries(earningsColumnState).map(([subtab, selected]) => [subtab, Array.from(selected)])),
     };
     localStorage.setItem(EARNINGS_COLUMN_STORAGE_KEY, JSON.stringify(serialized));
@@ -6196,7 +6198,7 @@ function aggregateTotalFleetRows(subtab, rows) {
     ];
     if (subtab === 'scanning') {
       sumFiniteEarningsFields(total, groupRows, [
-        ...commonFields, 'expectedSduPerScan', 'expectedSduValueAtl', 'scanAttempts',
+        ...commonFields, 'expectedSduPerScan', 'expectedSduValueAtl', 'txsDaily', 'scanAttempts',
         'successfulScans', 'sduFound',
       ]);
       total.scanSuccessRatePercent = total.scanAttempts > 0 ? (total.successfulScans / total.scanAttempts) * 100 : null;
@@ -6508,6 +6510,7 @@ function createEarningsOptionalCell(entry, columnId, colorMap) {
   if (columnId === 'requiredCrew') return createTextCell(entry.totalRequiredCrew == null ? '--' : formatWholeNumber(entry.totalRequiredCrew));
   if (columnId === 'sduMax') return createTextCell(entry.expectedSduPerScan == null ? '--' : formatWholeNumber(entry.expectedSduPerScan));
   if (columnId === 'atlasPerScan') return createTextCell(entry.expectedSduValueAtl == null ? '--' : formatAtlasNumber(entry.expectedSduValueAtl, 2));
+  if (columnId === 'txsDaily') return createTextCell(entry.txsDaily == null ? 'N/A' : formatWholeNumber(entry.txsDaily));
   if (columnId === 'scanAttempts') return createTextCell(formatWholeNumber(entry.scanAttempts || 0));
   if (columnId === 'successfulScans') return createTextCell(formatWholeNumber(entry.successfulScans || 0));
   if (columnId === 'scanSuccessRate') return createTextCell(formatPercentNumber(entry.scanSuccessRatePercent, 1));
