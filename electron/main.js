@@ -319,7 +319,7 @@ const shipFieldOffsets = Object.freeze({
   sizeClass: 137,
 });
 
-let aephiaResourceCache = null;
+const aephiaResourceCache = createAsyncTtlCache({ ttlMs: 5 * 60 * 1000 });
 const aephiaPriceSeriesCache = new Map();
 let aephiaLpSummaryCache = null;
 let tokenPriceCache = null;
@@ -4384,13 +4384,12 @@ async function fetchFactionRedeemedLpByDate(settings) {
 }
 
 async function fetchAephiaResourceData() {
-  const now = Date.now();
-  if (aephiaResourceCache && aephiaResourceCache.expiresAt > now) return aephiaResourceCache.data;
-  const response = await fetch(AEPHIA_RESOURCE_URL);
-  if (!response.ok) throw new Error(`aephia_resource_${response.status}`);
-  const data = await response.json();
-  aephiaResourceCache = { data: Array.isArray(data) ? data : [], expiresAt: now + 5 * 60 * 1000 };
-  return aephiaResourceCache.data;
+  return aephiaResourceCache.get('resources', async () => {
+    const response = await fetch(AEPHIA_RESOURCE_URL);
+    if (!response.ok) throw new Error(`aephia_resource_${response.status}`);
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  });
 }
 
 async function fetchAephiaSeries(pathname) {

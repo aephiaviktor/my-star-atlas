@@ -33,6 +33,12 @@ test('earnings raw history is persisted in a profile-local SQLite cache without 
   assert.doesNotMatch(sqliteCache, /normalizedSourceDescriptor[\s\S]*influxAuthToken/);
 });
 
+test('historical Cargo Fuel valuation shares one resource-discovery request across all source records', () => {
+  assert.match(main, /const aephiaResourceCache = createAsyncTtlCache\(\{ ttlMs: 5 \* 60 \* 1000 \}\)/);
+  assert.match(main, /return aephiaResourceCache\.get\('resources', async \(\) => \{/);
+  assert.doesNotMatch(main, /aephiaResourceCache = \{ data:/);
+});
+
 test('earnings snapshot keeps Mining and Scanning isolated while Cargo selects every canonical exporter', () => {
   assert.match(main, /selectRawRecordsForExporters\(rawCargoCosts\.records, transactionExportersForFaction\(settings\.faction\)\)/);
   assert.match(main, /assignmentRecoveredTransactionRecords = recoverFleetTransactionAssignments\(canonicalTransactionRawRecords, transactionAssignmentEvidence\)/);
