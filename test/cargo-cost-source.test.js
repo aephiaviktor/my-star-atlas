@@ -549,6 +549,23 @@ test('Cargo accepts the live historical-price timestamp shape for the requested 
   }, '2026-09-14').status, 'incomplete');
 });
 
+test('Cargo resolves each asset and UTC-day price once instead of once per source event', async () => {
+  const records = Array.from({ length: 1000 }, (_, index) => ({
+    eventType: index % 2 ? 'fuel' : 'sol_fee',
+    timestamp: '2026-09-14T12:00:00.000Z',
+    fuelQuantity: '1', txFeeLamports: '5000',
+  }));
+  let calls = 0;
+  const valued = await valueCanonicalRawCosts(records, {
+    resolvePrice: async () => {
+      calls += 1;
+      return { status: 'complete', priceATL: 1, priceATLExact: '1', effectiveUtcDate: '2026-09-14' };
+    },
+  });
+  assert.equal(valued.length, 1000);
+  assert.equal(calls, 2);
+});
+
 test('malformed identity is quality failure and raw query has no aggregation or cadence', () => {
   const bad = projectRawCostEvents([fuel({ eventIdentity: '' })]);
   assert.equal(bad.rejected[0].reason, 'source_identity_missing');

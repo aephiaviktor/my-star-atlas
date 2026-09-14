@@ -570,10 +570,14 @@ function applyRawCostsToCargoAllocations(rows = [], rawDailyRows = [], cutoverUt
 
 async function valueCanonicalRawCosts(records, { resolvePrice, resolveFuelPrice } = {}) {
   const resolver = resolvePrice || resolveFuelPrice;
+  const prices = new Map();
   return Promise.all(records.map(async (record) => {
     if (typeof resolver !== 'function') return record;
     const asset = record.eventType === 'fuel' ? 'Fuel' : 'SOL';
-    const result = await resolver(asset, utcDay(record.timestamp));
+    const eventDay = utcDay(record.timestamp);
+    const key = `${asset}\n${eventDay}`;
+    if (!prices.has(key)) prices.set(key, Promise.resolve().then(() => resolver(asset, eventDay)));
+    const result = await prices.get(key);
     return { ...record, valuation: valueNativeCost(record, result) };
   }));
 }
