@@ -99,7 +99,8 @@ const { revalueMarketplaceScanWithHistoricalSol } = require('./marketplace-histo
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
 const {
   RAW_COST_CUTOVER_MANIFEST_VERSION, queryRawCostRowsBatched,
-  selectLegacyRawCutover, exporterForFaction, miningExporterForFaction, transactionExportersForFaction, selectRawRecordsForExporters,
+  selectLegacyRawCutover, exporterForFaction, miningExporterForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
+  transactionQueryBatchMsForFaction, selectRawRecordsForExporters,
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
   valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
 } = require('./cargo-cost-source');
@@ -7674,7 +7675,9 @@ async function fetchCanonicalRawCargoCosts(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return { records: [], rejected: [], queryMode: 'unconfigured' };
   const projected = await queryRawCostRowsBatched({
     bucket: settings.influxBucket,
-    scopes: transactionExportersForFaction(settings.faction),
+    scopes: transactionQueryScopesForFaction(settings.faction),
+    batchMs: transactionQueryBatchMsForFaction(settings.faction),
+    concurrency: 4,
     query: (flux) => queryInfluxFlux(settings, flux),
     parseCsv: parseInfluxCsv,
   });

@@ -57,10 +57,33 @@ function buildRawCostFluxQuery(bucket, window = null, scope = null) {
   }
   let scopeFilter = '';
   if (scope != null) {
-    const faction = fluxString(scope.faction);
-    const instance = fluxString(scope.instance);
-    if (!faction || !instance) throw new TypeError('raw_cost_invalid_query_scope');
-    scopeFilter = `\n  |> filter(fn: (r) => r.faction == "${faction}" and r.instance == "${instance}")`;
+    const scopeClause = (entry, includeFaction = false) => {
+      const parts = [];
+      if (includeFaction) {
+        const faction = fluxString(entry?.faction);
+        if (!faction) throw new TypeError('raw_cost_invalid_query_scope');
+        parts.push(`r.faction == "${faction}"`);
+      }
+      const instance = fluxString(entry?.instance);
+      if (!instance) throw new TypeError('raw_cost_invalid_query_scope');
+      parts.push(`r.instance == "${instance}"`);
+      const eventType = fluxString(entry?.eventType);
+      if (eventType) parts.push(`r.eventType == "${eventType}"`);
+      if (Array.isArray(entry?.assignments) && entry.assignments.length) {
+        const assignmentClauses = entry.assignments.map(fluxString).map((assignment) => assignment
+          ? `r.assignment == "${assignment}"`
+          : 'not exists r.assignment or r.assignment == ""');
+        parts.push(`(${assignmentClauses.join(' or ')})`);
+      }
+      return parts.join(' and ');
+    };
+    if (Array.isArray(scope.alternatives) && scope.alternatives.length) {
+      const faction = fluxString(scope.faction);
+      if (!faction) throw new TypeError('raw_cost_invalid_query_scope');
+      scopeFilter = `\n  |> filter(fn: (r) => r.faction == "${faction}" and (${scope.alternatives.map((entry) => `(${scopeClause(entry)})`).join(' or ')}))`;
+    } else {
+      scopeFilter = `\n  |> filter(fn: (r) => ${scopeClause(scope, true)})`;
+    }
   }
   return `from(bucket: "${escaped}")\n  |> ${range}\n  |> filter(fn: (r) => r._measurement == "cargo_cost_source_event_v1")\n  |> filter(fn: (r) => exists r.schemaVersion and r.schemaVersion == "${RAW_COST_SCHEMA_VERSION}")\n  |> pivot(rowKey: ["_time", "eventType", "eventIdentity", "schemaVersion"], columnKey: ["_field"], valueColumn: "_value")${scopeFilter}\n  |> keep(columns: ["_time", "eventType", "eventIdentity", "schemaVersion", "fuelQuantity", "movementEventId", "cycleId", "movementIndex", "txFeeLamports", "transactionSignature", "eventPosition", "timestampProvenance", "sourceProvenance", "faction", "instance", "fleetAccount", "fleetLabel", "assignment"])\n  |> sort(columns: ["_time", "eventIdentity"])`;
 }
@@ -86,16 +109,21 @@ function isRawCostCapacityError(error) {
     .test(String(error?.message || error || ''));
 }
 
-async function queryRawCostRowsBatched({ bucket, scope = null, scopes = null, query, parseCsv, projectRows = projectRawCostEvents, now = new Date() } = {}) {
+async function queryRawCostRowsBatched({ bucket, scope = null, scopes = null, batchMs = RAW_COST_BATCH_MS, concurrency = 1, query, parseCsv, projectRows = projectRawCostEvents, now = new Date() } = {}) {
   if (typeof query !== 'function' || typeof parseCsv !== 'function' || typeof projectRows !== 'function') {
     throw new TypeError('raw_cost_query_dependencies_required');
   }
   const rows = [];
+  const projector = projectRows === projectRawCostEvents ? createRawCostEventProjector() : null;
   const selectedScopes = Array.isArray(scopes) && scopes.length ? scopes : [scope];
+  const consume = (csv) => {
+    const parsed = parseCsv(csv);
+    if (projector) projector.addRows(parsed);
+    else for (const row of parsed) rows.push(row);
+  };
   const queryWindow = async (window, selectedScope) => {
     try {
-      const csv = await query(buildRawCostFluxQuery(bucket, window, selectedScope), window, selectedScope);
-      for (const row of parseCsv(csv)) rows.push(row);
+      consume(await query(buildRawCostFluxQuery(bucket, window, selectedScope), window, selectedScope));
     } catch (error) {
       const startMs = Date.parse(window.start);
       const stopMs = Date.parse(window.stop);
@@ -105,72 +133,91 @@ async function queryRawCostRowsBatched({ bucket, scope = null, scopes = null, qu
       await queryWindow({ start: new Date(midpoint).toISOString(), stop: window.stop }, selectedScope);
     }
   };
-  for (const selectedScope of selectedScopes) {
-    for (const window of rawCostTimeBatches({ now })) await queryWindow(window, selectedScope);
-  }
-  return projectRows(rows);
+  const jobs = selectedScopes.flatMap((selectedScope) => rawCostTimeBatches({ now, batchMs })
+    .map((window) => ({ window, selectedScope })));
+  let cursor = 0;
+  const workerCount = Math.min(jobs.length || 1, Math.max(1, Math.min(4, Math.trunc(Number(concurrency) || 1))));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (cursor < jobs.length) {
+      const job = jobs[cursor];
+      cursor += 1;
+      await queryWindow(job.window, job.selectedScope);
+    }
+  }));
+  return projector ? projector.result() : projectRows(rows);
 }
 
-function projectRawCostEvents(rows = []) {
+function createRawCostEventProjector() {
   const records = new Map();
   const conflicted = new Set();
   const rejected = [];
-  for (const row of rows || []) {
-    if (clean(row.schemaVersion) !== RAW_COST_SCHEMA_VERSION) continue;
-    const eventType = clean(row.eventType);
-    const eventIdentity = clean(row.eventIdentity);
-    const faction = clean(row.faction);
-    const instance = clean(row.instance);
-    const timestamp = new Date(row._time);
-    const commonValid = eventIdentity && faction && instance
-      && !Number.isNaN(timestamp.getTime()) && clean(row.timestampProvenance)
-      && clean(row.sourceProvenance);
-    if (!commonValid) {
-      rejected.push({ reason: eventIdentity ? 'invalid_source_event' : 'source_identity_missing', eventIdentity: eventIdentity || null });
-      continue;
-    }
-    const record = {
-      id: canonicalRawCostIdentity({ faction, instance, eventType, eventIdentity }),
-      schemaVersion: 1, eventType, eventIdentity, faction, instance,
-      timestamp: timestamp.toISOString(), timestampProvenance: clean(row.timestampProvenance),
-      sourceProvenance: clean(row.sourceProvenance), fleetAccount: clean(row.fleetAccount),
-      fleetLabel: clean(row.fleetLabel), assignment: clean(row.assignment),
-      fuelQuantity: null, movementEventId: null, cycleId: null, movementIndex: null,
-      txFeeLamports: null, transactionSignature: null, eventPosition: null,
-      valuation: { status: 'incomplete', amountATL: null },
-    };
-    if (eventType === 'fuel') {
-      const quantity = exactPositiveDecimal(row.fuelQuantity);
-      const movementIndex = exactUnsigned(row.movementIndex);
-      if (!quantity || !clean(row.movementEventId) || !clean(row.cycleId) || !movementIndex) {
+  const addRows = (rows = []) => {
+    for (const row of rows || []) {
+      if (clean(row.schemaVersion) !== RAW_COST_SCHEMA_VERSION) continue;
+      const eventType = clean(row.eventType);
+      const eventIdentity = clean(row.eventIdentity);
+      const faction = clean(row.faction);
+      const instance = clean(row.instance);
+      const timestamp = new Date(row._time);
+      const commonValid = eventIdentity && faction && instance
+        && !Number.isNaN(timestamp.getTime()) && clean(row.timestampProvenance)
+        && clean(row.sourceProvenance);
+      if (!commonValid) {
+        rejected.push({ reason: eventIdentity ? 'invalid_source_event' : 'source_identity_missing', eventIdentity: eventIdentity || null });
+        continue;
+      }
+      const record = {
+        id: canonicalRawCostIdentity({ faction, instance, eventType, eventIdentity }),
+        schemaVersion: 1, eventType, eventIdentity, faction, instance,
+        timestamp: timestamp.toISOString(), timestampProvenance: clean(row.timestampProvenance),
+        sourceProvenance: clean(row.sourceProvenance), fleetAccount: clean(row.fleetAccount),
+        fleetLabel: clean(row.fleetLabel), assignment: clean(row.assignment),
+        fuelQuantity: null, movementEventId: null, cycleId: null, movementIndex: null,
+        txFeeLamports: null, transactionSignature: null, eventPosition: null,
+        valuation: { status: 'incomplete', amountATL: null },
+      };
+      if (eventType === 'fuel') {
+        const quantity = exactPositiveDecimal(row.fuelQuantity);
+        const movementIndex = exactUnsigned(row.movementIndex);
+        if (!quantity || !clean(row.movementEventId) || !clean(row.cycleId) || !movementIndex) {
+          rejected.push({ reason: 'invalid_source_event', eventIdentity });
+          continue;
+        }
+        Object.assign(record, { fuelQuantity: quantity, movementEventId: clean(row.movementEventId), cycleId: clean(row.cycleId), movementIndex });
+      } else if (eventType === 'sol_fee') {
+        const lamports = exactUnsigned(row.txFeeLamports);
+        const position = clean(row.eventPosition);
+        if (!lamports || lamports === '0' || !clean(row.transactionSignature) || (position && !exactUnsigned(position))) {
+          rejected.push({ reason: 'invalid_source_event', eventIdentity });
+          continue;
+        }
+        Object.assign(record, { txFeeLamports: lamports, transactionSignature: clean(row.transactionSignature), eventPosition: position ? exactUnsigned(position) : null });
+      } else {
         rejected.push({ reason: 'invalid_source_event', eventIdentity });
         continue;
       }
-      Object.assign(record, { fuelQuantity: quantity, movementEventId: clean(row.movementEventId), cycleId: clean(row.cycleId), movementIndex });
-    } else if (eventType === 'sol_fee') {
-      const lamports = exactUnsigned(row.txFeeLamports);
-      const position = clean(row.eventPosition);
-      if (!lamports || lamports === '0' || !clean(row.transactionSignature) || (position && !exactUnsigned(position))) {
-        rejected.push({ reason: 'invalid_source_event', eventIdentity });
+      const existing = records.get(record.id);
+      if (existing && immutableSourcePayload(existing) !== immutableSourcePayload(record)) {
+        records.delete(record.id);
+        conflicted.add(record.id);
+        rejected.push({ reason: 'source_identity_conflict', eventIdentity, id: record.id });
         continue;
       }
-      Object.assign(record, { txFeeLamports: lamports, transactionSignature: clean(row.transactionSignature), eventPosition: position ? exactUnsigned(position) : null });
-    } else {
-      rejected.push({ reason: 'invalid_source_event', eventIdentity });
-      continue;
+      if (!conflicted.has(record.id) && (!existing || canonicalPayload(record) < canonicalPayload(existing))) {
+        records.set(record.id, record);
+      }
     }
-    const existing = records.get(record.id);
-    if (existing && immutableSourcePayload(existing) !== immutableSourcePayload(record)) {
-      records.delete(record.id);
-      conflicted.add(record.id);
-      rejected.push({ reason: 'source_identity_conflict', eventIdentity, id: record.id });
-      continue;
-    }
-    if (!conflicted.has(record.id) && (!existing || canonicalPayload(record) < canonicalPayload(existing))) {
-      records.set(record.id, record);
-    }
-  }
-  return { records: Array.from(records.values()), rejected };
+  };
+  return {
+    addRows,
+    result: () => ({ records: Array.from(records.values()), rejected: [...rejected] }),
+  };
+}
+
+function projectRawCostEvents(rows = []) {
+  const projector = createRawCostEventProjector();
+  projector.addRows(rows);
+  return projector.result();
 }
 
 function getRawCostCutover(faction, instance) { return RAW_COST_CUTOVERS[`${clean(faction)}\n${clean(instance)}`] || null; }
@@ -213,6 +260,22 @@ function transactionExportersForFaction(faction) {
   const mining = miningExporterForFaction(faction);
   if (!scanning) return [];
   return mining.instance === scanning.instance ? [scanning] : [mining, scanning];
+}
+
+function transactionQueryScopesForFaction(faction) {
+  const exporters = transactionExportersForFaction(faction);
+  if (exporters.length !== 2) return exporters;
+  return [{
+    faction: exporters[0].faction,
+    alternatives: [
+      { instance: exporters[0].instance, eventType: 'sol_fee', assignments: ['Mine', ''] },
+      { instance: exporters[1].instance },
+    ],
+  }];
+}
+
+function transactionQueryBatchMsForFaction(faction) {
+  return exporterForFaction(faction)?.faction === 'UST' ? RAW_COST_MIN_BATCH_MS : RAW_COST_BATCH_MS;
 }
 
 function selectRawRecordsForExporters(records = [], exporters = []) {
@@ -457,7 +520,8 @@ module.exports = {
   RAW_COST_CUTOVER_UTC, RAW_COST_CUTOVERS, buildRawCostFluxQuery, canonicalRawCostIdentity,
   rawCostTimeBatches, queryRawCostRowsBatched,
   projectRawCostEvents, selectLegacyRawCutover, getRawCostCutover, lamportsToSolDecimal, rawCostDigest,
-  exporterForFaction, miningExporterForFaction, transactionExportersForFaction, selectRawRecordsForExporters,
+  exporterForFaction, miningExporterForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
+  transactionQueryBatchMsForFaction, selectRawRecordsForExporters,
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
   buildCanonicalRawCostPool, valueNativeCost, multiplyExactDecimals,
   requireSameDateCargoPrice, requireCargoFuelPrice,

@@ -7,7 +7,8 @@ const {
   projectRawCostEvents, selectLegacyRawCutover, lamportsToSolDecimal, rawCostDigest,
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
   buildCanonicalRawCostPool, queryRawCostRowsBatched, rawCostTimeBatches,
-  miningExporterForFaction, transactionExportersForFaction, selectRawRecordsForExporters,
+  miningExporterForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
+  selectRawRecordsForExporters,
 } = require('../electron/cargo-cost-source');
 
 const fuel = (overrides = {}) => ({ _time: '2026-08-05T00:01:02.003Z', schemaVersion: '1', eventType: 'fuel', eventIdentity: 'fuel:cycle:0', fuelQuantity: '12.500000000000001', movementEventId: 'cycle:0', cycleId: 'cycle', movementIndex: '0', timestampProvenance: 'solana_block_time', sourceProvenance: 'confirmed_movement', faction: 'MUD', instance: 'MUD', fleetAccount: 'fleet', fleetLabel: 'Fleet', assignment: 'Transport', ...overrides });
@@ -140,24 +141,45 @@ test('oversized daily raw queries split to six-hour windows and merge before pro
   assert.equal(projectCalls, 1, 'deduplication/conflict handling must remain global across batches');
 });
 
-test('USTUR transaction history queries mining and scanning instances before one global projection', async () => {
+test('USTUR transaction history queries only Mining fees from USTUR1 plus the established USTUR2 stream', async () => {
   assert.deepEqual(miningExporterForFaction('USTUR'), { faction: 'UST', instance: 'USTUR1' });
   assert.deepEqual(miningExporterForFaction('MUD'), { faction: 'MUD', instance: 'MUD' });
-  const scopes = transactionExportersForFaction('USTUR');
-  assert.deepEqual(scopes, [
+  assert.deepEqual(transactionExportersForFaction('USTUR'), [
     { faction: 'UST', instance: 'USTUR1' },
     { faction: 'UST', instance: 'USTUR2' },
   ]);
+  const scopes = transactionQueryScopesForFaction('USTUR');
+  assert.deepEqual(scopes, [{
+    faction: 'UST',
+    alternatives: [
+      { instance: 'USTUR1', eventType: 'sol_fee', assignments: ['Mine', ''] },
+      { instance: 'USTUR2' },
+    ],
+  }]);
   const calls = [];
+  let active = 0;
+  let maxActive = 0;
   let projectCalls = 0;
   const result = await queryRawCostRowsBatched({
     bucket: 'bucket',
     scopes,
+    batchMs: 6 * 60 * 60 * 1000,
+    concurrency: 4,
     now: new Date('2026-09-13T16:00:00.000Z'),
     query: async (flux, batch, scope) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
       calls.push({ batch, scope });
-      assert.match(flux, new RegExp(`r\\.faction == "${scope.faction}" and r\\.instance == "${scope.instance}"`));
-      return [{ _time: batch.start, ...scope }];
+      assert.match(flux, /r\.faction == "UST"/);
+      assert.match(flux, /r\.instance == "USTUR1"/);
+      assert.match(flux, /r\.eventType == "sol_fee"/);
+      assert.match(flux, /not exists r\.assignment/);
+      assert.match(flux, /r\.assignment == "Mine"/);
+      assert.match(flux, /r\.assignment == ""/);
+      assert.match(flux, /r\.instance == "USTUR2"/);
+      await new Promise((resolve) => setImmediate(resolve));
+      active -= 1;
+      return [{ _time: batch.start, faction: scope.faction }];
     },
     parseCsv: (rows) => rows,
     projectRows: (rows) => {
@@ -165,9 +187,30 @@ test('USTUR transaction history queries mining and scanning instances before one
       return { records: rows, rejected: [] };
     },
   });
-  assert.equal(calls.length, 62);
-  assert.equal(result.records.length, 62);
-  assert.equal(projectCalls, 1, 'deduplication/conflict handling must remain global across both instances');
+  assert.equal(calls.length, 124);
+  assert.equal(result.records.length, 124);
+  assert.equal(maxActive, 4);
+  assert.equal(projectCalls, 1, 'deduplication/conflict handling must remain global across all chunks');
+});
+
+test('streaming projection preserves cross-chunk identity conflicts without retaining raw history', async () => {
+  let calls = 0;
+  const result = await queryRawCostRowsBatched({
+    bucket: 'bucket',
+    scope: { faction: 'MUD', instance: 'MUD' },
+    now: new Date('2026-09-13T16:00:00.000Z'),
+    query: async () => {
+      calls += 1;
+      if (calls === 1) return [fuel()];
+      if (calls === 2) return [fuel({ fuelQuantity: '13' })];
+      return [];
+    },
+    parseCsv: (rows) => rows,
+  });
+  assert.equal(calls, 31);
+  assert.equal(result.records.length, 0);
+  assert.equal(result.rejected.length, 1);
+  assert.equal(result.rejected[0].reason, 'source_identity_conflict');
 });
 
 test('non-capacity raw query failures remain fail-closed instead of being multiplied', async () => {

@@ -11,7 +11,9 @@ const projector = fs.readFileSync(path.join(__dirname, '..', 'electron/cargo-all
 test('earnings snapshot fetches raw points through bounded adaptive Influx batches', () => {
   assert.match(main, /fetchCanonicalRawCargoCosts/);
   assert.match(main, /queryRawCostRowsBatched\(\{/);
-  assert.match(main, /scopes: transactionExportersForFaction\(settings\.faction\)/);
+  assert.match(main, /scopes: transactionQueryScopesForFaction\(settings\.faction\)/);
+  assert.match(main, /batchMs: transactionQueryBatchMsForFaction\(settings\.faction\)/);
+  assert.match(main, /concurrency: 4/);
   assert.match(main, /query: \(flux\) => queryInfluxFlux\(settings, flux\)/);
   assert.match(main, /queryMode: 'bounded_adaptive_batches'/);
   assert.match(main, /\(\) => fetchCanonicalRawCargoCosts\(settings\)/);
