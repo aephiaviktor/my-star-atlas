@@ -9,7 +9,7 @@ const {
   buildCanonicalRawCostPool, queryRawCostRowsBatched, rawCostTimeBatches,
   rawCostAlignedTimeBatches,
   miningExporterForFaction, cargoExportersForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
-  selectRawRecordsForExporters,
+  selectRawRecordsForExporters, requireCargoFuelPrice,
 } = require('../electron/cargo-cost-source');
 
 const fuel = (overrides = {}) => ({ _time: '2026-08-05T00:01:02.003Z', schemaVersion: '1', eventType: 'fuel', eventIdentity: 'fuel:cycle:0', fuelQuantity: '12.500000000000001', movementEventId: 'cycle:0', cycleId: 'cycle', movementIndex: '0', timestampProvenance: 'solana_block_time', sourceProvenance: 'confirmed_movement', faction: 'MUD', instance: 'MUD', fleetAccount: 'fleet', fleetLabel: 'Fleet', assignment: 'Transport', ...overrides });
@@ -532,6 +532,21 @@ test('post-seed missing price remains incomplete and null, never zero', async ()
   assert.equal(valued.valuation.status, 'incomplete');
   assert.equal(valued.valuation.amountATL, null);
   assert.equal(valued.valuation.effectiveUtcDate, '2026-08-05');
+});
+
+test('Cargo accepts the live historical-price timestamp shape for the requested UTC day', () => {
+  const accepted = requireCargoFuelPrice({
+    status: 'complete', priceATL: 0.0042, priceATLExact: '0.0042',
+    effectiveTimestamp: '2026-09-14T00:00:00.000Z',
+    observedAt: '2026-09-13T18:00:00.000Z', source: 'Aephia asset series',
+  }, '2026-09-14');
+  assert.equal(accepted.status, 'complete');
+  assert.equal(accepted.effectiveUtcDate, '2026-09-14');
+  assert.equal(accepted.priceDay, '2026-09-13');
+  assert.equal(requireCargoFuelPrice({
+    status: 'complete', priceATL: 0.0042,
+    effectiveTimestamp: '2026-09-13T00:00:00.000Z',
+  }, '2026-09-14').status, 'incomplete');
 });
 
 test('malformed identity is quality failure and raw query has no aggregation or cadence', () => {

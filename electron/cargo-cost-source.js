@@ -483,8 +483,8 @@ function requireSameDateCargoPrice(price, isoDate) {
 
 function requireCargoFuelPrice(price, isoDate) {
   const eventDay = clean(isoDate);
-  const priceDay = clean(price?.priceDay || price?.effectiveUtcDate);
-  const effectiveUtcDate = clean(price?.effectiveUtcDate);
+  const effectiveUtcDate = clean(price?.effectiveUtcDate) || utcDay(price?.effectiveTimestamp);
+  const priceDay = clean(price?.priceDay) || utcDay(price?.observedAt) || effectiveUtcDate;
   const priceATL = Number(price?.priceATLExact ?? price?.priceATL);
   const approved = ['complete', 'provisional'].includes(price?.status) && effectiveUtcDate === eventDay;
   if (!eventDay || !Number.isFinite(priceATL) || priceATL <= 0 || !approved) {
@@ -494,7 +494,8 @@ function requireCargoFuelPrice(price, isoDate) {
       source: price?.source, reason: 'cargo_fuel_price_unavailable',
     };
   }
-  return price;
+  if (clean(price?.priceDay) === priceDay && clean(price?.effectiveUtcDate) === effectiveUtcDate) return price;
+  return { ...price, priceDay, effectiveUtcDate };
 }
 
 function exactShares(total, weights) {
