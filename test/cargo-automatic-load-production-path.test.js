@@ -49,6 +49,20 @@ test('automatic prefetch reaches only shared Earnings while Allocation is on dem
  assert.match(renderer,/api\.getEarningsSnapshot\(settings\)/);
  assert.match(renderer,/activeCargoTable === 'allocation'\) refreshCargoAllocation\(\)/);
 });
+test('shared Earnings IPC omits large internal projection collections that freeze navigation',()=>{
+ const response=main.slice(main.lastIndexOf('return {',main.indexOf('function createWindow')),main.indexOf('function createWindow'));
+ const internals={
+  cargoCostPool:'cargoCostCount',
+  inventoryCostLedgerEvents:'inventoryCostLedgerEventCount',
+  inventoryCostLedgerAppliedEventResults:'inventoryCostLedgerAppliedEventCount',
+  inventoryReconciliationEvents:'inventoryReconciliationEventCount',
+  inventoryCostLedgerRejectedEvents:'inventoryCostLedgerRejectedEventCount',
+ };
+ for(const [internal,count] of Object.entries(internals)) {
+  assert.doesNotMatch(response,new RegExp(`\\n\\s*${internal},`));
+  assert.match(response,new RegExp(`\\n\\s*${count}:`));
+ }
+});
 test('allocation renderer distinguishes empty, loading, and unavailable states',()=>{
  const scope={faction:'MUD',playerProfile:'player'};
  assert.equal(acceptCargoAllocationResponse({ok:true,availability:'empty',rows:[]},scope,scope).state.cargoAllocationAvailability,'empty');
