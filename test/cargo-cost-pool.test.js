@@ -2,6 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildCargoCostPool, mergeCargoCostPools } = require('../electron/cargo-cost-pool');
 
+test('large Cargo cost pools merge without argument-spread call-stack overflow', () => {
+  const count = 150000;
+  const references = Array.from({ length: count }, (_, index) => ({ costId: `cost-${index}` }));
+  const pending = Array.from({ length: count }, (_, index) => ({ reason: `pending-${index}` }));
+  const merged = mergeCargoCostPools({ costs: [], references, pending });
+  assert.equal(merged.references.length, count);
+  assert.equal(merged.pending.length, count);
+});
+
 const rental = { kind: 'rental', daily: true, contractId: 'contract-1', amount: 12, currency: 'ATLAS', timestamp: '2026-08-04T00:00:00Z' };
 const tx = (signature, instructionIndex = 0) => ({ kind: 'transaction', transactionSignature: signature, instructionIndex, amount: 0.01, currency: 'SOL', timestamp: '2026-08-04T10:00:00Z' });
 

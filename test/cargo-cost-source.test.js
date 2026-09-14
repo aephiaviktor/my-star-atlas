@@ -8,7 +8,7 @@ const {
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
   buildCanonicalRawCostPool, queryRawCostRowsBatched, rawCostTimeBatches,
   rawCostAlignedTimeBatches,
-  miningExporterForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
+  miningExporterForFaction, cargoExportersForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
   selectRawRecordsForExporters,
 } = require('../electron/cargo-cost-source');
 
@@ -243,18 +243,25 @@ test('oversized daily raw queries split to six-hour windows and merge before pro
   assert.equal(projectCalls, 1, 'deduplication/conflict handling must remain global across batches');
 });
 
-test('USTUR transaction history queries only Mining fees from USTUR1 plus the established USTUR2 stream', async () => {
+test('USTUR transaction history queries Mining and Cargo evidence from USTUR1 plus the established USTUR2 stream', async () => {
   assert.deepEqual(miningExporterForFaction('USTUR'), { faction: 'UST', instance: 'USTUR1' });
   assert.deepEqual(miningExporterForFaction('MUD'), { faction: 'MUD', instance: 'MUD' });
   assert.deepEqual(transactionExportersForFaction('USTUR'), [
     { faction: 'UST', instance: 'USTUR1' },
     { faction: 'UST', instance: 'USTUR2' },
   ]);
+  assert.deepEqual(cargoExportersForFaction('USTUR'), [
+    { faction: 'UST', instance: 'USTUR1' },
+    { faction: 'UST', instance: 'USTUR2' },
+  ]);
+  assert.deepEqual(cargoExportersForFaction('MUD'), [{ faction: 'MUD', instance: 'MUD' }]);
+  assert.deepEqual(cargoExportersForFaction('ONI'), [{ faction: 'ONI', instance: 'ONI' }]);
   const scopes = transactionQueryScopesForFaction('USTUR');
   assert.deepEqual(scopes, [{
     faction: 'UST',
     alternatives: [
-      { instance: 'USTUR1', eventType: 'sol_fee', assignments: ['Mine', ''] },
+      { instance: 'USTUR1', eventType: 'sol_fee', assignments: ['Mine', 'Transport', 'Supply Chain', ''] },
+      { instance: 'USTUR1', eventType: 'fuel', assignments: ['Transport', 'Supply Chain'] },
       { instance: 'USTUR2' },
     ],
   }]);
@@ -277,6 +284,9 @@ test('USTUR transaction history queries only Mining fees from USTUR1 plus the es
       assert.match(flux, /r\.eventType == "sol_fee"/);
       assert.match(flux, /not exists r\.assignment/);
       assert.match(flux, /r\.assignment == "Mine"/);
+      assert.match(flux, /r\.assignment == "Transport"/);
+      assert.match(flux, /r\.assignment == "Supply Chain"/);
+      assert.match(flux, /r\.eventType == "fuel"/);
       assert.match(flux, /r\.assignment == ""/);
       assert.match(flux, /r\.instance == "USTUR2"/);
       await new Promise((resolve) => setImmediate(resolve));

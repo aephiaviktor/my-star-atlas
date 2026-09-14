@@ -33,12 +33,13 @@ test('earnings raw history is persisted in a profile-local SQLite cache without 
   assert.doesNotMatch(sqliteCache, /normalizedSourceDescriptor[\s\S]*influxAuthToken/);
 });
 
-test('earnings snapshot keeps USTUR1 mining and USTUR2 scanning transaction records separate from cargo cutover selection', () => {
+test('earnings snapshot keeps Mining and Scanning isolated while Cargo selects every canonical exporter', () => {
   assert.match(main, /selectRawRecordsForExporters\(rawCargoCosts\.records, transactionExportersForFaction\(settings\.faction\)\)/);
   assert.match(main, /assignmentRecoveredTransactionRecords = recoverFleetTransactionAssignments\(canonicalTransactionRawRecords, transactionAssignmentEvidence\)/);
   assert.match(main, /miningExporter = miningExporterForFaction\(settings\.faction\)/);
   assert.match(main, /aggregateFleetTransactionEvents\(assignmentRecoveredTransactionRecords, \{ assignments: \['Mine'\], \.\.\.miningExporter \}\)/);
-  assert.match(main, /assignmentRecoveredRawRecords = recoverFleetTransactionAssignments\(cutoverSelection\.rawRecords, transactionAssignmentEvidence\)/);
+  assert.match(main, /canonicalCargoSourceRecords = selectRawRecordsForExporters\(rawCargoCosts\.records, cargoExportersForFaction\(settings\.faction\)\)/);
+  assert.match(main, /assignmentRecoveredRawRecords = recoverFleetTransactionAssignments\(canonicalCargoSourceRecords, transactionAssignmentEvidence\)/);
 });
 
 test('dedicated Allocation applies cutover before canonical valuation', () => {

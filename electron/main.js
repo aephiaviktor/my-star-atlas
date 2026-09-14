@@ -99,7 +99,7 @@ const { revalueMarketplaceScanWithHistoricalSol } = require('./marketplace-histo
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
 const {
   RAW_COST_SCHEMA_VERSION, RAW_COST_CUTOVER_MANIFEST_VERSION, queryRawCostRowsBatched,
-  selectLegacyRawCutover, exporterForFaction, miningExporterForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
+  selectLegacyRawCutover, exporterForFaction, miningExporterForFaction, cargoExportersForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
   transactionQueryBatchMsForFaction, selectRawRecordsForExporters,
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
   valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
@@ -8060,7 +8060,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const canonicalScanningTransactions = rawExporter
     ? aggregateFleetTransactionEvents(assignmentRecoveredTransactionRecords, { assignments: ['Scan'], ...rawExporter })
     : [];
-  const assignmentRecoveredRawRecords = recoverFleetTransactionAssignments(cutoverSelection.rawRecords, transactionAssignmentEvidence);
+  const canonicalCargoSourceRecords = selectRawRecordsForExporters(rawCargoCosts.records, cargoExportersForFaction(settings.faction));
+  const assignmentRecoveredRawRecords = recoverFleetTransactionAssignments(canonicalCargoSourceRecords, transactionAssignmentEvidence);
   const canonicalCargoAssignments = ['Transport', 'Supply Chain'];
   const canonicalCargoRawRecords = assignmentRecoveredRawRecords.filter((record) => canonicalCargoAssignments.includes(record.assignment));
   const valuedCanonicalRawCosts = await valueCanonicalRawCosts(canonicalCargoRawRecords, {

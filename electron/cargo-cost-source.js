@@ -331,6 +331,14 @@ function miningExporterForFaction(faction) {
   return exporter?.faction === 'UST' ? { faction: 'UST', instance: 'USTUR1' } : exporter;
 }
 
+function cargoExportersForFaction(faction) {
+  const exporter = exporterForFaction(faction);
+  if (!exporter) return [];
+  return exporter.faction === 'UST'
+    ? [{ faction: 'UST', instance: 'USTUR1' }, exporter]
+    : [exporter];
+}
+
 function transactionExportersForFaction(faction) {
   const scanning = exporterForFaction(faction);
   const mining = miningExporterForFaction(faction);
@@ -344,7 +352,8 @@ function transactionQueryScopesForFaction(faction) {
   return [{
     faction: exporters[0].faction,
     alternatives: [
-      { instance: exporters[0].instance, eventType: 'sol_fee', assignments: ['Mine', ''] },
+      { instance: exporters[0].instance, eventType: 'sol_fee', assignments: ['Mine', 'Transport', 'Supply Chain', ''] },
+      { instance: exporters[0].instance, eventType: 'fuel', assignments: ['Transport', 'Supply Chain'] },
       { instance: exporters[1].instance },
     ],
   }];
@@ -596,7 +605,7 @@ module.exports = {
   RAW_COST_CUTOVER_UTC, RAW_COST_CUTOVERS, buildRawCostFluxQuery, canonicalRawCostIdentity,
   rawCostTimeBatches, rawCostAlignedTimeBatches, queryRawCostRowsBatched,
   projectRawCostEvents, selectLegacyRawCutover, getRawCostCutover, lamportsToSolDecimal, rawCostDigest,
-  exporterForFaction, miningExporterForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
+  exporterForFaction, miningExporterForFaction, cargoExportersForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
   transactionQueryBatchMsForFaction, selectRawRecordsForExporters,
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
   buildCanonicalRawCostPool, valueNativeCost, multiplyExactDecimals,

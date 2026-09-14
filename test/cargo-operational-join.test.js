@@ -80,6 +80,26 @@ test('Cargo/Transport authoritative row is included once and fully populated', (
   assert.equal(row.operationalStatus, 'joined');
 });
 
+test('Cargo joins canonical evidence by authoritative faction, fleet account, and UTC day across exporter instances', () => {
+  const [row] = joinCanonicalCostsWithOperationalRows({
+    costRows: [cost({ faction: 'UST', instance: 'USTUR1' })],
+    operationalRows: [op({ faction: 'UST', instance: 'USTUR2' })],
+  });
+  assert.equal(row.txsDaily, 3);
+  assert.equal(row.txCostSol, 0.000005001);
+  assert.equal(row.costEvidenceStatus, 'available');
+});
+
+test('Cargo fails closed when multiple canonical costs claim one authoritative fleet-day', () => {
+  const [row] = joinCanonicalCostsWithOperationalRows({
+    costRows: [cost({ instance: 'MUD' }), cost({ instance: 'MUD2', txsDaily: 7 })],
+    operationalRows: [op()],
+  });
+  assert.equal(row.txsDaily, null);
+  assert.equal(row.txCostSol, null);
+  assert.equal(row.costEvidenceStatus, 'unavailable');
+});
+
 test('actual ONI cutover overlap becomes one canonical fleet-day with conserved metrics', () => {
   const legacy = {
     isoDate: '2026-07-20', label: '07/20', faction: 'ONI', instance: 'ONI-1', fleetAccount: 'big-bois-account',

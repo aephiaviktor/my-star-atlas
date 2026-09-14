@@ -66,8 +66,8 @@ function mergeCargoCostPools(...pools) {
   const pending = [];
   for (const pool of pools.flat()) {
     for (const cost of pool?.costs || []) costs.set(cost.id, cost);
-    references.push(...(pool?.references || []));
-    pending.push(...(pool?.pending || []));
+    for (const reference of pool?.references || []) references.push(reference);
+    for (const entry of pool?.pending || []) pending.push(entry);
   }
   return { costs: Array.from(costs.values()), references, pending };
 }

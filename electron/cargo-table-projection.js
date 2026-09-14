@@ -27,9 +27,8 @@ function canonicalOperationalSection(assignment) {
 function operationalIdentity(row) {
   const isoDate = clean(row?.isoDate);
   const faction = clean(row?.faction);
-  const instance = clean(row?.instance);
   const fleetAccount = clean(row?.fleetAccount);
-  return isoDate && faction && instance && fleetAccount ? `${isoDate}\n${faction}\n${instance}\n${fleetAccount}` : '';
+  return isoDate && faction && fleetAccount ? `${isoDate}\n${faction}\n${fleetAccount}` : '';
 }
 function finiteOrNull(value) { return value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value); }
 function sumKnown(rows, field) {
@@ -183,14 +182,18 @@ function projectCargoFleetDateRows(rows = [], { profile = '', faction = '', sele
 
 function joinCanonicalCostsWithOperationalRows({ legacyRows = [], costRows = [], operationalRows = [] } = {}) {
   const operations = aggregateOperationalCargoRows(operationalRows);
-  const costs = new Map(costRows
-    .filter((cost) => cost?.allocationStatus !== 'unallocated')
-    .map((cost) => [operationalIdentity(cost), cost])
-    .filter(([identity]) => identity));
+  const costs = new Map();
+  for (const cost of costRows.filter((entry) => entry?.allocationStatus !== 'unallocated')) {
+    const identity = operationalIdentity(cost);
+    if (!identity) continue;
+    if (!costs.has(identity)) costs.set(identity, []);
+    costs.get(identity).push(cost);
+  }
   const canonical = Array.from(operations.entries())
     .filter(([, operation]) => canonicalOperationalSection(operation.assignment) === 'cargo')
     .map(([identity, operation]) => {
-      const matchedCost = costs.get(identity);
+      const candidates = costs.get(identity) || [];
+      const matchedCost = candidates.length === 1 ? candidates[0] : null;
       const cost = mergeComponentCosts(operation, matchedCost);
       return {
         ...cost,
