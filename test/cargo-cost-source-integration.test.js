@@ -11,11 +11,19 @@ const projector = fs.readFileSync(path.join(__dirname, '..', 'electron/cargo-all
 test('earnings snapshot fetches raw points through bounded adaptive Influx batches', () => {
   assert.match(main, /fetchCanonicalRawCargoCosts/);
   assert.match(main, /queryRawCostRowsBatched\(\{/);
-  assert.match(main, /scope: exporterForFaction\(settings\.faction\)/);
+  assert.match(main, /scopes: transactionExportersForFaction\(settings\.faction\)/);
   assert.match(main, /query: \(flux\) => queryInfluxFlux\(settings, flux\)/);
   assert.match(main, /queryMode: 'bounded_adaptive_batches'/);
   assert.match(main, /\(\) => fetchCanonicalRawCargoCosts\(settings\)/);
   assert.doesNotMatch(source, /fetch\(|Connection\(|setInterval|setTimeout|price.*fetch|RPC/i);
+});
+
+test('earnings snapshot keeps USTUR1 mining and USTUR2 scanning transaction records separate from cargo cutover selection', () => {
+  assert.match(main, /selectRawRecordsForExporters\(rawCargoCosts\.records, transactionExportersForFaction\(settings\.faction\)\)/);
+  assert.match(main, /assignmentRecoveredTransactionRecords = recoverFleetTransactionAssignments\(canonicalTransactionRawRecords, transactionAssignmentEvidence\)/);
+  assert.match(main, /miningExporter = miningExporterForFaction\(settings\.faction\)/);
+  assert.match(main, /aggregateFleetTransactionEvents\(assignmentRecoveredTransactionRecords, \{ assignments: \['Mine'\], \.\.\.miningExporter \}\)/);
+  assert.match(main, /assignmentRecoveredRawRecords = recoverFleetTransactionAssignments\(cutoverSelection\.rawRecords, transactionAssignmentEvidence\)/);
 });
 
 test('dedicated Allocation applies cutover before canonical valuation', () => {

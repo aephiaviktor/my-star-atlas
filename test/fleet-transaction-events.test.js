@@ -135,8 +135,9 @@ test('ambiguous multi-row fleet days fail closed instead of duplicating one cano
 
 test('Mining projection replaces its legacy totals from the shared canonical stream only', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /assignmentRecoveredRawRecords = recoverFleetTransactionAssignments/);
-  assert.match(main, /canonicalMiningTransactions = rawExporter[\s\S]*assignmentRecoveredRawRecords[\s\S]*assignments: \['Mine'\]/);
+  assert.match(main, /assignmentRecoveredTransactionRecords = recoverFleetTransactionAssignments/);
+  assert.match(main, /miningExporter = miningExporterForFaction\(settings\.faction\)/);
+  assert.match(main, /canonicalMiningTransactions = miningExporter[\s\S]*aggregateFleetTransactionEvents\(assignmentRecoveredTransactionRecords, \{ assignments: \['Mine'\], \.\.\.miningExporter \}\)/);
   const miningProjection = main.slice(main.indexOf('const mining = await Promise.all'), main.indexOf('const cargo = await Promise.all'));
   assert.match(miningProjection, /unambiguousMiningFleetDays\.has/);
   assert.match(miningProjection, /applyFleetTransactionTotals\(miningRow, transactionFleetAccount, canonicalMiningTransactions\)/);

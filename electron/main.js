@@ -99,8 +99,8 @@ const { revalueMarketplaceScanWithHistoricalSol } = require('./marketplace-histo
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
 const {
   RAW_COST_CUTOVER_MANIFEST_VERSION, queryRawCostRowsBatched,
-  selectLegacyRawCutover, exporterForFaction, aggregateRawCostsByFleetDay,
-  applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
+  selectLegacyRawCutover, exporterForFaction, miningExporterForFaction, transactionExportersForFaction, selectRawRecordsForExporters,
+  aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
   valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
 } = require('./cargo-cost-source');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
@@ -7674,7 +7674,7 @@ async function fetchCanonicalRawCargoCosts(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return { records: [], rejected: [], queryMode: 'unconfigured' };
   const projected = await queryRawCostRowsBatched({
     bucket: settings.influxBucket,
-    scope: exporterForFaction(settings.faction),
+    scopes: transactionExportersForFaction(settings.faction),
     query: (flux) => queryInfluxFlux(settings, flux),
     parseCsv: parseInfluxCsv,
   });
@@ -8002,13 +8002,16 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       assignment: row.assignment,
     });
   }
-  const assignmentRecoveredRawRecords = recoverFleetTransactionAssignments(cutoverSelection.rawRecords, transactionAssignmentEvidence);
-  const canonicalMiningTransactions = rawExporter
-    ? aggregateFleetTransactionEvents(assignmentRecoveredRawRecords, { assignments: ['Mine'], ...rawExporter })
+  const canonicalTransactionRawRecords = selectRawRecordsForExporters(rawCargoCosts.records, transactionExportersForFaction(settings.faction));
+  const assignmentRecoveredTransactionRecords = recoverFleetTransactionAssignments(canonicalTransactionRawRecords, transactionAssignmentEvidence);
+  const miningExporter = miningExporterForFaction(settings.faction);
+  const canonicalMiningTransactions = miningExporter
+    ? aggregateFleetTransactionEvents(assignmentRecoveredTransactionRecords, { assignments: ['Mine'], ...miningExporter })
     : [];
   const canonicalScanningTransactions = rawExporter
-    ? aggregateFleetTransactionEvents(assignmentRecoveredRawRecords, { assignments: ['Scan'], ...rawExporter })
+    ? aggregateFleetTransactionEvents(assignmentRecoveredTransactionRecords, { assignments: ['Scan'], ...rawExporter })
     : [];
+  const assignmentRecoveredRawRecords = recoverFleetTransactionAssignments(cutoverSelection.rawRecords, transactionAssignmentEvidence);
   const canonicalCargoAssignments = ['Transport', 'Supply Chain'];
   const canonicalCargoRawRecords = assignmentRecoveredRawRecords.filter((record) => canonicalCargoAssignments.includes(record.assignment));
   const valuedCanonicalRawCosts = await valueCanonicalRawCosts(canonicalCargoRawRecords, {

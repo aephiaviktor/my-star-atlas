@@ -7,6 +7,7 @@ const {
   projectRawCostEvents, selectLegacyRawCutover, lamportsToSolDecimal, rawCostDigest,
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
   buildCanonicalRawCostPool, queryRawCostRowsBatched, rawCostTimeBatches,
+  miningExporterForFaction, transactionExportersForFaction, selectRawRecordsForExporters,
 } = require('../electron/cargo-cost-source');
 
 const fuel = (overrides = {}) => ({ _time: '2026-08-05T00:01:02.003Z', schemaVersion: '1', eventType: 'fuel', eventIdentity: 'fuel:cycle:0', fuelQuantity: '12.500000000000001', movementEventId: 'cycle:0', cycleId: 'cycle', movementIndex: '0', timestampProvenance: 'solana_block_time', sourceProvenance: 'confirmed_movement', faction: 'MUD', instance: 'MUD', fleetAccount: 'fleet', fleetLabel: 'Fleet', assignment: 'Transport', ...overrides });
@@ -139,6 +140,36 @@ test('oversized daily raw queries split to six-hour windows and merge before pro
   assert.equal(projectCalls, 1, 'deduplication/conflict handling must remain global across batches');
 });
 
+test('USTUR transaction history queries mining and scanning instances before one global projection', async () => {
+  assert.deepEqual(miningExporterForFaction('USTUR'), { faction: 'UST', instance: 'USTUR1' });
+  assert.deepEqual(miningExporterForFaction('MUD'), { faction: 'MUD', instance: 'MUD' });
+  const scopes = transactionExportersForFaction('USTUR');
+  assert.deepEqual(scopes, [
+    { faction: 'UST', instance: 'USTUR1' },
+    { faction: 'UST', instance: 'USTUR2' },
+  ]);
+  const calls = [];
+  let projectCalls = 0;
+  const result = await queryRawCostRowsBatched({
+    bucket: 'bucket',
+    scopes,
+    now: new Date('2026-09-13T16:00:00.000Z'),
+    query: async (flux, batch, scope) => {
+      calls.push({ batch, scope });
+      assert.match(flux, new RegExp(`r\\.faction == "${scope.faction}" and r\\.instance == "${scope.instance}"`));
+      return [{ _time: batch.start, ...scope }];
+    },
+    parseCsv: (rows) => rows,
+    projectRows: (rows) => {
+      projectCalls += 1;
+      return { records: rows, rejected: [] };
+    },
+  });
+  assert.equal(calls.length, 62);
+  assert.equal(result.records.length, 62);
+  assert.equal(projectCalls, 1, 'deduplication/conflict handling must remain global across both instances');
+});
+
 test('non-capacity raw query failures remain fail-closed instead of being multiplied', async () => {
   let calls = 0;
   await assert.rejects(queryRawCostRowsBatched({
@@ -169,15 +200,20 @@ test('incremental projection equals full rebuild, including mutable metadata rev
   assert.deepEqual(incremental.records, full.records);
 });
 
-test('versioned UTC cutover prevents legacy/raw overlap and excludes disabled USTUR1', () => {
+test('versioned UTC cutover prevents overlap and admits USTUR1 mining transaction records', () => {
   assert.equal(RAW_COST_CUTOVER_UTC, '2026-08-05T00:00:00.000Z');
-  assert.equal(Object.keys(RAW_COST_CUTOVERS).length, 3);
+  assert.equal(Object.keys(RAW_COST_CUTOVERS).length, 4);
   const raw = [projectRawCostEvents([fuel()]).records[0], projectRawCostEvents([fuel({ _time: '2026-08-04T23:59:59Z' })]).records[0]];
   const selected = selectLegacyRawCutover({ faction: 'MUD', instance: 'MUD', legacyRows: [{ isoDate: '2026-08-04' }, { isoDate: '2026-08-05' }], rawRecords: raw });
   assert.deepEqual(selected.legacyRows.map((r) => r.isoDate), ['2026-08-04']);
   assert.equal(selected.rawRecords.length, 1);
-  const disabled = selectLegacyRawCutover({ faction: 'UST', instance: 'USTUR1', legacyRows: [{ isoDate: '2026-08-05' }], rawRecords: raw });
-  assert.equal(disabled.cutover, null); assert.equal(disabled.trackingDisabled, true); assert.equal(disabled.legacyRows.length, 1); assert.equal(disabled.rawRecords.length, 0);
+  const usturMining = projectRawCostEvents([sol({ faction: 'UST', instance: 'USTUR1', assignment: 'Mine' })]).records;
+  const selectedMining = selectLegacyRawCutover({ faction: 'UST', instance: 'USTUR1', legacyRows: [{ isoDate: '2026-08-05' }], rawRecords: usturMining });
+  assert.equal(selectedMining.cutover, RAW_COST_CUTOVER_UTC);
+  assert.equal(selectedMining.trackingDisabled, false);
+  assert.equal(selectedMining.legacyRows.length, 0);
+  assert.equal(selectedMining.rawRecords.length, 1);
+  assert.deepEqual(selectRawRecordsForExporters(usturMining, transactionExportersForFaction('USTUR')), usturMining);
 });
 
 test('raw daily projection drives existing cargo-weight allocation with exact native conservation', () => {

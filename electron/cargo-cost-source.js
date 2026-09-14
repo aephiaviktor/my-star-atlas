@@ -12,6 +12,7 @@ const RAW_COST_CUTOVER_UTC = '2026-08-05T00:00:00.000Z';
 const RAW_COST_CUTOVERS = Object.freeze({
   'MUD\nMUD': RAW_COST_CUTOVER_UTC,
   'ONI\nONI': RAW_COST_CUTOVER_UTC,
+  'UST\nUSTUR1': RAW_COST_CUTOVER_UTC,
   'UST\nUSTUR2': RAW_COST_CUTOVER_UTC,
 });
 
@@ -85,25 +86,28 @@ function isRawCostCapacityError(error) {
     .test(String(error?.message || error || ''));
 }
 
-async function queryRawCostRowsBatched({ bucket, scope = null, query, parseCsv, projectRows = projectRawCostEvents, now = new Date() } = {}) {
+async function queryRawCostRowsBatched({ bucket, scope = null, scopes = null, query, parseCsv, projectRows = projectRawCostEvents, now = new Date() } = {}) {
   if (typeof query !== 'function' || typeof parseCsv !== 'function' || typeof projectRows !== 'function') {
     throw new TypeError('raw_cost_query_dependencies_required');
   }
   const rows = [];
-  const queryWindow = async (window) => {
+  const selectedScopes = Array.isArray(scopes) && scopes.length ? scopes : [scope];
+  const queryWindow = async (window, selectedScope) => {
     try {
-      const csv = await query(buildRawCostFluxQuery(bucket, window, scope), window);
+      const csv = await query(buildRawCostFluxQuery(bucket, window, selectedScope), window, selectedScope);
       for (const row of parseCsv(csv)) rows.push(row);
     } catch (error) {
       const startMs = Date.parse(window.start);
       const stopMs = Date.parse(window.stop);
       if (!isRawCostCapacityError(error) || stopMs - startMs <= RAW_COST_MIN_BATCH_MS) throw error;
       const midpoint = startMs + Math.floor((stopMs - startMs) / 2);
-      await queryWindow({ start: window.start, stop: new Date(midpoint).toISOString() });
-      await queryWindow({ start: new Date(midpoint).toISOString(), stop: window.stop });
+      await queryWindow({ start: window.start, stop: new Date(midpoint).toISOString() }, selectedScope);
+      await queryWindow({ start: new Date(midpoint).toISOString(), stop: window.stop }, selectedScope);
     }
   };
-  for (const window of rawCostTimeBatches({ now })) await queryWindow(window);
+  for (const selectedScope of selectedScopes) {
+    for (const window of rawCostTimeBatches({ now })) await queryWindow(window, selectedScope);
+  }
   return projectRows(rows);
 }
 
@@ -197,6 +201,27 @@ function exporterForFaction(faction) {
   if (value === 'ONI') return { faction: 'ONI', instance: 'ONI' };
   if (value === 'UST' || value === 'USTUR') return { faction: 'UST', instance: 'USTUR2' };
   return null;
+}
+
+function miningExporterForFaction(faction) {
+  const exporter = exporterForFaction(faction);
+  return exporter?.faction === 'UST' ? { faction: 'UST', instance: 'USTUR1' } : exporter;
+}
+
+function transactionExportersForFaction(faction) {
+  const scanning = exporterForFaction(faction);
+  const mining = miningExporterForFaction(faction);
+  if (!scanning) return [];
+  return mining.instance === scanning.instance ? [scanning] : [mining, scanning];
+}
+
+function selectRawRecordsForExporters(records = [], exporters = []) {
+  const scopes = new Set((exporters || []).map((scope) => `${clean(scope?.faction)}\n${clean(scope?.instance)}`));
+  return (records || []).filter((record) => {
+    const cutover = getRawCostCutover(record?.faction, record?.instance);
+    return scopes.has(`${clean(record?.faction)}\n${clean(record?.instance)}`)
+      && cutover != null && new Date(record?.timestamp).getTime() >= Date.parse(cutover);
+  });
 }
 
 function addExactDecimals(values) {
@@ -432,7 +457,8 @@ module.exports = {
   RAW_COST_CUTOVER_UTC, RAW_COST_CUTOVERS, buildRawCostFluxQuery, canonicalRawCostIdentity,
   rawCostTimeBatches, queryRawCostRowsBatched,
   projectRawCostEvents, selectLegacyRawCutover, getRawCostCutover, lamportsToSolDecimal, rawCostDigest,
-  exporterForFaction, aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
+  exporterForFaction, miningExporterForFaction, transactionExportersForFaction, selectRawRecordsForExporters,
+  aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
   buildCanonicalRawCostPool, valueNativeCost, multiplyExactDecimals,
   requireSameDateCargoPrice, requireCargoFuelPrice,
 };
