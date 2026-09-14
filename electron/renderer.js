@@ -8218,6 +8218,20 @@ async function refreshEarnings() {
         })).catch(() => {});
       }
       renderEarnings(result);
+      if (result?.earningsAggregateCache?.status === 'stale') {
+        Promise.resolve(api.getEarningsSnapshot({
+          ...settings,
+          trigger: 'background',
+          waitForEarningsAggregateRefresh: true,
+        })).then((freshResult) => {
+          if (!requestGuard.isCurrent(request, getRefreshContext())) return;
+          if (!freshResult || freshResult.ok !== true) return;
+          if (freshResult.earningsAggregateCache?.status !== 'fresh') return;
+          renderEarnings(freshResult);
+        }).catch((refreshError) => {
+          console.warn('Earnings aggregate background refresh failed', refreshError);
+        });
+      }
     } catch (error) {
       console.error(error);
       Promise.resolve(api.recordEarningsRendererError?.({

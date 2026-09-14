@@ -12,24 +12,26 @@ const start = renderer.indexOf('async function refreshEarnings()');
 const end = renderer.indexOf('\nfunction optimizationFilterIso', start);
 const refreshSource = renderer.slice(start, end);
 
-function harness({ result = { ok: true, rows: [] }, renderError = null } = {}) {
+function harness({ result = { ok: true, rows: [] }, results = null, renderError = null } = {}) {
   const diagnostics = [];
   const statuses = [];
+  const renders = [];
+  const snapshotCalls = [];
   const context = {
     rendererTelemetryTrigger: 'unknown', TELEMETRY_TRIGGERS: new Set(['unknown']), earningsRefreshInFlight: null,
     latestSettings: { faction: 'MUD', playerProfile: 'profile' }, currentEarningsSubtab: 'scanning',
     getFormPayload: () => ({}), normalizeFaction: (v) => v || 'MUD', getActivePlayerProfile: () => 'profile',
     requestGuard: { begin: () => ({ id: 1 }), isCurrent: () => true }, getRefreshContext: () => ({}),
     getCachedFactionResult: () => null,
-    renderEarnings: () => { if (renderError) throw renderError; },
+    renderEarnings: (value) => { renders.push(value); if (renderError) throw renderError; },
     renderEarningsEmpty: () => {}, renderEarningsMiningEmpty: () => {}, renderEarningsCargoEmpty: () => {},
     renderEarningsMarketplaceLoading: () => {},
     setEarningsStatus: (v) => statuses.push(v), setEarningsMiningStatus: () => {}, setEarningsCargoStatus: () => {},
-    api: { getEarningsSnapshot: async () => result, recordEarningsRendererError: async (payload) => { diagnostics.push(payload); return { ok: true }; } },
-    console: { error: () => {} }, Promise, Error, Date, Math, Set,
+    api: { getEarningsSnapshot: async (payload) => { snapshotCalls.push(payload); return results ? results.shift() : result; }, recordEarningsRendererError: async (payload) => { diagnostics.push(payload); return { ok: true }; } },
+    console: { error: () => {}, warn: () => {} }, Promise, Error, Date, Math, Set,
   };
   vm.runInNewContext(`${refreshSource}\nthis.refreshEarnings = refreshEarnings;`, context);
-  return { context, diagnostics, statuses };
+  return { context, diagnostics, statuses, renders, snapshotCalls };
 }
 
 test('successful IPC followed by renderer exception persists renderer evidence and keeps existing failure UI', async () => {
@@ -61,6 +63,29 @@ test('successful refresh remains unchanged and writes no renderer diagnostic', a
   await h.context.refreshEarnings();
   assert.equal(h.diagnostics.length, 0);
   assert.ok(!h.statuses.includes('Earnings sync failed'));
+});
+
+test('persisted aggregate renders immediately and refreshes in the background', async () => {
+  const stale = { ok: true, rows: [{ txsDaily: 12 }], earningsAggregateCache: { status: 'stale' } };
+  const fresh = { ok: true, rows: [{ txsDaily: 16 }], earningsAggregateCache: { status: 'fresh' } };
+  const h = harness({ results: [stale, fresh] });
+  await h.context.refreshEarnings();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.snapshotCalls.length, 2);
+  assert.equal(h.snapshotCalls[1].waitForEarningsAggregateRefresh, true);
+  assert.equal(h.snapshotCalls[1].trigger, 'background');
+  assert.equal(h.renders[0].rows[0].txsDaily, 12);
+  assert.equal(h.renders.at(-1).rows[0].txsDaily, 16);
+});
+
+test('partial background projection never replaces a last-good aggregate', async () => {
+  const stale = { ok: true, rows: [{ txsDaily: 12 }], earningsAggregateCache: { status: 'stale' } };
+  const partial = { ok: true, rows: [], miningError: 'unavailable', earningsAggregateCache: { status: 'partial' } };
+  const h = harness({ results: [stale, partial] });
+  await h.context.refreshEarnings();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.renders.length, 1);
+  assert.equal(h.renders[0].rows[0].txsDaily, 12);
 });
 
 test('trusted IPC and telemetry wrapper failures are covered while fetch partial results remain unchanged', () => {

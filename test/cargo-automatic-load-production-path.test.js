@@ -50,7 +50,8 @@ test('automatic prefetch reaches only shared Earnings while Allocation is on dem
  assert.match(renderer,/activeCargoTable === 'allocation'\) refreshCargoAllocation\(\)/);
 });
 test('shared Earnings IPC omits large internal projection collections that freeze navigation',()=>{
- const response=main.slice(main.lastIndexOf('return {',main.indexOf('function createWindow')),main.indexOf('function createWindow'));
+ const snapshotStart=main.lastIndexOf('const snapshot = {',main.indexOf('function createWindow'));
+ const response=main.slice(snapshotStart,main.indexOf('function createWindow'));
  const internals={
   cargoCostPool:'cargoCostCount',
   inventoryCostLedgerEvents:'inventoryCostLedgerEventCount',

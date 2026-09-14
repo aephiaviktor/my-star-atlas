@@ -105,6 +105,7 @@ const {
   valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
 } = require('./cargo-cost-source');
 const { buildRawCostCacheSourceKey, createRawCostSqliteCache } = require('./raw-cost-sqlite-cache');
+const { buildEarningsAggregateCacheSourceKey, createEarningsAggregateSqliteCache } = require('./earnings-aggregate-sqlite-cache');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, decodeLocalMarketTransactions } = require('./local-market-scanner');
 const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
@@ -7797,11 +7798,102 @@ async function fetchRentalHistoryIndex(settings, connection, sot) {
   return createRentalHistoryIndex(recoveredRecords);
 }
 
+const EARNINGS_AGGREGATE_PROJECTION_VERSION = 1;
+const earningsAggregateSqliteCaches = new Map();
+const earningsAggregateRefreshes = new Map();
+
+function getEarningsAggregateSqliteCache(settings, snapshotScope) {
+  const source = {
+    influxUrl: settings.influxUrl,
+    influxOrganization: settings.influxOrganization,
+    influxBucket: settings.influxBucket,
+    rpcUrl: getRpcUrl(settings),
+    profile: getSelectedPlayerProfile(settings),
+    faction: normalizeFaction(settings.faction),
+    scope: snapshotScope || 'total',
+    projectionVersion: EARNINGS_AGGREGATE_PROJECTION_VERSION,
+  };
+  const sourceKey = buildEarningsAggregateCacheSourceKey(source);
+  if (!earningsAggregateSqliteCaches.has(sourceKey)) {
+    earningsAggregateSqliteCaches.set(sourceKey, createEarningsAggregateSqliteCache({
+      filePath: path.join(app.getPath('userData'), 'cache', 'earnings-history-v1.sqlite'),
+      source,
+    }));
+  }
+  return earningsAggregateSqliteCaches.get(sourceKey);
+}
+
+function decorateEarningsAggregateSnapshot(snapshot, metadata) {
+  const { earningsAggregateCache: _previous, ...clean } = snapshot || {};
+  return { ...clean, earningsAggregateCache: metadata };
+}
+
+function isPersistableEarningsAggregateSnapshot(snapshot, snapshotScope) {
+  if (!snapshot || snapshot.ok !== true) return false;
+  const errors = ['scanningError', 'miningError', 'cargoError', 'craftingError', 'upgradingError', 'rawCargoCostError'];
+  if (errors.some((key) => String(snapshot[key] || '').trim())) return false;
+  if (['breakeven', 'upgrading'].includes(snapshotScope) && String(snapshot.breakevenError || '').trim()) return false;
+  return true;
+}
+
+function startEarningsAggregateRefresh(sourceKey, loader) {
+  if (earningsAggregateRefreshes.has(sourceKey)) return earningsAggregateRefreshes.get(sourceKey);
+  const pending = Promise.resolve().then(loader).finally(() => {
+    if (earningsAggregateRefreshes.get(sourceKey) === pending) earningsAggregateRefreshes.delete(sourceKey);
+  });
+  earningsAggregateRefreshes.set(sourceKey, pending);
+  return pending;
+}
+
 async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const rawPayload = payload || (await readSettings());
   const settings = normalizeSettings(rawPayload);
   const snapshotScope = String(rawPayload.earningsScope || rawPayload.earningsSubtab || '').trim().toLowerCase();
   const needsInventoryLedger = ['breakeven', 'crafting', 'upgrading'].includes(snapshotScope);
+  const internalAggregateRefresh = rawPayload.__earningsAggregateRefresh === true;
+  const waitForAggregateRefresh = rawPayload.waitForEarningsAggregateRefresh === true;
+  const forceAggregateRefresh = rawPayload.trigger === 'manual' || rawPayload.force === true;
+  let aggregateCache = null;
+  let aggregateCacheError = '';
+  try {
+    const candidate = getEarningsAggregateSqliteCache(settings, snapshotScope);
+    aggregateCache = candidate && typeof candidate.read === 'function' && typeof candidate.write === 'function'
+      ? candidate : null;
+  } catch (error) {
+    aggregateCacheError = String(error?.message || error || 'earnings_aggregate_cache_unavailable').slice(0, 240);
+  }
+  if (!internalAggregateRefresh && aggregateCache && forceAggregateRefresh
+    && earningsAggregateRefreshes.has(aggregateCache.sourceKey)) {
+    return earningsAggregateRefreshes.get(aggregateCache.sourceKey);
+  }
+  if (!internalAggregateRefresh && aggregateCache && !forceAggregateRefresh) {
+    let cached = null;
+    try {
+      cached = aggregateCache.read();
+    } catch (error) {
+      aggregateCacheError = String(error?.message || error || 'earnings_aggregate_cache_read_failed').slice(0, 240);
+    }
+    if (cached) {
+      const refresh = startEarningsAggregateRefresh(aggregateCache.sourceKey, () => fetchEarningsSnapshot({
+        ...rawPayload,
+        __earningsAggregateRefresh: true,
+        waitForEarningsAggregateRefresh: false,
+        trigger: 'background',
+      }, null));
+      if (waitForAggregateRefresh) return refresh;
+      refresh.catch(() => {});
+      return decorateEarningsAggregateSnapshot(cached.snapshot, {
+        status: 'stale',
+        projectedAt: new Date(cached.projectedAtMs).toISOString(),
+        ageMs: Math.max(0, Date.now() - cached.projectedAtMs),
+        refreshPending: true,
+        error: aggregateCacheError,
+      });
+    }
+    if (waitForAggregateRefresh && earningsAggregateRefreshes.has(aggregateCache.sourceKey)) {
+      return earningsAggregateRefreshes.get(aggregateCache.sourceKey);
+    }
+  }
   const fleetResult = await fetchProfileFleets(settings);
   const fleets = Array.isArray(fleetResult.fleets) ? fleetResult.fleets : [];
   const connection = createSolanaConnection(settings);
@@ -8996,7 +9088,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     .map(([fleetName, netProfitAtlas]) => ({ fleetName, netProfitAtlas }))
     .sort((a, b) => b.netProfitAtlas - a.netProfitAtlas || a.fleetName.localeCompare(b.fleetName))[0] || null;
 
-  return {
+  const snapshot = {
     ok: true,
     checkedAt: new Date().toISOString(),
     sduPriceAtl,
@@ -9108,6 +9200,26 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     inventoryBasisObservationError,
     crossFactionCargoLedgerError,
     inventoryMarketplaceEventError: inventoryMarketplaceEvents.error,
+  };
+  const aggregateComplete = isPersistableEarningsAggregateSnapshot(snapshot, snapshotScope);
+  let aggregateWrite = null;
+  if (aggregateCache && aggregateComplete) {
+    try {
+      aggregateWrite = aggregateCache.write(snapshot);
+    } catch (error) {
+      aggregateCacheError = String(error?.message || error || 'earnings_aggregate_cache_write_failed').slice(0, 240);
+    }
+  }
+  return {
+    ...snapshot,
+    earningsAggregateCache: {
+      status: aggregateComplete ? 'fresh' : 'partial',
+      projectedAt: aggregateWrite ? new Date(aggregateWrite.projectedAtMs).toISOString() : snapshot.checkedAt,
+      ageMs: 0,
+      refreshPending: false,
+      persisted: Boolean(aggregateWrite),
+      error: aggregateCacheError,
+    },
   };
 }
 
