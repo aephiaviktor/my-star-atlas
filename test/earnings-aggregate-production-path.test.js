@@ -64,7 +64,7 @@ test('production cache is profile/faction/scope keyed and refreshes partial resu
   const aggregateRegion = main.slice(main.indexOf('const EARNINGS_AGGREGATE_PROJECTION_VERSION'), start);
   assert.match(aggregateRegion, /profile: getSelectedPlayerProfile\(settings\)/);
   assert.match(aggregateRegion, /faction: normalizeFaction\(settings\.faction\)/);
-  assert.match(aggregateRegion, /scope: snapshotScope \|\| 'total'/);
+  assert.match(aggregateRegion, /scope: normalizeEarningsAggregateScope\(snapshotScope\)/);
   assert.match(aggregateRegion, /rawCargoCostError/);
   assert.match(renderer, /freshResult\.earningsAggregateCache\?\.status !== 'fresh'/);
 });

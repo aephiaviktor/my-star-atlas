@@ -24,8 +24,14 @@ function normalizedSourceDescriptor(source = {}) {
     profile: String(source.profile || '').trim(),
     projectionVersion: Number(source.projectionVersion),
     rpcUrl: String(source.rpcUrl || '').trim().replace(/\/$/, ''),
-    scope: String(source.scope || '').trim().toLowerCase(),
+    scope: normalizeEarningsAggregateScope(source.scope),
   };
+}
+
+function normalizeEarningsAggregateScope(scope) {
+  const normalized = String(scope || '').trim().toLowerCase();
+  if (normalized === 'breakeven' || normalized === 'upgrading') return 'ledger-complete';
+  return normalized || 'total';
 }
 
 function buildEarningsAggregateCacheSourceKey(source = {}) {
@@ -124,4 +130,5 @@ module.exports = {
   EARNINGS_AGGREGATE_SQLITE_CACHE_SCHEMA_VERSION: CACHE_SCHEMA_VERSION,
   buildEarningsAggregateCacheSourceKey,
   createEarningsAggregateSqliteCache,
+  normalizeEarningsAggregateScope,
 };

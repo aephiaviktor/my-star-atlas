@@ -8,6 +8,7 @@ const { DatabaseSync } = require('node:sqlite');
 const {
   buildEarningsAggregateCacheSourceKey,
   createEarningsAggregateSqliteCache,
+  normalizeEarningsAggregateScope,
 } = require('../electron/earnings-aggregate-sqlite-cache');
 
 function temporaryDatabase() {
@@ -25,6 +26,21 @@ const source = {
   scope: 'crafting',
   projectionVersion: 1,
 };
+
+test('ledger-complete Earnings views share one aggregate scope without widening partial views', () => {
+  assert.equal(normalizeEarningsAggregateScope('breakeven'), 'ledger-complete');
+  assert.equal(normalizeEarningsAggregateScope('upgrading'), 'ledger-complete');
+  assert.equal(normalizeEarningsAggregateScope('crafting'), 'crafting');
+  assert.equal(normalizeEarningsAggregateScope(''), 'total');
+  assert.equal(
+    buildEarningsAggregateCacheSourceKey({ ...source, scope: 'breakeven' }),
+    buildEarningsAggregateCacheSourceKey({ ...source, scope: 'upgrading' }),
+  );
+  assert.notEqual(
+    buildEarningsAggregateCacheSourceKey({ ...source, scope: 'crafting' }),
+    buildEarningsAggregateCacheSourceKey({ ...source, scope: 'breakeven' }),
+  );
+});
 
 test('aggregate source identity excludes credentials and covers projection inputs', () => {
   const baseline = buildEarningsAggregateCacheSourceKey({ ...source, influxAuthToken: 'secret-a' });

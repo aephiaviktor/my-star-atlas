@@ -105,7 +105,11 @@ const {
   valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
 } = require('./cargo-cost-source');
 const { buildRawCostCacheSourceKey, createRawCostSqliteCache } = require('./raw-cost-sqlite-cache');
-const { buildEarningsAggregateCacheSourceKey, createEarningsAggregateSqliteCache } = require('./earnings-aggregate-sqlite-cache');
+const {
+  buildEarningsAggregateCacheSourceKey,
+  createEarningsAggregateSqliteCache,
+  normalizeEarningsAggregateScope,
+} = require('./earnings-aggregate-sqlite-cache');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, decodeLocalMarketTransactions } = require('./local-market-scanner');
 const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
@@ -7810,7 +7814,7 @@ function getEarningsAggregateSqliteCache(settings, snapshotScope) {
     rpcUrl: getRpcUrl(settings),
     profile: getSelectedPlayerProfile(settings),
     faction: normalizeFaction(settings.faction),
-    scope: snapshotScope || 'total',
+    scope: normalizeEarningsAggregateScope(snapshotScope),
     projectionVersion: EARNINGS_AGGREGATE_PROJECTION_VERSION,
   };
   const sourceKey = buildEarningsAggregateCacheSourceKey(source);
