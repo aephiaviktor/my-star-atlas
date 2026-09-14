@@ -104,36 +104,86 @@ function rawCostTimeBatches({ now = new Date(), historyMs = RAW_COST_HISTORY_MS,
   return batches;
 }
 
+function rawCostAlignedTimeBatches({ now = new Date(), historyMs = RAW_COST_HISTORY_MS, batchMs = RAW_COST_MIN_BATCH_MS } = {}) {
+  const nowMs = new Date(now).getTime();
+  if (!Number.isFinite(nowMs) || !Number.isFinite(historyMs) || historyMs <= 0 || !Number.isFinite(batchMs) || batchMs <= 0) {
+    throw new TypeError('raw_cost_invalid_time_window');
+  }
+  const exactStartMs = nowMs - historyMs;
+  const startMs = Math.floor(exactStartMs / batchMs) * batchMs;
+  const stopMs = Math.ceil(nowMs / batchMs) * batchMs;
+  const batches = [];
+  for (let cursor = startMs; cursor < stopMs; cursor += batchMs) {
+    batches.push({
+      start: new Date(cursor).toISOString(),
+      stop: new Date(cursor + batchMs).toISOString(),
+    });
+  }
+  return batches;
+}
+
 function isRawCostCapacityError(error) {
   return /(?:\b413\b|request too large|resources exhausted|heap exhausted|\b504\b|(?:query|influx)_timeout|timed out)/i
     .test(String(error?.message || error || ''));
 }
 
-async function queryRawCostRowsBatched({ bucket, scope = null, scopes = null, batchMs = RAW_COST_BATCH_MS, concurrency = 1, query, parseCsv, projectRows = projectRawCostEvents, now = new Date() } = {}) {
+async function queryRawCostRowsBatched({
+  bucket, scope = null, scopes = null, batchMs = RAW_COST_BATCH_MS, concurrency = 1,
+  query, parseCsv, projectRows = projectRawCostEvents, now = new Date(), cache = null,
+  refreshRecent = false, recentMs = 48 * 60 * 60 * 1000, recentRefreshTtlMs = 0,
+} = {}) {
   if (typeof query !== 'function' || typeof parseCsv !== 'function' || typeof projectRows !== 'function') {
     throw new TypeError('raw_cost_query_dependencies_required');
   }
   const rows = [];
   const projector = projectRows === projectRawCostEvents ? createRawCostEventProjector() : null;
   const selectedScopes = Array.isArray(scopes) && scopes.length ? scopes : [scope];
+  const nowMs = new Date(now).getTime();
+  const exactStartMs = nowMs - RAW_COST_HISTORY_MS;
+  let cacheHits = 0;
+  let cacheMisses = 0;
+  let cacheRefreshes = 0;
+  const cacheRefreshErrors = [];
+  const cachePersistenceErrors = [];
+  const recordCacheError = (operation, error, window = null) => {
+    cachePersistenceErrors.push({
+      operation,
+      ...(window ? { start: window.start, stop: window.stop } : {}),
+      error: String(error?.message || error || `cache_${operation}_failed`),
+    });
+  };
   const consume = (csv) => {
     const parsed = parseCsv(csv);
     if (projector) projector.addRows(parsed);
     else for (const row of parsed) rows.push(row);
   };
-  const queryWindow = async (window, selectedScope) => {
+  const queryWindow = async (window, selectedScope, cached = null) => {
     try {
-      consume(await query(buildRawCostFluxQuery(bucket, window, selectedScope), window, selectedScope));
+      const csv = await query(buildRawCostFluxQuery(bucket, window, selectedScope), window, selectedScope);
+      consume(csv);
+      if (cache) {
+        try { cache.write(window, csv); }
+        catch (error) { recordCacheError('write', error, window); }
+      }
     } catch (error) {
       const startMs = Date.parse(window.start);
       const stopMs = Date.parse(window.stop);
+      if (cached) {
+        cacheHits += 1;
+        cacheRefreshErrors.push({ start: window.start, stop: window.stop, error: String(error?.message || error || 'cache_refresh_failed') });
+        consume(cached.csv);
+        return;
+      }
       if (!isRawCostCapacityError(error) || stopMs - startMs <= RAW_COST_MIN_BATCH_MS) throw error;
       const midpoint = startMs + Math.floor((stopMs - startMs) / 2);
       await queryWindow({ start: window.start, stop: new Date(midpoint).toISOString() }, selectedScope);
       await queryWindow({ start: new Date(midpoint).toISOString(), stop: window.stop }, selectedScope);
     }
   };
-  const jobs = selectedScopes.flatMap((selectedScope) => rawCostTimeBatches({ now, batchMs })
+  const windows = cache
+    ? rawCostAlignedTimeBatches({ now, batchMs: RAW_COST_MIN_BATCH_MS })
+    : rawCostTimeBatches({ now, batchMs });
+  const jobs = selectedScopes.flatMap((selectedScope) => windows
     .map((window) => ({ window, selectedScope })));
   let cursor = 0;
   const workerCount = Math.min(jobs.length || 1, Math.max(1, Math.min(4, Math.trunc(Number(concurrency) || 1))));
@@ -141,10 +191,36 @@ async function queryRawCostRowsBatched({ bucket, scope = null, scopes = null, ba
     while (cursor < jobs.length) {
       const job = jobs[cursor];
       cursor += 1;
-      await queryWindow(job.window, job.selectedScope);
+      let cached = null;
+      if (cache) {
+        try { cached = cache.read(job.window) || null; }
+        catch (error) { recordCacheError('read', error, job.window); }
+      }
+      const recent = Date.parse(job.window.stop) > nowMs - recentMs;
+      const recentRefreshDue = !cached || !Number.isFinite(Number(cached.completedAtMs))
+        || Number(cached.completedAtMs) <= nowMs - Math.max(0, Number(recentRefreshTtlMs) || 0);
+      if (cached && !(refreshRecent && recent && recentRefreshDue)) {
+        cacheHits += 1;
+        consume(cached.csv);
+        continue;
+      }
+      if (cached) cacheRefreshes += 1;
+      else cacheMisses += 1;
+      await queryWindow(job.window, job.selectedScope, cached);
     }
   }));
-  return projector ? projector.result() : projectRows(rows);
+  if (cache) {
+    try { cache.pruneBefore(new Date(exactStartMs).toISOString()); }
+    catch (error) { recordCacheError('prune', error); }
+  }
+  const result = projector ? projector.result() : projectRows(rows);
+  if (projector) {
+    result.records = result.records.filter((record) => {
+      const timestampMs = Date.parse(record?.timestamp);
+      return Number.isFinite(timestampMs) && timestampMs >= exactStartMs && timestampMs < nowMs;
+    });
+  }
+  return { ...result, cacheHits, cacheMisses, cacheRefreshes, cacheRefreshErrors, cachePersistenceErrors };
 }
 
 function createRawCostEventProjector() {
@@ -518,7 +594,7 @@ function rawCostDigest(records = []) {
 module.exports = {
   RAW_COST_SCHEMA_VERSION, RAW_COST_HISTORY_WINDOW, RAW_COST_CUTOVER_MANIFEST_VERSION,
   RAW_COST_CUTOVER_UTC, RAW_COST_CUTOVERS, buildRawCostFluxQuery, canonicalRawCostIdentity,
-  rawCostTimeBatches, queryRawCostRowsBatched,
+  rawCostTimeBatches, rawCostAlignedTimeBatches, queryRawCostRowsBatched,
   projectRawCostEvents, selectLegacyRawCutover, getRawCostCutover, lamportsToSolDecimal, rawCostDigest,
   exporterForFaction, miningExporterForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
   transactionQueryBatchMsForFaction, selectRawRecordsForExporters,

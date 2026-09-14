@@ -7,6 +7,7 @@ const {
   projectRawCostEvents, selectLegacyRawCutover, lamportsToSolDecimal, rawCostDigest,
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts,
   buildCanonicalRawCostPool, queryRawCostRowsBatched, rawCostTimeBatches,
+  rawCostAlignedTimeBatches,
   miningExporterForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
   selectRawRecordsForExporters,
 } = require('../electron/cargo-cost-source');
@@ -112,6 +113,107 @@ test('31-day raw history is fetched in contiguous one-day windows', () => {
   assert.equal(batches[0].start, '2026-08-13T16:00:00.000Z');
   assert.equal(batches.at(-1).stop, '2026-09-13T16:00:00.000Z');
   assert.ok(batches.every((batch, index) => index === 0 || batches[index - 1].stop === batch.start));
+});
+
+test('persistent cache uses stable UTC-aligned six-hour shards across restarts', async () => {
+  const now = new Date('2026-09-13T16:17:00.000Z');
+  const batches = rawCostAlignedTimeBatches({ now });
+  assert.equal(batches.length, 125);
+  assert.deepEqual(batches[0], {
+    start: '2026-08-13T12:00:00.000Z',
+    stop: '2026-08-13T18:00:00.000Z',
+  });
+  assert.deepEqual(batches.at(-1), {
+    start: '2026-09-13T12:00:00.000Z',
+    stop: '2026-09-13T18:00:00.000Z',
+  });
+
+  const persisted = new Map();
+  const cache = {
+    read(window) { return persisted.get(`${window.start}\n${window.stop}`) || null; },
+    write(window, csv) {
+      persisted.set(`${window.start}\n${window.stop}`, { ...window, csv, completedAtMs: now.getTime() });
+    },
+    pruneBefore() { return 0; },
+  };
+  let queryCalls = 0;
+  const run = () => queryRawCostRowsBatched({
+    bucket: 'bucket',
+    scope: { faction: 'MUD', instance: 'MUD' },
+    now,
+    cache,
+    query: async (_flux, window) => {
+      queryCalls += 1;
+      return [{ _time: window.start, schemaVersion: '1', eventType: 'sol_fee', eventIdentity: `fee:${window.start}`, txFeeLamports: '1', transactionSignature: `sig:${window.start}`, timestampProvenance: 'solana_block_time', sourceProvenance: 'confirmed_transaction', faction: 'MUD', instance: 'MUD', fleetAccount: 'fleet', fleetLabel: 'Fleet', assignment: 'Mine' }];
+    },
+    parseCsv: (rows) => rows,
+  });
+
+  const first = await run();
+  assert.equal(queryCalls, 125);
+  assert.equal(first.records.length, 124, 'the leading aligned overlap is excluded from the exact rolling range');
+  queryCalls = 0;
+  const restored = await run();
+  assert.equal(queryCalls, 0);
+  assert.equal(restored.records.length, first.records.length);
+  assert.equal(restored.cacheHits, 125);
+  assert.equal(restored.cacheMisses, 0);
+});
+
+test('manual refresh replaces only recent cached shards and retains last-good data on refresh failure', async () => {
+  const now = new Date('2026-09-13T18:00:00.000Z');
+  const persisted = new Map();
+  const cache = {
+    read(window) { return persisted.get(`${window.start}\n${window.stop}`) || null; },
+    write(window, csv) { persisted.set(`${window.start}\n${window.stop}`, { ...window, csv, completedAtMs: now.getTime() - 60_000 }); },
+    pruneBefore() { return 0; },
+  };
+  const rowFor = (window, suffix) => [{ _time: window.start, schemaVersion: '1', eventType: 'sol_fee', eventIdentity: `fee:${window.start}`, txFeeLamports: suffix, transactionSignature: `sig:${window.start}`, timestampProvenance: 'solana_block_time', sourceProvenance: 'confirmed_transaction', faction: 'MUD', instance: 'MUD', fleetAccount: 'fleet', fleetLabel: 'Fleet', assignment: 'Mine' }];
+  await queryRawCostRowsBatched({ bucket: 'bucket', scope: { faction: 'MUD', instance: 'MUD' }, now, cache, query: async (_flux, window) => rowFor(window, '1'), parseCsv: (rows) => rows });
+  let calls = 0;
+  const refreshed = await queryRawCostRowsBatched({
+    bucket: 'bucket', scope: { faction: 'MUD', instance: 'MUD' }, now, cache,
+    refreshRecent: true, recentMs: 24 * 60 * 60 * 1000,
+    query: async (_flux, window) => {
+      calls += 1;
+      if (window.start === '2026-09-13T12:00:00.000Z') throw new Error('temporary outage');
+      return rowFor(window, '2');
+    },
+    parseCsv: (rows) => rows,
+  });
+  assert.equal(calls, 4);
+  assert.equal(refreshed.cacheRefreshErrors.length, 1);
+  assert.equal(refreshed.records.length, 124);
+  assert.equal(refreshed.records.find((row) => row.timestamp === '2026-09-13T12:00:00.000Z').txFeeLamports, '1');
+});
+
+test('cache I/O failure never makes fresh canonical history unavailable', async () => {
+  let writes = 0;
+  const result = await queryRawCostRowsBatched({
+    bucket: 'bucket', scope: { faction: 'MUD', instance: 'MUD' },
+    now: new Date('2026-09-13T18:00:00.000Z'), cache: {
+      read() { throw new Error('read-only filesystem'); },
+      write() { writes += 1; throw new Error('disk full'); },
+      pruneBefore() { throw new Error('database busy'); },
+    },
+    query: async (_flux, window) => [{ _time: window.start, schemaVersion: '1', eventType: 'sol_fee', eventIdentity: `fee:${window.start}`, txFeeLamports: '1', transactionSignature: `sig:${window.start}`, timestampProvenance: 'solana_block_time', sourceProvenance: 'confirmed_transaction', faction: 'MUD', instance: 'MUD', fleetAccount: 'fleet', fleetLabel: 'Fleet', assignment: 'Mine' }],
+    parseCsv: (rows) => rows,
+  });
+  assert.equal(result.records.length, 124);
+  assert.equal(writes, 124);
+  assert.ok(result.cachePersistenceErrors.length >= 126);
+});
+
+test('a shard is not persisted until its response parses successfully', async () => {
+  let writes = 0;
+  await assert.rejects(queryRawCostRowsBatched({
+    bucket: 'bucket', scope: { faction: 'MUD', instance: 'MUD' },
+    now: new Date('2026-09-13T18:00:00.000Z'),
+    cache: { read: () => null, write: () => { writes += 1; }, pruneBefore: () => 0 },
+    query: async () => 'malformed',
+    parseCsv: () => { throw new Error('invalid csv'); },
+  }), /invalid csv/);
+  assert.equal(writes, 0);
 });
 
 test('oversized daily raw queries split to six-hour windows and merge before projection', async () => {

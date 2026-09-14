@@ -98,12 +98,13 @@ const {
 const { revalueMarketplaceScanWithHistoricalSol } = require('./marketplace-historical-fees');
 const { buildCargoCostPool, mergeCargoCostPools } = require('./cargo-cost-pool');
 const {
-  RAW_COST_CUTOVER_MANIFEST_VERSION, queryRawCostRowsBatched,
+  RAW_COST_SCHEMA_VERSION, RAW_COST_CUTOVER_MANIFEST_VERSION, queryRawCostRowsBatched,
   selectLegacyRawCutover, exporterForFaction, miningExporterForFaction, transactionExportersForFaction, transactionQueryScopesForFaction,
   transactionQueryBatchMsForFaction, selectRawRecordsForExporters,
   aggregateRawCostsByFleetDay, applyRawCostsToCargoAllocations, valueCanonicalRawCosts, buildCanonicalRawCostPool,
   valueNativeCost, requireSameDateCargoPrice, requireCargoFuelPrice,
 } = require('./cargo-cost-source');
+const { buildRawCostCacheSourceKey, createRawCostSqliteCache } = require('./raw-cost-sqlite-cache');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, decodeLocalMarketTransactions } = require('./local-market-scanner');
 const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
@@ -7671,17 +7672,60 @@ async function fetchCrossFactionCargoLedgerRows(settings) {
   return crossFactionCargoLedgerCache.get(key, () => loadCrossFactionCargoLedgerRows(settings));
 }
 
+const RAW_COST_CACHE_PROJECTOR_VERSION = 1;
+const rawCostSqliteCaches = new Map();
+
+function getRawCostSqliteCache(settings, scopes) {
+  const source = {
+    influxUrl: settings.influxUrl,
+    influxBucket: settings.influxBucket,
+    faction: normalizeFaction(settings.faction),
+    scopes,
+    sourceSchemaVersion: RAW_COST_SCHEMA_VERSION,
+    cutoverManifestVersion: RAW_COST_CUTOVER_MANIFEST_VERSION,
+    projectorVersion: RAW_COST_CACHE_PROJECTOR_VERSION,
+  };
+  const sourceKey = buildRawCostCacheSourceKey(source);
+  if (!rawCostSqliteCaches.has(sourceKey)) {
+    rawCostSqliteCaches.set(sourceKey, createRawCostSqliteCache({
+      filePath: path.join(app.getPath('userData'), 'cache', 'earnings-history-v1.sqlite'),
+      source,
+    }));
+  }
+  return rawCostSqliteCaches.get(sourceKey);
+}
+
 async function fetchCanonicalRawCargoCosts(settings) {
   if (!settings?.influxUrl || !settings?.influxAuthToken || !settings?.influxBucket) return { records: [], rejected: [], queryMode: 'unconfigured' };
+  const scopes = transactionQueryScopesForFaction(settings.faction);
+  let cache = null;
+  let cacheError = '';
+  try {
+    cache = getRawCostSqliteCache(settings, scopes);
+  } catch (error) {
+    cacheError = String(error?.message || error || 'raw_cost_cache_unavailable');
+  }
   const projected = await queryRawCostRowsBatched({
     bucket: settings.influxBucket,
-    scopes: transactionQueryScopesForFaction(settings.faction),
+    scopes,
     batchMs: transactionQueryBatchMsForFaction(settings.faction),
     concurrency: 4,
     query: (flux) => queryInfluxFlux(settings, flux),
     parseCsv: parseInfluxCsv,
+    cache,
+    refreshRecent: true,
+    recentMs: 48 * 60 * 60 * 1000,
+    recentRefreshTtlMs: settings.trigger === 'manual' ? 0 : 5 * 60 * 1000,
   });
-  return { ...projected, queryMode: 'bounded_adaptive_batches' };
+  const refreshErrors = projected.cacheRefreshErrors || [];
+  const persistenceErrors = projected.cachePersistenceErrors || [];
+  return {
+    ...projected,
+    queryMode: cache ? 'persistent_sqlite_six_hour_shards' : 'bounded_adaptive_batches',
+    cacheError,
+    cacheRefreshError: refreshErrors.length ? refreshErrors.map((entry) => entry.error).join('; ').slice(0, 240) : '',
+    cachePersistenceError: persistenceErrors.length ? persistenceErrors.map((entry) => entry.error).join('; ').slice(0, 240) : '',
+  };
 }
 
 async function recoverMissingRentalCrew(records, connection, sot) {
@@ -7952,8 +7996,10 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   if (craftingResult.status === 'fulfilled' && upgradingResult.status === 'fulfilled') {
     craftingRows = removeUpgradeMirroredCraftingEvents(craftingRows, upgradingRows.jobs || []);
   }
-  if (rawCargoCostResult.status === 'fulfilled') rawCargoCosts = rawCargoCostResult.value;
-  else rawCargoCostError = String(rawCargoCostResult.reason?.message || rawCargoCostResult.reason || 'raw_cargo_cost_rows_unavailable');
+  if (rawCargoCostResult.status === 'fulfilled') {
+    rawCargoCosts = rawCargoCostResult.value;
+    rawCargoCostError = rawCargoCosts.cacheRefreshError || rawCargoCosts.cacheError || '';
+  } else rawCargoCostError = String(rawCargoCostResult.reason?.message || rawCargoCostResult.reason || 'raw_cargo_cost_rows_unavailable');
   const cargoVolumeFetch = cargoVolumeResult.status === 'fulfilled'
     ? cargoVolumeResult.value
     : { rows: [], durationMs: null, returnedRecordCount: 0 };
@@ -8989,6 +9035,11 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     rentalHistoryError,
     cargoAllocationLedgerError,
     rawCargoCostQuery: rawCargoCosts.query,
+    rawCargoCostCacheHits: Number(rawCargoCosts.cacheHits || 0),
+    rawCargoCostCacheMisses: Number(rawCargoCosts.cacheMisses || 0),
+    rawCargoCostCacheRefreshes: Number(rawCargoCosts.cacheRefreshes || 0),
+    rawCargoCostCacheRefreshErrorCount: Array.isArray(rawCargoCosts.cacheRefreshErrors) ? rawCargoCosts.cacheRefreshErrors.length : 0,
+    rawCargoCostCachePersistenceErrorCount: Array.isArray(rawCargoCosts.cachePersistenceErrors) ? rawCargoCosts.cachePersistenceErrors.length : 0,
     rawCargoCostCutoverManifestVersion: RAW_COST_CUTOVER_MANIFEST_VERSION,
     rawCargoCostCutoverUtc: cutoverSelection.cutover,
     rawCargoCostTrackingDisabled: cutoverSelection.trackingDisabled,
@@ -9431,6 +9482,10 @@ app.on('before-quit', (event) => {
   if (telemetryQuitFlushStarted) return;
   telemetryQuitFlushStarted = true;
   event.preventDefault();
+  for (const cache of rawCostSqliteCaches.values()) {
+    try { cache.close(); } catch (_) { /* Shutdown continues; SQLite transactions are atomic. */ }
+  }
+  rawCostSqliteCaches.clear();
   telemetryLedger.stop().finally(() => app.quit());
 });
 
