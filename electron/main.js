@@ -4642,36 +4642,70 @@ async function buildLocalMarketAssetMap(connection, faction) {
   return map;
 }
 
-async function loadLocalMarketTradeCheckpoint(filePath) {
+function marketplaceTradeCheckpointScope(filePath) {
+  const identity = crypto.createHash('sha256').update(path.resolve(filePath), 'utf8').digest('hex');
+  return `trade-${identity.slice(0, 48)}`;
+}
+
+async function loadMarketplaceTradeCheckpointDocument(filePath) {
+  const scope = marketplaceTradeCheckpointScope(filePath);
+  try {
+    const stored = getMarketplaceCheckpointSqliteStore().read(scope);
+    if (stored) return stored.document;
+  } catch (_error) { /* Fall through to the legacy compatibility checkpoint. */ }
   try {
     const document = JSON.parse(await fs.readFile(filePath, 'utf8'));
-    return {
-      orders: Array.isArray(document?.orders) ? document.orders : [],
-      trades: Array.isArray(document?.trades) ? document.trades : [],
-      assetFlows: Array.isArray(document?.assetFlows) ? document.assetFlows : [],
-      publishedTradeIds: new Set(Array.isArray(document?.publishedTradeIds) ? document.publishedTradeIds : []),
-      publishedFlowIds: new Set(Array.isArray(document?.publishedFlowIds) ? document.publishedFlowIds : []),
-      walletCursors: document?.walletCursors && typeof document.walletCursors === 'object'
-        && Object.keys(document.walletCursors).length
-        ? document.walletCursors
-        : (document?.pendingWalletCursors && typeof document.pendingWalletCursors === 'object'
-          ? document.pendingWalletCursors : {}),
-      orderCursors: document?.orderCursors && typeof document.orderCursors === 'object' ? document.orderCursors : {},
-      activeOrderIds: Array.isArray(document?.activeOrderIds) ? document.activeOrderIds : [],
-      archivedOrderIds: Array.isArray(document?.archivedOrderIds) ? document.archivedOrderIds : [],
-      marketplaceBackfilled: document?.marketplaceBackfilled === true,
-      assetFlowBackfilled: document?.assetFlowBackfilled === true,
-      tradeEnrichmentVersion: Number(document?.tradeEnrichmentVersion || 0),
-    };
+    try { getMarketplaceCheckpointSqliteStore().write(scope, document); }
+    catch (_error) { /* Legacy JSON remains a safe fallback when SQLite is unavailable. */ }
+    return document;
   } catch (error) {
-    if (error?.code === 'ENOENT') return {
-      orders: [], trades: [], assetFlows: [], publishedTradeIds: new Set(), publishedFlowIds: new Set(), walletCursors: {}, orderCursors: {},
-      activeOrderIds: [], archivedOrderIds: [], marketplaceBackfilled: false,
-      assetFlowBackfilled: false,
-      tradeEnrichmentVersion: 0,
-    };
+    if (error?.code === 'ENOENT') return null;
     throw error;
   }
+}
+
+async function saveMarketplaceTradeCheckpoint(filePath, document) {
+  const scope = marketplaceTradeCheckpointScope(filePath);
+  let sqliteWritten = false;
+  let sqliteError = null;
+  try {
+    getMarketplaceCheckpointSqliteStore().write(scope, document);
+    sqliteWritten = true;
+  } catch (error) {
+    sqliteError = error;
+  }
+  try {
+    await writeJsonAtomic(filePath, document);
+  } catch (error) {
+    if (!sqliteWritten) throw sqliteError || error;
+  }
+}
+
+function normalizeMarketplaceTradeCheckpoint(document) {
+  return {
+    orders: Array.isArray(document?.orders) ? document.orders : [],
+    trades: Array.isArray(document?.trades) ? document.trades : [],
+    assetFlows: Array.isArray(document?.assetFlows) ? document.assetFlows : [],
+    publishedTradeIds: new Set(Array.isArray(document?.publishedTradeIds) ? document.publishedTradeIds : []),
+    publishedFlowIds: new Set(Array.isArray(document?.publishedFlowIds) ? document.publishedFlowIds : []),
+    walletCursors: document?.walletCursors && typeof document.walletCursors === 'object'
+      && Object.keys(document.walletCursors).length
+      ? document.walletCursors
+      : (document?.pendingWalletCursors && typeof document.pendingWalletCursors === 'object'
+        ? document.pendingWalletCursors : {}),
+    orderCursors: document?.orderCursors && typeof document.orderCursors === 'object' ? document.orderCursors : {},
+    activeOrderIds: Array.isArray(document?.activeOrderIds) ? document.activeOrderIds : [],
+    archivedOrderIds: Array.isArray(document?.archivedOrderIds) ? document.archivedOrderIds : [],
+    marketplaceBackfilled: document?.marketplaceBackfilled === true,
+    rawDataBackfilled: document?.rawDataBackfilled === true,
+    assetFlowBackfilled: document?.assetFlowBackfilled === true,
+    tradeEnrichmentVersion: Number(document?.tradeEnrichmentVersion || 0),
+  };
+}
+
+async function loadLocalMarketTradeCheckpoint(filePath) {
+  const document = await loadMarketplaceTradeCheckpointDocument(filePath);
+  return normalizeMarketplaceTradeCheckpoint(document);
 }
 
 async function fetchOpenLocalMarketOrderIds(connection, trackedWallets) {
@@ -5613,12 +5647,8 @@ async function persistRecoveredMarketplaceIds(hold, { tradeIds = [], flowIds = [
   const filePath = hold.market === 'LM'
     ? localMarketCheckpointPath(normalizeFaction(hold.candidateSnapshot?.faction || profileName))
     : globalMarketCheckpointPath();
-  let document;
-  try { document = JSON.parse(await fs.readFile(filePath, 'utf8')); }
-  catch (error) {
-    if (error?.code === 'ENOENT') return false;
-    throw error;
-  }
+  const document = await loadMarketplaceTradeCheckpointDocument(filePath);
+  if (!document) return false;
   if (hold.kind === 'trade') {
     document.publishedTradeIds = Array.from(new Set([
       ...(Array.isArray(document.publishedTradeIds) ? document.publishedTradeIds : []),
@@ -5631,7 +5661,7 @@ async function persistRecoveredMarketplaceIds(hold, { tradeIds = [], flowIds = [
     ])).sort();
   }
   document.savedAt = new Date().toISOString();
-  await writeJsonAtomic(filePath, document);
+  await saveMarketplaceTradeCheckpoint(filePath, document);
   return true;
 }
 
@@ -5872,7 +5902,7 @@ async function fetchLocalMarketTrades(settings, connection) {
     settings,
     publicationRepresentations.map((trade) => marketplaceTradePublicationCandidate(trade, { market: 'LM', faction, profileScope: profileName })),
     { market: 'LM', faction, profileScope: profileName, cursorInputSnapshot, cursorOutputSnapshot },
-    { commitSafeCursor: () => writeJsonAtomic(filePath, safeCheckpointDocument) },
+    { commitSafeCursor: () => saveMarketplaceTradeCheckpoint(filePath, safeCheckpointDocument) },
   );
   if (!publication.safeCursorCommitted) return {
     trades, marketAssetsByMint, error: publication.error,
@@ -5887,7 +5917,7 @@ async function fetchLocalMarketTrades(settings, connection) {
   };
   // The durable checkpoint containing the applicable mutable IDs is written
   // before any hold can be completed or released.
-  await writeJsonAtomic(filePath, checkpointDocument);
+  await saveMarketplaceTradeCheckpoint(filePath, checkpointDocument);
   const holdsCompleted = await completeMarketplacePublicationHolds(publication.holdIdsToComplete);
   const hasActiveTradeHold = await hasActiveMarketplacePublicationHolds('LM', ['trade']);
   const marketplaceBackfilledNext = publication.allCurrentComplete && holdsCompleted && !hasActiveTradeHold;
@@ -5895,7 +5925,7 @@ async function fetchLocalMarketTrades(settings, connection) {
     && scanned.stats.transactionMisses === 0 && publishError === '' && publication.allEnrichableComplete
     ? 3 : checkpoint.tradeEnrichmentVersion;
   const rawDataBackfilledNext = rawBackfillComplete && scanned.stats.transactionMisses === 0 && !scanned.exhaustion;
-  await writeJsonAtomic(filePath, {
+  await saveMarketplaceTradeCheckpoint(filePath, {
     ...checkpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
     marketplaceBackfilled: marketplaceBackfilledNext,
     rawDataBackfilled: rawDataBackfilledNext,
@@ -6060,7 +6090,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     })),
     ...assetFlows.map(marketplaceFlowPublicationCandidate),
   ], { market: 'GM', faction: 'GLOBAL', profileScope: 'GLOBAL', cursorInputSnapshot, cursorOutputSnapshot }, {
-    commitSafeCursor: () => writeJsonAtomic(filePath, safeCheckpointDocument),
+    commitSafeCursor: () => saveMarketplaceTradeCheckpoint(filePath, safeCheckpointDocument),
   });
   if (!publication.safeCursorCommitted) return {
     trades, assetFlows, error: [publication.error, shadowWrite.error].filter(Boolean).join('; '),
@@ -6079,7 +6109,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
     assetFlowBackfilled: false,
     tradeEnrichmentVersion: checkpoint.tradeEnrichmentVersion,
   };
-  await writeJsonAtomic(filePath, checkpointDocument);
+  await saveMarketplaceTradeCheckpoint(filePath, checkpointDocument);
   const tradeHoldsCompleted = await completeMarketplacePublicationHolds(publication.tradeHoldIdsToComplete);
   const flowHoldsCompleted = await completeMarketplacePublicationHolds(publication.flowHoldIdsToComplete);
   const [hasActiveTradeHold, hasActiveFlowHold] = await Promise.all([
@@ -6089,7 +6119,7 @@ async function fetchGlobalMarketTrades(settings, connection) {
   const marketplaceBackfilledNext = publication.allTradeCurrentComplete && tradeHoldsCompleted && !hasActiveTradeHold;
   const assetFlowBackfilledNext = combinedGlobalScan.stats.transactionMisses === 0 && publishError === ''
     && publication.allFlowCurrentComplete && flowHoldsCompleted && !hasActiveFlowHold;
-  await writeJsonAtomic(filePath, {
+  await saveMarketplaceTradeCheckpoint(filePath, {
     ...checkpointDocument, savedAt: new Date().toISOString(), ...cursorOutputSnapshot,
     marketplaceBackfilled: marketplaceBackfilledNext,
     assetFlowBackfilled: assetFlowBackfilledNext,

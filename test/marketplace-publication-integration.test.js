@@ -169,9 +169,9 @@ test('checkpoint IDs are durable before hold completion and cursor release for L
   const local = functionBody('fetchLocalMarketTrades', 'async function fetchGlobalMarketTrades');
   const global = functionBody('fetchGlobalMarketTrades', 'let marketplaceSyncActive');
   for (const body of [local, global]) {
-    const safeCheckpoint = body.indexOf('commitSafeCursor: () => writeJsonAtomic(filePath, safeCheckpointDocument)');
+    const safeCheckpoint = body.indexOf('commitSafeCursor: () => saveMarketplaceTradeCheckpoint(filePath, safeCheckpointDocument)');
     const completion = body.indexOf('completeMarketplacePublicationHolds');
-    const finalCheckpoint = body.lastIndexOf('await writeJsonAtomic(filePath');
+    const finalCheckpoint = body.lastIndexOf('await saveMarketplaceTradeCheckpoint(filePath');
     assert.ok(safeCheckpoint > 0 && safeCheckpoint < completion);
     assert.ok(completion < finalCheckpoint);
     assert.match(body, /\.\.\.cursorOutputSnapshot/);
@@ -221,7 +221,7 @@ test('publication and release failures preserve the already-committed safe curso
   const local = functionBody('fetchLocalMarketTrades', 'async function fetchGlobalMarketTrades');
   const global = functionBody('fetchGlobalMarketTrades', 'let marketplaceSyncActive');
   for (const body of [local, global]) {
-    assert.match(body, /commitSafeCursor: \(\) => writeJsonAtomic\(filePath, safeCheckpointDocument\)/);
+    assert.match(body, /commitSafeCursor: \(\) => saveMarketplaceTradeCheckpoint\(filePath, safeCheckpointDocument\)/);
     assert.match(body, /\.\.\.checkpointDocument, savedAt: new Date\(\)\.toISOString\(\), \.\.\.cursorOutputSnapshot/);
     const afterSafeCommit = body.slice(body.indexOf('if (!publication.safeCursorCommitted)'));
     assert.doesNotMatch(afterSafeCommit, /\.\.\.cursorInputSnapshot/);

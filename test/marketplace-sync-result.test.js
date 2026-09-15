@@ -71,7 +71,7 @@ test('Marketplace v2 publication checkpoints IDs before hold completion and curs
     const body = main.slice(start, end);
     assert.match(body, /publishMarketplaceCandidateSet/);
     assert.match(body, /commitSafeCursor/);
-    assert.ok(body.indexOf('writeJsonAtomic(filePath, checkpointDocument)') < body.indexOf('completeMarketplacePublicationHolds'));
+    assert.ok(body.indexOf('saveMarketplaceTradeCheckpoint(filePath, checkpointDocument)') < body.indexOf('completeMarketplacePublicationHolds'));
     assert.doesNotMatch(body, /writeInfluxLines\(|formatLocalMarketInfluxLine\(/);
   }
   assert.match(main, /publication_hold_write_failed/);
