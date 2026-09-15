@@ -34,6 +34,11 @@ function normalizeEarningsAggregateScope(scope) {
   return normalized || 'total';
 }
 
+function earningsAggregateReadScopes(scope) {
+  const normalized = normalizeEarningsAggregateScope(scope);
+  return normalized === 'ledger-complete' ? [normalized] : ['ledger-complete', normalized];
+}
+
 function buildEarningsAggregateCacheSourceKey(source = {}) {
   return crypto.createHash('sha256').update(stableSerialize(normalizedSourceDescriptor(source))).digest('hex');
 }
@@ -130,5 +135,6 @@ module.exports = {
   EARNINGS_AGGREGATE_SQLITE_CACHE_SCHEMA_VERSION: CACHE_SCHEMA_VERSION,
   buildEarningsAggregateCacheSourceKey,
   createEarningsAggregateSqliteCache,
+  earningsAggregateReadScopes,
   normalizeEarningsAggregateScope,
 };

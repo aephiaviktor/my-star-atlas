@@ -8,6 +8,7 @@ const { DatabaseSync } = require('node:sqlite');
 const {
   buildEarningsAggregateCacheSourceKey,
   createEarningsAggregateSqliteCache,
+  earningsAggregateReadScopes,
   normalizeEarningsAggregateScope,
 } = require('../electron/earnings-aggregate-sqlite-cache');
 
@@ -40,6 +41,13 @@ test('ledger-complete Earnings views share one aggregate scope without widening 
     buildEarningsAggregateCacheSourceKey({ ...source, scope: 'crafting' }),
     buildEarningsAggregateCacheSourceKey({ ...source, scope: 'breakeven' }),
   );
+});
+
+test('lighter Earnings views read ledger-complete first and retain their safe fallback', () => {
+  assert.deepEqual(earningsAggregateReadScopes(''), ['ledger-complete', 'total']);
+  assert.deepEqual(earningsAggregateReadScopes('crafting'), ['ledger-complete', 'crafting']);
+  assert.deepEqual(earningsAggregateReadScopes('breakeven'), ['ledger-complete']);
+  assert.deepEqual(earningsAggregateReadScopes('upgrading'), ['ledger-complete']);
 });
 
 test('aggregate source identity excludes credentials and covers projection inputs', () => {

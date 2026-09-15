@@ -108,6 +108,7 @@ const { buildRawCostCacheSourceKey, createRawCostSqliteCache } = require('./raw-
 const {
   buildEarningsAggregateCacheSourceKey,
   createEarningsAggregateSqliteCache,
+  earningsAggregateReadScopes,
   normalizeEarningsAggregateScope,
 } = require('./earnings-aggregate-sqlite-cache');
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
@@ -7859,6 +7860,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   const forceAggregateRefresh = rawPayload.trigger === 'manual' || rawPayload.force === true;
   let aggregateCache = null;
   let aggregateCacheError = '';
+  const aggregateReadCandidates = [];
+  const aggregateReadSourceKeys = new Set();
   try {
     const candidate = getEarningsAggregateSqliteCache(settings, snapshotScope);
     aggregateCache = candidate && typeof candidate.read === 'function' && typeof candidate.write === 'function'
@@ -7866,20 +7869,35 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   } catch (error) {
     aggregateCacheError = String(error?.message || error || 'earnings_aggregate_cache_unavailable').slice(0, 240);
   }
+  for (const readScope of earningsAggregateReadScopes(snapshotScope)) {
+    try {
+      const candidate = getEarningsAggregateSqliteCache(settings, readScope);
+      if (!candidate || typeof candidate.read !== 'function' || aggregateReadSourceKeys.has(candidate.sourceKey)) continue;
+      aggregateReadSourceKeys.add(candidate.sourceKey);
+      aggregateReadCandidates.push({
+        cache: candidate,
+        refreshScope: readScope === 'ledger-complete' ? 'breakeven' : readScope,
+      });
+    } catch (error) {
+      aggregateCacheError = String(error?.message || error || 'earnings_aggregate_cache_unavailable').slice(0, 240);
+    }
+  }
   if (!internalAggregateRefresh && aggregateCache && forceAggregateRefresh
     && earningsAggregateRefreshes.has(aggregateCache.sourceKey)) {
     return earningsAggregateRefreshes.get(aggregateCache.sourceKey);
   }
-  if (!internalAggregateRefresh && aggregateCache && !forceAggregateRefresh) {
-    let cached = null;
-    try {
-      cached = aggregateCache.read();
-    } catch (error) {
-      aggregateCacheError = String(error?.message || error || 'earnings_aggregate_cache_read_failed').slice(0, 240);
-    }
-    if (cached) {
-      const refresh = startEarningsAggregateRefresh(aggregateCache.sourceKey, () => fetchEarningsSnapshot({
+  if (!internalAggregateRefresh && !forceAggregateRefresh) {
+    for (const candidate of aggregateReadCandidates) {
+      let cached = null;
+      try {
+        cached = candidate.cache.read();
+      } catch (error) {
+        aggregateCacheError = String(error?.message || error || 'earnings_aggregate_cache_read_failed').slice(0, 240);
+      }
+      if (!cached) continue;
+      const refresh = startEarningsAggregateRefresh(candidate.cache.sourceKey, () => fetchEarningsSnapshot({
         ...rawPayload,
+        earningsScope: candidate.refreshScope,
         __earningsAggregateRefresh: true,
         waitForEarningsAggregateRefresh: false,
         trigger: 'background',
@@ -7894,8 +7912,12 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
         error: aggregateCacheError,
       });
     }
-    if (waitForAggregateRefresh && earningsAggregateRefreshes.has(aggregateCache.sourceKey)) {
-      return earningsAggregateRefreshes.get(aggregateCache.sourceKey);
+    if (waitForAggregateRefresh) {
+      for (const candidate of aggregateReadCandidates) {
+        if (earningsAggregateRefreshes.has(candidate.cache.sourceKey)) {
+          return earningsAggregateRefreshes.get(candidate.cache.sourceKey);
+        }
+      }
     }
   }
   const fleetResult = await fetchProfileFleets(settings);
