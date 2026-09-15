@@ -16,6 +16,7 @@ test('active menu finishes before Earnings and excludes unrelated menus', () => 
   for (const key of ["key: 'earnings'", "key: 'earnings-breakeven'", "key: 'earnings-upgrading'", "key: 'earnings-marketplace'"]) {
     assert.match(prefetch, new RegExp(key.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')));
   }
+  assert.ok(prefetch.indexOf("key: 'earnings-breakeven'") < prefetch.indexOf("key: 'earnings'"));
   assert.match(prefetch, /const tasks = activeSection === 'earnings'\s*\? earningsTasks\s*:\s*\[\.\.\.\(tasksBySection\[activeSection\] \|\| \[\]\), \.\.\.earningsTasks\]/);
   assert.doesNotMatch(prefetch, /syncMarketplace/);
 });
