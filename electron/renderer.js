@@ -7976,7 +7976,10 @@ async function refreshMarketplace({ sync = false } = {}) {
       setText(earningsMarketplaceSyncStatus, 'Marketplace sync running in background...');
       syncResult = await api.syncMarketplace(settings);
     }
-    const result = await api.getMarketplaceSnapshot(settings);
+    const result = await api.getMarketplaceSnapshot({
+      ...settings,
+      forceMarketplaceViewRefresh: sync,
+    });
     const currentSettings = latestSettings || getFormPayload();
     if (faction !== normalizeFaction(currentSettings.faction)
       || profile !== getActivePlayerProfile(currentSettings)) return result;
@@ -8006,6 +8009,23 @@ async function refreshMarketplace({ sync = false } = {}) {
     marketplaceSnapshotCache.set(cacheKey, accepted);
     latestMarketplaceResult = accepted;
     renderEarningsMarketplace(latestMarketplaceResult);
+    if (!sync && result?.marketplaceViewCache?.status === 'stale') {
+      Promise.resolve(api.getMarketplaceSnapshot({
+        ...settings,
+        trigger: 'background',
+        waitForMarketplaceViewRefresh: true,
+      })).then((freshResult) => {
+        const activeSettings = latestSettings || getFormPayload();
+        if (faction !== normalizeFaction(activeSettings.faction)
+          || profile !== getActivePlayerProfile(activeSettings)) return;
+        if (freshResult?.marketplaceViewCache?.status !== 'fresh') return;
+        marketplaceSnapshotCache.set(cacheKey, freshResult);
+        latestMarketplaceResult = freshResult;
+        renderEarningsMarketplace(latestMarketplaceResult);
+      }).catch((refreshError) => {
+        console.warn('Marketplace view background refresh failed', refreshError);
+      });
+    }
     const factionWrite = syncResult?.marketplaceFactionV2Write;
     if (factionWrite?.error) {
       setText(earningsMarketplaceSyncStatus, `Marketplace faction-v2 write failed: ${factionWrite.error}`);

@@ -35,6 +35,7 @@ function completeSnapshot(overrides = {}) {
     marketplaceRawDataCount: 1,
     marketplaceRawDataError: '',
     marketplaceRawDataCoverage: { total: 1, complete: 1, pending: 0, sources: [] },
+    marketplaceRawDataCoverageError: '',
     marketplaceEvents: [{ signature: 'raw-a', eventType: 'sale' }],
     marketplaceEventCount: 1,
     marketplaceTrades: [{ signature: 'raw-a', side: 'buy' }],
@@ -44,6 +45,8 @@ function completeSnapshot(overrides = {}) {
     marketplaceGameLedgerRows: [{ signature: 'raw-a', direction: 'deposit' }],
     marketplaceGameLedgerCount: 1,
     marketplaceEventsError: '',
+    marketplaceAssetFlowError: '',
+    marketplaceBreakevenBasisError: '',
     marketplaceInventoryBasisError: '',
     localMarketTrades: [{ signature: 'local-a' }],
     localMarketTradeCount: 1,
@@ -69,6 +72,10 @@ test('complete Marketplace view validation requires every render collection, mat
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceRawDataCount: 2 })), false);
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceEvents: undefined })), false);
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceRawDataCoverage: [] })), false);
+  assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceRawDataCoverage: { total: 1, complete: 0, pending: 1, sources: [] } })), false);
+  assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceRawDataCoverageError: 'coverage failed' })), false);
+  assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceAssetFlowError: 'flows failed' })), false);
+  assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceBreakevenBasisError: 'basis history failed' })), false);
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceInventoryBasisError: 'basis failed' })), false);
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ checkedAt: 'not-a-date' })), false);
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ checkedAt: 1_789_000_000_000 })), false);

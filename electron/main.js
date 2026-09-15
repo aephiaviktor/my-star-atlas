@@ -116,6 +116,10 @@ const { scanLocalMarketTrades, decodeLocalMarketTransactions } = require('./loca
 const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
 const { createMarketplaceTransactionSqliteCache } = require('./marketplace-transaction-sqlite-cache');
 const { createMarketplaceCheckpointSqliteStore } = require('./marketplace-checkpoint-sqlite-store');
+const {
+  buildMarketplaceViewCacheSourceKey, createMarketplaceViewSqliteCache,
+} = require('./marketplace-view-sqlite-cache');
+const { createMarketplaceViewCacheOrchestrator } = require('./marketplace-view-cache-orchestrator');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows, selectFactionAssetFlows } = require('./marketplace-asset-flow');
 const {
   CSS_STARBASE_NAMES,
@@ -358,6 +362,7 @@ function marketplaceRawDataCheckpointPath() {
 
 let marketplaceTransactionSqliteCache = null;
 let marketplaceCheckpointSqliteStore = null;
+let marketplaceViewCacheOrchestrator = null;
 
 function getMarketplaceTransactionSqliteCache() {
   if (!marketplaceTransactionSqliteCache) {
@@ -375,6 +380,35 @@ function getMarketplaceCheckpointSqliteStore() {
     });
   }
   return marketplaceCheckpointSqliteStore;
+}
+
+function marketplaceViewCacheSource(settings) {
+  const source = {
+    influxUrl: settings.influxUrl,
+    influxBucket: settings.influxBucket,
+    profile: getSelectedPlayerProfile(settings),
+    faction: settings.faction,
+    scope: 'marketplace-complete',
+    projectionVersion: 1,
+    marketplaceHistoryCutoverIso: MARKETPLACE_HISTORY_CUTOVER_ISO,
+  };
+  return { ...source, sourceKey: buildMarketplaceViewCacheSourceKey(source) };
+}
+
+function getMarketplaceViewCacheOrchestrator() {
+  if (!marketplaceViewCacheOrchestrator) {
+    marketplaceViewCacheOrchestrator = createMarketplaceViewCacheOrchestrator({
+      sourceForSettings: marketplaceViewCacheSource,
+      openCache: (source) => createMarketplaceViewSqliteCache({
+        filePath: path.join(baseUserData, 'cache', 'marketplace-transactions-v1.sqlite'),
+        source,
+      }),
+      buildSnapshot: buildFreshMarketplaceSnapshot,
+      onBackgroundError: (error) => console.warn('[MyStarAtlas] Marketplace view refresh failed:', error),
+      onCacheWriteError: (error) => console.warn('[MyStarAtlas] Marketplace view cache write rejected:', error),
+    });
+  }
+  return marketplaceViewCacheOrchestrator;
 }
 
 function normalizeFaction(value) {
@@ -6253,16 +6287,30 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
   }
 }
 
-async function fetchMarketplaceSnapshot(payload) {
-  const settings = normalizeSettings(payload || (await readSettings()));
-  const [result, rawData, decodedEvents, rawDataCoverage, assetFlowEvents, breakevenBasisStates] = await Promise.all([
+async function settleMarketplaceViewDependency(promise, fallback, errorCode) {
+  try {
+    return { value: await promise, error: '' };
+  } catch (error) {
+    return { value: fallback, error: String(error?.message || error || errorCode) };
+  }
+}
+
+async function buildFreshMarketplaceSnapshot(settings) {
+  const [result, rawData, decodedEvents, coverageRead, assetFlowRead, breakevenBasisRead] = await Promise.all([
     fetchMarketplaceTradesFromInflux(settings),
     fetchMarketplaceRawDataFromInflux(settings),
     fetchMarketplaceEventsFromInflux(settings),
-    buildMarketplaceRawDataCoverage(settings).catch(() => ({ sources: [], total: 0, complete: 0, pending: 0, lastSavedAt: '' })),
-    fetchMarketplaceAssetFlowsFromInflux(settings).catch(() => []),
-    readHistoricalBreakevenBasisStates(settings).catch(() => []),
+    settleMarketplaceViewDependency(
+      buildMarketplaceRawDataCoverage(settings),
+      { sources: [], total: 0, complete: 0, pending: 0, lastSavedAt: '' },
+      'marketplace_raw_data_coverage_failed',
+    ),
+    settleMarketplaceViewDependency(fetchMarketplaceAssetFlowsFromInflux(settings), [], 'marketplace_asset_flow_read_failed'),
+    settleMarketplaceViewDependency(readHistoricalBreakevenBasisStates(settings), [], 'marketplace_breakeven_basis_read_failed'),
   ]);
+  const rawDataCoverage = coverageRead.value;
+  const assetFlowEvents = assetFlowRead.value;
+  const breakevenBasisStates = breakevenBasisRead.value;
   const rawSignatures = new Set(rawData.rows.map((row) => row.signature));
   const marketplaceEvents = decodedEvents.rows.filter((event) => rawSignatures.has(event.signature));
   let inventoryBasisObservations = [];
@@ -6290,6 +6338,7 @@ async function fetchMarketplaceSnapshot(payload) {
     marketplaceRawDataCount: rawData.rows.length,
     marketplaceRawDataError: rawData.error,
     marketplaceRawDataCoverage: rawDataCoverage,
+    marketplaceRawDataCoverageError: coverageRead.error,
     marketplaceEvents,
     marketplaceEventCount: marketplaceEvents.length,
     marketplaceTrades,
@@ -6299,12 +6348,22 @@ async function fetchMarketplaceSnapshot(payload) {
     marketplaceGameLedgerRows,
     marketplaceGameLedgerCount: marketplaceGameLedgerRows.length,
     marketplaceEventsError: decodedEvents.error,
+    marketplaceAssetFlowError: assetFlowRead.error,
+    marketplaceBreakevenBasisError: breakevenBasisRead.error,
     marketplaceInventoryBasisError,
     localMarketTrades: trades,
     localMarketTradeCount: trades.length,
     localMarketError: result.error,
     checkedAt: new Date().toISOString(),
   };
+}
+
+async function fetchMarketplaceSnapshot(payload) {
+  const settings = normalizeSettings(payload || (await readSettings()));
+  return getMarketplaceViewCacheOrchestrator().load(settings, {
+    forceRefresh: Boolean(payload?.forceMarketplaceViewRefresh),
+    waitForRefresh: Boolean(payload?.waitForMarketplaceViewRefresh),
+  });
 }
 
 function getCurrentResourcePriceAtl(prices, resourceName) {

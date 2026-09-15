@@ -142,7 +142,7 @@ test('Earnings snapshot stays on the fast path and leaves Marketplace to its own
 test('Marketplace loader uses profile-scoped cached snapshots on tab and faction activation', () => {
   assert.match(main, /fetchMarketplaceAssetFlowsFromInflux\(settings\)/);
   assert.match(main, /readInventoryBasisSnapshots\(\{[\s\S]*?bucket: settings\.influxBucket,[\s\S]*?query: async \(flux\) => parseInfluxCsv\(await queryInfluxFlux\(settings, flux\)\),[\s\S]*?\}\)/);
-  assert.match(main, /readHistoricalBreakevenBasisStates\(settings\)\.catch\(\(\) => \[\]\)/);
+  assert.match(main, /settleMarketplaceViewDependency\(readHistoricalBreakevenBasisStates\(settings\), \[\], 'marketplace_breakeven_basis_read_failed'\)/);
   assert.match(main, /enrichGmTradesWithInventoryBasis\(result\.trades, accounting\.appliedEventResults, \{ inventoryBasisObservations \}\)/);
   assert.match(renderer, /function renderEarningsMarketplaceLoading/);
   assert.match(renderer, /renderEarningsMarketplaceLoading\(sync \? 'Syncing Marketplace data\.\.\.' : 'Loading Marketplace data\.\.\.'\)/);
@@ -296,6 +296,55 @@ test('Marketplace activation uses cache while background and manual refresh sync
   await Promise.all([startupBackground, scheduledTick, manualRefresh, factionRefresh]);
   assert.equal(syncCalls, 1);
   assert.equal(snapshotCalls, 2);
+});
+
+test('Marketplace persistent view cache serves stale immediately, revalidates in background, and forces manual rebuilds', () => {
+  assert.match(main, /createMarketplaceViewCacheOrchestrator/);
+  assert.match(main, /createMarketplaceViewSqliteCache/);
+  assert.match(main, /async function buildFreshMarketplaceSnapshot/);
+  assert.match(main, /forceRefresh:\s*Boolean\(payload\?\.forceMarketplaceViewRefresh\)/);
+  assert.match(main, /waitForRefresh:\s*Boolean\(payload\?\.waitForMarketplaceViewRefresh\)/);
+  assert.match(main, /marketplaceAssetFlowError/);
+  assert.match(main, /marketplaceBreakevenBasisError/);
+  assert.match(main, /marketplaceRawDataCoverageError/);
+  assert.match(renderer, /marketplaceViewCache\?\.status === 'stale'/);
+  assert.match(renderer, /waitForMarketplaceViewRefresh:\s*true/);
+  assert.match(renderer, /forceMarketplaceViewRefresh:\s*sync/);
+});
+
+test('Marketplace persistent stale result renders before its fresh background replacement', async () => {
+  const sourceStart = renderer.indexOf('const marketplaceRefreshInFlight = new Map();');
+  const sourceEnd = renderer.indexOf('async function refreshEarnings()', sourceStart);
+  const rendered = [];
+  const payloads = [];
+  const context = {
+    latestSettings: { faction: 'USTUR', playerProfiles: { USTUR: 'profile' } },
+    getFormPayload: () => ({}),
+    normalizeFaction: (value) => value,
+    getActivePlayerProfile: () => 'profile',
+    renderEarningsMarketplaceLoading: () => {},
+    setText: () => {},
+    earningsMarketplaceSyncStatus: {},
+    api: {
+      syncMarketplace: async () => ({ ok: true }),
+      getMarketplaceSnapshot: async (payload) => {
+        payloads.push(payload);
+        return payload.waitForMarketplaceViewRefresh
+          ? { ok: true, rows: ['fresh'], marketplaceViewCache: { status: 'fresh' } }
+          : { ok: true, rows: ['cached'], marketplaceViewCache: { status: 'stale' } };
+      },
+    },
+    renderEarningsMarketplace: (result) => rendered.push(result.rows[0]),
+    console: { error: () => {}, warn: () => {} },
+    Promise,
+  };
+  vm.runInNewContext(`${renderer.slice(sourceStart, sourceEnd)}\nthis.refreshMarketplace = refreshMarketplace;`, context);
+
+  await context.refreshMarketplace({ sync: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(rendered, ['cached', 'fresh']);
+  assert.equal(payloads[0].forceMarketplaceViewRefresh, false);
+  assert.equal(payloads[1].waitForMarketplaceViewRefresh, true);
 });
 
 test('Marketplace skipped cross-faction sync still loads and uses the requested faction snapshot', async () => {

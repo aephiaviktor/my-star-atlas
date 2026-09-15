@@ -18,7 +18,10 @@ const COLLECTION_COUNTS = Object.freeze([
 ]);
 const ERROR_FIELDS = Object.freeze([
   'marketplaceRawDataError',
+  'marketplaceRawDataCoverageError',
   'marketplaceEventsError',
+  'marketplaceAssetFlowError',
+  'marketplaceBreakevenBasisError',
   'marketplaceInventoryBasisError',
   'localMarketError',
 ]);
@@ -49,8 +52,13 @@ function buildMarketplaceViewCacheSourceKey(source = {}) {
 
 function isCompleteMarketplaceViewSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot) || snapshot.ok !== true) return false;
-  if (!snapshot.marketplaceRawDataCoverage || typeof snapshot.marketplaceRawDataCoverage !== 'object'
-    || Array.isArray(snapshot.marketplaceRawDataCoverage)) return false;
+  const coverage = snapshot.marketplaceRawDataCoverage;
+  if (!coverage || typeof coverage !== 'object' || Array.isArray(coverage)
+    || !Array.isArray(coverage.sources)
+    || !Number.isSafeInteger(coverage.total) || coverage.total < 0
+    || !Number.isSafeInteger(coverage.complete) || coverage.complete < 0
+    || !Number.isSafeInteger(coverage.pending) || coverage.pending < 0
+    || coverage.complete !== coverage.total || coverage.pending !== 0) return false;
   if (typeof snapshot.checkedAt !== 'string' || !Number.isFinite(Date.parse(snapshot.checkedAt))) return false;
   if (ERROR_FIELDS.some((field) => Boolean(snapshot[field]))) return false;
   return COLLECTION_COUNTS.every(([collectionField, countField]) => (
