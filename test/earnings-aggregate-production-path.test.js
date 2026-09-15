@@ -71,6 +71,10 @@ test('warm Earnings request returns the persisted daily aggregate before heavy p
   assert.equal(result.rows[0].txsDaily, 12);
   assert.equal(result.earningsAggregateCache.status, 'stale');
   assert.equal(result.earningsAggregateCache.refreshPending, true);
+  assert.equal(result.earningsAggregateCache.source, 'sqlite');
+  assert.equal(result.earningsAggregateCache.scope, 'ledger-complete');
+  assert.equal(result.earningsAggregateCache.persisted, true);
+  assert.equal(Number.isFinite(result.earningsAggregateCache.readDurationMs), true);
   assert.equal(calls.read, 1);
   assert.equal(calls.refresh, 1);
   assert.equal(calls.heavy, 0);
@@ -101,4 +105,22 @@ test('production cache is profile/faction/scope keyed and refreshes partial resu
   assert.match(aggregateRegion, /scope: normalizeEarningsAggregateScope\(snapshotScope\)/);
   assert.match(aggregateRegion, /rawCargoCostError/);
   assert.match(renderer, /freshResult\.earningsAggregateCache\?\.status !== 'fresh'/);
+  assert.match(main, /projectionDurationMs/);
+  assert.match(main, /writeDurationMs/);
+  assert.match(renderer, /formatEarningsAggregateCacheStatus/);
+});
+
+test('Upgrading and Inventory Ledger display shared aggregate cache timing', () => {
+  const sourceStart = renderer.indexOf('function formatEarningsAggregateCacheStatus');
+  const sourceEnd = renderer.indexOf('function renderEarningsBreakevenEmpty', sourceStart);
+  assert.ok(sourceStart >= 0 && sourceEnd > sourceStart);
+  const vm = require('node:vm');
+  const context = { formatWholeNumber: (value) => String(value) };
+  vm.runInNewContext(`${renderer.slice(sourceStart, sourceEnd)}\nthis.formatStatus = formatEarningsAggregateCacheStatus;`, context);
+  assert.equal(context.formatStatus({ earningsAggregateCache: {
+    source: 'sqlite', scope: 'ledger-complete', readDurationMs: 18.7, ageMs: 125_000, refreshPending: true,
+  } }), ' · SQLite ledger-complete 19 ms · age 2 min · refreshing');
+  assert.equal(context.formatStatus({ earningsAggregateCache: {
+    source: 'projection', projectionDurationMs: 181_234, writeDurationMs: 92.2, persisted: true,
+  } }), ' · rebuilt 181234 ms · saved 92 ms');
 });

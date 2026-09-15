@@ -8000,6 +8000,7 @@ function startEarningsAggregateRefresh(sourceKey, loader) {
 }
 
 async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
+  const aggregateProjectionStartedAt = Date.now();
   const rawPayload = payload || (await readSettings());
   const settings = normalizeSettings(rawPayload);
   const snapshotScope = String(rawPayload.earningsScope || rawPayload.earningsSubtab || '').trim().toLowerCase();
@@ -8025,6 +8026,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       aggregateReadSourceKeys.add(candidate.sourceKey);
       aggregateReadCandidates.push({
         cache: candidate,
+        scope: readScope,
         refreshScope: readScope === 'ledger-complete' ? 'breakeven' : readScope,
       });
     } catch (error) {
@@ -8038,6 +8040,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
   if (!internalAggregateRefresh && !forceAggregateRefresh) {
     for (const candidate of aggregateReadCandidates) {
       let cached = null;
+      const aggregateReadStartedAt = Date.now();
       try {
         cached = candidate.cache.read();
       } catch (error) {
@@ -8055,9 +8058,15 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       refresh.catch(() => {});
       return decorateEarningsAggregateSnapshot(cached.snapshot, {
         status: 'stale',
+        source: 'sqlite',
+        scope: candidate.scope,
         projectedAt: new Date(cached.projectedAtMs).toISOString(),
         ageMs: Math.max(0, Date.now() - cached.projectedAtMs),
+        readDurationMs: Math.max(0, Date.now() - aggregateReadStartedAt),
+        projectionDurationMs: 0,
+        writeDurationMs: 0,
         refreshPending: true,
+        persisted: true,
         error: aggregateCacheError,
       });
     }
@@ -9377,20 +9386,30 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     inventoryMarketplaceEventError: inventoryMarketplaceEvents.error,
   };
   const aggregateComplete = isPersistableEarningsAggregateSnapshot(snapshot, snapshotScope);
+  const aggregateProjectionDurationMs = Math.max(0, Date.now() - aggregateProjectionStartedAt);
   let aggregateWrite = null;
+  let aggregateWriteDurationMs = 0;
   if (aggregateCache && aggregateComplete) {
+    const aggregateWriteStartedAt = Date.now();
     try {
       aggregateWrite = aggregateCache.write(snapshot);
     } catch (error) {
       aggregateCacheError = String(error?.message || error || 'earnings_aggregate_cache_write_failed').slice(0, 240);
+    } finally {
+      aggregateWriteDurationMs = Math.max(0, Date.now() - aggregateWriteStartedAt);
     }
   }
   return {
     ...snapshot,
     earningsAggregateCache: {
       status: aggregateComplete ? 'fresh' : 'partial',
+      source: 'projection',
+      scope: normalizeEarningsAggregateScope(snapshotScope),
       projectedAt: aggregateWrite ? new Date(aggregateWrite.projectedAtMs).toISOString() : snapshot.checkedAt,
       ageMs: 0,
+      readDurationMs: 0,
+      projectionDurationMs: aggregateProjectionDurationMs,
+      writeDurationMs: aggregateWriteDurationMs,
       refreshPending: false,
       persisted: Boolean(aggregateWrite),
       error: aggregateCacheError,

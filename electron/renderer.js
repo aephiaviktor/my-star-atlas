@@ -7725,6 +7725,22 @@ function renderInventoryCostLedger(result) {
   }
 }
 
+function formatEarningsAggregateCacheStatus(result) {
+  const cache = result?.earningsAggregateCache;
+  if (!cache || typeof cache !== 'object') return '';
+  if (cache.source === 'sqlite') {
+    const readMs = Math.max(0, Math.round(Number(cache.readDurationMs) || 0));
+    const ageMinutes = Math.max(0, Math.floor((Number(cache.ageMs) || 0) / 60_000));
+    const scope = String(cache.scope || 'aggregate');
+    return ` · SQLite ${scope} ${readMs} ms · age ${ageMinutes < 1 ? '<1' : formatWholeNumber(ageMinutes)} min${cache.refreshPending ? ' · refreshing' : ''}`;
+  }
+  const projectionMs = Math.max(0, Math.round(Number(cache.projectionDurationMs) || 0));
+  const writeMs = Math.max(0, Math.round(Number(cache.writeDurationMs) || 0));
+  return cache.persisted
+    ? ` · rebuilt ${projectionMs} ms · saved ${writeMs} ms`
+    : cache.status === 'partial' ? ` · rebuilt ${projectionMs} ms · not cached` : '';
+}
+
 function renderEarningsBreakevenEmpty(message) {
   renderInventoryCostLedger(null);
   setText(earningsBreakevenSyncStatus, message);
@@ -7770,7 +7786,8 @@ function renderEarningsBreakeven(result) {
   const checkpointStatus = result?.ledgerCheckpointStatus
     ? ` · checkpoint ${result.ledgerCheckpointStatus}${result?.ledgerCheckpointError ? ': ' + result.ledgerCheckpointError : ''}`
     : '';
-  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${baselineStatus}${checkpointStatus}${snapshotError ? ' · ' + snapshotError : ''}`;
+  const cacheStatus = formatEarningsAggregateCacheStatus(result);
+  const syncMessage = `${formatWholeNumber(rows.length)} inventory cost-basis rows at ${formatCheckedAt(result?.checkedAt)}${cacheStatus}${baselineStatus}${checkpointStatus}${snapshotError ? ' · ' + snapshotError : ''}`;
   setText(earningsBreakevenSyncStatus, syncMessage);
   const ledgerFilterRows = (Array.isArray(result?.inventoryCostLedgerRows) ? result.inventoryCostLedgerRows : [])
     .filter(isDisplayableInventoryLedgerRow)
@@ -7811,7 +7828,8 @@ function renderEarningsUpgrading(result) {
   renderEarningsHeader('upgrading');
   const colorMap = buildEarningsAssetColorMap(rows, (row) => row.asset || 'Unknown asset');
   renderEarningsNetProfitChart({ ...result, rows }, colorMap, { target: earningsUpgradingAssetNetProfitChart, label: 'Upgrading net profit by asset in ATLAS by day', getSegmentLabel: (row) => row.asset || 'Unknown asset', mode: earningsChartMode.upgrading, getCrew: (row) => row.crew, getCrewIdentity: (row) => row.starbase });
-  setText(earningsUpgradingSyncStatus, `${formatWholeNumber(rows.length)} upgrading rows at ${formatCheckedAt(result?.checkedAt)}${result?.upgradingError ? ' · ' + result.upgradingError : ''}`);
+  const cacheStatus = formatEarningsAggregateCacheStatus(result);
+  setText(earningsUpgradingSyncStatus, `${formatWholeNumber(rows.length)} upgrading rows at ${formatCheckedAt(result?.checkedAt)}${cacheStatus}${result?.upgradingError ? ' · ' + result.upgradingError : ''}`);
   if (!earningsUpgradingTableBody) return;
   const sortedRows = sortEarningsRows('upgrading', getFilteredEarningsRows('upgrading', rows));
   earningsUpgradingTableBody.textContent = '';
