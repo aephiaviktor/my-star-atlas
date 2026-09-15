@@ -21,10 +21,10 @@ const source = {
   influxUrl: 'https://influx.example/api/v2/query?org=Aephia',
   influxOrganization: 'Aephia',
   influxBucket: 'SLYAssistant',
-  profile: 'profile-public-key',
-  faction: 'USTUR',
-  scope: 'marketplace-complete',
-  projectionVersion: 1,
+  gmTradingWallets: ['gm-wallet-a', 'gm-wallet-b'],
+  profiles: { MUD: 'mud-profile', ONI: 'oni-profile', USTUR: 'ustur-profile' },
+  scope: 'marketplace-global',
+  projectionVersion: 2,
   marketplaceHistoryCutoverIso: '2026-08-01T00:00:00.000Z',
 };
 
@@ -42,15 +42,15 @@ function completeSnapshot(overrides = {}) {
     marketplaceTradeCount: 1,
     marketplaceGlobalLedgerRows: [{ signature: 'raw-a', direction: 'in' }],
     marketplaceGlobalLedgerCount: 1,
-    marketplaceGameLedgerRows: [{ signature: 'raw-a', direction: 'deposit' }],
-    marketplaceGameLedgerCount: 1,
+    marketplaceGameLedgerRowsByFaction: {
+      MUD: [{ signature: 'raw-a', direction: 'deposit', faction: 'MUD' }],
+      ONI: [],
+      USTUR: [{ signature: 'raw-b', direction: 'deposit', faction: 'USTUR' }],
+    },
+    marketplaceGameLedgerCountsByFaction: { MUD: 1, ONI: 0, USTUR: 1 },
     marketplaceEventsError: '',
-    marketplaceAssetFlowError: '',
     marketplaceBreakevenBasisError: '',
     marketplaceInventoryBasisError: '',
-    localMarketTrades: [{ signature: 'local-a' }],
-    localMarketTradeCount: 1,
-    localMarketError: '',
     checkedAt: '2026-09-15T06:30:00.000Z',
     ...overrides,
   };
@@ -59,9 +59,12 @@ function completeSnapshot(overrides = {}) {
 test('Marketplace view source identity excludes credentials and covers projection inputs', () => {
   const baseline = buildMarketplaceViewCacheSourceKey({ ...source, influxAuthToken: 'secret-a', rpcApiKey: 'rpc-secret-a' });
   assert.equal(baseline, buildMarketplaceViewCacheSourceKey({ ...source, influxAuthToken: 'secret-b', rpcApiKey: 'rpc-secret-b' }));
-  assert.notEqual(baseline, buildMarketplaceViewCacheSourceKey({ ...source, faction: 'ONI' }));
-  assert.notEqual(baseline, buildMarketplaceViewCacheSourceKey({ ...source, profile: 'other-profile' }));
-  assert.notEqual(baseline, buildMarketplaceViewCacheSourceKey({ ...source, projectionVersion: 2 }));
+  assert.equal(baseline, buildMarketplaceViewCacheSourceKey({ ...source, faction: 'ONI', profile: 'other-profile' }));
+  assert.notEqual(baseline, buildMarketplaceViewCacheSourceKey({ ...source,
+    profiles: { ...source.profiles, ONI: 'other-profile' },
+  }));
+  assert.notEqual(baseline, buildMarketplaceViewCacheSourceKey({ ...source, gmTradingWallets: ['gm-wallet-a'] }));
+  assert.notEqual(baseline, buildMarketplaceViewCacheSourceKey({ ...source, projectionVersion: 3 }));
   assert.notEqual(baseline, buildMarketplaceViewCacheSourceKey({ ...source, marketplaceHistoryCutoverIso: '2026-09-01T00:00:00.000Z' }));
   assert.doesNotMatch(baseline, /secret/);
 });
@@ -74,7 +77,12 @@ test('complete Marketplace view validation requires every render collection, mat
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceRawDataCoverage: [] })), false);
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceRawDataCoverage: { total: 1, complete: 0, pending: 1, sources: [] } })), false);
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceRawDataCoverageError: 'coverage failed' })), false);
-  assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceAssetFlowError: 'flows failed' })), false);
+  assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({
+    marketplaceGameLedgerRowsByFaction: { MUD: [], ONI: [], USTUR: [] },
+  })), false);
+  assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({
+    marketplaceGameLedgerCountsByFaction: { MUD: 1, ONI: 0, USTUR: 2 },
+  })), false);
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceBreakevenBasisError: 'basis history failed' })), false);
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ marketplaceInventoryBasisError: 'basis failed' })), false);
   assert.equal(isCompleteMarketplaceViewSnapshot(completeSnapshot({ checkedAt: 'not-a-date' })), false);

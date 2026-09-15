@@ -137,7 +137,6 @@ const { filterLegacyMarketplaceInfluxLines } = require('./marketplace-write-poli
 const {
   MARKETPLACE_FACTION_MEASUREMENT,
   MARKETPLACE_HISTORY_CUTOVER_ISO,
-  enrichGmTradesWithInventoryBasis,
   buildGmWalletUniverse,
   projectGmFactionMarketplaceRows,
   formatGmFactionMarketplaceV2Line,
@@ -386,11 +385,14 @@ function getMarketplaceCheckpointSqliteStore() {
 function marketplaceViewCacheSource(settings) {
   const source = {
     influxUrl: settings.influxUrl,
+    influxOrganization: settings.influxOrganization,
     influxBucket: settings.influxBucket,
-    profile: getSelectedPlayerProfile(settings),
-    faction: settings.faction,
-    scope: 'marketplace-complete',
-    projectionVersion: 1,
+    gmTradingWallets: String(settings.gmTradingWallets || '').split(/[\s,;]+/).filter(Boolean).sort(),
+    profiles: Object.fromEntries(['MUD', 'ONI', 'USTUR'].map((faction) => [
+      faction, String(settings.playerProfiles?.[faction] || '').trim(),
+    ])),
+    scope: 'marketplace-global',
+    projectionVersion: 2,
     marketplaceHistoryCutoverIso: MARKETPLACE_HISTORY_CUTOVER_ISO,
   };
   return { ...source, sourceKey: buildMarketplaceViewCacheSourceKey(source) };
@@ -4981,12 +4983,15 @@ async function buildMarketplaceRawDataCoverage(settings) {
     discoverySource: 'token_account', label: `Token accounts · ${owner}`, address: owner, sourceCount: addresses.length,
     backfillComplete: addresses.length > 0 && addresses.every((address) => rawCursorComplete(checkpoint.cursors[address])),
   });
-  const faction = normalizeFaction(settings.faction);
-  const lmCheckpoint = await loadLocalMarketTradeCheckpoint(localMarketCheckpointPath(faction));
-  sources.push({
-    discoverySource: 'lm_scanner', label: `LM scanner · ${faction}`, address: String(settings.playerProfiles?.[faction] || ''), sourceCount: 1,
-    backfillComplete: lmCheckpoint.marketplaceBackfilled === true,
-  });
+  for (const faction of ['MUD', 'ONI', 'USTUR']) {
+    const profile = String(settings.playerProfiles?.[faction] || '').trim();
+    if (!profile) continue;
+    const lmCheckpoint = await loadLocalMarketTradeCheckpoint(localMarketCheckpointPath(faction));
+    sources.push({
+      discoverySource: 'lm_scanner', label: `LM scanner · ${faction}`, address: profile, sourceCount: 1,
+      backfillComplete: lmCheckpoint.marketplaceBackfilled === true,
+    });
+  }
   return {
     sources,
     total: sources.length,
@@ -6298,8 +6303,7 @@ async function settleMarketplaceViewDependency(promise, fallback, errorCode) {
 }
 
 async function buildFreshMarketplaceSnapshot(settings) {
-  const [result, rawData, decodedEvents, coverageRead, assetFlowRead, breakevenBasisRead] = await Promise.all([
-    fetchMarketplaceTradesFromInflux(settings),
+  const [rawData, decodedEvents, coverageRead, breakevenBasisRead] = await Promise.all([
     fetchMarketplaceRawDataFromInflux(settings),
     fetchMarketplaceEventsFromInflux(settings),
     settleMarketplaceViewDependency(
@@ -6307,11 +6311,9 @@ async function buildFreshMarketplaceSnapshot(settings) {
       { sources: [], total: 0, complete: 0, pending: 0, lastSavedAt: '' },
       'marketplace_raw_data_coverage_failed',
     ),
-    settleMarketplaceViewDependency(fetchMarketplaceAssetFlowsFromInflux(settings), [], 'marketplace_asset_flow_read_failed'),
     settleMarketplaceViewDependency(readHistoricalBreakevenBasisStates(settings), [], 'marketplace_breakeven_basis_read_failed'),
   ]);
   const rawDataCoverage = coverageRead.value;
-  const assetFlowEvents = assetFlowRead.value;
   const breakevenBasisStates = breakevenBasisRead.value;
   const rawSignatures = new Set(rawData.rows.map((row) => row.signature));
   const marketplaceEvents = decodedEvents.rows.filter((event) => rawSignatures.has(event.signature));
@@ -6325,17 +6327,20 @@ async function buildFreshMarketplaceSnapshot(settings) {
   } catch (error) {
     marketplaceInventoryBasisError = String(error?.message || error || 'marketplace_inventory_basis_read_failed');
   }
-  const accounting = buildCostLedgerResult({ localMarketTrades: result.trades, assetFlowEvents });
-  const trades = enrichGmTradesWithInventoryBasis(result.trades, accounting.appliedEventResults, { inventoryBasisObservations });
   const marketplaceTrades = projectDecodedMarketplaceTrades(marketplaceEvents);
   const marketplaceInventoryMovements = buildMarketplaceInventoryMovements(marketplaceEvents, {
     inventoryBasisObservations, breakevenBasisStates,
   });
   const marketplaceInventoryLedger = replayMarketplaceInventoryLedger(marketplaceInventoryMovements);
   const marketplaceGlobalLedgerRows = projectGlobalLedgerRows(marketplaceInventoryLedger.rows);
-  const marketplaceGameLedgerRows = projectGameLedgerRows(marketplaceInventoryLedger.rows, { faction: settings.faction });
+  const marketplaceGameLedgerRowsByFaction = Object.fromEntries(['MUD', 'ONI', 'USTUR'].map((faction) => [
+    faction, projectGameLedgerRows(marketplaceInventoryLedger.rows, { faction }),
+  ]));
+  const marketplaceGameLedgerCountsByFaction = Object.fromEntries(['MUD', 'ONI', 'USTUR'].map((faction) => [
+    faction, marketplaceGameLedgerRowsByFaction[faction].length,
+  ]));
   return {
-    ok: !result.error,
+    ok: !rawData.error && !decodedEvents.error,
     marketplaceRawData: rawData.rows,
     marketplaceRawDataCount: rawData.rows.length,
     marketplaceRawDataError: rawData.error,
@@ -6347,25 +6352,33 @@ async function buildFreshMarketplaceSnapshot(settings) {
     marketplaceTradeCount: marketplaceTrades.length,
     marketplaceGlobalLedgerRows,
     marketplaceGlobalLedgerCount: marketplaceGlobalLedgerRows.length,
-    marketplaceGameLedgerRows,
-    marketplaceGameLedgerCount: marketplaceGameLedgerRows.length,
+    marketplaceGameLedgerRowsByFaction,
+    marketplaceGameLedgerCountsByFaction,
     marketplaceEventsError: decodedEvents.error,
-    marketplaceAssetFlowError: assetFlowRead.error,
     marketplaceBreakevenBasisError: breakevenBasisRead.error,
     marketplaceInventoryBasisError,
-    localMarketTrades: trades,
-    localMarketTradeCount: trades.length,
-    localMarketError: result.error,
     checkedAt: new Date().toISOString(),
+  };
+}
+
+function selectMarketplaceFactionView(snapshot, faction) {
+  const selectedFaction = normalizeFaction(faction);
+  const rows = Array.isArray(snapshot?.marketplaceGameLedgerRowsByFaction?.[selectedFaction])
+    ? snapshot.marketplaceGameLedgerRowsByFaction[selectedFaction] : [];
+  return {
+    ...snapshot,
+    marketplaceGameLedgerRows: rows,
+    marketplaceGameLedgerCount: rows.length,
   };
 }
 
 async function fetchMarketplaceSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
-  return getMarketplaceViewCacheOrchestrator().load(settings, {
+  const snapshot = await getMarketplaceViewCacheOrchestrator().load(settings, {
     forceRefresh: Boolean(payload?.forceMarketplaceViewRefresh),
     waitForRefresh: Boolean(payload?.waitForMarketplaceViewRefresh),
   });
+  return selectMarketplaceFactionView(snapshot, settings.faction);
 }
 
 function getCurrentResourcePriceAtl(prices, resourceName) {

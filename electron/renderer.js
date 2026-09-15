@@ -1442,7 +1442,7 @@ async function runFactionBackgroundPrefetch(generation, faction, activeSection) 
   };
   settings.trigger = telemetryTrigger;
   const profile = getActivePlayerProfile(settings);
-  const marketplaceCacheKey = `${faction}:${profile}`;
+  const marketplaceCacheKey = marketplaceGlobalCacheKey(settings);
   const earningsTasks = [
     { key: 'earnings-breakeven', cached: () => !profile || api.breakevenCache.inspect(getBreakevenCacheInput(settings))?.entry?.status === 'ready', load: () => api.breakevenCache.ensure(getBreakevenCacheInput(settings), () => fetchCompleteBreakevenSnapshot(settings)) },
     { key: 'earnings', cached: () => isEarningsSnapshotCacheComplete(getCachedFactionResult(faction, 'earnings')) || !profile, load: async () => { const result = await api.getEarningsSnapshot({ ...settings, earningsSubtab: 'crafting' }); if (result?.ok !== false) setCachedFactionResult(faction, 'earnings', result); } },
@@ -7997,6 +7997,24 @@ const marketplaceRefreshInFlight = new Map();
 const marketplaceSnapshotCache = new Map();
 const MARKETPLACE_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 
+function marketplaceGlobalCacheKey(settings = {}) {
+  const profiles = settings.playerProfiles || {};
+  return JSON.stringify([
+    String(settings.influxUrl || '').trim().replace(/\/$/, ''),
+    String(settings.influxOrganization || '').trim(),
+    String(settings.influxBucket || '').trim(),
+    ...String(settings.gmTradingWallets || '').split(/[\s,;]+/).filter(Boolean).sort(),
+    ...['MUD', 'ONI', 'USTUR'].map((faction) => String(profiles[faction] || '').trim()),
+  ]);
+}
+
+function selectMarketplaceFactionView(snapshot, faction) {
+  const selectedFaction = normalizeFaction(faction);
+  const rows = Array.isArray(snapshot?.marketplaceGameLedgerRowsByFaction?.[selectedFaction])
+    ? snapshot.marketplaceGameLedgerRowsByFaction[selectedFaction] : [];
+  return { ...snapshot, marketplaceGameLedgerRows: rows, marketplaceGameLedgerCount: rows.length };
+}
+
 async function refreshMarketplace({ sync = false } = {}) {
   const pendingTelemetryTrigger = typeof rendererTelemetryTrigger !== 'undefined' && typeof TELEMETRY_TRIGGERS !== 'undefined' && TELEMETRY_TRIGGERS.has(rendererTelemetryTrigger)
     ? rendererTelemetryTrigger
@@ -8005,13 +8023,12 @@ async function refreshMarketplace({ sync = false } = {}) {
   if (typeof rendererTelemetryTrigger !== 'undefined') rendererTelemetryTrigger = 'unknown';
   const settings = { ...(latestSettings || getFormPayload()), trigger: telemetryTrigger };
   const faction = normalizeFaction(settings.faction);
-  const profile = getActivePlayerProfile(settings);
-  const cacheKey = `${faction}:${profile}`;
+  const cacheKey = marketplaceGlobalCacheKey(settings);
   const cached = marketplaceSnapshotCache.get(cacheKey);
   if (cached) {
-    latestMarketplaceResult = cached;
+    latestMarketplaceResult = selectMarketplaceFactionView(cached, faction);
     renderEarningsMarketplace(latestMarketplaceResult);
-    if (!sync) return cached;
+    if (!sync) return latestMarketplaceResult;
   }
   if (marketplaceRefreshInFlight.has(cacheKey)) return marketplaceRefreshInFlight.get(cacheKey);
   const promise = (async () => {
@@ -8026,8 +8043,7 @@ async function refreshMarketplace({ sync = false } = {}) {
       forceMarketplaceViewRefresh: sync,
     });
     const currentSettings = latestSettings || getFormPayload();
-    if (faction !== normalizeFaction(currentSettings.faction)
-      || profile !== getActivePlayerProfile(currentSettings)) return result;
+    if (cacheKey !== marketplaceGlobalCacheKey(currentSettings)) return result;
     const prior = marketplaceSnapshotCache.get(cacheKey);
     const rawReadFailed = Boolean(result?.marketplaceRawDataError);
     const eventsReadFailed = Boolean(result?.marketplaceEventsError);
@@ -8046,13 +8062,13 @@ async function refreshMarketplace({ sync = false } = {}) {
             marketplaceTradeCount: prior.marketplaceTradeCount,
             marketplaceGlobalLedgerRows: prior.marketplaceGlobalLedgerRows,
             marketplaceGlobalLedgerCount: prior.marketplaceGlobalLedgerCount,
-            marketplaceGameLedgerRows: prior.marketplaceGameLedgerRows,
-            marketplaceGameLedgerCount: prior.marketplaceGameLedgerCount,
+            marketplaceGameLedgerRowsByFaction: prior.marketplaceGameLedgerRowsByFaction,
+            marketplaceGameLedgerCountsByFaction: prior.marketplaceGameLedgerCountsByFaction,
           } : {}),
         }
       : result;
     marketplaceSnapshotCache.set(cacheKey, accepted);
-    latestMarketplaceResult = accepted;
+    latestMarketplaceResult = selectMarketplaceFactionView(accepted, normalizeFaction(currentSettings.faction));
     renderEarningsMarketplace(latestMarketplaceResult);
     if (!sync && result?.marketplaceViewCache?.status === 'stale') {
       Promise.resolve(api.getMarketplaceSnapshot({
@@ -8061,11 +8077,10 @@ async function refreshMarketplace({ sync = false } = {}) {
         waitForMarketplaceViewRefresh: true,
       })).then((freshResult) => {
         const activeSettings = latestSettings || getFormPayload();
-        if (faction !== normalizeFaction(activeSettings.faction)
-          || profile !== getActivePlayerProfile(activeSettings)) return;
+        if (cacheKey !== marketplaceGlobalCacheKey(activeSettings)) return;
         if (freshResult?.marketplaceViewCache?.status !== 'fresh') return;
         marketplaceSnapshotCache.set(cacheKey, freshResult);
-        latestMarketplaceResult = freshResult;
+        latestMarketplaceResult = selectMarketplaceFactionView(freshResult, activeSettings.faction);
         renderEarningsMarketplace(latestMarketplaceResult);
       }).catch((refreshError) => {
         console.warn('Marketplace view background refresh failed', refreshError);
@@ -8079,7 +8094,7 @@ async function refreshMarketplace({ sync = false } = {}) {
     } else if (syncResult) {
       setText(earningsMarketplaceSyncStatus, 'Marketplace faction-v2: no qualifying rows');
     }
-    return result;
+    return latestMarketplaceResult;
   })().catch((error) => {
     console.error(error);
     setText(earningsMarketplaceSyncStatus, 'Marketplace sync unavailable');

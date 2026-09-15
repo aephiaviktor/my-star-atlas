@@ -6,24 +6,21 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const { DatabaseSync } = require('node:sqlite');
 
-const CACHE_SCHEMA_VERSION = 1;
+const CACHE_SCHEMA_VERSION = 2;
 const DEFAULT_MAX_SNAPSHOT_BYTES = 128 * 1024 * 1024;
 const COLLECTION_COUNTS = Object.freeze([
   ['marketplaceRawData', 'marketplaceRawDataCount'],
   ['marketplaceEvents', 'marketplaceEventCount'],
   ['marketplaceTrades', 'marketplaceTradeCount'],
   ['marketplaceGlobalLedgerRows', 'marketplaceGlobalLedgerCount'],
-  ['marketplaceGameLedgerRows', 'marketplaceGameLedgerCount'],
-  ['localMarketTrades', 'localMarketTradeCount'],
 ]);
+const MARKETPLACE_FACTIONS = Object.freeze(['MUD', 'ONI', 'USTUR']);
 const ERROR_FIELDS = Object.freeze([
   'marketplaceRawDataError',
   'marketplaceRawDataCoverageError',
   'marketplaceEventsError',
-  'marketplaceAssetFlowError',
   'marketplaceBreakevenBasisError',
   'marketplaceInventoryBasisError',
-  'localMarketError',
 ]);
 
 function stableSerialize(value) {
@@ -33,14 +30,21 @@ function stableSerialize(value) {
 }
 
 function normalizedSourceDescriptor(source = {}) {
+  const profiles = source.profiles && typeof source.profiles === 'object' && !Array.isArray(source.profiles)
+    ? source.profiles : {};
+  const gmTradingWallets = (Array.isArray(source.gmTradingWallets)
+    ? source.gmTradingWallets : String(source.gmTradingWallets || '').split(/[\s,;]+/))
+    .map((value) => String(value || '').trim()).filter(Boolean).sort();
   return {
     cacheSchemaVersion: CACHE_SCHEMA_VERSION,
-    faction: String(source.faction || '').trim().toUpperCase(),
     influxBucket: String(source.influxBucket || '').trim(),
     influxOrganization: String(source.influxOrganization || '').trim(),
     influxUrl: String(source.influxUrl || '').trim().replace(/\/$/, ''),
+    gmTradingWallets,
     marketplaceHistoryCutoverIso: String(source.marketplaceHistoryCutoverIso || '').trim(),
-    profile: String(source.profile || '').trim(),
+    profiles: Object.fromEntries(MARKETPLACE_FACTIONS.map((faction) => [
+      faction, String(profiles[faction] || '').trim(),
+    ])),
     projectionVersion: Number(source.projectionVersion),
     scope: String(source.scope || 'marketplace-complete').trim().toLowerCase(),
   };
@@ -61,12 +65,19 @@ function isCompleteMarketplaceViewSnapshot(snapshot) {
     || coverage.complete !== coverage.total || coverage.pending !== 0) return false;
   if (typeof snapshot.checkedAt !== 'string' || !Number.isFinite(Date.parse(snapshot.checkedAt))) return false;
   if (ERROR_FIELDS.some((field) => Boolean(snapshot[field]))) return false;
-  return COLLECTION_COUNTS.every(([collectionField, countField]) => (
+  if (!COLLECTION_COUNTS.every(([collectionField, countField]) => (
     Array.isArray(snapshot[collectionField])
     && Number.isSafeInteger(snapshot[countField])
     && snapshot[countField] >= 0
     && snapshot[countField] === snapshot[collectionField].length
-  ));
+  ))) return false;
+  const rowsByFaction = snapshot.marketplaceGameLedgerRowsByFaction;
+  const countsByFaction = snapshot.marketplaceGameLedgerCountsByFaction;
+  if (!rowsByFaction || typeof rowsByFaction !== 'object' || Array.isArray(rowsByFaction)
+    || !countsByFaction || typeof countsByFaction !== 'object' || Array.isArray(countsByFaction)) return false;
+  return MARKETPLACE_FACTIONS.every((faction) => Array.isArray(rowsByFaction[faction])
+    && Number.isSafeInteger(countsByFaction[faction]) && countsByFaction[faction] >= 0
+    && countsByFaction[faction] === rowsByFaction[faction].length);
 }
 
 function createMarketplaceViewSqliteCache({

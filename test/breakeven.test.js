@@ -282,7 +282,8 @@ test('production ledger seeds opening inventory from the last snapshot before it
   assert.match(main, /range\(start: -38d, stop: -31d\)/);
   assert.match(main, /group\(columns: \["rss", "starbase"\]\)[\s\S]*?last\(\)[\s\S]*?filter\(fn: \(r\) => r\._value > 0\)/);
   assert.match(main, /openingInventoryRows = \(await fetchOpeningPerStarbaseInventory\(settings\)\)/);
-  assert.match(main, /buildCostLedgerResult\(\{[\s\S]*?openingInventoryRows,/);
+  assert.match(main, /const inventoryCostLedgerInput = \{[\s\S]*?openingInventoryRows,/);
+  assert.match(main, /buildCostLedgerResult\(\{ \.\.\.inventoryCostLedgerInput, craftingRows: craftingInput \}\)/);
 });
 
 test('production Breakeven reconciles current inventory against ledger quantity', () => {

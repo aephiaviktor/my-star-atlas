@@ -92,7 +92,8 @@ test('Global Ledger is all-wallet and Game Ledger is faction-specific and asymme
   assert.match(renderer, /result\?\.marketplaceGameLedgerRows/);
   assert.match(renderer, /marketplaceGameDirection = button\.dataset\.marketplaceGameDirection/);
   assert.match(main, /buildMarketplaceInventoryMovements\(marketplaceEvents, \{[\s\S]*inventoryBasisObservations, breakevenBasisStates/);
-  assert.match(main, /projectGameLedgerRows\(marketplaceInventoryLedger\.rows, \{ faction: settings\.faction \}\)/);
+  assert.match(main, /marketplaceGameLedgerRowsByFaction = Object\.fromEntries\(\['MUD', 'ONI', 'USTUR'\]/);
+  assert.match(main, /projectGameLedgerRows\(marketplaceInventoryLedger\.rows, \{ faction \}\)/);
   assert.match(main, /inventoryBasisScopesFromEvents\(marketplaceEvents\)/);
   assert.match(main, /marketplaceInventoryBasisError/);
 });
@@ -164,7 +165,7 @@ test('Raw ingestion records factual discovery provenance without decoding event 
 
 test('Marketplace snapshot state is independent and retains raw rows after a failed refresh', () => {
   assert.match(renderer, /let latestMarketplaceResult = null/);
-  assert.match(renderer, /latestMarketplaceResult = cached/);
+  assert.match(renderer, /latestMarketplaceResult = selectMarketplaceFactionView\(cached, faction\)/);
   assert.match(renderer, /const rawReadFailed = Boolean\(result\?\.marketplaceRawDataError\)/);
   assert.match(renderer, /marketplaceRawData: prior\.marketplaceRawData/);
   assert.match(renderer, /renderMarketplaceRawData\(latestMarketplaceResult\)/);
