@@ -115,6 +115,7 @@ const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutov
 const { scanLocalMarketTrades, decodeLocalMarketTransactions } = require('./local-market-scanner');
 const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
 const { createMarketplaceTransactionSqliteCache } = require('./marketplace-transaction-sqlite-cache');
+const { createMarketplaceCheckpointSqliteStore } = require('./marketplace-checkpoint-sqlite-store');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows, selectFactionAssetFlows } = require('./marketplace-asset-flow');
 const {
   CSS_STARBASE_NAMES,
@@ -356,6 +357,7 @@ function marketplaceRawDataCheckpointPath() {
 }
 
 let marketplaceTransactionSqliteCache = null;
+let marketplaceCheckpointSqliteStore = null;
 
 function getMarketplaceTransactionSqliteCache() {
   if (!marketplaceTransactionSqliteCache) {
@@ -364,6 +366,15 @@ function getMarketplaceTransactionSqliteCache() {
     });
   }
   return marketplaceTransactionSqliteCache;
+}
+
+function getMarketplaceCheckpointSqliteStore() {
+  if (!marketplaceCheckpointSqliteStore) {
+    marketplaceCheckpointSqliteStore = createMarketplaceCheckpointSqliteStore({
+      filePath: path.join(baseUserData, 'cache', 'marketplace-transactions-v1.sqlite'),
+    });
+  }
+  return marketplaceCheckpointSqliteStore;
 }
 
 function normalizeFaction(value) {
@@ -4816,22 +4827,54 @@ async function writeBreakevenBasisStates(settings, states) {
   return lines.length;
 }
 
+function normalizeMarketplaceRawDataCheckpoint(parsed) {
+  if (![1, 2].includes(parsed?.schemaVersion) || !parsed.cursors || typeof parsed.cursors !== 'object'
+    || Array.isArray(parsed.cursors) || !Array.isArray(parsed.tokenAccounts)) throw new Error('invalid');
+  return {
+    ...parsed,
+    schemaVersion: 2,
+    custodyBackfillVersion: Number(parsed.custodyBackfillVersion || 0),
+    tokenAccountOwners: Array.isArray(parsed.tokenAccountOwners) ? parsed.tokenAccountOwners : [],
+  };
+}
+
+function emptyMarketplaceRawDataCheckpoint() {
+  return {
+    schemaVersion: 2, custodyBackfillVersion: 0, cursors: {}, tokenAccounts: [], tokenAccountOwners: [],
+    tokenAccountsRefreshedAt: '', lastTransferScanAt: '',
+  };
+}
+
 async function loadMarketplaceRawDataCheckpoint() {
   try {
-    const parsed = JSON.parse(await fs.readFile(marketplaceRawDataCheckpointPath(), 'utf8'));
-    if (![1, 2].includes(parsed?.schemaVersion) || !parsed.cursors || typeof parsed.cursors !== 'object'
-      || Array.isArray(parsed.cursors) || !Array.isArray(parsed.tokenAccounts)) throw new Error('invalid');
-    return {
-      ...parsed,
-      schemaVersion: 2,
-      custodyBackfillVersion: Number(parsed.custodyBackfillVersion || 0),
-      tokenAccountOwners: Array.isArray(parsed.tokenAccountOwners) ? parsed.tokenAccountOwners : [],
-    };
+    const stored = getMarketplaceCheckpointSqliteStore().read('raw-data');
+    if (stored) return normalizeMarketplaceRawDataCheckpoint(stored.document);
+  } catch (_error) { /* Fall through to the legacy compatibility checkpoint. */ }
+  try {
+    const document = normalizeMarketplaceRawDataCheckpoint(
+      JSON.parse(await fs.readFile(marketplaceRawDataCheckpointPath(), 'utf8')),
+    );
+    try { getMarketplaceCheckpointSqliteStore().write('raw-data', document); }
+    catch (_error) { /* Legacy JSON remains a safe fallback when SQLite is unavailable. */ }
+    return document;
   } catch (_error) {
-    return {
-      schemaVersion: 2, custodyBackfillVersion: 0, cursors: {}, tokenAccounts: [], tokenAccountOwners: [],
-      tokenAccountsRefreshedAt: '', lastTransferScanAt: '',
-    };
+    return emptyMarketplaceRawDataCheckpoint();
+  }
+}
+
+async function saveMarketplaceRawDataCheckpoint(document) {
+  let sqliteWritten = false;
+  let sqliteError = null;
+  try {
+    getMarketplaceCheckpointSqliteStore().write('raw-data', document);
+    sqliteWritten = true;
+  } catch (error) {
+    sqliteError = error;
+  }
+  try {
+    await writeJsonAtomic(marketplaceRawDataCheckpointPath(), document);
+  } catch (error) {
+    if (!sqliteWritten) throw sqliteError || error;
   }
 }
 
@@ -5044,7 +5087,7 @@ async function syncMarketplaceRawDataUnlocked(settings, connection, { gmWallets,
     startIso: MARKETPLACE_RAWDATA_CUTOVER_ISO, startSlot: MARKETPLACE_RAWDATA_CUTOVER_SLOT, maxPages: 1,
   });
   const written = await writeMarketplaceRawRecords(settings, scanned.records);
-  await writeJsonAtomic(marketplaceRawDataCheckpointPath(), {
+  await saveMarketplaceRawDataCheckpoint({
     schemaVersion: 2, custodyBackfillVersion: 4, savedAt: new Date().toISOString(),
     cursors: scanned.cursors, tokenAccounts, tokenAccountOwners,
     tokenAccountsRefreshedAt: refreshTokenAccounts ? new Date().toISOString() : checkpoint.tokenAccountsRefreshedAt,
