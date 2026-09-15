@@ -114,6 +114,7 @@ const {
 const { projectCargoTableRow, joinCanonicalCostsWithOperationalRows, selectCutoverOwnedCargoRows, projectCargoFleetDateRows, cargoCostSourceSelectionStats } = require('./cargo-table-projection');
 const { scanLocalMarketTrades, decodeLocalMarketTransactions } = require('./local-market-scanner');
 const { createMarketplaceTransactionCacheConnection } = require('./marketplace-transaction-cache');
+const { createMarketplaceTransactionSqliteCache } = require('./marketplace-transaction-sqlite-cache');
 const { decodeMarketplaceAssetFlows, formatAssetFlowInfluxLine, projectAssetFlowInfluxRows, selectFactionAssetFlows } = require('./marketplace-asset-flow');
 const {
   CSS_STARBASE_NAMES,
@@ -352,6 +353,17 @@ function marketplaceRawDataCheckpointPath() {
   // Shared by every MSA profile so MUD/ONI/USTUR processes cannot each
   // replay the same GM, CSS, and token-account history.
   return path.join(baseUserData, 'marketplace-rawdata', 'checkpoint.json');
+}
+
+let marketplaceTransactionSqliteCache = null;
+
+function getMarketplaceTransactionSqliteCache() {
+  if (!marketplaceTransactionSqliteCache) {
+    marketplaceTransactionSqliteCache = createMarketplaceTransactionSqliteCache({
+      filePath: path.join(baseUserData, 'cache', 'marketplace-transactions-v1.sqlite'),
+    });
+  }
+  return marketplaceTransactionSqliteCache;
 }
 
 function normalizeFaction(value) {
@@ -6093,7 +6105,10 @@ async function syncMarketplaceTrades(payload, { rpcAttemptLimit = DEFAULT_MARKET
     try {
       await recoverMarketplacePublication(settings);
       const connection = createSolanaConnection(settings, { instrumentation });
-      const cachedConnection = createMarketplaceTransactionCacheConnection(connection);
+      let persistentCache = null;
+      try { persistentCache = getMarketplaceTransactionSqliteCache(); }
+      catch (_error) { /* Marketplace RPC remains available when local persistence is unavailable. */ }
+      const cachedConnection = createMarketplaceTransactionCacheConnection(connection, { persistentCache });
       const localConnection = wrapMarketplaceConnection(cachedConnection, { instrumentation, operation: 'LM' });
       const globalConnection = wrapMarketplaceConnection(cachedConnection, { instrumentation, operation: 'GM' });
       const local = await fetchLocalMarketTrades(settings, localConnection);

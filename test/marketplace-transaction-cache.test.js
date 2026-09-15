@@ -51,7 +51,9 @@ test('Marketplace sync shares one parsed-transaction cache across LM and GM wrap
   const fs = require('node:fs');
   const path = require('node:path');
   const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /const cachedConnection = createMarketplaceTransactionCacheConnection\(connection\)/);
+  assert.match(main, /createMarketplaceTransactionSqliteCache/);
+  assert.match(main, /path\.join\(baseUserData, 'cache', 'marketplace-transactions-v1\.sqlite'\)/);
+  assert.match(main, /const cachedConnection = createMarketplaceTransactionCacheConnection\(connection, \{ persistentCache \}\)/);
   assert.match(main, /wrapMarketplaceConnection\(cachedConnection, \{ instrumentation, operation: 'LM' \}\)/);
   assert.match(main, /wrapMarketplaceConnection\(cachedConnection, \{ instrumentation, operation: 'GM' \}\)/);
 });
