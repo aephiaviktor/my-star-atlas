@@ -304,12 +304,15 @@ test('Marketplace persistent view cache serves stale immediately, revalidates in
   assert.match(main, /async function buildFreshMarketplaceSnapshot/);
   assert.match(main, /forceRefresh:\s*Boolean\(payload\?\.forceMarketplaceViewRefresh\)/);
   assert.match(main, /waitForRefresh:\s*Boolean\(payload\?\.waitForMarketplaceViewRefresh\)/);
+  assert.match(main, /MARKETPLACE_VIEW_REVALIDATE_MS = 5 \* 60 \* 1000/);
+  assert.match(main, /freshnessMs: MARKETPLACE_VIEW_REVALIDATE_MS/);
   assert.match(main, /marketplaceAssetFlowError/);
   assert.match(main, /marketplaceBreakevenBasisError/);
   assert.match(main, /marketplaceRawDataCoverageError/);
   assert.match(renderer, /marketplaceViewCache\?\.status === 'stale'/);
   assert.match(renderer, /waitForMarketplaceViewRefresh:\s*true/);
   assert.match(renderer, /forceMarketplaceViewRefresh:\s*sync/);
+  assert.match(renderer, /formatMarketplaceViewCacheStatus/);
 });
 
 test('Marketplace persistent stale result renders before its fresh background replacement', async () => {
@@ -345,6 +348,19 @@ test('Marketplace persistent stale result renders before its fresh background re
   assert.deepEqual(rendered, ['cached', 'fresh']);
   assert.equal(payloads[0].forceMarketplaceViewRefresh, false);
   assert.equal(payloads[1].waitForMarketplaceViewRefresh, true);
+});
+
+test('Marketplace cache status explains SQLite hits and completed rebuild timings', () => {
+  const sourceStart = renderer.indexOf('function formatMarketplaceViewCacheStatus');
+  const sourceEnd = renderer.indexOf('function renderEarningsMarketplace(result)', sourceStart);
+  const context = { formatMarketplaceWhole: (value) => String(value) };
+  vm.runInNewContext(`${renderer.slice(sourceStart, sourceEnd)}\nthis.formatStatus = formatMarketplaceViewCacheStatus;`, context);
+  assert.equal(context.formatStatus({ marketplaceViewCache: {
+    source: 'sqlite', readDurationMs: 84.6, snapshotAgeMs: 121_000, refreshPending: true,
+  } }), ' · SQLite 85 ms · age 2 min · refreshing');
+  assert.equal(context.formatStatus({ marketplaceViewCache: {
+    source: 'projection', projectionDurationMs: 1_234.4, writeDurationMs: 42.7, persisted: true,
+  } }), ' · rebuilt 1234 ms · saved 43 ms');
 });
 
 test('Marketplace skipped cross-faction sync still loads and uses the requested faction snapshot', async () => {

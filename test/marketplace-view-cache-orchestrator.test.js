@@ -58,6 +58,9 @@ test('cached Marketplace view returns immediately and starts one coalesced backg
   const second = await subject.orchestrator.load({ faction: 'USTUR', profile: 'profile' });
   assert.deepEqual(first.rows, ['cached']);
   assert.equal(first.marketplaceViewCache.status, 'stale');
+  assert.equal(first.marketplaceViewCache.source, 'sqlite');
+  assert.equal(first.marketplaceViewCache.refreshPending, true);
+  assert.equal(first.marketplaceViewCache.persisted, true);
   assert.equal(second.marketplaceViewCache.status, 'stale');
   assert.equal(subject.builds, 1);
 
@@ -68,8 +71,43 @@ test('cached Marketplace view returns immediately and starts one coalesced backg
   );
   assert.deepEqual(refreshed.rows, ['fresh']);
   assert.equal(refreshed.marketplaceViewCache.status, 'fresh');
+  assert.equal(refreshed.marketplaceViewCache.source, 'projection');
+  assert.equal(refreshed.marketplaceViewCache.persisted, true);
   assert.equal(subject.builds, 1);
   assert.equal(subject.writes, 1);
+});
+
+test('recent persisted Marketplace view is a fresh hit and skips background projection', async () => {
+  let builds = 0;
+  const orchestrator = createMarketplaceViewCacheOrchestrator({
+    freshnessMs: 5 * 60 * 1000,
+    now: () => 1_000_000,
+    clock: (() => {
+      const readings = [10, 12];
+      return () => readings.shift() ?? 12;
+    })(),
+    sourceForSettings: () => ({ sourceKey: 'USTUR:profile' }),
+    openCache: () => ({
+      read: () => ({ snapshot: cachedSnapshot, materializedAtMs: 900_000 }),
+      write: () => { throw new Error('write not expected'); },
+      close: () => {},
+    }),
+    buildSnapshot: async () => { builds += 1; return freshSnapshot; },
+  });
+
+  const result = await orchestrator.load({ faction: 'USTUR', profile: 'profile' });
+  assert.equal(builds, 0);
+  assert.deepEqual(result.marketplaceViewCache, {
+    status: 'fresh',
+    source: 'sqlite',
+    materializedAtMs: 900_000,
+    snapshotAgeMs: 100_000,
+    readDurationMs: 2,
+    projectionDurationMs: 0,
+    writeDurationMs: 0,
+    refreshPending: false,
+    persisted: true,
+  });
 });
 
 test('cache miss waits for a fresh Marketplace view and persists it', async () => {

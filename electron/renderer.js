@@ -7505,6 +7505,21 @@ function renderMarketplaceGameLedger(result) {
   applyMarketplaceLedgerColumnVisibility(earningsMarketplaceGameTableBody, 'marketplaceGame', marketplaceGameColumns);
 }
 
+function formatMarketplaceViewCacheStatus(result) {
+  const cache = result?.marketplaceViewCache;
+  if (!cache || typeof cache !== 'object') return '';
+  if (cache.source === 'sqlite') {
+    const readMs = Math.max(0, Math.round(Number(cache.readDurationMs) || 0));
+    const ageMinutes = Math.max(0, Math.floor((Number(cache.snapshotAgeMs) || 0) / 60_000));
+    return ` · SQLite ${readMs} ms · age ${ageMinutes < 1 ? '<1' : formatMarketplaceWhole(ageMinutes)} min${cache.refreshPending ? ' · refreshing' : ''}`;
+  }
+  const projectionMs = Math.max(0, Math.round(Number(cache.projectionDurationMs) || 0));
+  const writeMs = Math.max(0, Math.round(Number(cache.writeDurationMs) || 0));
+  return cache.persisted
+    ? ` · rebuilt ${projectionMs} ms · saved ${writeMs} ms`
+    : cache.status === 'rejected' ? ` · rebuilt ${projectionMs} ms · not cached` : '';
+}
+
 function renderEarningsMarketplace(result) {
   const sourceTradeResult = result;
   const sourceTradeRows = Array.from(result?.marketplaceTrades || []);
@@ -7526,7 +7541,8 @@ function renderEarningsMarketplace(result) {
   updateMarketplaceSubtab();
   const rows = sortMarketplaceTableRows(Array.isArray(result?.marketplaceTrades) ? result.marketplaceTrades : [], marketplaceTradeSort);
   const errorSuffix = result?.marketplaceEventsError ? ` · Decoded Events read failed: ${result.marketplaceEventsError}` : '';
-  setText(earningsMarketplaceSyncStatus, `ALL FACTIONS · ${formatMarketplaceWhole(rows.length)} trades at ${formatCheckedAt(result?.checkedAt)}${errorSuffix}`);
+  const cacheStatus = formatMarketplaceViewCacheStatus(result);
+  setText(earningsMarketplaceSyncStatus, `ALL FACTIONS · ${formatMarketplaceWhole(rows.length)} trades at ${formatCheckedAt(result?.checkedAt)}${cacheStatus}${errorSuffix}`);
   if (!earningsMarketplaceTableBody) return;
   const visibleColumns = getVisibleMarketplaceColumns();
   renderMarketplaceHeader(visibleColumns);

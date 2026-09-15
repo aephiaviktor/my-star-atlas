@@ -281,6 +281,7 @@ const SAGE_PROGRAM_ID = new PublicKey('SAGE2HAwep459SNq61LHvjxPk4pLPEJLoMETef7f7
 const GM_PROGRAM_ID = new PublicKey('traderDnaR5w6Tcoi3NFm53i48FTDNbGjBSZwWXDRrg');
 const MARKETPLACE_RAWDATA_CUTOVER_ISO = '2026-08-30T12:00:22.000Z';
 const MARKETPLACE_RAWDATA_CUTOVER_SLOT = 442873938;
+const MARKETPLACE_VIEW_REVALIDATE_MS = 5 * 60 * 1000;
 const PLAYER_PROFILE_PROGRAM_ID = new PublicKey('pprofELXjL5Kck7Jn5hCpwAL82DpTkSYBENzahVtbc9');
 const SAGE_GAME_ID = new PublicKey('GAMEzqJehF8yAnKiTARUuhZMvLvkZVAsCVri5vSfemLr');
 const SRSLY_PROGRAM_ID = new PublicKey('SRSLYxcFnjd5jG2DpJw4as6UEyjwJQK1U4J1TD1hvZH');
@@ -404,6 +405,7 @@ function getMarketplaceViewCacheOrchestrator() {
         source,
       }),
       buildSnapshot: buildFreshMarketplaceSnapshot,
+      freshnessMs: MARKETPLACE_VIEW_REVALIDATE_MS,
       onBackgroundError: (error) => console.warn('[MyStarAtlas] Marketplace view refresh failed:', error),
       onCacheWriteError: (error) => console.warn('[MyStarAtlas] Marketplace view cache write rejected:', error),
     });
