@@ -35,7 +35,7 @@ test('foreground and background Breakeven loads reject incomplete snapshots', ()
   assert.match(renderer, /async function fetchCompleteBreakevenSnapshot[\s\S]*getBreakevenSnapshotError\(result\)[\s\S]*throw new Error\(error\)/);
   assert.match(renderer, /earnings-breakeven[\s\S]*load: \(\) => api\.breakevenCache\.ensure\([^\n]*fetchCompleteBreakevenSnapshot\(settings\)/);
   const refresh = renderer.slice(renderer.indexOf('async function refreshBreakeven'), renderer.indexOf('async function refreshCargoAllocation'));
-  assert.match(refresh, /api\.breakevenCache\.ensure\(input, \(\) => fetchCompleteBreakevenSnapshot\(settings\)\)/);
+  assert.match(refresh, /api\.breakevenCache\.ensure\(input, async \(\) => \{[\s\S]*fetchCompleteBreakevenSnapshot\(settings\)/);
 });
 
 test('Inventory Ledger rendering preserves exact source diagnostics', () => {

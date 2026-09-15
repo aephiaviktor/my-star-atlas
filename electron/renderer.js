@@ -7741,6 +7741,17 @@ function formatEarningsAggregateCacheStatus(result) {
     : cache.status === 'partial' ? ` · rebuilt ${projectionMs} ms · not cached` : '';
 }
 
+function renderTimedEarningsAggregate(render, statusElement, result, requestDurationMs = null) {
+  const renderStartedAt = performance.now();
+  render(result);
+  const renderDurationMs = Math.max(0, performance.now() - renderStartedAt);
+  const timings = [];
+  if (Number.isFinite(requestDurationMs)) timings.push(`request ${Math.round(requestDurationMs)} ms`);
+  timings.push(`render ${Math.round(renderDurationMs)} ms`);
+  setText(statusElement, `${String(statusElement?.textContent || '')} · ${timings.join(' · ')}`);
+  return { requestDurationMs, renderDurationMs };
+}
+
 function renderEarningsBreakevenEmpty(message) {
   renderInventoryCostLedger(null);
   setText(earningsBreakevenSyncStatus, message);
@@ -8118,20 +8129,26 @@ async function refreshEarningsUpgrading({ force = false } = {}) {
   const displayable = initial?.entry?.value || initial?.entry?.lastGoodValue;
   if (displayable) {
     latestUpgradingResult = displayable;
-    renderEarningsUpgrading(displayable);
+    renderTimedEarningsAggregate(renderEarningsUpgrading, earningsUpgradingSyncStatus, displayable);
   } else {
     renderEarningsUpgradingEmpty('Loading Upgrading ledger data...');
   }
+  let requestDurationMs = null;
   const settled = await api.upgradingCache.ensure(input, async () => {
-    const result = await api.getEarningsSnapshot(settings);
-    if (result?.ok === false) throw new Error(result.error || 'Upgrading snapshot failed');
-    return result;
+    const requestStartedAt = performance.now();
+    try {
+      const result = await api.getEarningsSnapshot(settings);
+      if (result?.ok === false) throw new Error(result.error || 'Upgrading snapshot failed');
+      return result;
+    } finally {
+      requestDurationMs = Math.max(0, performance.now() - requestStartedAt);
+    }
   });
   if (!isActiveUpgradingContext(settled.key, settled.entry.generation)) return settled;
   const value = settled.entry.value || settled.entry.lastGoodValue;
   if (value) {
     latestUpgradingResult = value;
-    renderEarningsUpgrading(value);
+    renderTimedEarningsAggregate(renderEarningsUpgrading, earningsUpgradingSyncStatus, value, requestDurationMs);
   } else {
     latestUpgradingResult = null;
     renderEarningsUpgradingEmpty(settled.entry.error?.message || 'Upgrading data unavailable');
@@ -8173,16 +8190,24 @@ async function refreshBreakeven({ force = false } = {}) {
   const displayable = initial?.entry?.value || initial?.entry?.lastGoodValue;
   if (displayable) {
     latestBreakevenResult = displayable;
-    renderEarningsBreakeven(displayable);
+    renderTimedEarningsAggregate(renderEarningsBreakeven, earningsBreakevenSyncStatus, displayable);
   } else {
     renderEarningsBreakevenEmpty('Loading complete Inventory Ledger data...');
   }
-  const settled = await api.breakevenCache.ensure(input, () => fetchCompleteBreakevenSnapshot(settings));
+  let requestDurationMs = null;
+  const settled = await api.breakevenCache.ensure(input, async () => {
+    const requestStartedAt = performance.now();
+    try {
+      return await fetchCompleteBreakevenSnapshot(settings);
+    } finally {
+      requestDurationMs = Math.max(0, performance.now() - requestStartedAt);
+    }
+  });
   if (!isActiveBreakevenContext(settled.key, settled.entry.generation)) return settled;
   const value = settled.entry.value || settled.entry.lastGoodValue;
   if (value) {
     latestBreakevenResult = value;
-    renderEarningsBreakeven(value);
+    renderTimedEarningsAggregate(renderEarningsBreakeven, earningsBreakevenSyncStatus, value, requestDurationMs);
   } else {
     latestBreakevenResult = null;
     renderEarningsBreakevenEmpty(settled.entry.error?.message || 'Inventory Ledger data unavailable');

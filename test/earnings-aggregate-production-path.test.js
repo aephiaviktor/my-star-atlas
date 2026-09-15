@@ -124,3 +124,23 @@ test('Upgrading and Inventory Ledger display shared aggregate cache timing', () 
     source: 'projection', projectionDurationMs: 181_234, writeDurationMs: 92.2, persisted: true,
   } }), ' · rebuilt 181234 ms · saved 92 ms');
 });
+
+test('shared aggregate renderer timing separates request round trip from DOM rendering cost', () => {
+  const sourceStart = renderer.indexOf('function renderTimedEarningsAggregate');
+  const sourceEnd = renderer.indexOf('function renderEarningsBreakevenEmpty', sourceStart);
+  assert.ok(sourceStart >= 0 && sourceEnd > sourceStart);
+  const vm = require('node:vm');
+  const readings = [10, 17];
+  const status = { textContent: '' };
+  const context = {
+    performance: { now: () => readings.shift() },
+    setText: (node, value) => { node.textContent = value; },
+  };
+  vm.runInNewContext(`${renderer.slice(sourceStart, sourceEnd)}\nthis.renderTimed = renderTimedEarningsAggregate;`, context);
+  const metrics = context.renderTimed(() => { status.textContent = '12 rows'; }, status, {}, 23.6);
+  assert.equal(status.textContent, '12 rows · request 24 ms · render 7 ms');
+  assert.equal(metrics.requestDurationMs, 23.6);
+  assert.equal(metrics.renderDurationMs, 7);
+  assert.match(renderer, /renderTimedEarningsAggregate\(renderEarningsUpgrading, earningsUpgradingSyncStatus/);
+  assert.match(renderer, /renderTimedEarningsAggregate\(renderEarningsBreakeven, earningsBreakevenSyncStatus/);
+});
