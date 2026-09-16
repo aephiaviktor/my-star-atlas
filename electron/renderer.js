@@ -1082,8 +1082,6 @@ const earningsChartMode = {
   upgrading: 'total',
 };
 
-const earningsResourceFallbackColumns = { scanning: [], mining: [] };
-
 const earningsCostBasisMode = {
   scanning: 'internal',
   mining: 'internal',
@@ -1163,6 +1161,7 @@ function createPerUnitAwareEarningsCell(entry, subtab, columnId) {
   const value = resolveEarningsMonetaryDisplayValue(entry, subtab, columnId, active);
   const cell = createTextCell(value == null ? '--' : active ? formatAtlasNumber(value, 6) : formatAtlasWhole(value));
   if (active) cell.classList.add('earnings-per-unit-column');
+  if (value != null && entry.resourceCostBasis?.[columnId] === 'external') cell.textContent += '*';
   return cell;
 }
 
@@ -5293,7 +5292,6 @@ function setEarningsCraftingStatus(message) {
 }
 
 function renderEarningsEmpty(message) {
-  earningsResourceFallbackColumns.scanning = [];
   latestEarningsResult = null;
   renderEarningsHeader('scanning');
   renderEarningsNetProfitChart(null, new Map(), { target: earningsNetProfitChart, label: 'Scanning net profit by fleet in ATLAS by day' });
@@ -5317,7 +5315,6 @@ function renderEarningsEmpty(message) {
 }
 
 function renderEarningsMiningEmpty(message) {
-  earningsResourceFallbackColumns.mining = [];
   renderEarningsHeader('mining');
   renderEarningsNetProfitChart(null, new Map(), { target: earningsMiningNetProfitChart, label: 'Mining fleet net profit in ATLAS by day' });
   renderEarningsNetProfitChart(null, new Map(), { target: earningsMiningMaterialNetProfitChart, label: 'Mining raw material net profit in ATLAS by day' });
@@ -5943,7 +5940,7 @@ function getMarketplaceTradeColumnLabel(column) {
 
 function getEarningsMetricGuideEntry(subtab, columnId) {
   if ((subtab === 'scanning' || subtab === 'mining') && ['foodCosts', 'fuelCosts', 'ammoCosts'].includes(columnId)) {
-    return ['Value of the resource consumed by this activity.', 'Consumed quantity × selected unit cost: current same-starbase Inventory Ledger basis or historical GM price.', 'A header asterisk in Internal mode means this entire resource-cost column uses external prices for the filtered selection.'];
+    return ['Value of the resource consumed by this activity.', 'Consumed quantity × selected unit cost: current same-starbase Inventory Ledger basis or historical GM price.', 'In Internal mode, a value marked with * uses external prices because no usable internal cost basis was available for that value.'];
   }
   return earningsMetricGuideBySubtab[subtab]?.[columnId] || earningsMetricGuideCommon[columnId] || null;
 }
@@ -5954,7 +5951,7 @@ function renderEarningsMetricGuide(subtab = currentEarningsSubtab) {
   container.textContent = '';
   if (subtab === 'scanning' || subtab === 'mining') {
     const note = document.createElement('p');
-    note.textContent = 'Internal Cost Basis uses the current Inventory Ledger total cost per unit (including delivery costs) for each asset at its recorded supply starbase, within the active faction/profile. This current basis is applied to all displayed dates, so past profit estimates may change as inventory basis changes. If any consumed quantity in the filtered selection lacks a supply starbase or usable internal basis, the entire affected resource-cost column uses historical GM prices and its header is marked *. A genuine zero internal cost remains valid. Total Costs and profit metrics include the selected resource valuations; an asterisk does not mean every cost component is external. External Cost Basis uses the latest GM price at or before each row’s UTC day start. Per Unit independently divides the selected monetary values by output quantity.';
+    note.textContent = 'Internal Cost Basis uses the current Inventory Ledger total cost per unit (including delivery costs) for each asset at its recorded supply starbase, within the active faction/profile. This current basis is applied to all displayed dates, so past profit estimates may change as inventory basis changes. When a value lacks a usable internal basis, that value uses historical GM prices and is marked with an asterisk. A genuine zero internal cost remains valid. Total Costs and profit metrics include the selected resource valuations; an asterisk on a value means only that resource cost used external prices. External Cost Basis uses the latest GM price at or before each row’s UTC day start. Per Unit independently divides the selected monetary values by output quantity.';
     container.appendChild(note);
   }
   const guideColumns = getVisibleEarningsColumns(subtab);
@@ -6231,6 +6228,16 @@ function aggregateTotalFleetRows(subtab, rows) {
     total.profitMarginPercent = total.revenueAtlasPerDay !== 0 && Number.isFinite(total.revenueAtlasPerDay) && Number.isFinite(total.netProfitAtlas)
       ? (total.netProfitAtlas / total.revenueAtlasPerDay) * 100
       : null;
+    if (subtab === 'scanning' || subtab === 'mining') {
+      const resourceColumns = subtab === 'mining' ? ['ammoCosts', 'foodCosts', 'fuelCosts'] : ['foodCosts', 'fuelCosts'];
+      const basis = {};
+      for (const column of resourceColumns) {
+        const states = groupRows.map((row) => row.resourceCostBasis?.[column]).filter((state) => state === 'internal' || state === 'external');
+        if (states.length && states.every((state) => state === 'external')) basis[column] = 'external';
+        else if (states.length && states.every((state) => state === 'internal')) basis[column] = 'internal';
+      }
+      total.resourceCostBasis = Object.keys(basis).length ? basis : undefined;
+    }
     return total;
   });
 }
@@ -6488,7 +6495,6 @@ function renderEarningsHeader(subtab = 'scanning') {
     if (earningsCostBasisMode[subtab] === 'external' && column.id === 'upgCosts') label = 'Component External Value';
     const perUnit = isEarningsPerUnitEnabled(subtab) && isEarningsPerUnitColumn(subtab, column.id);
     if (perUnit) label = `${label} / Unit`;
-    if (earningsResourceFallbackColumns[subtab]?.includes(column.id)) label += '*';
     appendEarningsHeaderCell(row, column.id, label, sortState, perUnit);
   }
   tableHead.textContent = '';
@@ -6636,7 +6642,6 @@ function renderEarnings(result) {
   populateEarningsFilterOptions('scanning', sourceRows);
   const valuation = ResourceCostBasis.selectRows(getFilteredEarningsRows('scanning', sourceRows), 'scanning', earningsCostBasisMode.scanning);
   const rows = valuation.rows;
-  earningsResourceFallbackColumns.scanning = valuation.fallbackColumns;
   renderEarningsMetricGuide('scanning');
   result = { ...result,
     topScanNetProfitFleetYesterday: resourceProfitLeader(rows, result.checkedAt, 1),
@@ -6735,7 +6740,6 @@ function renderEarningsMining(result) {
   populateEarningsFilterOptions('mining', sourceRows);
   const valuation = ResourceCostBasis.selectRows(getFilteredEarningsRows('mining', sourceRows), 'mining', earningsCostBasisMode.mining);
   const rows = valuation.rows;
-  earningsResourceFallbackColumns.mining = valuation.fallbackColumns;
   renderEarningsMetricGuide('mining');
   result = { ...result,
     topMiningNetProfitFleetToday: resourceProfitLeader(rows, result.checkedAt, 0),

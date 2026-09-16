@@ -18,11 +18,15 @@ test('current ledger basis blends actual supply quantities across starbases and 
   assert.equal(enriched[0].foodCostsAtlas, 50);
   assert.equal(selectRows(enriched, 'scanning', 'external').rows[0].foodCostsAtlas, 50);
 });
-test('missing supply/basis uses entire affected column only; filtered selection can recover internal', () => {
+test('missing supply/basis falls back per value only; complete rows keep internal basis', () => {
   const rows = enrichRows([scan, { ...scan, resourceConsumptionByStarbase: { ...scan.resourceConsumptionByStarbase, burnedFood: [{ starbase: 'C', quantity: 5 }] } }], 'scanning', pools);
   const result = selectRows(rows, 'scanning', 'internal');
   assert.deepEqual(result.fallbackColumns, ['foodCosts']);
-  assert.ok(result.rows.every((row) => row.foodCostsAtlas === 50 && row.fuelCostsAtlas === 0));
+  assert.equal(result.rows[0].foodCostsAtlas, 16);
+  assert.deepEqual(result.rows[0].resourceCostBasis, { foodCosts: 'internal', fuelCosts: 'internal' });
+  assert.equal(result.rows[1].foodCostsAtlas, 50);
+  assert.deepEqual(result.rows[1].resourceCostBasis, { foodCosts: 'external', fuelCosts: 'internal' });
+  assert.ok(result.rows.every((row) => row.fuelCostsAtlas === 0));
   assert.deepEqual(selectRows(rows.slice(0, 1), 'scanning', 'internal').fallbackColumns, []);
   assert.equal(enrichRows([{ ...scan, resourceConsumptionByStarbase: {} }], 'scanning', pools)[0].internalResourceCosts.foodCosts, null);
 });
@@ -136,16 +140,36 @@ test('actual renderer applies filtered basis to charts/cards and independent tab
   }
 });
 
-test('real headers mark only externally substituted resource columns, including Per Unit mode', () => {
+test('real headers no longer carry resource fallback asterisks; per-value cells mark external basis', () => {
   const element = () => ({ children: [], classList: { add() {} }, dataset: {}, appendChild(child) { this.children.push(child); }, textContent: '' });
   const head = element();
   const scope = { document: { createElement: element }, earningsTableHead: head,
-    earningsSort: {}, earningsCostBasisMode: { scanning: 'internal' }, earningsResourceFallbackColumns: { scanning: ['fuelCosts'] },
+    earningsSort: {}, earningsCostBasisMode: { scanning: 'internal' },
     getVisibleEarningsColumns: () => [{ id: 'foodCosts', label: 'Food Cost' }, { id: 'fuelCosts', label: 'Fuel Cost' }, { id: 'totalCosts', label: 'Total Costs' }],
     isEarningsPerUnitEnabled: () => true, isEarningsPerUnitColumn: () => true,
   };
   vm.runInNewContext(sourceFunction(renderer, 'function appendEarningsHeaderCell', 'function createEarningsFleetCell') + "\nrenderEarningsHeader('scanning');", scope);
-  assert.deepEqual(head.children[0].children.map((cell) => cell.children[0].textContent), ['Date', 'Fleet', 'Food Cost / Unit', 'Fuel Cost / Unit*', 'Total Costs / Unit']);
+  assert.deepEqual(head.children[0].children.map((cell) => cell.children[0].textContent), ['Date', 'Fleet', 'Food Cost / Unit', 'Fuel Cost / Unit', 'Total Costs / Unit']);
+});
+
+test('per-value resource cells append an asterisk only when external basis was used', () => {
+  const element = () => ({ children: [], classList: { add() {} }, textContent: '' });
+  const makeCell = (value) => {
+    const cell = element();
+    cell.textContent = value != null ? String(value) : '--';
+    return cell;
+  };
+  const scope = {
+    document: { createElement: makeCell },
+    isEarningsPerUnitEnabled: () => false,
+    resolveEarningsMonetaryDisplayValue: (entry, _subtab, columnId, _perUnit) => entry[`${columnId}Atlas`],
+    createTextCell: (value) => makeCell(value),
+    formatAtlasWhole: (value) => value, formatAtlasNumber: (value) => value,
+  };
+  vm.runInNewContext(sourceFunction(renderer, 'function createPerUnitAwareEarningsCell', 'function applyEarningsCostBasis') + "\nthis.cellInternal = createPerUnitAwareEarningsCell({ foodCostsAtlas: 16, resourceCostBasis: { foodCosts: 'internal' } }, 'scanning', 'foodCosts');\nthis.cellExternal = createPerUnitAwareEarningsCell({ foodCostsAtlas: 50, resourceCostBasis: { foodCosts: 'external' } }, 'scanning', 'foodCosts');\nthis.cellNull = createPerUnitAwareEarningsCell({ foodCostsAtlas: null, resourceCostBasis: { foodCosts: 'external' } }, 'scanning', 'foodCosts');", scope);
+  assert.equal(scope.cellInternal.textContent, '16');
+  assert.equal(scope.cellExternal.textContent, '50*');
+  assert.equal(scope.cellNull.textContent, '--');
 });
 
 test('real cost-basis click handlers preserve independent state and selected button appearance', () => {

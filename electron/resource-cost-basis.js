@@ -38,14 +38,20 @@
 
   function selectRows(rows, subtab, mode) {
     const columns = resources[subtab].map(([column]) => column);
-    const fallbackColumns = mode === 'internal'
-      ? columns.filter((column) => rows.some((row) => !valid(row.internalResourceCosts?.[column]))) : [];
     const selected = rows.map((source) => {
       if (mode !== 'internal') return { ...source };
       const row = { ...source };
+      const resourceCostBasis = {};
       for (const column of columns) {
-        if (!fallbackColumns.includes(column)) row[`${column}Atlas`] = Number(row.internalResourceCosts[column]);
+        const internalCost = row.internalResourceCosts?.[column];
+        if (valid(internalCost)) {
+          row[`${column}Atlas`] = Number(internalCost);
+          resourceCostBasis[column] = 'internal';
+        } else {
+          resourceCostBasis[column] = 'external';
+        }
       }
+      row.resourceCostBasis = resourceCostBasis;
       const resourceCosts = columns.map((column) => row[`${column}Atlas`]);
       // Retain existing rental/fee availability semantics; missing resource prices cannot masquerade as profit.
       const extras = [row.rentalRateAtlasPerDay, row.txsCostsAtlas].filter(valid).map(Number);
@@ -57,6 +63,8 @@
       row.costsPerUnitAtlas = row.totalCostsAtlas != null && units > 0 ? row.totalCostsAtlas / units : null;
       return row;
     });
+    const fallbackColumns = mode === 'internal'
+      ? columns.filter((column) => selected.some((row) => row.resourceCostBasis?.[column] === 'external')) : [];
     return { rows: selected, fallbackColumns };
   }
 
