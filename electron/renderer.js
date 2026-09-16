@@ -7642,8 +7642,10 @@ function inventoryLedgerValues(row, perUnit) {
     lm: sourceValue('lm'), gm: sourceValue('gm'), cargo: basisValue(cargo),
     purchasedQuantity: row?.acquisition?.purchased?.quantity ?? 0,
     producedQuantity: row?.acquisition?.produced?.quantity ?? 0,
+    rewardQuantity: row?.acquisition?.reward?.quantity ?? 0,
     purchased: perUnit ? row?.acquisition?.purchased?.unitCost ?? null : row?.acquisition?.purchased?.cost ?? null,
     produced: perUnit ? row?.acquisition?.produced?.unitCost ?? null : row?.acquisition?.produced?.cost ?? null,
+    reward: perUnit ? row?.acquisition?.reward?.unitCost ?? null : row?.acquisition?.reward?.cost ?? null,
     producedPercent: row?.producedPercent ?? null,
     totalBasis: row?.basisStatus === 'unpriced' ? null : basisValue(totalBasis), status,
   };
@@ -7669,7 +7671,8 @@ function renderInventoryCostLedger(result) {
     const index = visibleColumns.findIndex((column) => column.id === 'totalBasis');
     visibleColumns.splice(index < 0 ? visibleColumns.length : index, 0,
       { id: 'purchasedQuantity', label: 'Purchased Qty' }, { id: 'purchased', label: 'Purchased (incl. cargo)' },
-      { id: 'producedQuantity', label: 'Produced Qty' }, { id: 'produced', label: 'Produced (incl. cargo)' });
+      { id: 'producedQuantity', label: 'Produced Qty' }, { id: 'produced', label: 'Produced (incl. cargo)' },
+      { id: 'rewardQuantity', label: 'Reward Qty' }, { id: 'reward', label: 'Reward (incl. cargo)' });
   }
   const totalIndex = visibleColumns.findIndex((column) => column.id === 'totalBasis');
   visibleColumns.splice(totalIndex < 0 ? visibleColumns.length : totalIndex + 1, 0, { id: 'producedPercent', label: 'Produced %' });
@@ -7678,7 +7681,7 @@ function renderInventoryCostLedger(result) {
   if (earningsCostLedgerTableHead) {
     const tr = document.createElement('tr');
     for (const column of visibleColumns) {
-      const basisColumn = !['starbase', 'asset', 'quantity', 'costedQuantity', 'uncostedQuantity', 'purchasedQuantity', 'producedQuantity', 'producedPercent', 'status'].includes(column.id);
+      const basisColumn = !['starbase', 'asset', 'quantity', 'costedQuantity', 'uncostedQuantity', 'purchasedQuantity', 'producedQuantity', 'rewardQuantity', 'producedPercent', 'status'].includes(column.id);
       const label = basisColumn && perUnit
         ? (column.id === 'totalBasis' ? 'Total / Unit' : `${column.label} / Unit`)
         : column.label;
@@ -7713,7 +7716,7 @@ function renderInventoryCostLedger(result) {
     const tr = document.createElement('tr');
     for (const column of visibleColumns) {
       const value = values[column.id];
-      const formatted = ['quantity', 'costedQuantity', 'uncostedQuantity', 'purchasedQuantity', 'producedQuantity'].includes(column.id) ? formatWholeNumber(value)
+      const formatted = ['quantity', 'costedQuantity', 'uncostedQuantity', 'purchasedQuantity', 'producedQuantity', 'rewardQuantity'].includes(column.id) ? formatWholeNumber(value)
         : column.id === 'producedPercent' ? (value == null ? '--' : formatPercentNumber(value, 1))
         : ['starbase', 'asset', 'status'].includes(column.id) ? value
           : formatInventoryLedgerBasisValue(value, perUnit);
@@ -7721,8 +7724,8 @@ function renderInventoryCostLedger(result) {
       if (perUnit && ['gm', 'lm', 'mining', 'crafting', 'scanning'].includes(column.id)) {
         cell.title = 'Contribution to the blended inventory cost. All cost components use the same quantity denominator and sum to Total / Unit.';
       }
-      if (['purchased', 'produced'].includes(column.id)) cell.title = `Complete landed cost of ${formatWholeNumber(row.acquisition?.[column.id]?.quantity || 0)} remaining costed units from this route, including ingredients and cargo. Route unit prices do not add together.`;
-      if (column.id === 'producedPercent') cell.title = `Internally produced costed quantity / total costed quantity. Purchased: ${formatWholeNumber(row.acquisition?.purchased?.quantity || 0)}; produced: ${formatWholeNumber(row.acquisition?.produced?.quantity || 0)}; unknown/other origin: ${formatWholeNumber(row.unknownOriginQuantity || 0)}. Uncosted stock excluded.`;
+      if (['purchased', 'produced', 'reward'].includes(column.id)) cell.title = `Complete landed cost of ${formatWholeNumber(row.acquisition?.[column.id]?.quantity || 0)} remaining costed units from this route, including ingredients and cargo. Route unit prices do not add together.`;
+      if (column.id === 'producedPercent') cell.title = `Internally produced costed quantity / total costed quantity. Purchased: ${formatWholeNumber(row.acquisition?.purchased?.quantity || 0)}; produced: ${formatWholeNumber(row.acquisition?.produced?.quantity || 0)}; reward: ${formatWholeNumber(row.acquisition?.reward?.quantity || 0)}; unknown/other origin: ${formatWholeNumber(row.unknownOriginQuantity || 0)}. Uncosted stock excluded.`;
       tr.appendChild(cell);
     }
     earningsCostLedgerTableBody.appendChild(tr);

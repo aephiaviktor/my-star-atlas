@@ -1,6 +1,6 @@
 'use strict';
 
-const { mergeOrigins, scaleOrigins } = require('./inventory-source-units');
+const { mergeOrigins, scaleOrigins, SOURCES } = require('./inventory-source-units');
 const { canonicalAssetName } = require('./asset-name');
 const { resolveBreakevenBasisAtOrBefore } = require('./breakeven-basis-state');
 
@@ -147,6 +147,8 @@ function replayMarketplaceInventoryLedger(movements = []) {
       const lot = emptyLot(quantity);
       lot.principalAtlas = 0;
       if (text(movement.transactionFeePayer) === wallet) addFeeToLot(lot, movement.transactionFeeAtlas);
+      lot.origins = [{ source: 'reward', quantity, uncosted: false,
+        costs: Object.fromEntries(SOURCES.map((source) => [source, 0])), cargoCost: lot.transactionFeeAtlas }];
       const after = add(wallet, asset, lot);
       rows.push({ ...common, fromWallet: text(movement.fromWallet), toWallet: wallet, ...lotFields(lot),
         marketplaceFeeAtlas: 0, basisSource: 'zero_principal_reward', after: copyPool(after) });
@@ -369,6 +371,24 @@ function buildMarketplaceInventoryMovements(events = [], {
   for (const group of feeGroups.values()) {
     if (group.length <= 1) continue;
     const totalTransactionFee = Math.max(...group.map((movement) => Number(movement.transactionFeeAtlas || 0)));
+    // Claim rewards bundle several assets under one signature: allocate the
+    // single transaction fee to each reward proportionally to its quantity so
+    // game cost/unit = allocated fee / quantity. Non-reward groups keep the
+    // existing equal split.
+    if (group.every((movement) => movement.kind === 'reward')) {
+      const totalQuantity = group.reduce((sum, movement) => sum + Math.max(0, Number(movement.quantity || 0)), 0);
+      if (totalQuantity > 0) {
+        let allocated = 0;
+        for (let index = 0; index < group.length; index += 1) {
+          const movement = group[index];
+          const share = index === group.length - 1 ? totalTransactionFee - allocated
+            : totalTransactionFee * Math.max(0, Number(movement.quantity || 0)) / totalQuantity;
+          movement.transactionFeeAtlas = Math.max(0, share);
+          allocated += movement.transactionFeeAtlas;
+        }
+        continue;
+      }
+    }
     for (const movement of group) movement.transactionFeeAtlas = totalTransactionFee / group.length;
   }
   return movements;

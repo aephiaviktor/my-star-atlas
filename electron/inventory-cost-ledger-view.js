@@ -59,7 +59,7 @@ function projectInventoryCostLedgerRows({ ledgerRows = [], valuationRows = [], p
     const origins = scaleOrigins(ledger.origins,
       ledgerKnown > 0 ? Math.min(1, knownCostQuantity / ledgerKnown) : 0, 0);
     const acquisition = {};
-    for (const [route, sources] of Object.entries({ purchased: ['gm', 'lm'], produced: ['scanning', 'mining', 'crafting'] })) {
+    for (const [route, sources] of Object.entries({ purchased: ['gm', 'lm'], produced: ['scanning', 'mining', 'crafting'], reward: ['reward'] })) {
       const parts = origins.filter((part) => !part.uncosted && sources.includes(part.source));
       const qty = parts.reduce((sum, part) => sum + part.quantity, 0);
       const cost = parts.reduce((sum, part) => sum + Object.values(part.costs).reduce((a, b) => a + b, part.cargoCost), 0);

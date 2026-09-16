@@ -1,5 +1,8 @@
 'use strict';
 const SOURCES = ['scanning', 'mining', 'crafting', 'lm', 'gm'];
+// Acquisition-origin sources may include the faction-claim reward route, which
+// is not a cost bucket: its basis is carried as cargo (transaction fees).
+const ORIGIN_SOURCES = [...SOURCES, 'reward'];
 // Bounded acquisition cohorts. Ingredient GM costs remain in the crafted cohort,
 // never masquerading as purchases of the finished asset.
 function mergeOrigins(...groups) {
@@ -25,7 +28,7 @@ function validateOrigins(parts = [], quantity, uncostedQuantity) {
   if (!Array.isArray(parts) || parts.length > 10) throw new Error('invalid inventory origins');
   let known = 0, unknown = 0;
   for (const part of parts) {
-    if (!SOURCES.includes(part.source) || typeof part.uncosted !== 'boolean') throw new Error('invalid inventory origin');
+    if (!ORIGIN_SOURCES.includes(part.source) || typeof part.uncosted !== 'boolean') throw new Error('invalid inventory origin');
     for (const value of [part.quantity, part.cargoCost, ...SOURCES.map((s) => part.costs?.[s] ?? 0)]) {
       if (!Number.isFinite(value) || value < 0) throw new Error('invalid inventory origin value');
     }
@@ -45,4 +48,4 @@ function sourceUnitMetrics(parts = []) {
   }
   return { sourceUnitCosts, sourceQuantities };
 }
-module.exports = { mergeOrigins, scaleOrigins, validateOrigins, sourceUnitMetrics };
+module.exports = { SOURCES, ORIGIN_SOURCES, mergeOrigins, scaleOrigins, validateOrigins, sourceUnitMetrics };
