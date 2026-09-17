@@ -6,8 +6,8 @@ const path = require('node:path');
 const { InventoryCostLedger } = require('../electron/inventory-cost-ledger');
 const { loadLedgerCheckpoint, saveLedgerCheckpoint, LEDGER_CHECKPOINT_SCHEMA_VERSION } = require('../electron/ledger-checkpoint');
 
-test('schema 18 invalidates ledgers created before crafting and cross-faction cargo basis recovery', () => {
-  assert.equal(LEDGER_CHECKPOINT_SCHEMA_VERSION, 18);
+test('schema 19 invalidates ledgers created under mixed Toolkit/Toolkits asset naming', () => {
+  assert.equal(LEDGER_CHECKPOINT_SCHEMA_VERSION, 19);
 });
 const { createInventoryBasisSnapshot } = require('../electron/inventory-basis-snapshot');
 

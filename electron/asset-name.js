@@ -2,7 +2,9 @@
 
 function canonicalAssetName(value) {
   const asset = String(value ?? '').trim();
-  return asset === 'Ammo' ? 'Ammunition' : asset;
+  if (asset === 'Ammo') return 'Ammunition';
+  if (asset === 'Toolkits') return 'Toolkit';
+  return asset;
 }
 
 module.exports = { canonicalAssetName };

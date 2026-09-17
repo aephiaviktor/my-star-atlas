@@ -1330,7 +1330,7 @@ const assetChartColors = Object.freeze({
   Ink: '#2f2a2c',
   Magner: '#7d8da1',
   Rochinol: '#8d5f9c',
-  Toolkits: '#9c7a4f',
+  Toolkit: '#9c7a4f',
   'Energy Substrate': '#5e8b7a',
   Electromagnet: '#a45c4f',
   'Power Source': '#d6a64a',
@@ -1352,7 +1352,7 @@ const PCR_CATEGORIES = Object.freeze([
   Object.freeze({
     id: 'consumable',
     label: 'Consumable',
-    assets: ['Ammunition', 'Food', 'Fuel', 'Ink', 'Toolkits'],
+    assets: ['Ammunition', 'Food', 'Fuel', 'Ink', 'Toolkit'],
     // Production: crafting output. Consumption: every source that can
     // burn a consumable (mining ammo/food/fuel, crafting input, upgrade
     // input, sdu food, movement fuel).

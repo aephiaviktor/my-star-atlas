@@ -28,6 +28,7 @@ function depositBaselineScopes(depositEvents = []) {
 
 function assetFilter(asset) {
   if (canonicalAssetName(asset) === 'Ammunition') return '(r.rss == "Ammunition" or r.rss == "Ammo")';
+  if (canonicalAssetName(asset) === 'Toolkit') return '(r.rss == "Toolkit" or r.rss == "Toolkits")';
   return `r.rss == "${fluxString(asset)}"`;
 }
 

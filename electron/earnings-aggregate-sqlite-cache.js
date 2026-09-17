@@ -6,7 +6,7 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const { DatabaseSync } = require('node:sqlite');
 
-const CACHE_SCHEMA_VERSION = 1;
+const CACHE_SCHEMA_VERSION = 2;
 
 function stableSerialize(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);

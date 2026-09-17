@@ -147,7 +147,7 @@ const ASSET_REGISTRY = Object.freeze([
     "mint": "TTNM1SMkM7VKtyPW6CNBZ4cg3An3zzQ8NVLS2HpMaWL"
   },
   {
-    "name": "Toolkits",
+    "name": "Toolkit",
     "mint": "tooLsNYLiVqzg8o4m3L2Uetbn62mvMWRqkog6PQeYKL"
   },
   {

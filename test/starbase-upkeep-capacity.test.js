@@ -35,7 +35,7 @@ test('equal final empty balances cannot hide missing deposits or cross-scope/con
   assert.equal(normalizeState({ ...anchor, depletionRate: 101 }), null);
   assert.equal(normalizeState({ ...anchor, localTime: null }), null);
 });
-test('disabled upkeep retains full speed even without Toolkits', () => {
+test('disabled upkeep retains full speed even without Toolkit', () => {
   const s = { ...base(), reserve: 0, depletionRate: 0 };
   assert.equal(projectClock(s, t + 300).localTime, t + 300);
 });

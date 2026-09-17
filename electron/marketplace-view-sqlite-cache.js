@@ -6,7 +6,7 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const { DatabaseSync } = require('node:sqlite');
 
-const CACHE_SCHEMA_VERSION = 2;
+const CACHE_SCHEMA_VERSION = 3;
 const DEFAULT_MAX_SNAPSHOT_BYTES = 128 * 1024 * 1024;
 const COLLECTION_COUNTS = Object.freeze([
   ['marketplaceRawData', 'marketplaceRawDataCount'],
