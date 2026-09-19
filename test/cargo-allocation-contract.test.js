@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { formatAllocationNumber, getCargoAllocationVisibleColumns, buildCargoAllocationRenderedColumns } = require('../electron/cargo-allocation-renderer');
+const { formatAllocationNumber, getCargoAllocationVisibleColumns, buildCargoAllocationRenderedColumns, sortCargoAllocationRowsNewestFirst } = require('../electron/cargo-allocation-renderer');
 const { createCargoAllocationProjector } = require('../electron/cargo-allocation-projector');
 const { groupCargoAllocationRows } = require('../electron/influx-data');
 const { allocateFleetDayRentalCosts } = require('../electron/cargo-rental-allocation');
@@ -35,10 +35,11 @@ function projector(overrides = {}) {
 test('Allocation business columns match the approved contract and order', () => {
   const block = rendererSource.slice(rendererSource.indexOf('const cargoAllocationEarningsOptionalColumns'), rendererSource.indexOf('const craftingEarningsOptionalColumns'));
   const labels = [...block.matchAll(/label: '([^']+)'/g)].map((match) => match[1]).filter((label) => !['Color', 'Ownership', 'Ships', 'Required Crew', 'Assignment'].includes(label));
-  assert.deepEqual(labels, ['Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Cost', 'Rental Cost', 'TXS Cost', 'Total Cargo Costs', 'Cargo Cost/Unit']);
-  for (const forbidden of ['Base Cost/Unit', 'Total Cost/Unit']) assert.doesNotMatch(block, new RegExp(forbidden));
-  assert.match(rendererSource, /Fuel Cost \+ Rental Cost \+ TXS Cost/);
-  assert.match(html, /Cargo Amount[\s\S]*Cargo Volume[\s\S]*Allocated Fuel[\s\S]*Fuel Cost[\s\S]*Rental Cost[\s\S]*TXS Cost[\s\S]*Total Cargo Costs[\s\S]*Cargo Cost\/Unit/);
+  assert.deepEqual(labels, ['Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Cost', 'Rental Cost', 'TXS Cost', 'Total Cargo Costs']);
+  for (const forbidden of ['Cargo Cost/Unit', 'Base Cost/Unit', 'Total Cost/Unit']) assert.doesNotMatch(block, new RegExp(forbidden));
+  assert.match(rendererSource, /Fuel Cost \+ available Rental Cost \+ TXS Cost/);
+  assert.match(html, /Cargo Amount[\s\S]*Cargo Volume[\s\S]*Allocated Fuel[\s\S]*Fuel Cost[\s\S]*Rental Cost[\s\S]*TXS Cost[\s\S]*Total Cargo Costs/);
+  assert.doesNotMatch(html.slice(html.indexOf('earnings-cargo-allocation-table-head'), html.indexOf('earnings-cargo-allocation-table-body')), /Cargo Cost\/Unit/);
 });
 
 test('Allocation-specific formatting preserves finite nonzero values and distinguishes zero/unavailable', () => {
@@ -57,23 +58,23 @@ test('rendered Allocation columns survive legacy persisted visibility and bind e
   const row = {
     amount: 12, cargoVolume: 24, allocatedFuel: 0.25,
     fuelCostsAtlas: null, rentalCostsAtlas: 5, txsCostsAtlas: 0,
-    totalCostsAtlas: null, costsPerUnitAtlas: 0.00000000011215801893402239,
+    totalCostsAtlas: null,
     baseCostsPerUnitAtlas: 88, landedCostsPerUnitAtlas: 77,
   };
   const rendered = buildCargoAllocationRenderedColumns(row);
   const visible = getCargoAllocationVisibleColumns(rendered, legacySelected);
   assert.deepEqual(visible.map(({ label }) => label), [
-    'Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Cost', 'Rental Cost', 'TXS Cost', 'Total Cargo Costs', 'Cargo Cost/Unit',
+    'Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Cost', 'Rental Cost', 'TXS Cost', 'Total Cargo Costs',
   ]);
-  assert.deepEqual(visible.map(({ text }) => text), ['12', '24', '0', '--', '5', '0', '--', '0']);
-  assert.equal(visible.some(({ label }) => ['Base Cost/Unit', 'Total Cost/Unit'].includes(label)), false);
+  assert.deepEqual(visible.map(({ text }) => text), ['12', '24', '0', '--', '5', '0', '--']);
+  assert.equal(visible.some(({ label }) => ['Cargo Cost/Unit', 'Base Cost/Unit', 'Total Cost/Unit'].includes(label)), false);
 });
 
 test('Allocation display rounds quantities and costs with the requested column precision', () => {
   const rendered = Object.fromEntries(buildCargoAllocationRenderedColumns({
     amount: 12.345, cargoVolume: 24.678, allocatedFuel: 167.958,
     fuelCostsAtlas: 10.6, rentalCostsAtlas: 2.1, txsCostsAtlas: 0.49,
-    totalCostsAtlas: 13.19, costsPerUnitAtlas: 0.123456789,
+    totalCostsAtlas: 13.19,
   }).map(({ id, text }) => [id, text]));
   assert.equal(rendered.amount, formatAllocationNumber(12.345));
   assert.equal(rendered.cargoVolume, formatAllocationNumber(24.678));
@@ -82,7 +83,23 @@ test('Allocation display rounds quantities and costs with the requested column p
   assert.equal(rendered.rentalCosts, '2');
   assert.equal(rendered.txsCosts, '0');
   assert.equal(rendered.totalCosts, '13');
-  assert.equal(rendered.costsPerUnit, '0.123457');
+  const perUnit = Object.fromEntries(buildCargoAllocationRenderedColumns({
+    amount: 2, fuelCostsAtlas: 10.6, rentalCostsAtlas: null, txsCostsAtlas: 0.49, totalCostsAtlas: 11.09,
+  }, { perUnit: true }).map(({ id, text }) => [id, text]));
+  assert.equal(perUnit.fuelCosts, '5.3');
+  assert.equal(perUnit.rentalCosts, '--');
+  assert.equal(perUnit.txsCosts, '0.245');
+  assert.equal(perUnit.totalCosts, '5.545');
+});
+
+test('Allocation rows sort by UTC date descending while preserving same-day order', () => {
+  const rows = [
+    { isoDate: '2026-08-09', asset: 'Food' },
+    { isoDate: '2026-08-10', asset: 'Fuel' },
+    { isoDate: '2026-08-10', asset: 'Toolkit' },
+  ];
+  assert.deepEqual(sortCargoAllocationRowsNewestFirst(rows).map(({ asset }) => asset), ['Fuel', 'Toolkit', 'Food']);
+  assert.deepEqual(rows.map(({ asset }) => asset), ['Food', 'Fuel', 'Toolkit']);
 });
 
 test('Allocation projector preserves independent component availability and exact aggregate formulas', async () => {
@@ -111,14 +128,15 @@ test('rented fleet daily cost is allocated once by delivered cargo volume', asyn
   assert.deepEqual(rows.map((row) => row.totalCostsAtlas), [14, 34]);
 });
 
-test('rented fleet without rental evidence fails aggregate costs closed', async () => {
+test('missing rental evidence remains unavailable but does not suppress known total costs', async () => {
   const { run, allocation } = projector({
     fetchCargoRows: async () => [{ fleetAccount: 'fleet', fleet: 'Fleet', isoDate: allocation.isoDate, relationship: 'managed', ownership: 'Rented', completedCycleIds: [allocation.cycleId] }],
   });
   const { rows: [row], diagnostics } = await run({ faction: 'MUD' }, [allocation], {}, new AbortController().signal);
   assert.equal(row.rentalCostsAtlas, null);
   assert.equal(row.rentalCostStatus, 'unavailable');
-  assert.equal(row.totalCostsAtlas, null);
+  assert.equal(row.totalCostsAtlas, 4);
+  assert.equal(row.costsPerUnitAtlas, 2);
   assert.equal(diagnostics.unavailableRentalCostCount, 1);
 });
 
@@ -176,7 +194,7 @@ test('missing transaction valuation only invalidates TXS and aggregate fields', 
   assert.equal(row.totalCostsAtlas, null); assert.equal(row.costsPerUnitAtlas, null);
 });
 
-test('zero or non-positive Cargo Amount makes Cargo Cost/Unit unavailable', async () => {
+test('zero or non-positive Cargo Amount keeps the stored per-unit basis unavailable', async () => {
   for (const amount of [0, -1]) {
     const { run, allocation } = projector();
     const { rows: [row] } = await run({ faction: 'MUD' }, [{ ...allocation, amount }], {}, new AbortController().signal);
@@ -193,4 +211,5 @@ test('Allocation UI remains dedicated while ledger consumers reuse the same non-
     const source = fs.readFileSync(path.join(__dirname, '..', 'electron', file), 'utf8');
     assert.doesNotMatch(source, /new Connection|getAccountInfo|getMultipleAccountsInfo|getSignaturesForAddress|@solana\/web3\.js/);
   }
+  assert.match(main, /CARGO_ALLOCATION_PROJECTION_VERSION = 3/);
 });

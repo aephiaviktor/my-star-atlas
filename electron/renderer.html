@@ -1444,6 +1444,7 @@
                   <select id="earnings-cargo-allocation-asset-filter" aria-label="Filter cargo allocation by asset"><option value="">All Assets</option></select>
                 </label>
                 <span class="activity-filter-note">Filters combine with AND</span>
+                <button class="earnings-per-unit-btn earnings-filter-action-right" type="button" data-earnings-per-unit="cargoAllocation" aria-pressed="false">Per Unit</button>
               </div>
               <div id="earnings-cargo-allocation-sync-status" class="fleet-sync-status" role="status">Awaiting cargo allocation data</div>
               <div class="fleet-table-wrap">
@@ -1463,11 +1464,10 @@
                       <th scope="col">Rental Cost</th>
                       <th scope="col">TXS Cost</th>
                       <th scope="col">Total Cargo Costs</th>
-                      <th scope="col">Cargo Cost/Unit</th>
                     </tr>
                   </thead>
                   <tbody id="earnings-cargo-allocation-table-body">
-                    <tr class="empty-row"><td colspan="14">No cargo allocation data loaded</td></tr>
+                    <tr class="empty-row"><td colspan="13">No cargo allocation data loaded</td></tr>
                   </tbody>
                 </table>
               </div>

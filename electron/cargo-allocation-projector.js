@@ -71,8 +71,8 @@ function createCargoAllocationProjector(deps) {
       const fuelCostStatus = Number.isFinite(fuelCostsAtlas) ? 'available' : 'unavailable';
       const txsCostStatus = Number.isFinite(txsCostsAtlas) ? 'available' : 'unavailable';
       const rentalCostStatus = row.rentalCostStatus === 'available' && Number.isFinite(Number(row.rentalCostsAtlas)) ? 'available' : 'unavailable';
-      const totalCostsAtlas = fuelCostStatus === 'available' && rentalCostStatus === 'available' && txsCostStatus === 'available'
-        ? fuelCostsAtlas + Number(row.rentalCostsAtlas) + txsCostsAtlas
+      const totalCostsAtlas = fuelCostStatus === 'available' && txsCostStatus === 'available'
+        ? fuelCostsAtlas + (rentalCostStatus === 'available' ? Number(row.rentalCostsAtlas) : 0) + txsCostsAtlas
         : null;
       return {
         ...row,

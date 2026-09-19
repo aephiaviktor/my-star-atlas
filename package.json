@@ -1,6 +1,6 @@
 {
   "name": "my-star-atlas",
-  "version": "0.6.331",
+  "version": "0.6.332",
   "description": "Local Electron app for Star Atlas fleet performance dashboards.",
   "author": "Aephia",
   "private": true,

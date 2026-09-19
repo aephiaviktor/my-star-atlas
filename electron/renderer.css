@@ -1652,6 +1652,7 @@ select:focus {
 
 .earnings-per-unit-btn:hover { background: rgba(251, 146, 60, 0.34); }
 .earnings-per-unit-btn.active { border-color: #f97316; background: #f97316; color: #1f1307; }
+.earnings-filter-action-right { margin-left: auto; }
 .earnings-table .earnings-per-unit-column { background: rgba(251, 146, 60, 0.16); }
 .earnings-table th.earnings-per-unit-column { color: #fed7aa; }
 

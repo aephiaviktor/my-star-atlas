@@ -45,22 +45,31 @@
     Object.freeze({ id: 'rentalCosts', label: 'Rental Cost', field: 'rentalCostsAtlas' }),
     Object.freeze({ id: 'txsCosts', label: 'TXS Cost', field: 'txsCostsAtlas' }),
     Object.freeze({ id: 'totalCosts', label: 'Total Cargo Costs', field: 'totalCostsAtlas' }),
-    Object.freeze({ id: 'costsPerUnit', label: 'Cargo Cost/Unit', field: 'costsPerUnitAtlas' }),
   ]);
   function getCargoAllocationVisibleColumns(columns = [], selected = new Set()) {
     const requiredIds = new Set(renderedColumnContract.map(({ id }) => id));
     return columns.filter((column) => column.id === 'assignment' ? selected.has(column.id) : requiredIds.has(column.id));
   }
-  function buildCargoAllocationRenderedColumns(row = {}) {
-    return renderedColumnContract.map(({ id, label, field }) => Object.freeze({
-      id,
-      label,
-      text: ['allocatedFuel', 'fuelCosts', 'rentalCosts', 'txsCosts', 'totalCosts'].includes(id)
-        ? formatAllocationNumber(row[field], { maximumFractionDigits: 0 })
-        : id === 'costsPerUnit'
-          ? formatAllocationNumber(row[field], { maximumFractionDigits: 6 })
-          : formatAllocationNumber(row[field]),
-    }));
+  function buildCargoAllocationRenderedColumns(row = {}, { perUnit = false } = {}) {
+    const costIds = new Set(['fuelCosts', 'rentalCosts', 'txsCosts', 'totalCosts']);
+    const amount = Number(row.amount);
+    return renderedColumnContract.map(({ id, label, field }) => {
+      const rawValue = perUnit && costIds.has(id)
+        ? (Number.isFinite(amount) && amount > 0 && row[field] != null && Number.isFinite(Number(row[field])) ? Number(row[field]) / amount : null)
+        : row[field];
+      return Object.freeze({
+        id,
+        label,
+        text: perUnit && costIds.has(id)
+          ? formatAllocationNumber(rawValue, { maximumFractionDigits: 6 })
+          : ['allocatedFuel', 'fuelCosts', 'rentalCosts', 'txsCosts', 'totalCosts'].includes(id)
+            ? formatAllocationNumber(rawValue, { maximumFractionDigits: 0 })
+            : formatAllocationNumber(rawValue),
+      });
+    });
   }
-  return { scopeKey, acceptCargoAllocationResponse, filterCargoAllocationRows, formatAllocationNumber, renderedColumnContract, getCargoAllocationVisibleColumns, buildCargoAllocationRenderedColumns };
+  function sortCargoAllocationRowsNewestFirst(rows = []) {
+    return (Array.isArray(rows) ? rows : []).slice().sort((left, right) => normalize(right?.isoDate).localeCompare(normalize(left?.isoDate)));
+  }
+  return { scopeKey, acceptCargoAllocationResponse, filterCargoAllocationRows, formatAllocationNumber, renderedColumnContract, getCargoAllocationVisibleColumns, buildCargoAllocationRenderedColumns, sortCargoAllocationRowsNewestFirst };
 });

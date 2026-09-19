@@ -115,6 +115,15 @@ test('Cargo allocation offers fleet detail columns off by default', () => {
   assert.match(js, /cargoAllocation: new Set\(\['assignment'/);
 });
 
+test('Cargo Allocation Per Unit control shares the filter row and is right aligned', () => {
+  const allocationPanel = html.slice(html.indexOf('data-cargo-table-panel="allocation"'), html.indexOf('earnings-cargo-allocation-sync-status'));
+  assert.match(allocationPanel, /class="activity-filter-bar earnings-filter-bar"[\s\S]*data-earnings-per-unit="cargoAllocation"/);
+  assert.match(allocationPanel, /class="earnings-per-unit-btn earnings-filter-action-right"/);
+  assert.match(css, /\.earnings-filter-action-right\s*\{[^}]*margin-left:\s*auto/s);
+  assert.match(js, /subtab === 'cargoAllocation'\) renderEarningsCargoAllocations\(latestCargoAllocationResult\)/);
+  assert.match(js, /CargoAllocationRenderer\.sortCargoAllocationRowsNewestFirst\(groupedRows\)/);
+});
+
 test('Cargo table views use the same fixed table height as other Earnings tables', () => {
   assert.match(css, /\.cargo-table-view\s*>\s*\.fleet-table-wrap\s*\{[^}]*height:\s*560px/s);
 });

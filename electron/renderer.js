@@ -225,6 +225,7 @@ const earningsCargoFleetFilter = document.querySelector('#earnings-cargo-fleet-f
 const earningsCargoAllocationDateFilter = document.querySelector('#earnings-cargo-allocation-date-filter');
 const earningsCargoAllocationFleetFilter = document.querySelector('#earnings-cargo-allocation-fleet-filter');
 const earningsCargoAllocationAssetFilter = document.querySelector('#earnings-cargo-allocation-asset-filter');
+const earningsCargoAllocationPerUnitButton = document.querySelector('[data-earnings-per-unit="cargoAllocation"]');
 const earningsCargoNetProfitChart = document.querySelector('#earnings-cargo-net-profit-chart');
 const earningsCargoCostBreakdownChart = document.querySelector('#earnings-cargo-cost-breakdown-chart');
 const sduTotalValue = document.querySelector('#sdu-total-value');
@@ -762,7 +763,6 @@ const cargoAllocationEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'rentalCosts', label: 'Rental Cost' }),
   Object.freeze({ id: 'txsCosts', label: 'TXS Cost' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Cargo Costs' }),
-  Object.freeze({ id: 'costsPerUnit', label: 'Cargo Cost/Unit' }),
 ]);
 
 const craftingEarningsOptionalColumns = Object.freeze([
@@ -907,7 +907,7 @@ const earningsColumnState = {
   scanning: new Set(['sduMax', 'txsDaily', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   cargo: new Set(['txsDaily', 'cargoCycles', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
-  cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'rentalCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
+  cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'rentalCosts', 'txsCosts', 'totalCosts']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   breakeven: new Set(breakevenEarningsOptionalColumns
@@ -1014,14 +1014,13 @@ const earningsMetricGuideBySubtab = Object.freeze({
   }),
   cargoAllocation: Object.freeze({
     assignment: ['Logistics assignment that delivered this asset.', 'Recorded assignment: Transport or Supply Chain.', 'Use it to separate direct transport from supply-chain activity for the same asset.'],
-    amount: ['Units of the asset delivered during the UTC day.', 'Σ delivered Cargo Amount.', 'This is the denominator used for Cargo Cost/Unit.'],
+    amount: ['Units of the asset delivered during the UTC day.', 'Σ delivered Cargo Amount.', 'This is the denominator used by Per Unit mode.'],
     cargoVolume: ['Cargo-space volume represented by the delivered asset.', 'Σ delivered Cargo Volume.', 'Compare it with Cargo Amount to understand how much hold capacity the asset consumed.'],
     allocatedFuel: ['Fuel attributed to delivery of this asset, including its share of empty-leg overhead.', 'Loaded-leg fuel + allocated empty-leg fuel overhead.', 'This assigns the complete cycle fuel cost across the assets delivered by that cycle.'],
     fuelCosts: ['ATLAS value of the fuel allocated to this asset.', 'Allocated Fuel × applicable fuel price.', 'Unavailable source or price evidence is shown as --, never as a manufactured zero.'],
     rentalCosts: ['Fleet rental cost attributed to this delivered asset.', 'Fleet rental cost for the UTC day × this row’s share of the fleet-day delivered cargo volume.', 'Owned fleets show 0; rented fleets with missing rental evidence remain unavailable.'],
     txsCosts: ['ATLAS value of transaction fees allocated to this asset, including empty-leg overhead.', 'Allocated transaction cost in SOL × applicable ATLAS-per-SOL rate.', 'Unavailable source or valuation evidence is shown as --.'],
-    totalCosts: ['Total represented cargo logistics cost allocated to this asset.', 'Fuel Cost + Rental Cost + TXS Cost.', 'Unavailable Fuel, Rental, or TXS evidence keeps the total unavailable.'],
-    costsPerUnit: ['Allocated cargo logistics cost for one delivered asset unit.', 'Total Cargo Costs ÷ Cargo Amount.', 'Available only when Fuel, Rental, and TXS costs are available and Cargo Amount is positive.'],
+    totalCosts: ['Total represented cargo logistics cost allocated to this asset.', 'Fuel Cost + available Rental Cost + TXS Cost.', 'Unavailable Fuel or TXS evidence keeps the total unavailable; unavailable rental evidence remains -- and is omitted from the known total.'],
   }),
   crafting: Object.freeze({
     crafted: ['Total output units crafted during the UTC day.', 'Σ crafted output quantity.', 'Use with unit prices and costs to understand production scale.'],
@@ -1095,7 +1094,7 @@ const earningsPerUnitModeByFaction = new Map();
 
 function getEarningsPerUnitState(faction = normalizeFaction(latestSettings?.faction)) {
   if (!earningsPerUnitModeByFaction.has(faction)) {
-    earningsPerUnitModeByFaction.set(faction, { scanning: false, mining: false, crafting: false, upgrading: false, inventoryLedger: false });
+    earningsPerUnitModeByFaction.set(faction, { scanning: false, mining: false, cargoAllocation: false, crafting: false, upgrading: false, inventoryLedger: false });
   }
   return earningsPerUnitModeByFaction.get(faction);
 }
@@ -1106,6 +1105,7 @@ function resolveEarningsMonetaryDisplayValue(entry, subtab, columnId, perUnit) {
     ammoCosts: 'ammoCostsAtlas',
     foodCosts: 'foodCostsAtlas',
     fuelCosts: 'fuelCostsAtlas',
+    rentalCosts: 'rentalCostsAtlas',
     rental: 'rentalRateAtlasPerDay',
     ingCosts: 'ingCostsAtlas',
     feeCosts: 'feeCostsAtlas',
@@ -1124,6 +1124,7 @@ function resolveEarningsMonetaryDisplayValue(entry, subtab, columnId, perUnit) {
     mining: entry?.mined,
     crafting: entry?.crafted,
     upgrading: entry?.installed,
+    cargoAllocation: entry?.amount,
   };
   const denominator = Number(denominatorBySubtab[subtab]);
   return Number.isFinite(denominator) && denominator > 0 ? value / denominator : null;
@@ -1138,7 +1139,9 @@ function isEarningsPerUnitColumn(subtab, columnId) {
         ? ['revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit']
         : subtab === 'upgrading'
           ? ['revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit']
-          : [];
+          : subtab === 'cargoAllocation'
+            ? ['fuelCosts', 'rentalCosts', 'txsCosts', 'totalCosts']
+            : [];
   return columns.includes(columnId);
 }
 
@@ -1151,7 +1154,8 @@ function applyEarningsPerUnitButtonState(subtab) {
     : subtab === 'mining' ? earningsMiningPerUnitButton
       : subtab === 'crafting' ? earningsCraftingPerUnitButton
         : subtab === 'upgrading' ? earningsUpgradingPerUnitButton
-          : subtab === 'inventoryLedger' ? earningsInventoryLedgerPerUnitButton : null;
+          : subtab === 'cargoAllocation' ? earningsCargoAllocationPerUnitButton
+            : subtab === 'inventoryLedger' ? earningsInventoryLedgerPerUnitButton : null;
   if (!button) return;
   const active = isEarningsPerUnitEnabled(subtab);
   button.classList.toggle('active', active);
@@ -7939,22 +7943,35 @@ function renderEarningsCargoAllocations(result) {
   const filteredRows = getFilteredEarningsRows('cargoAllocation', rows);
   const totalFleet = earningsFilters.cargoAllocation.fleet === EARNINGS_TOTAL_FLEETS_FILTER;
   const totalAsset = earningsFilters.cargoAllocation.asset === EARNINGS_TOTAL_ASSETS_FILTER;
-  const displayRows = totalFleet || totalAsset
+  const groupedRows = totalFleet || totalAsset
     ? aggregateTotalCargoAllocationRows(filteredRows, { totalFleet, totalAsset })
     : filteredRows;
+  const displayRows = CargoAllocationRenderer.sortCargoAllocationRowsNewestFirst(groupedRows);
+  const perUnit = isEarningsPerUnitEnabled('cargoAllocation');
   const visibleColumns = getVisibleEarningsColumns('cargoAllocation');
   const fleetDetailIds = new Set(['color', 'ownership', 'ships', 'requiredCrew']);
   const fleetDetailColumns = visibleColumns.filter((column) => fleetDetailIds.has(column.id));
   const remainingColumns = visibleColumns.filter((column) => !fleetDetailIds.has(column.id));
   const colorMap = buildEarningsFleetColorMap(rows, 0);
+  applyEarningsPerUnitButtonState('cargoAllocation');
   renderEarningsMetricGuide('cargoAllocation');
   if (earningsCargoAllocationTableHead) {
     earningsCargoAllocationTableHead.textContent = '';
     const tr = document.createElement('tr');
-    for (const label of ['Date', 'Fleet', ...fleetDetailColumns.map((column) => column.label), 'Asset', 'Origin Starbase', 'Destination Starbase', ...remainingColumns.map((column) => column.label)]) {
+    for (const column of [
+      { id: 'date', label: 'Date' },
+      { id: 'fleet', label: 'Fleet' },
+      ...fleetDetailColumns,
+      { id: 'asset', label: 'Asset' },
+      { id: 'origin', label: 'Origin Starbase' },
+      { id: 'destination', label: 'Destination Starbase' },
+      ...remainingColumns,
+    ]) {
       const th = document.createElement('th');
       th.scope = 'col';
-      th.textContent = label;
+      const perUnitColumn = perUnit && isEarningsPerUnitColumn('cargoAllocation', column.id);
+      th.textContent = perUnitColumn ? `${column.label} / Unit` : column.label;
+      if (perUnitColumn) th.classList.add('earnings-per-unit-column');
       tr.appendChild(th);
     }
     earningsCargoAllocationTableHead.appendChild(tr);
@@ -7988,11 +8005,15 @@ function renderEarningsCargoAllocations(result) {
     tr.appendChild(createTextCell(entry.origin || '--'));
     tr.appendChild(createTextCell(entry.destination || '--'));
     const renderedValues = new Map(
-      CargoAllocationRenderer.buildCargoAllocationRenderedColumns(entry).map(({ id, text }) => [id, text]),
+      CargoAllocationRenderer.buildCargoAllocationRenderedColumns(entry, { perUnit }).map(({ id, text }) => [id, text]),
     );
     for (const column of remainingColumns) {
       if (column.id === 'assignment') tr.appendChild(createTextCell(entry.assignment || '--'));
-      else if (renderedValues.has(column.id)) tr.appendChild(createTextCell(renderedValues.get(column.id)));
+      else if (renderedValues.has(column.id)) {
+        const cell = createTextCell(renderedValues.get(column.id));
+        if (perUnit && isEarningsPerUnitColumn('cargoAllocation', column.id)) cell.classList.add('earnings-per-unit-column');
+        tr.appendChild(cell);
+      }
     }
     earningsCargoAllocationTableBody.appendChild(tr);
   }
@@ -11014,12 +11035,13 @@ for (const button of document.querySelectorAll('[data-earnings-cost-basis]')) {
 for (const button of document.querySelectorAll('[data-earnings-per-unit]')) {
   button.addEventListener('click', () => {
     const subtab = button.dataset.earningsPerUnit;
-    if (!['scanning', 'mining', 'crafting', 'upgrading', 'inventoryLedger'].includes(subtab)) return;
+    if (!['scanning', 'mining', 'cargoAllocation', 'crafting', 'upgrading', 'inventoryLedger'].includes(subtab)) return;
     const state = getEarningsPerUnitState();
     state[subtab] = !state[subtab];
     applyEarningsPerUnitButtonState(subtab);
     if (subtab === 'scanning') renderEarnings(latestEarningsResult);
     else if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
+    else if (subtab === 'cargoAllocation') renderEarningsCargoAllocations(latestCargoAllocationResult);
     else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
     else if (subtab === 'upgrading') renderEarningsUpgrading(latestUpgradingResult);
     else renderInventoryCostLedger(latestBreakevenResult);

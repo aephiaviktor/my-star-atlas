@@ -30,7 +30,7 @@ function loadFleetAggregator() {
   return context.aggregate;
 }
 
-test('Scanning, Mining, Crafting, and Upgrading monetary values use their own positive unit denominator', () => {
+test('Earnings monetary values use each subtab own positive unit denominator', () => {
   const resolve = loadResolver();
   const scanning = { sduFound: 10, revenueAtlasPerDay: 100, foodCostsAtlas: 10, fuelCostsAtlas: 20, rentalRateAtlasPerDay: 5, txsCostsAtlas: 5, totalCostsAtlas: 40, netProfitAtlas: 60 };
   assert.equal(resolve(scanning, 'scanning', 'revenue', false), 100);
@@ -67,6 +67,13 @@ test('Scanning, Mining, Crafting, and Upgrading monetary values use their own po
   assert.equal(resolve(upgrading, 'upgrading', 'txsCosts', true), 1);
   assert.equal(resolve(upgrading, 'upgrading', 'totalCosts', true), 7);
   assert.equal(resolve(upgrading, 'upgrading', 'netProfit', true), 9);
+
+  const cargoAllocation = { amount: 4, fuelCostsAtlas: 20, rentalCostsAtlas: null, txsCostsAtlas: 4, totalCostsAtlas: 24 };
+  assert.equal(resolve(cargoAllocation, 'cargoAllocation', 'fuelCosts', false), 20);
+  assert.equal(resolve(cargoAllocation, 'cargoAllocation', 'fuelCosts', true), 5);
+  assert.equal(resolve(cargoAllocation, 'cargoAllocation', 'rentalCosts', true), null);
+  assert.equal(resolve(cargoAllocation, 'cargoAllocation', 'txsCosts', true), 1);
+  assert.equal(resolve(cargoAllocation, 'cargoAllocation', 'totalCosts', true), 6);
 });
 
 test('Mining total-fleet rows remain resource-scoped for Per Unit values', () => {
@@ -91,16 +98,18 @@ test('Per Unit mode fails closed for missing or non-positive denominators', () =
   for (const mined of [0, -1, null, undefined]) assert.equal(resolve({ mined, totalCostsAtlas: 10 }, 'mining', 'totalCosts', true), null);
   for (const crafted of [0, -1, null, undefined]) assert.equal(resolve({ crafted, totalCostsAtlas: 10 }, 'crafting', 'totalCosts', true), null);
   for (const installed of [0, -1, null, undefined]) assert.equal(resolve({ installed, totalCostsAtlas: 10 }, 'upgrading', 'totalCosts', true), null);
+  for (const amount of [0, -1, null, undefined]) assert.equal(resolve({ amount, totalCostsAtlas: 10 }, 'cargoAllocation', 'totalCosts', true), null);
   assert.equal(resolve({ crafted: 2, totalCostsAtlas: null }, 'crafting', 'totalCosts', true), null);
 });
 
-test('Scanning, Mining, Crafting, Upgrading, and Inventory Ledger expose independent orange Per Unit controls', () => {
-  assert.equal((html.match(/data-earnings-per-unit=/g) || []).length, 5);
+test('Earnings cost subtabs expose independent orange Per Unit controls', () => {
+  assert.equal((html.match(/data-earnings-per-unit=/g) || []).length, 6);
   assert.match(html, /data-earnings-per-unit="scanning"[^>]*>Per Unit</);
   assert.match(html, /data-earnings-per-unit="mining"[^>]*>Per Unit</);
   assert.match(html, /data-earnings-per-unit="crafting"[^>]*>Per Unit</);
   assert.match(html, /data-earnings-per-unit="upgrading"[^>]*>Per Unit</);
   assert.match(html, /data-earnings-per-unit="inventoryLedger"[^>]*>Per Unit</);
+  assert.match(html, /data-earnings-per-unit="cargoAllocation"[^>]*>Per Unit</);
   assert.match(css, /\.earnings-per-unit-btn/);
   assert.match(css, /\.earnings-per-unit-btn\.active/);
   assert.match(css, /\.earnings-per-unit-column/);
@@ -109,15 +118,17 @@ test('Scanning, Mining, Crafting, Upgrading, and Inventory Ledger expose indepen
   assert.match(renderer, /sortEarningsRows[\s\S]*resolveEarningsMonetaryDisplayValue\(row, subtab, sortState\.column, true\)/);
 });
 
-test('Scanning, Mining, and Crafting remove the redundant standalone Cost per Unit column', () => {
+test('Scanning, Mining, Crafting, and Cargo Allocation remove the redundant standalone Cost per Unit column', () => {
   const scanningColumns = renderer.slice(renderer.indexOf('const scanningEarningsOptionalColumns'), renderer.indexOf('const miningEarningsOptionalColumns'));
   const miningColumns = renderer.slice(renderer.indexOf('const miningEarningsOptionalColumns'), renderer.indexOf('const cargoEarningsOptionalColumns'));
   const craftingColumns = renderer.slice(renderer.indexOf('const craftingEarningsOptionalColumns'), renderer.indexOf('const upgradingEarningsOptionalColumns'));
+  const cargoAllocationColumns = renderer.slice(renderer.indexOf('const cargoAllocationEarningsOptionalColumns'), renderer.indexOf('const craftingEarningsOptionalColumns'));
   assert.doesNotMatch(scanningColumns, /id: 'costsPerUnit'/);
   assert.doesNotMatch(miningColumns, /id: 'costsPerUnit'/);
   assert.doesNotMatch(craftingColumns, /id: 'costsPerUnit'/);
+  assert.doesNotMatch(cargoAllocationColumns, /id: 'costsPerUnit'/);
   const state = renderer.slice(renderer.indexOf('const earningsColumnState'), renderer.indexOf('const EARNINGS_COLUMN_STORAGE_KEY'));
-  for (const subtab of ['scanning', 'mining', 'crafting']) {
+  for (const subtab of ['scanning', 'mining', 'crafting', 'cargoAllocation']) {
     assert.doesNotMatch(state.match(new RegExp(`${subtab}: new Set\\([^\\n]+`))?.[0] || '', /costsPerUnit/);
   }
 });

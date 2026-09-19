@@ -7771,7 +7771,7 @@ ${scopeFilterFlux}
   return parseInfluxCsv(await queryInfluxFlux(settings, flux));
 }
 
-const CARGO_ALLOCATION_PROJECTION_VERSION = 2;
+const CARGO_ALLOCATION_PROJECTION_VERSION = 3;
 const cargoAllocationSqliteCaches = new Map();
 
 function getCargoAllocationSqliteCache(settings) {
