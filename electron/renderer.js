@@ -1932,6 +1932,8 @@ function mergeSettingsFromForm(overrides = {}) {
 function resetFactionScopedState() {
   latestFleetResult = null;
   latestEarningsResult = null;
+  latestCargoAllocationResult = null;
+  cargoAllocationRequestSequence += 1;
   latestMarketplaceResult = null;
   latestBreakevenResult = null;
   latestOptimizationResult = null;
@@ -6017,7 +6019,7 @@ function renderEarningsColumnControls() {
       } else if (subtab === 'cargo') {
         renderEarningsCargo(latestEarningsResult);
       } else if (subtab === 'cargoAllocation') {
-        renderEarningsCargoAllocations(latestEarningsResult);
+        renderEarningsCargoAllocations(latestCargoAllocationResult);
       } else if (subtab === 'crafting') {
         renderEarningsCrafting(latestEarningsResult);
       } else if (subtab === 'breakeven') {
@@ -6348,7 +6350,7 @@ function setupEarningsFilterHandlers() {
       earningsFilters[subtab][key] = select.value;
       if (subtab === 'mining') renderEarningsMining(latestEarningsResult);
       else if (subtab === 'cargo') renderEarningsCargo(latestEarningsResult);
-      else if (subtab === 'cargoAllocation') renderEarningsCargoAllocations(latestEarningsResult);
+      else if (subtab === 'cargoAllocation') renderEarningsCargoAllocations(latestCargoAllocationResult);
       else if (subtab === 'crafting') renderEarningsCrafting(latestEarningsResult);
       else if (subtab === 'upgrading') renderEarningsUpgrading(latestUpgradingResult);
       else if (subtab === 'breakeven') renderEarningsBreakeven(latestBreakevenResult);
@@ -10134,6 +10136,9 @@ function refreshVisibleFactionViews() {
   if (currentSection === 'earnings') {
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven();
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading();
+    if (currentEarningsSubtab === 'cargo' && activeCargoTable === 'allocation') {
+      return Promise.all([refreshEarnings(), refreshCargoAllocation()]);
+    }
     return currentEarningsSubtab === 'marketplace' ? refreshMarketplace({ sync: false }) : refreshEarnings();
   }
   if (currentSection === 'optimization') {
@@ -10161,6 +10166,9 @@ function refreshVisibleIdentity({ force = false } = {}) {
     if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: false });
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven({ force });
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading({ force });
+    if (currentEarningsSubtab === 'cargo' && activeCargoTable === 'allocation') {
+      return Promise.all([refreshEarnings(), refreshCargoAllocation({ retry: force })]);
+    }
     return refreshEarnings();
   }
   if (currentSection === 'optimization') {
@@ -10184,6 +10192,9 @@ function refreshCurrentVisibleData() {
     if (currentEarningsSubtab === 'marketplace') return refreshMarketplace({ sync: true });
     if (currentEarningsSubtab === 'breakeven') return refreshBreakeven({ force: true });
     if (currentEarningsSubtab === 'upgrading') return refreshEarningsUpgrading({ force: true });
+    if (currentEarningsSubtab === 'cargo' && activeCargoTable === 'allocation') {
+      return Promise.all([refreshEarnings(), refreshCargoAllocation({ retry: true })]);
+    }
     return refreshEarnings();
   }
   if (currentSection === 'optimization') {

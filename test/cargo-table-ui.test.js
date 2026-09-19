@@ -50,6 +50,43 @@ test('an unavailable Allocation query cannot fail or erase other Earnings result
   assert.doesNotMatch(js, /latestEarningsResult\s*=\s*\{[^}]*cargoAllocation/);
 });
 
+test('Cargo Allocation UI controls rerender from the dedicated allocation snapshot', () => {
+  const columnControls = js.slice(
+    js.indexOf('function renderEarningsColumnControls'),
+    js.indexOf('function compareEarningsValues')
+  );
+  const filterHandlers = js.slice(
+    js.indexOf('function setupEarningsFilterHandlers'),
+    js.indexOf('function applyEarningsChartModeState')
+  );
+  for (const source of [columnControls, filterHandlers]) {
+    assert.match(source, /renderEarningsCargoAllocations\(latestCargoAllocationResult\)/);
+    assert.doesNotMatch(source, /renderEarningsCargoAllocations\(latestEarningsResult\)/);
+  }
+});
+
+test('active Cargo Allocation follows faction switches and manual refreshes', () => {
+  const reset = js.slice(
+    js.indexOf('function resetFactionScopedState'),
+    js.indexOf('function resetLegacyFleetState')
+  );
+  assert.match(reset, /latestCargoAllocationResult = null/);
+  assert.match(reset, /cargoAllocationRequestSequence \+= 1/);
+
+  const visibleFaction = js.slice(
+    js.indexOf('function refreshVisibleFactionViews'),
+    js.indexOf('function refreshVisibleConsumptionIdentity')
+  );
+  assert.match(visibleFaction, /currentEarningsSubtab === 'cargo' && activeCargoTable === 'allocation'/);
+  assert.match(visibleFaction, /Promise\.all\(\[refreshEarnings\(\), refreshCargoAllocation\(\)\]\)/);
+
+  const manualRefresh = js.slice(
+    js.indexOf('function refreshCurrentVisibleData'),
+    js.indexOf('function setActiveSubtab')
+  );
+  assert.match(manualRefresh, /Promise\.all\(\[refreshEarnings\(\), refreshCargoAllocation\(\{ retry: true \}\)\]\)/);
+});
+
 test('Cargo table shows completed cycles immediately after Txs Daily', () => {
   assert.match(js, /id: 'txsDaily', label: 'Txs Daily' \}\),\s*Object\.freeze\(\{ id: 'cargoCycles', label: 'Cycles Daily'/);
   assert.match(js, /columnId === 'cargoCycles'[\s\S]*entry\.cargoCycles[\s\S]*entry\.cargoLegs/);
