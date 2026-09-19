@@ -51,6 +51,8 @@ const { parseInfluxCsv, isCargoCycleId, cargoFleetAccountFromCycleId, groupCargo
 const { buildCargoAllocationPivotFlux, createCargoAllocationSource } = require('./cargo-allocation-source');
 const { registerCargoAllocationIpc } = require('./cargo-allocation-ipc');
 const { createCargoAllocationProjector } = require('./cargo-allocation-projector');
+const { allocateFleetDayRentalCosts } = require('./cargo-rental-allocation');
+const { buildCargoAllocationCacheSourceKey, createCargoAllocationSqliteCache } = require('./cargo-allocation-sqlite-cache');
 const { calculateFleetCargoCapacity, calculateCargoEfficiency, cargoVolumeRangeStart, buildCargoVolumeRows, buildCargoVolumeByFleetDay, filterCargoAllocationsToCompletedCycles, calculateTravelModeTime } = require('./earnings-math');
 const {
   CURRENT_RENTAL_OFFSETS,
@@ -7769,8 +7771,32 @@ ${scopeFilterFlux}
   return parseInfluxCsv(await queryInfluxFlux(settings, flux));
 }
 
+const CARGO_ALLOCATION_PROJECTION_VERSION = 2;
+const cargoAllocationSqliteCaches = new Map();
+
+function getCargoAllocationSqliteCache(settings) {
+  const source = {
+    influxUrl: settings.influxUrl,
+    influxOrganization: settings.influxOrganization,
+    influxBucket: settings.influxBucket,
+    faction: normalizeFaction(settings.faction),
+    playerProfile: getSelectedPlayerProfile(settings),
+    sourceSchemaVersion: '1',
+    projectionVersion: CARGO_ALLOCATION_PROJECTION_VERSION,
+  };
+  const sourceKey = buildCargoAllocationCacheSourceKey(source);
+  if (!cargoAllocationSqliteCaches.has(sourceKey)) {
+    cargoAllocationSqliteCaches.set(sourceKey, createCargoAllocationSqliteCache({
+      filePath: path.join(app.getPath('userData'), 'cache', 'cargo-allocation-history-v1.sqlite'),
+      source,
+    }));
+  }
+  return cargoAllocationSqliteCaches.get(sourceKey);
+}
+
 const cargoAllocationSource = createCargoAllocationSource({
   parseCsv: parseInfluxCsv,
+  getPersistentCache: getCargoAllocationSqliteCache,
   queryBatch: async (settings, batch) => queryInfluxFlux(
     settings,
     buildCargoAllocationPivotFlux(escapeFluxString(settings.influxBucket), buildInstanceScopeFilter(settings), batch)
@@ -7780,6 +7806,7 @@ const cargoAllocationSource = createCargoAllocationSource({
     fetchCompletionRows: fetchCargoCompletionEvidenceRows,
     fetchPrices: fetchCurrentEarningsPrices,
     fetchRawCosts: fetchCanonicalRawCargoCosts,
+    fetchRentalHistory: (settings) => fetchRentalHistoryIndex(settings),
     getIncludedDays: () => getLastUtcDays(30).map((date) => getUtcDateKey(date)),
     mergeCargoRows: mergeCargoRowsWithCompletedAllocations,
     cargoFleetAccountFromCycleId,
@@ -7793,6 +7820,8 @@ const cargoAllocationSource = createCargoAllocationSource({
     aggregateRawCosts: aggregateRawCostsByFleetDay,
     applyRawCosts: applyRawCostsToCargoAllocations,
     groupRows: groupCargoAllocationRows,
+    allocateRentalCosts: allocateFleetDayRentalCosts,
+    resolveRental: resolveHistoricalRental,
     valueNativeCost,
     formatDate: formatShortUtcDate,
   }),
@@ -7801,7 +7830,7 @@ const cargoAllocationSource = createCargoAllocationSource({
 async function fetchCargoAllocationSnapshot(payload) {
   const settings = normalizeSettings(payload || (await readSettings()));
   cargoAllocationSource.cancelExcept(settings);
-  return cargoAllocationSource.load(settings, { retry: Boolean(payload?.retry) });
+  return cargoAllocationSource.load(settings, { retry: Boolean(payload?.retry), cacheOnly: Boolean(payload?.cacheOnly) });
 }
 
 const crossFactionCargoLedgerCache = createAsyncTtlCache({ ttlMs: 15 * 60_000 });
@@ -7961,7 +7990,9 @@ async function fetchRentalHistoryIndex(settings, connection, sot) {
   const flux = buildRentalHistoryFluxQuery(settings.influxBucket);
   const rows = parseInfluxCsv(await queryInfluxFlux(settings, flux));
   const records = projectRentalHistoryRows(rows);
-  const recoveredRecords = await recoverMissingRentalCrew(records, connection, sot).catch(() => records);
+  const recoveredRecords = connection && sot
+    ? await recoverMissingRentalCrew(records, connection, sot).catch(() => records)
+    : records;
   return createRentalHistoryIndex(recoveredRecords);
 }
 

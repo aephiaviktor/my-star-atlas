@@ -42,6 +42,7 @@
     Object.freeze({ id: 'cargoVolume', label: 'Cargo Volume', field: 'cargoVolume' }),
     Object.freeze({ id: 'allocatedFuel', label: 'Allocated Fuel', field: 'allocatedFuel' }),
     Object.freeze({ id: 'fuelCosts', label: 'Fuel Cost', field: 'fuelCostsAtlas' }),
+    Object.freeze({ id: 'rentalCosts', label: 'Rental Cost', field: 'rentalCostsAtlas' }),
     Object.freeze({ id: 'txsCosts', label: 'TXS Cost', field: 'txsCostsAtlas' }),
     Object.freeze({ id: 'totalCosts', label: 'Total Cargo Costs', field: 'totalCostsAtlas' }),
     Object.freeze({ id: 'costsPerUnit', label: 'Cargo Cost/Unit', field: 'costsPerUnitAtlas' }),
@@ -54,7 +55,7 @@
     return renderedColumnContract.map(({ id, label, field }) => Object.freeze({
       id,
       label,
-      text: ['allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts'].includes(id)
+      text: ['allocatedFuel', 'fuelCosts', 'rentalCosts', 'txsCosts', 'totalCosts'].includes(id)
         ? formatAllocationNumber(row[field], { maximumFractionDigits: 0 })
         : id === 'costsPerUnit'
           ? formatAllocationNumber(row[field], { maximumFractionDigits: 6 })

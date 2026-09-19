@@ -759,6 +759,7 @@ const cargoAllocationEarningsOptionalColumns = Object.freeze([
   Object.freeze({ id: 'cargoVolume', label: 'Cargo Volume' }),
   Object.freeze({ id: 'allocatedFuel', label: 'Allocated Fuel' }),
   Object.freeze({ id: 'fuelCosts', label: 'Fuel Cost' }),
+  Object.freeze({ id: 'rentalCosts', label: 'Rental Cost' }),
   Object.freeze({ id: 'txsCosts', label: 'TXS Cost' }),
   Object.freeze({ id: 'totalCosts', label: 'Total Cargo Costs' }),
   Object.freeze({ id: 'costsPerUnit', label: 'Cargo Cost/Unit' }),
@@ -906,7 +907,7 @@ const earningsColumnState = {
   scanning: new Set(['sduMax', 'txsDaily', 'sduFound', 'revenue', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   mining: new Set(['txsDaily', 'starbase', 'rawMaterial', 'mined', 'revenue', 'ammoCosts', 'foodCosts', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'netProfit', 'profitMargin']),
   cargo: new Set(['txsDaily', 'cargoCycles', 'assignment', 'travelModeTime', 'starbases', 'fuelCosts', 'rental', 'txsCosts', 'totalCosts', 'txsCostsPct', 'cargoVolume', 'cargoCapacity', 'cargoEfficiency']),
-  cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
+  cargoAllocation: new Set(['assignment', 'amount', 'cargoVolume', 'allocatedFuel', 'fuelCosts', 'rentalCosts', 'txsCosts', 'totalCosts', 'costsPerUnit']),
   crafting: new Set(['txsDaily', 'crafted', 'crew', 'revenue', 'ingCosts', 'feeCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   upgrading: new Set(['installed', 'crew', 'revenue', 'upgCosts', 'txsCosts', 'totalCosts', 'netProfit', 'npPerCrew', 'profitMargin']),
   breakeven: new Set(breakevenEarningsOptionalColumns
@@ -1017,9 +1018,10 @@ const earningsMetricGuideBySubtab = Object.freeze({
     cargoVolume: ['Cargo-space volume represented by the delivered asset.', 'Σ delivered Cargo Volume.', 'Compare it with Cargo Amount to understand how much hold capacity the asset consumed.'],
     allocatedFuel: ['Fuel attributed to delivery of this asset, including its share of empty-leg overhead.', 'Loaded-leg fuel + allocated empty-leg fuel overhead.', 'This assigns the complete cycle fuel cost across the assets delivered by that cycle.'],
     fuelCosts: ['ATLAS value of the fuel allocated to this asset.', 'Allocated Fuel × applicable fuel price.', 'Unavailable source or price evidence is shown as --, never as a manufactured zero.'],
+    rentalCosts: ['Fleet rental cost attributed to this delivered asset.', 'Fleet rental cost for the UTC day × this row’s share of the fleet-day delivered cargo volume.', 'Owned fleets show 0; rented fleets with missing rental evidence remain unavailable.'],
     txsCosts: ['ATLAS value of transaction fees allocated to this asset, including empty-leg overhead.', 'Allocated transaction cost in SOL × applicable ATLAS-per-SOL rate.', 'Unavailable source or valuation evidence is shown as --.'],
-    totalCosts: ['Total represented cargo logistics cost allocated to this asset.', 'Fuel Cost + TXS Cost.', 'Cargo cost currently includes Fuel and TXS only; Rental and inventory basis are not included.'],
-    costsPerUnit: ['Allocated cargo logistics cost for one delivered asset unit.', 'Total Cargo Costs ÷ Cargo Amount.', 'Available only when Fuel and TXS costs are available and Cargo Amount is positive.'],
+    totalCosts: ['Total represented cargo logistics cost allocated to this asset.', 'Fuel Cost + Rental Cost + TXS Cost.', 'Unavailable Fuel, Rental, or TXS evidence keeps the total unavailable.'],
+    costsPerUnit: ['Allocated cargo logistics cost for one delivered asset unit.', 'Total Cargo Costs ÷ Cargo Amount.', 'Available only when Fuel, Rental, and TXS costs are available and Cargo Amount is positive.'],
   }),
   crafting: Object.freeze({
     crafted: ['Total output units crafted during the UTC day.', 'Σ crafted output quantity.', 'Use with unit prices and costs to understand production scale.'],
@@ -6311,7 +6313,7 @@ function aggregateTotalCargoAllocationRows(rows, { totalFleet = false, totalAsse
       shipTypes: totalFleet ? 0 : first.shipTypes,
     };
     sumFiniteEarningsFields(total, groupRows, [
-      'amount', 'cargoVolume', 'allocatedFuel', 'fuelCostsAtlas', 'txsCostsAtlas', 'totalCostsAtlas',
+      'amount', 'cargoVolume', 'allocatedFuel', 'fuelCostsAtlas', 'rentalCostsAtlas', 'txsCostsAtlas', 'totalCostsAtlas',
     ]);
     total.costsPerUnitAtlas = total.amount > 0 && Number.isFinite(total.totalCostsAtlas)
       ? total.totalCostsAtlas / total.amount
@@ -8250,9 +8252,24 @@ async function refreshCargoAllocation({ retry = false } = {}) {
     return;
   }
   renderEarningsCargoAllocations({ ...(latestCargoAllocationResult || {}), cargoAllocationAvailability: 'loading', cargoAllocationRows: latestCargoAllocationResult?.cargoAllocationRows || [] });
+  if (!retry) {
+    const cached = await api.getCargoAllocation({ ...settings, cacheOnly: true });
+    if (requestSequence !== cargoAllocationRequestSequence) return;
+    const currentSettings = latestSettings || getFormPayload();
+    const acceptedCached = CargoAllocationRenderer.acceptCargoAllocationResponse(
+      cached,
+      { faction, playerProfile },
+      { faction: normalizeFaction(currentSettings.faction), playerProfile: getActivePlayerProfile(currentSettings) }
+    );
+    if (!acceptedCached.accepted) return;
+    if (cached?.persistentCacheHit) {
+      latestCargoAllocationResult = acceptedCached.state;
+      renderEarningsCargoAllocations(latestCargoAllocationResult);
+    }
+  }
   const result = await api.getCargoAllocation(settings);
-  const currentSettings = latestSettings || getFormPayload();
   if (requestSequence !== cargoAllocationRequestSequence) return;
+  const currentSettings = latestSettings || getFormPayload();
   const accepted = CargoAllocationRenderer.acceptCargoAllocationResponse(
     result,
     { faction, playerProfile },

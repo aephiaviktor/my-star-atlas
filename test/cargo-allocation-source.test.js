@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createCargoAllocationSource, buildCargoAllocationPivotFlux } = require('../electron/cargo-allocation-source');
+const { cargoAllocationUtcBatches } = require('../electron/influx-data');
 
 const NOW = new Date('2026-08-10T16:00:00.000Z');
 const SETTINGS = { faction: 'MUD', playerProfile: 'mud-profile', influxBucket: 'slya' };
@@ -23,6 +24,24 @@ function source(overrides = {}) {
     ...overrides,
   });
   return { instance, calls: () => calls };
+}
+
+function memoryDailyCache(initial = new Map()) {
+  const days = new Map(initial);
+  return {
+    days,
+    readDay: (day) => days.has(day) ? { isoDate: day, rows: structuredClone(days.get(day)) } : null,
+    writeDay: (day, rows) => { days.set(day, structuredClone(rows)); },
+    pruneBefore: (cutoff) => {
+      let count = 0;
+      for (const day of days.keys()) if (day < cutoff) { days.delete(day); count += 1; }
+      return count;
+    },
+  };
+}
+
+function includedDays() {
+  return cargoAllocationUtcBatches({ now: NOW, batchDays: 1 }).map(({ start }) => start.slice(0, 10));
 }
 
 test('optimized Allocation query pivots complete records inside a bounded UTC batch', () => {
@@ -72,6 +91,73 @@ test('repeated tab openings share one flight then use successful cache', async (
   const cached = await instance.load(SETTINGS);
   assert.equal(cached.cacheHit, true);
   assert.equal(calls, 6);
+});
+
+test('complete persistent cache returns all faction rows without querying or projecting', async () => {
+  const days = includedDays();
+  const persistent = memoryDailyCache(new Map(days.map((day) => [day, day === '2026-08-10'
+    ? [{ isoDate: day, fleetAccount: 'fleet', asset: 'Fuel' }]
+    : []])));
+  let queries = 0;
+  let projections = 0;
+  const { instance } = source({
+    getPersistentCache: () => persistent,
+    queryBatch: async () => { queries += 1; return ''; },
+    projectRows: async () => { projections += 1; return { rows: [] }; },
+  });
+  const result = await instance.load(SETTINGS, { cacheOnly: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.persistentCacheHit, true);
+  assert.equal(result.rows.length, 1);
+  assert.equal(queries, 0);
+  assert.equal(projections, 0);
+});
+
+test('complete persistent cache refreshes only today and yesterday then replaces those days', async () => {
+  const days = includedDays();
+  const persistent = memoryDailyCache(new Map(days.map((day) => [day, day === '2026-08-08'
+    ? [{ isoDate: day, fleetAccount: 'old', asset: 'Food' }]
+    : []])));
+  const windows = [];
+  const { instance } = source({
+    getPersistentCache: () => persistent,
+    queryBatch: async (_settings, window) => { windows.push(window); return csv([pivotRow()]); },
+    projectRows: async (_settings, records) => ({ rows: records }),
+  });
+  const result = await instance.load(SETTINGS);
+  assert.deepEqual(windows, [{ start: '2026-08-09T00:00:00.000Z', stop: '2026-08-11T00:00:00.000Z' }]);
+  assert.equal(result.rows.some((row) => row.isoDate === '2026-08-08' && row.asset === 'Food'), true);
+  assert.equal(result.rows.some((row) => row.isoDate === '2026-08-10' && row.asset === 'Fuel'), true);
+  assert.deepEqual(persistent.days.get('2026-08-09'), []);
+  assert.equal(persistent.days.get('2026-08-10').length, 1);
+});
+
+test('first persistent load keeps six bounded queries and seeds every daily shard including empty days', async () => {
+  const persistent = memoryDailyCache();
+  const { instance, calls } = source({ getPersistentCache: () => persistent });
+  const result = await instance.load(SETTINGS);
+  assert.equal(result.ok, true);
+  assert.equal(calls(), 6);
+  assert.equal(persistent.days.size, 30);
+  assert.equal(persistent.days.get('2026-08-10').length, 1);
+  assert.deepEqual(persistent.days.get('2026-08-09'), []);
+});
+
+test('complete persistent cache survives a whole-worker timeout without clearing last-good rows', async () => {
+  const days = includedDays();
+  const persistent = memoryDailyCache(new Map(days.map((day) => [day, day === '2026-08-10'
+    ? [{ isoDate: day, fleetAccount: 'fleet', asset: 'Fuel' }]
+    : []])));
+  const { instance } = source({
+    getPersistentCache: () => persistent,
+    workerTimeoutMs: 5,
+    queryBatch: () => new Promise(() => {}),
+  });
+  const result = await instance.load(SETTINGS);
+  assert.equal(result.ok, true);
+  assert.equal(result.availability, 'stale');
+  assert.equal(result.rows.length, 1);
+  assert.match(result.refreshError, /worker_timeout/);
 });
 
 test('expired last-good allocation remains available when background refresh fails', async () => {

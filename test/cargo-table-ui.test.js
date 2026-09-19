@@ -87,6 +87,17 @@ test('active Cargo Allocation follows faction switches and manual refreshes', ()
   assert.match(manualRefresh, /Promise\.all\(\[refreshEarnings\(\), refreshCargoAllocation\(\{ retry: true \}\)\]\)/);
 });
 
+test('Cargo Allocation renders a persistent hit before its recent-window refresh without cache-status copy', () => {
+  const refreshStart = js.indexOf('async function refreshCargoAllocation');
+  const refresh = js.slice(
+    refreshStart,
+    js.indexOf('async function refreshEarnings()', refreshStart)
+  );
+  assert.match(refresh, /api\.getCargoAllocation\(\{ \.\.\.settings, cacheOnly: true \}\)/);
+  assert.match(refresh, /cached\?\.persistentCacheHit[\s\S]*renderEarningsCargoAllocations\(latestCargoAllocationResult\)[\s\S]*api\.getCargoAllocation\(settings\)/);
+  assert.doesNotMatch(js, /SQLite hit|refreshing recent data/i);
+});
+
 test('Cargo table shows completed cycles immediately after Txs Daily', () => {
   assert.match(js, /id: 'txsDaily', label: 'Txs Daily' \}\),\s*Object\.freeze\(\{ id: 'cargoCycles', label: 'Cycles Daily'/);
   assert.match(js, /columnId === 'cargoCycles'[\s\S]*entry\.cargoCycles[\s\S]*entry\.cargoLegs/);

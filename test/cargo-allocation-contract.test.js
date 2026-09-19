@@ -6,6 +6,7 @@ const path = require('node:path');
 const { formatAllocationNumber, getCargoAllocationVisibleColumns, buildCargoAllocationRenderedColumns } = require('../electron/cargo-allocation-renderer');
 const { createCargoAllocationProjector } = require('../electron/cargo-allocation-projector');
 const { groupCargoAllocationRows } = require('../electron/influx-data');
+const { allocateFleetDayRentalCosts } = require('../electron/cargo-rental-allocation');
 
 const rendererSource = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '..', 'electron', 'renderer.html'), 'utf8');
@@ -17,8 +18,9 @@ function projector(overrides = {}) {
     cycleId: 'fleet:0,0:1', asset: 'Fuel', amount: 2, cargoVolume: 4, allocatedFuel: 1, allocatedTxCostSol: 0.25,
   };
   const deps = {
-    fetchCargoRows: async () => [{ fleetAccount: 'fleet', completedCycleIds: [allocation.cycleId] }],
+    fetchCargoRows: async () => [{ fleetAccount: 'fleet', fleet: 'Fleet', isoDate: allocation.isoDate, relationship: 'owned', ownership: 'Owned', completedCycleIds: [allocation.cycleId] }],
     fetchCompletionRows: async () => [], fetchPrices: async () => ({ atlasPerSol: 4 }), fetchRawCosts: async () => ({ records: [], rejected: [] }),
+    fetchRentalHistory: async () => ({}), resolveRental: () => null, allocateRentalCosts: allocateFleetDayRentalCosts,
     getIncludedDays: () => ['2026-08-10'], mergeCargoRows: ({ movementRows }) => movementRows,
     cargoFleetAccountFromCycleId: () => 'fleet', filterCompleted: (rows) => rows,
     exporterForFaction: () => null, selectCutover: () => ({ cutover: null, rawRecords: [] }), valueRawCosts: async () => [],
@@ -33,10 +35,10 @@ function projector(overrides = {}) {
 test('Allocation business columns match the approved contract and order', () => {
   const block = rendererSource.slice(rendererSource.indexOf('const cargoAllocationEarningsOptionalColumns'), rendererSource.indexOf('const craftingEarningsOptionalColumns'));
   const labels = [...block.matchAll(/label: '([^']+)'/g)].map((match) => match[1]).filter((label) => !['Color', 'Ownership', 'Ships', 'Required Crew', 'Assignment'].includes(label));
-  assert.deepEqual(labels, ['Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Cost', 'TXS Cost', 'Total Cargo Costs', 'Cargo Cost/Unit']);
-  for (const forbidden of ['Total Rental Cost', 'Base Cost/Unit', 'Total Cost/Unit']) assert.doesNotMatch(block, new RegExp(forbidden));
-  assert.match(rendererSource, /Fuel Cost \+ TXS Cost/);
-  assert.match(html, /Cargo Amount[\s\S]*Cargo Volume[\s\S]*Allocated Fuel[\s\S]*Fuel Cost[\s\S]*TXS Cost[\s\S]*Total Cargo Costs[\s\S]*Cargo Cost\/Unit/);
+  assert.deepEqual(labels, ['Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Cost', 'Rental Cost', 'TXS Cost', 'Total Cargo Costs', 'Cargo Cost/Unit']);
+  for (const forbidden of ['Base Cost/Unit', 'Total Cost/Unit']) assert.doesNotMatch(block, new RegExp(forbidden));
+  assert.match(rendererSource, /Fuel Cost \+ Rental Cost \+ TXS Cost/);
+  assert.match(html, /Cargo Amount[\s\S]*Cargo Volume[\s\S]*Allocated Fuel[\s\S]*Fuel Cost[\s\S]*Rental Cost[\s\S]*TXS Cost[\s\S]*Total Cargo Costs[\s\S]*Cargo Cost\/Unit/);
 });
 
 test('Allocation-specific formatting preserves finite nonzero values and distinguishes zero/unavailable', () => {
@@ -54,31 +56,32 @@ test('rendered Allocation columns survive legacy persisted visibility and bind e
   const legacySelected = new Set(['assignment', 'amount', 'cargoVolume']);
   const row = {
     amount: 12, cargoVolume: 24, allocatedFuel: 0.25,
-    fuelCostsAtlas: null, txsCostsAtlas: 0,
+    fuelCostsAtlas: null, rentalCostsAtlas: 5, txsCostsAtlas: 0,
     totalCostsAtlas: null, costsPerUnitAtlas: 0.00000000011215801893402239,
-    rentalCostsAtlas: 99, baseCostsPerUnitAtlas: 88, landedCostsPerUnitAtlas: 77,
+    baseCostsPerUnitAtlas: 88, landedCostsPerUnitAtlas: 77,
   };
   const rendered = buildCargoAllocationRenderedColumns(row);
   const visible = getCargoAllocationVisibleColumns(rendered, legacySelected);
   assert.deepEqual(visible.map(({ label }) => label), [
-    'Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Cost', 'TXS Cost', 'Total Cargo Costs', 'Cargo Cost/Unit',
+    'Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Cost', 'Rental Cost', 'TXS Cost', 'Total Cargo Costs', 'Cargo Cost/Unit',
   ]);
-  assert.deepEqual(visible.map(({ text }) => text), ['12', '24', '0', '--', '0', '--', '0']);
-  assert.equal(visible.some(({ label }) => ['Total Rental Cost', 'Base Cost/Unit', 'Total Cost/Unit'].includes(label)), false);
+  assert.deepEqual(visible.map(({ text }) => text), ['12', '24', '0', '--', '5', '0', '--', '0']);
+  assert.equal(visible.some(({ label }) => ['Base Cost/Unit', 'Total Cost/Unit'].includes(label)), false);
 });
 
 test('Allocation display rounds quantities and costs with the requested column precision', () => {
   const rendered = Object.fromEntries(buildCargoAllocationRenderedColumns({
     amount: 12.345, cargoVolume: 24.678, allocatedFuel: 167.958,
-    fuelCostsAtlas: 10.6, txsCostsAtlas: 0.49,
-    totalCostsAtlas: 11.09, costsPerUnitAtlas: 0.123456789,
+    fuelCostsAtlas: 10.6, rentalCostsAtlas: 2.1, txsCostsAtlas: 0.49,
+    totalCostsAtlas: 13.19, costsPerUnitAtlas: 0.123456789,
   }).map(({ id, text }) => [id, text]));
   assert.equal(rendered.amount, formatAllocationNumber(12.345));
   assert.equal(rendered.cargoVolume, formatAllocationNumber(24.678));
   assert.equal(rendered.allocatedFuel, '168');
   assert.equal(rendered.fuelCosts, '11');
+  assert.equal(rendered.rentalCosts, '2');
   assert.equal(rendered.txsCosts, '0');
-  assert.equal(rendered.totalCosts, '11');
+  assert.equal(rendered.totalCosts, '13');
   assert.equal(rendered.costsPerUnit, '0.123457');
 });
 
@@ -86,11 +89,37 @@ test('Allocation projector preserves independent component availability and exac
   const { run, allocation } = projector();
   const result = await run({ faction: 'MUD' }, [allocation], {}, new AbortController().signal);
   assert.equal(result.rows[0].fuelCostsAtlas, 3);
+  assert.equal(result.rows[0].rentalCostsAtlas, 0);
   assert.equal(result.rows[0].txsCostsAtlas, 1);
   assert.equal(result.rows[0].totalCostsAtlas, 4);
   assert.equal(result.rows[0].costsPerUnitAtlas, 2);
   assert.equal(result.rows[0].fuelCostStatus, 'available');
   assert.equal(result.rows[0].txsCostStatus, 'available');
+  assert.equal(result.rows[0].rentalCostStatus, 'available');
+});
+
+test('rented fleet daily cost is allocated once by delivered cargo volume', async () => {
+  const { run, allocation } = projector({
+    fetchCargoRows: async () => [{ fleetAccount: 'fleet', fleet: 'Fleet', isoDate: allocation.isoDate, relationship: 'managed', ownership: 'Rented', completedCycleIds: [allocation.cycleId, 'fleet:0,0:2'] }],
+    fetchRentalHistory: async () => ({ rental: 40 }),
+    resolveRental: () => ({ rentalCostAtlas: 40 }),
+  });
+  const second = { ...allocation, cycleId: 'fleet:0,0:2', asset: 'Food', cargoVolume: 12 };
+  const { rows } = await run({ faction: 'MUD' }, [allocation, second], {}, new AbortController().signal);
+  assert.deepEqual(rows.map((row) => row.rentalCostsAtlas), [10, 30]);
+  assert.equal(rows.reduce((sum, row) => sum + row.rentalCostsAtlas, 0), 40);
+  assert.deepEqual(rows.map((row) => row.totalCostsAtlas), [14, 34]);
+});
+
+test('rented fleet without rental evidence fails aggregate costs closed', async () => {
+  const { run, allocation } = projector({
+    fetchCargoRows: async () => [{ fleetAccount: 'fleet', fleet: 'Fleet', isoDate: allocation.isoDate, relationship: 'managed', ownership: 'Rented', completedCycleIds: [allocation.cycleId] }],
+  });
+  const { rows: [row], diagnostics } = await run({ faction: 'MUD' }, [allocation], {}, new AbortController().signal);
+  assert.equal(row.rentalCostsAtlas, null);
+  assert.equal(row.rentalCostStatus, 'unavailable');
+  assert.equal(row.totalCostsAtlas, null);
+  assert.equal(diagnostics.unavailableRentalCostCount, 1);
 });
 
 test('missing canonical raw fleet/day evidence keeps quantities visible and costs unavailable with bounded diagnostics', async () => {
