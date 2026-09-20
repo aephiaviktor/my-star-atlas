@@ -67,8 +67,31 @@
       });
     });
   }
+  // Presentation-only join: use the already enriched, faction/profile-scoped
+  // Cargo snapshot, never raw movement rows or mutable fleet labels.
+  function enrichCargoAllocationFleetDetails(rows = [], cargoRows = []) {
+    const key = (row) => normalize(row.fleetAccount) && normalize(row.isoDate)
+      ? JSON.stringify([normalize(row.fleetAccount), normalize(row.isoDate)]) : '';
+    const byFleetDay = new Map();
+    for (const row of cargoRows) {
+      const identity = key(row);
+      if (identity) byFleetDay.set(identity, byFleetDay.has(identity) ? null : row);
+    }
+    return rows.map((row) => {
+      const metadata = byFleetDay.get(key(row));
+      if (!metadata) return row;
+      return {
+        ...row,
+        ships: metadata.ships || [],
+        shipTypes: metadata.shipTypes || 0,
+        totalRequiredCrew: metadata.totalRequiredCrew ?? null,
+        ownership: metadata.ownership || '',
+        relationship: metadata.relationship || '',
+      };
+    });
+  }
   function sortCargoAllocationRowsNewestFirst(rows = []) {
     return (Array.isArray(rows) ? rows : []).slice().sort((left, right) => normalize(right?.isoDate).localeCompare(normalize(left?.isoDate)));
   }
-  return { scopeKey, acceptCargoAllocationResponse, filterCargoAllocationRows, formatAllocationNumber, renderedColumnContract, getCargoAllocationVisibleColumns, buildCargoAllocationRenderedColumns, sortCargoAllocationRowsNewestFirst };
+  return { enrichCargoAllocationFleetDetails, scopeKey, acceptCargoAllocationResponse, filterCargoAllocationRows, formatAllocationNumber, renderedColumnContract, getCargoAllocationVisibleColumns, buildCargoAllocationRenderedColumns, sortCargoAllocationRowsNewestFirst };
 });

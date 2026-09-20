@@ -7870,6 +7870,7 @@ function renderEarningsUpgrading(result) {
 }
 
 function renderEarningsCargo(result) {
+  if (latestCargoAllocationResult) renderEarningsCargoAllocations(latestCargoAllocationResult, result);
   if (!result?.ok) {
     renderEarningsCargoEmpty(result?.error || 'Cargo earnings sync failed');
     setEarningsCargoStatus('Cargo earnings sync failed');
@@ -7934,9 +7935,12 @@ function renderEarningsCargo(result) {
   }
 }
 
-function renderEarningsCargoAllocations(result) {
+function renderEarningsCargoAllocations(result, fleetResult = latestEarningsResult) {
   if (!earningsCargoAllocationTableBody) return;
-  const rows = Array.isArray(result?.cargoAllocationRows) ? result.cargoAllocationRows : [];
+  const rows = CargoAllocationRenderer.enrichCargoAllocationFleetDetails(
+    Array.isArray(result?.cargoAllocationRows) ? result.cargoAllocationRows : [],
+    fleetResult?.ok && Array.isArray(fleetResult.cargoRows) ? fleetResult.cargoRows : [],
+  );
   const cargoAllocationAvailability = result?.cargoAllocationAvailability
     || (result?.cargoAllocationError ? 'unavailable' : (rows.length ? 'available' : 'empty'));
   populateEarningsFilterOptions('cargoAllocation', rows);
