@@ -53,8 +53,8 @@ test('Allocation-specific formatting preserves finite nonzero values and disting
   assert.equal(formatAllocationNumber(Number.NaN), '--');
 });
 
-test('rendered Allocation columns survive legacy persisted visibility and bind every approved value', () => {
-  const legacySelected = new Set(['assignment', 'amount', 'cargoVolume']);
+test('Allocation column visibility follows the sidebar selection and binds selected values', () => {
+  const selected = new Set(['amount', 'rentalCosts', 'totalCosts']);
   const row = {
     amount: 12, cargoVolume: 24, allocatedFuel: 0.25,
     fuelCostsAtlas: null, rentalCostsAtlas: 5, txsCostsAtlas: 0,
@@ -62,12 +62,26 @@ test('rendered Allocation columns survive legacy persisted visibility and bind e
     baseCostsPerUnitAtlas: 88, landedCostsPerUnitAtlas: 77,
   };
   const rendered = buildCargoAllocationRenderedColumns(row);
-  const visible = getCargoAllocationVisibleColumns(rendered, legacySelected);
+  const visible = getCargoAllocationVisibleColumns(rendered, selected);
   assert.deepEqual(visible.map(({ label }) => label), [
-    'Cargo Amount', 'Cargo Volume', 'Allocated Fuel', 'Fuel Cost', 'Rental Cost', 'TXS Cost', 'Total Cargo Costs',
+    'Cargo Amount', 'Rental Cost', 'Total Cargo Costs',
   ]);
-  assert.deepEqual(visible.map(({ text }) => text), ['12', '24', '0', '--', '5', '0', '--']);
+  assert.deepEqual(visible.map(({ text }) => text), ['12', '5', '--']);
   assert.equal(visible.some(({ label }) => ['Cargo Cost/Unit', 'Base Cost/Unit', 'Total Cost/Unit'].includes(label)), false);
+});
+
+test('Allocation fleet-detail columns use the same sidebar selection contract', () => {
+  const columns = [
+    { id: 'color', label: 'Color' },
+    { id: 'ownership', label: 'Ownership' },
+    { id: 'ships', label: 'Ships' },
+    { id: 'requiredCrew', label: 'Required Crew' },
+    { id: 'assignment', label: 'Assignment' },
+  ];
+  assert.deepEqual(
+    getCargoAllocationVisibleColumns(columns, new Set(['color', 'ships'])).map(({ id }) => id),
+    ['color', 'ships'],
+  );
 });
 
 test('Allocation display rounds quantities and costs with the requested column precision', () => {

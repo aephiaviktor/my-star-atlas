@@ -47,8 +47,7 @@
     Object.freeze({ id: 'totalCosts', label: 'Total Cargo Costs', field: 'totalCostsAtlas' }),
   ]);
   function getCargoAllocationVisibleColumns(columns = [], selected = new Set()) {
-    const requiredIds = new Set(renderedColumnContract.map(({ id }) => id));
-    return columns.filter((column) => column.id === 'assignment' ? selected.has(column.id) : requiredIds.has(column.id));
+    return columns.filter((column) => selected.has(column.id));
   }
   function buildCargoAllocationRenderedColumns(row = {}, { perUnit = false } = {}) {
     const costIds = new Set(['fuelCosts', 'rentalCosts', 'txsCosts', 'totalCosts']);
