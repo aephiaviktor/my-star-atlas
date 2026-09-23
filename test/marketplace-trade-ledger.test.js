@@ -2,7 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { projectDecodedMarketplaceTrades } = require('../electron/marketplace-trade-ledger');
+const {
+  selectCanonicalMarketplaceExecutions, projectDecodedMarketplaceTrades, projectLocalMarketInventoryTrades,
+} = require('../electron/marketplace-trade-ledger');
 
 const base = {
   eventId: 'trade', timestamp: '2026-08-31T10:00:00Z', action: 'execution', eventType: 'gm',
@@ -27,6 +29,48 @@ test('decoded LM execution retains its faction while GM is always global', () =>
   ]);
   assert.deepEqual(Object.fromEntries(rows.map((row) => [row.marketplace, row.faction])), { GM: 'GLOBAL', LM: 'ONI' });
   assert.deepEqual(Object.fromEntries(rows.map((row) => [row.marketplace, row.starbase])), { GM: '-', LM: 'ONI-1' });
+});
+
+test('duplicate LM representations collapse to the starbase and order enriched execution', () => {
+  const duplicate = {
+    ...base, eventType: 'lm', market: 'LM', faction: 'USTUR', side: 'sell', asset: 'Iron Ore',
+    timestamp: '2026-09-15T05:01:42Z', signature: 'same-signature', quantityRaw: '10000000',
+    unitPriceAtlas: 0.00075, grossAtlas: 7500, marketplaceFeeAtlas: 450, txFeeAtlas: 0,
+  };
+  const selected = selectCanonicalMarketplaceExecutions([
+    { ...duplicate, eventId: 'fallback', starbase: '', orderId: '' },
+    { ...duplicate, eventId: 'enriched', starbase: 'MRZ-23', orderId: 'order-23' },
+  ]);
+  assert.deepEqual(selected.map((event) => event.eventId), ['enriched']);
+  const [row] = projectDecodedMarketplaceTrades(selected);
+  assert.equal(row.starbase, 'MRZ-23');
+});
+
+test('conflicting nonempty LM starbases are preserved for review instead of silently merged', () => {
+  const duplicate = {
+    ...base, eventType: 'lm', market: 'LM', faction: 'USTUR', side: 'sell', asset: 'Iron Ore',
+    signature: 'conflict-signature', quantityRaw: '10000000', grossAtlas: 7500,
+  };
+  assert.equal(selectCanonicalMarketplaceExecutions([
+    { ...duplicate, eventId: 'mrz-22', starbase: 'MRZ-22' },
+    { ...duplicate, eventId: 'mrz-23', starbase: 'MRZ-23' },
+  ]).length, 2);
+});
+
+test('canonical LM events become direct selected-faction starbase inventory trades', () => {
+  const trades = projectLocalMarketInventoryTrades([
+    { ...base, eventId: 'buy', eventType: 'lm', market: 'LM', faction: 'MUD', starbase: 'MRZ-6', side: 'buy',
+      asset: 'Hydrogen', quantityRaw: '20000000', grossAtlas: 6820, txFeeAtlas: 7.92 },
+    { ...base, eventId: 'sell', eventType: 'lm', market: 'LM', faction: 'MUD', starbase: 'MRZ-9', side: 'sell',
+      asset: 'Food', quantityRaw: '1000000', grossAtlas: 1100, marketplaceFeeAtlas: 66, txFeeAtlas: 0.82 },
+    { ...base, eventId: 'other-faction', eventType: 'lm', market: 'LM', faction: 'ONI', starbase: 'ONI-1', side: 'buy' },
+  ], { faction: 'MUD' });
+  assert.deepEqual(trades, [
+    { id: 'buy', timestamp: '2026-08-31T10:00:00Z', marketplace: 'LM', faction: 'MUD', starbase: 'MRZ-6',
+      asset: 'Hydrogen', side: 'buy', quantity: 20000000, settledAtlas: 6827.92 },
+    { id: 'sell', timestamp: '2026-08-31T10:00:00Z', marketplace: 'LM', faction: 'MUD', starbase: 'MRZ-9',
+      asset: 'Food', side: 'sell', quantity: 1000000, settledAtlas: 1033.18 },
+  ]);
 });
 
 test('decoded sell execution subtracts seller-paid marketplace and transaction fees', () => {

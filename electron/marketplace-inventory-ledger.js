@@ -3,6 +3,7 @@
 const { mergeOrigins, scaleOrigins, SOURCES } = require('./inventory-source-units');
 const { canonicalAssetName } = require('./asset-name');
 const { resolveBreakevenBasisAtOrBefore } = require('./breakeven-basis-state');
+const { selectCanonicalMarketplaceExecutions } = require('./marketplace-trade-ledger');
 
 function text(value) { return String(value || '').trim(); }
 function number(value) {
@@ -266,7 +267,12 @@ function inventoryBasisAtOrBefore(observations, event) {
 function buildMarketplaceInventoryMovements(events = [], {
   inventoryBasisObservations = [], breakevenBasisStates = [],
 } = {}) {
-  const rows = Array.from(events || []);
+  const sourceRows = Array.from(events || []);
+  const rows = [
+    ...sourceRows.filter((event) => !(event?.action === 'execution'
+      && ['lm', 'gm'].includes(text(event?.eventType).toLowerCase()))),
+    ...selectCanonicalMarketplaceExecutions(sourceRows),
+  ];
   const primarySignatures = new Set(rows.filter((event) => event?.action === 'execution'
       || ['deposit', 'withdraw', 'reward'].includes(text(event?.eventType).toLowerCase()))
     .map((event) => text(event?.signature)).filter(Boolean));

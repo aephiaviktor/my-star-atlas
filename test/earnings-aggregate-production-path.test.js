@@ -100,6 +100,7 @@ test('lighter Earnings requests prefer the complete snapshot without reading the
 
 test('production cache is profile/faction/scope keyed and refreshes partial results fail closed', () => {
   const aggregateRegion = main.slice(main.indexOf('const EARNINGS_AGGREGATE_PROJECTION_VERSION'), start);
+  assert.match(aggregateRegion, /const EARNINGS_AGGREGATE_PROJECTION_VERSION = 2/);
   assert.match(aggregateRegion, /profile: getSelectedPlayerProfile\(settings\)/);
   assert.match(aggregateRegion, /faction: normalizeFaction\(settings\.faction\)/);
   assert.match(aggregateRegion, /scope: normalizeEarningsAggregateScope\(snapshotScope\)/);

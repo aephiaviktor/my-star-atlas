@@ -150,7 +150,7 @@ const {
   dedupeMarketplaceRows,
 } = require('./marketplace-trade-compat');
 const { deriveMarketplaceTradeId } = require('./marketplace-v2-point');
-const { projectDecodedMarketplaceTrades } = require('./marketplace-trade-ledger');
+const { projectDecodedMarketplaceTrades, projectLocalMarketInventoryTrades } = require('./marketplace-trade-ledger');
 const {
   buildMarketplaceInventoryMovements, replayMarketplaceInventoryLedger,
   projectGlobalLedgerRows, projectGameLedgerRows, projectInventoryCostLedgerDepositEvents,
@@ -395,7 +395,7 @@ function marketplaceViewCacheSource(settings) {
       faction, String(settings.playerProfiles?.[faction] || '').trim(),
     ])),
     scope: 'marketplace-global',
-    projectionVersion: 2,
+    projectionVersion: 3,
     marketplaceHistoryCutoverIso: MARKETPLACE_HISTORY_CUTOVER_ISO,
   };
   return { ...source, sourceKey: buildMarketplaceViewCacheSourceKey(source) };
@@ -7957,7 +7957,7 @@ async function fetchRentalHistoryIndex(settings, connection, sot) {
   return createRentalHistoryIndex(recoveredRecords);
 }
 
-const EARNINGS_AGGREGATE_PROJECTION_VERSION = 1;
+const EARNINGS_AGGREGATE_PROJECTION_VERSION = 2;
 const earningsAggregateSqliteCaches = new Map();
 const earningsAggregateRefreshes = new Map();
 
@@ -8802,9 +8802,12 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     depositEvents: inventoryMarketplaceDepositEvents,
     baselineRows: inventoryDepositBaselineRows,
   });
-  const inventoryLedgerMarketTrades = localMarketResult.trades.filter((trade) =>
-    String(trade?.marketplace || trade?.market || '').toUpperCase() !== 'GM'
-      || Date.parse(trade?.timestamp) < Date.parse(MARKETPLACE_RAWDATA_CUTOVER_ISO));
+  const legacyInventoryMarketTrades = localMarketResult.trades.filter((trade) =>
+    Date.parse(trade?.timestamp) < Date.parse(MARKETPLACE_RAWDATA_CUTOVER_ISO));
+  const inventoryLedgerMarketTrades = [
+    ...legacyInventoryMarketTrades,
+    ...projectLocalMarketInventoryTrades(inventoryMarketplaceEvents.rows, { faction: ledgerFaction }),
+  ];
   const checkpointPath = ledgerCheckpointPath(ledgerFaction);
   const checkpoint = needsInventoryLedger
     ? await loadLedgerCheckpoint(checkpointPath, { faction: ledgerFaction, profile: profileName })

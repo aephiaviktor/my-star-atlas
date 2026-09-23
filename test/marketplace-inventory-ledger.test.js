@@ -10,6 +10,17 @@ const {
   createBreakevenBasisState, resolveBreakevenBasisAtOrBefore, buildHistoricalBreakevenBasisStateFlux,
 } = require('../electron/breakeven-basis-state');
 
+test('inventory movement projection reuses canonical LM execution selection', () => {
+  const base = { eventType: 'lm', action: 'execution', timestamp: '2026-09-15T05:01:42Z', signature: 'same-signature',
+    faction: 'USTUR', side: 'sell', fromWallet: 'player', asset: 'Iron Ore', quantityRaw: '10000000', grossAtlas: 7500,
+    marketplaceFeeAtlas: 450, txFeeAtlas: 0 };
+  const movements = buildMarketplaceInventoryMovements([
+    { ...base, eventId: 'fallback', starbase: '' },
+    { ...base, eventId: 'enriched', starbase: 'MRZ-23', orderId: 'order-23' },
+  ]);
+  assert.deepEqual(movements.map((movement) => movement.movementId), ['enriched']);
+});
+
 test('historical Breakeven lookup selects the exact latest basis before a CSS withdrawal', () => {
   const states = [
     createBreakevenBasisState({ faction: 'USTUR', starbase: 'CSS', asset: 'Iron Ore', timestamp: '2026-08-30T10:00:00Z', inventory: 100, landedCostPerUnit: 5 }),

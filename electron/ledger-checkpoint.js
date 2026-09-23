@@ -5,8 +5,8 @@ const { writeJsonAtomic } = require('./atomic-json');
 const { InventoryCostLedger } = require('./inventory-cost-ledger');
 const { projectInventoryBasisSnapshotRows } = require('./inventory-basis-snapshot');
 
-// Version 18 rebuilds crafting fallback and cross-faction cargo basis.
-const LEDGER_CHECKPOINT_SCHEMA_VERSION = 19;
+// Version 20 rebuilds inventory under canonical post-cutover LM execution replay.
+const LEDGER_CHECKPOINT_SCHEMA_VERSION = 20;
 
 function emptyResult(status, error = '') {
   return {

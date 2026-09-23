@@ -105,6 +105,12 @@ test('Marketplace event synchronization supplies decoded LM and GM executions wi
   assert.match(main, /projectMarketplaceOrderAndExecutionEvents\(\{ trades: globalTrades \}, 'GM', \{ faction: 'GLOBAL' \}\)/);
 });
 
+test('post-cutover LM inventory uses canonical decoded events while legacy trades stop at the cutover', () => {
+  assert.match(main, /const legacyInventoryMarketTrades = localMarketResult\.trades\.filter\(\(trade\) =>[\s\S]*Date\.parse\(trade\?\.timestamp\) < Date\.parse\(MARKETPLACE_RAWDATA_CUTOVER_ISO\)/);
+  assert.match(main, /projectLocalMarketInventoryTrades\(inventoryMarketplaceEvents\.rows, \{ faction: ledgerFaction \}\)/);
+  assert.doesNotMatch(main, /String\(trade\?\.marketplace \|\| trade\?\.market \|\| ''\)\.toUpperCase\(\) !== 'GM'/);
+});
+
 test('Update shares one compact row with Refresh data and no Marketplace side switch', () => {
   assert.match(html, /class="update-action-stack"[\s\S]*class="top-action-row"[\s\S]*id="refresh-data-btn"[\s\S]*id="update-btn"/);
   assert.doesNotMatch(html, /id="earnings-marketplace-side-switch"/);
@@ -390,6 +396,7 @@ test('Marketplace persistent view cache serves stale immediately, revalidates in
   assert.match(main, /forceRefresh:\s*Boolean\(payload\?\.forceMarketplaceViewRefresh\)/);
   assert.match(main, /waitForRefresh:\s*Boolean\(payload\?\.waitForMarketplaceViewRefresh\)/);
   assert.match(main, /MARKETPLACE_VIEW_REVALIDATE_MS = 5 \* 60 \* 1000/);
+  assert.match(main, /scope: 'marketplace-global',[\s\S]*projectionVersion: 3/);
   assert.match(main, /freshnessMs: MARKETPLACE_VIEW_REVALIDATE_MS/);
   assert.match(main, /marketplaceGameLedgerRowsByFaction/);
   assert.match(main, /marketplaceBreakevenBasisError/);
