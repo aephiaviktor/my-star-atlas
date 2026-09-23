@@ -11,6 +11,7 @@ const renderer = fs.readFileSync(path.join(root, 'electron', 'renderer.js'), 'ut
 const css = fs.readFileSync(path.join(root, 'electron', 'renderer.css'), 'utf8');
 const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
 const raw = fs.readFileSync(path.join(root, 'electron', 'marketplace-rawdata.js'), 'utf8');
+const events = fs.readFileSync(path.join(root, 'electron', 'marketplace-events.js'), 'utf8');
 
 test('Marketplace Raw Data exposes only transaction filters, sortable facts, and payload details', () => {
   for (const id of ['raw-search', 'raw-from', 'raw-to', 'raw-discovery-source']) assert.match(html, new RegExp(`id="earnings-marketplace-${id}"`));
@@ -63,7 +64,7 @@ test('Marketplace Decoded Events is a separate persisted event view linked to ra
   assert.match(main, /projectMarketplaceEventsFromRawRows\(rawData\.rows, 'LM', \{[\s\S]*marketAssetsByMint: localMarketAssetsByMint, faction: settings\.faction/);
   assert.match(main, /projectMarketplaceEventsFromRawRows\(rawData\.rows, 'GM'\)/);
   assert.match(main, /decodeLocalMarketTransactions\(transactions, assetMap\)/);
-  assert.match(main, /action: 'order_cancelled'/);
+  assert.match(events, /action: 'order_cancelled'/);
   assert.doesNotMatch(main, /writeMarketplaceEvents\(settings, projectMarketplaceOrderAndExecutionEvents\(scanned/);
   assert.match(renderer, /const marketplaceEventColumns = Object\.freeze/);
   assert.match(renderer, /marketplaceEvents: new Set\(marketplaceEventColumns\.map/);

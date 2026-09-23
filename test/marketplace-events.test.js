@@ -6,12 +6,25 @@ const bs58Module = require('bs58');
 const bs58 = bs58Module.default || bs58Module;
 const {
   MARKETPLACE_EVENTS_MEASUREMENT, eventPayloadHash, formatMarketplaceEventInfluxLine,
-  deriveCustodyEventsFromRawRows, enrichMarketplaceEventsWithTransactionFees,
+  deriveCustodyEventsFromRawRows, enrichMarketplaceEventsWithTransactionFees, projectMarketplaceOrderAndExecutionEvents,
 } = require('../electron/marketplace-events');
 const { DEPOSIT_CARGO_TO_GAME, WITHDRAW_CARGO_FROM_GAME, PROCESS_HARVEST,
   CLAIM_STAKE_PROGRAM_ID, CLAIM_STAKE_TREASURY_AUTHORITY } = require('../electron/marketplace-rawdata');
 
 const signature = '5abc';
+
+test('LM execution events retain the starbase used by buys and sells', () => {
+  const events = projectMarketplaceOrderAndExecutionEvents({ trades: [
+    { id: 'buy', signature: 'buy-signature', orderId: 'buy-order', starbase: 'MUD-1', asset: 'Carbon', side: 'buy',
+      wallet: 'player', rawMint: 'carbon-mint', quantity: 10, unitPriceAtlas: 2, grossAtlas: 20 },
+    { id: 'sell', signature: 'sell-signature', orderId: 'sell-order', starbase: 'MUD-2', asset: 'Food', side: 'sell',
+      wallet: 'player', rawMint: 'food-mint', quantity: 4, unitPriceAtlas: 3, grossAtlas: 12, marketplaceFeeAtlas: 0.5 },
+  ] }, 'LM', { faction: 'MUD' });
+
+  assert.deepEqual(events.map((event) => [event.side, event.starbase]), [
+    ['buy', 'MUD-1'], ['sell', 'MUD-2'],
+  ]);
+});
 
 test('Marketplace event lines preserve deterministic identity and source transaction linkage', () => {
   const event = { eventId: `${signature}:0:outer`, signature, eventType: 'deposit', asset: 'Food', quantityRaw: '25' };

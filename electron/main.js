@@ -134,6 +134,7 @@ const {
 } = require('./marketplace-rawdata');
 const {
   formatMarketplaceEventInfluxLine, deriveCustodyEventsFromRawRows, enrichMarketplaceEventsWithTransactionFees,
+  projectMarketplaceOrderAndExecutionEvents,
 } = require('./marketplace-events');
 const { filterLegacyMarketplaceInfluxLines } = require('./marketplace-write-policy');
 const {
@@ -5029,46 +5030,6 @@ async function writeMarketplaceEvents(settings, events, transactions = []) {
   }
   if (lines.length) await writeInventoryBasisLinesToInflux(settings, lines.join('\n'));
   return { written: lines.length };
-}
-
-function projectMarketplaceOrderAndExecutionEvents(scanned, market, { faction = '' } = {}) {
-  const eventType = String(market || '').toLowerCase();
-  const eventFaction = eventType === 'gm' ? 'GLOBAL' : normalizeFaction(faction);
-  const events = [];
-  for (const order of scanned?.orders || []) {
-    const signature = String(order.creationSignature || '');
-    if (!signature || !order.orderId) continue;
-    events.push({
-      eventId: `${signature}:${eventType}:order:${order.orderId}`, signature, eventType,
-      action: 'order_created', market: String(market || '').toUpperCase(), orderId: String(order.orderId),
-      faction: eventFaction,
-      side: String(order.side || ''), fromWallet: String(order.initializer || ''), asset: canonicalAssetName(order.asset),
-      mint: String(order.rawMint || order.certificateMint || ''), quantityRaw: String(order.originalQuantity ?? ''),
-      unitPriceAtlas: Number(order.priceAtlas),
-    });
-  }
-  for (const trade of scanned?.trades || []) {
-    const signature = String(trade.signature || '');
-    if (!signature || !trade.id) continue;
-    events.push({
-      eventId: `${signature}:${eventType}:execution:${trade.id}`, signature, eventType,
-      action: 'execution', market: String(market || '').toUpperCase(), orderId: String(trade.orderId || ''),
-      faction: eventFaction,
-      side: String(trade.side || ''), fromWallet: String(trade.wallet || ''), asset: canonicalAssetName(trade.asset),
-      mint: String(trade.rawMint || trade.certificateMint || ''), quantityRaw: String(trade.quantity ?? ''),
-      unitPriceAtlas: Number(trade.unitPriceAtlas ?? trade.priceAtlas), grossAtlas: Number(trade.grossAtlas),
-      marketplaceFeeAtlas: Number(trade.marketplaceFeeAtlas || 0), txFeeAtlas: Number(trade.txFeeAtlas || 0),
-    });
-  }
-  for (const transaction of scanned?.rawTransactions || []) {
-    const signature = String(transaction?.signature || transaction?.transaction?.signatures?.[0] || '');
-    const cancellations = (transaction?.meta?.logMessages || []).filter((line) => String(line).includes('Instruction: ProcessCancel'));
-    cancellations.forEach((_line, index) => events.push({
-      eventId: `${signature}:${eventType}:cancel:${index}`, signature, eventType,
-      action: 'order_cancelled', market: String(market || '').toUpperCase(), faction: eventFaction,
-    }));
-  }
-  return events;
 }
 
 function rawRowHasDiscoverySource(row, source) {
