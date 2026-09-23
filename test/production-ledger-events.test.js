@@ -238,6 +238,14 @@ test('cargo events use telemetry timestamps and reject incomplete routes or cost
   }]);
 });
 
+test('cargo transfer events canonicalize legacy Ammo telemetry to Ammunition', () => {
+  assert.deepEqual(buildCargoTransferEvents([{
+    timestamp: '2026-09-23T05:00:00Z', origin: 'MRZ-5', destination: 'MRZ-6', asset: 'Ammo', amount: 250, totalCostsAtlas: 3,
+  }]), [{
+    type: 'transfer', timestamp: '2026-09-23T05:00:00.000Z', origin: 'MRZ-5', destination: 'MRZ-6', asset: 'Ammunition', quantity: 250, cargoCost: 3, carryPoolRate: true,
+  }]);
+});
+
 test('crafting events carry ingredient basis and add only direct conversion costs', () => {
   const result = buildCostLedgerResult({
     miningRows: [{ isoDate: '2026-07-24', starbase: 'UST-1', rawMaterial: 'Carbon', mined: 10, totalCostsAtlas: 5 }],

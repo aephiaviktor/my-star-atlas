@@ -139,7 +139,7 @@ function buildCargoTransferEvents(rows) {
     const timestamp = normalizeTimestamp(row.timestamp, row.isoDate);
     const origin = String(row.origin || '').trim();
     const destination = String(row.destination || '').trim();
-    const asset = String(row.asset || '').trim();
+    const asset = canonicalAssetName(row.asset);
     const quantity = Number(row.amount);
     const hasCargoCost = row.totalCostsAtlas !== null && row.totalCostsAtlas !== undefined && row.totalCostsAtlas !== ''
       && Number.isFinite(Number(row.totalCostsAtlas)) && Number(row.totalCostsAtlas) >= 0;
