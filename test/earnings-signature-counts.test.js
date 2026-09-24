@@ -49,7 +49,8 @@ test('mining retains legacy telemetry only as input before canonical fail-closed
   const snapshot = sourceBetween(main, 'async function fetchEarningsSnapshot', "handleTrustedIpc('app:get-profile-name'");
   assert.match(mining, /r\._field == "txCostSol" or r\._field == "txCount"/);
   assert.match(mining, /aggregateMiningTransactionEvents/);
-  assert.match(snapshot, /applyFleetTransactionTotals\(miningRow/);
+  assert.match(snapshot, /applyMiningFleetDayTransactionEvidence\(miningRow/);
+  assert.match(snapshot, /canonicalRows: canonicalMiningTransactions,/);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'electron', 'fleet-transaction-events.js'), 'utf8'), /transactionCostSource: 'unavailable'/);
   assert.doesNotMatch(mining, /getSignaturesForAddress|fetchFleetSignatureDailyCounts/);
 });

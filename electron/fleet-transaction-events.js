@@ -116,6 +116,25 @@ function unambiguousFleetDayKeys(rows = [], resolveFleetAccount = () => '') {
   return new Set(Array.from(counts.entries()).filter(([, count]) => count === 1).map(([key]) => key));
 }
 
+function applyMiningFleetDayTransactionEvidence(row, { fleetAccount = '', unambiguous = false, canonicalRows = [] } = {}) {
+  if (!unambiguous) {
+    // Multi-material mining day: the canonical signature stream only carries
+    // fleet-day totals and cannot be attributed to one raw material. Keep the
+    // per-material mining telemetry totals (txCount/txCostSol are tagged with
+    // fleet + starbase + rss) when present; otherwise fail closed instead of
+    // inventing a split.
+    const txsDaily = Number(row?.txsDaily);
+    const txCostSol = Number(row?.txCostSol);
+    const hasTelemetry = Number.isFinite(txsDaily) && Number.isFinite(txCostSol)
+      && (txsDaily > 0 || txCostSol > 0);
+    if (!hasTelemetry) {
+      return { ...row, txsDaily: null, txCostSol: null, txFeeLamports: null, transactionCostSource: 'unavailable' };
+    }
+    return { ...row, txFeeLamports: null, transactionCostSource: 'mining_telemetry_per_material' };
+  }
+  return applyFleetTransactionTotals(row, fleetAccount, canonicalRows);
+}
+
 function applyFleetTransactionTotals(row, fleetAccount, canonicalRows = []) {
   const account = clean(fleetAccount);
   const canonical = account ? canonicalRows.find((entry) => clean(entry?.isoDate) === clean(row?.isoDate)
@@ -141,6 +160,7 @@ function applyFleetTransactionTotals(row, fleetAccount, canonicalRows = []) {
 module.exports = {
   aggregateFleetTransactionEvents,
   applyFleetTransactionTotals,
+  applyMiningFleetDayTransactionEvidence,
   recoverFleetTransactionAssignments,
   unambiguousFleetDayKeys,
 };

@@ -88,7 +88,8 @@ const { upgradingPoolKey, resolveUpgradingCostsAtlas } = require('./upgrading-co
 const { enrichRows: enrichResourceCostBasisRows } = require('./resource-cost-basis');
 const { aggregateMiningTransactionEvents } = require('./mining-transaction-events');
 const { aggregateScanningTransactionEvents } = require('./scanning-transaction-events');
-const { aggregateFleetTransactionEvents, applyFleetTransactionTotals, recoverFleetTransactionAssignments, unambiguousFleetDayKeys } = require('./fleet-transaction-events');
+const { aggregateFleetTransactionEvents, applyFleetTransactionTotals, applyMiningFleetDayTransactionEvidence, recoverFleetTransactionAssignments, unambiguousFleetDayKeys } = require('./fleet-transaction-events');
+const { createFleetCompositionStore } = require('./fleet-composition-store');
 const {
   formatBreakevenBasisStateInfluxLine, projectBreakevenBasisStateRows,
   diffBreakevenBasisStates, buildLatestBreakevenBasisStateFlux, buildHistoricalBreakevenBasisStateFlux,
@@ -383,6 +384,16 @@ function getMarketplaceCheckpointSqliteStore() {
     });
   }
   return marketplaceCheckpointSqliteStore;
+}
+
+let fleetCompositionStore = null;
+function getFleetCompositionStore() {
+  if (!fleetCompositionStore) {
+    fleetCompositionStore = createFleetCompositionStore({
+      filePath: path.join(baseUserData, 'cache', 'fleet-compositions-v1.sqlite'),
+    });
+  }
+  return fleetCompositionStore;
 }
 
 function marketplaceViewCacheSource(settings) {
@@ -8208,6 +8219,48 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     if (account && !fleetByAccount.has(account)) fleetByAccount.set(account, fleet);
   }
 
+  // Persist the current on-chain ship composition into the local SQLite
+  // fleet store so ship/crew data survives once a fleet stops being rented
+  // or disappears entirely. The snapshot is refreshed whenever the fleet is
+  // visible; historical rows fall back to the newest stored observation.
+  const fleetCompositionStore = getFleetCompositionStore();
+  const compositionProfile = getSelectedPlayerProfile(settings);
+  const compositionObservedAtMs = Date.now();
+  try {
+    for (const fleet of fleetRows) {
+      if (!walletFactionMatches(fleet)) continue;
+      const account = String(fleet.key || '').trim();
+      if (!account) continue;
+      fleetCompositionStore.upsertComposition({
+        faction: settingsFaction,
+        profile: compositionProfile,
+        fleetAccount: account,
+        label: String(fleet.label || '').trim(),
+        ships: fleet.ships || [],
+        totalRequiredCrew: fleet.totalRequiredCrew,
+        shipTypes: fleet.shipTypes || 0,
+        observedAtMs: compositionObservedAtMs,
+      });
+    }
+  } catch (_compositionError) {
+    // Composition persistence must never break the earnings snapshot.
+  }
+  const storedCompositionByFleet = new Map();
+  const storedCompositionFor = (fleetAccount, fleetLabel) => {
+    const account = String(fleetAccount || '').trim();
+    const key = account ? `${settingsFaction}\n${compositionProfile}\n${account}` : `label\n${settingsFaction}\n${compositionProfile}\n${String(fleetLabel || '').trim()}`;
+    if (storedCompositionByFleet.has(key)) return storedCompositionByFleet.get(key);
+    let composition = null;
+    try {
+      if (account) composition = fleetCompositionStore.readComposition({ faction: settingsFaction, profile: compositionProfile, fleetAccount: account });
+      if (!composition) composition = fleetCompositionStore.readCompositionByLabel({ faction: settingsFaction, profile: compositionProfile, label: String(fleetLabel || '').trim() });
+    } catch (_compositionError) {
+      composition = null;
+    }
+    storedCompositionByFleet.set(key, composition);
+    return composition;
+  };
+
   let scanningRows = [];
   let scanningError = '';
   let miningRows = [];
@@ -8378,6 +8431,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     activeFleetKeys.add(activeKey);
     totalSduFound += scanRow.sduFound;
     if (fleet) activeMappedFleetKeys.add(fleet.key);
+    const storedComposition = fleet ? null : storedCompositionFor('', scanRow.fleet);
     const [sduPrice, foodPrice, fuelPrice, solPrice] = await Promise.all([
       resolveHistoricalAtlasPrice('Survey Data Unit', scanRow.isoDate),
       resolveHistoricalAtlasPrice('Food', scanRow.isoDate),
@@ -8389,7 +8443,7 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const hasTransactionEvidence = Number.isFinite(scanRow.txCostSol) && Number.isFinite(scanRow.txsDaily);
     const txsCostsAtlas = hasTransactionEvidence && solPrice.status === 'complete' ? scanRow.txCostSol * solPrice.priceATL : null;
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
-    const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
+    const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? storedComposition?.totalRequiredCrew ?? null;
     const costParts = [foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = hasTransactionEvidence && Number.isFinite(txsCostsAtlas) && costParts.length
       ? costParts.reduce((sum, value) => sum + value, 0) : null;
@@ -8405,8 +8459,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       ownership: fleet?.ownership || '',
       relationship: fleet?.relationship || '',
       activity: fleet?.activity || '',
-      ships: fleet?.ships || [],
-      shipTypes: fleet?.shipTypes || 0,
+      ships: fleet?.ships || storedComposition?.ships || [],
+      shipTypes: fleet?.shipTypes || storedComposition?.shipTypes || 0,
       expectedSduPerScan: fleet?.expectedSduPerScan ?? null,
       expectedSduValueAtl: fleet?.expectedSduValueAtl ?? null,
       totalRequiredCrew,
@@ -8453,8 +8507,12 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const fleet = fleetByLabel.get(normalizeFleetLabel(miningRow.fleet));
     const historicalRental = rentalForRow(fleet, miningRow.fleet, miningRow.isoDate);
     const resolvedFleetAccount = fleet?.key || historicalRental?.fleetAccount || '';
-    const transactionFleetAccount = unambiguousMiningFleetDays.has(`${miningRow.isoDate}\n${resolvedFleetAccount}`) ? resolvedFleetAccount : '';
-    miningRow = applyFleetTransactionTotals(miningRow, transactionFleetAccount, canonicalMiningTransactions);
+    const miningDayUnambiguous = unambiguousMiningFleetDays.has(`${miningRow.isoDate}\n${resolvedFleetAccount}`);
+    miningRow = applyMiningFleetDayTransactionEvidence(miningRow, {
+      fleetAccount: miningDayUnambiguous ? resolvedFleetAccount : '',
+      unambiguous: miningDayUnambiguous,
+      canonicalRows: canonicalMiningTransactions,
+    });
     const activeKey = fleet?.key || normalizeFleetLabel(miningRow.fleet);
     activeMiningFleetKeys.add(activeKey);
     if (fleet) activeMappedMiningFleetKeys.add(fleet.key);
@@ -8474,7 +8532,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
     const hasTransactionEvidence = Number.isFinite(miningRow.txCostSol) && Number.isFinite(miningRow.txsDaily);
     const txsCostsAtlas = hasTransactionEvidence && solPrice.status === 'complete' ? miningRow.txCostSol * solPrice.priceATL : null;
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
-    const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
+    const storedComposition = fleet ? null : storedCompositionFor(resolvedFleetAccount, miningRow.fleet);
+    const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? storedComposition?.totalRequiredCrew ?? null;
     const costParts = [ammoCostsAtlas, foodCostsAtlas, fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = hasTransactionEvidence && Number.isFinite(txsCostsAtlas) && costParts.length
       ? costParts.reduce((sum, value) => sum + value, 0) : null;
@@ -8493,8 +8552,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       ownership: fleet?.ownership || '',
       relationship: fleet?.relationship || '',
       activity: fleet?.activity || '',
-      ships: fleet?.ships || [],
-      shipTypes: fleet?.shipTypes || 0,
+      ships: fleet?.ships || storedComposition?.ships || [],
+      shipTypes: fleet?.shipTypes || storedComposition?.shipTypes || 0,
       totalRequiredCrew,
       crewSnapshotSource: historicalRental?.crewSnapshotSource || (fleet?.totalRequiredCrew ? 'current_fleet_composition' : ''),
       rawMaterialPriceAtl,
@@ -8562,7 +8621,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       : (hasTransactionEvidence && historicalSolPrice?.status === 'complete' ? cargoRow.txCostSol * historicalSolPrice.priceATL : null);
     const historicalRental = rentalForRow(fleet, cargoRow.fleet, cargoRow.isoDate, authoritativeAccount);
     const rentalRateAtlasPerDay = historicalRental?.rentalCostAtlas ?? null;
-    const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? null;
+    const storedComposition = fleet ? null : storedCompositionFor(authoritativeAccount || historicalRental?.fleetAccount || '', cargoRow.fleet);
+    const totalRequiredCrew = historicalRental?.requiredCrew ?? fleet?.totalRequiredCrew ?? storedComposition?.totalRequiredCrew ?? null;
     const incompleteRawValuation = (fuelCanonical && Number(cargoRow.burnedFuel) > 0 && !Number.isFinite(fuelCostsAtlas)) || (feeCanonical && BigInt(cargoRow.txFeeLamports || '0') > 0n && !Number.isFinite(txsCostsAtlas));
     const costParts = [fuelCostsAtlas, rentalRateAtlasPerDay, txsCostsAtlas].filter((value) => Number.isFinite(value));
     const totalCostsAtlas = hasTransactionEvidence && Number.isFinite(txsCostsAtlas) && !incompleteRawValuation && costParts.length
@@ -8578,8 +8638,8 @@ async function fetchEarningsSnapshot(payload, diagnosticContext = null) {
       ownership: fleet?.ownership || '',
       relationship: fleet?.relationship || '',
       activity: fleet?.activity || '',
-      ships: fleet?.ships || [],
-      shipTypes: fleet?.shipTypes || 0,
+      ships: fleet?.ships || storedComposition?.ships || [],
+      shipTypes: fleet?.shipTypes || storedComposition?.shipTypes || 0,
       totalRequiredCrew,
       crewSnapshotSource: historicalRental?.crewSnapshotSource || (fleet?.totalRequiredCrew ? 'current_fleet_composition' : ''),
       fleetCargoCapacity: fleet?.totalCargoCapacity ?? null,

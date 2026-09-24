@@ -138,9 +138,10 @@ test('Mining projection replaces its legacy totals from the shared canonical str
   assert.match(main, /assignmentRecoveredTransactionRecords = recoverFleetTransactionAssignments/);
   assert.match(main, /miningExporter = miningExporterForFaction\(settings\.faction\)/);
   assert.match(main, /canonicalMiningTransactions = miningExporter[\s\S]*aggregateFleetTransactionEvents\(assignmentRecoveredTransactionRecords, \{ assignments: \['Mine'\], \.\.\.miningExporter \}\)/);
-  const miningProjection = main.slice(main.indexOf('const mining = await Promise.all'), main.indexOf('const cargo = await Promise.all'));
-  assert.match(miningProjection, /unambiguousMiningFleetDays\.has/);
-  assert.match(miningProjection, /applyFleetTransactionTotals\(miningRow, transactionFleetAccount, canonicalMiningTransactions\)/);
+  const miningProjection = main.slice(main.indexOf('const mining = await Promise.all'), main.indexOf('const miningCostTotalsByFleetDateAndMaterial'));
+  assert.match(miningProjection, /miningDayUnambiguous = unambiguousMiningFleetDays\.has/);
+  assert.match(miningProjection, /applyMiningFleetDayTransactionEvidence\(miningRow, \{\n      fleetAccount: miningDayUnambiguous \? resolvedFleetAccount : ''/);
+  assert.match(miningProjection, /canonicalRows: canonicalMiningTransactions,/);
 });
 
 test('Scanning projection replaces its legacy totals from exact Scan-assignment signatures', () => {
@@ -175,4 +176,36 @@ test('missing transaction evidence cannot become zero or a partial total in Earn
   assert.match(renderer, /entry\.txsDaily == null \? 'N\/A'/);
   assert.doesNotMatch(cargoProjection, /fee: feeCovered \? 'canonical' : 'legacy'/);
   assert.match(cargoProjection, /fee: feeCovered \? 'canonical' : 'unavailable'/);
+});
+
+test('multi-material mining fleet-day keeps per-material telemetry instead of blanking TXS', () => {
+  const { applyMiningFleetDayTransactionEvidence } = require('../electron/fleet-transaction-events');
+  const row = { isoDate: '2026-09-22', fleet: 'Garter Snake Fleet', rawMaterial: 'Carbon', mined: 10, txsDaily: 61, txCostSol: 0.05 };
+  const kept = applyMiningFleetDayTransactionEvidence(row, { fleetAccount: 'fleet-a', unambiguous: false });
+  assert.equal(kept.txsDaily, 61);
+  assert.equal(kept.txCostSol, 0.05);
+  assert.equal(kept.transactionCostSource, 'mining_telemetry_per_material');
+  assert.equal(kept.txFeeLamports, null);
+});
+
+test('multi-material mining fleet-day without telemetry evidence fails closed to unavailable', () => {
+  const { applyMiningFleetDayTransactionEvidence } = require('../electron/fleet-transaction-events');
+  const row = { isoDate: '2026-09-22', fleet: 'Garter Snake Fleet', rawMaterial: 'Hydrogen', mined: 100 };
+  const kept = applyMiningFleetDayTransactionEvidence(row, { fleetAccount: 'fleet-a', unambiguous: false });
+  assert.equal(kept.txsDaily, null);
+  assert.equal(kept.txCostSol, null);
+  assert.equal(kept.transactionCostSource, 'unavailable');
+});
+
+test('unambiguous mining fleet-day still applies the canonical signature totals', () => {
+  const { applyMiningFleetDayTransactionEvidence } = require('../electron/fleet-transaction-events');
+  const row = { isoDate: '2026-09-23', fleet: 'Bongo Fleet', rawMaterial: 'Hydrogen', mined: 50, txsDaily: 2, txCostSol: 0.001 };
+  const kept = applyMiningFleetDayTransactionEvidence(row, {
+    fleetAccount: 'fleet-a',
+    unambiguous: true,
+    canonicalRows: [{ isoDate: '2026-09-23', fleetAccount: 'fleet-a', txsDaily: 86, txCostSol: 0.08, txFeeLamports: '80000000' }],
+  });
+  assert.equal(kept.txsDaily, 86);
+  assert.equal(kept.txCostSol, 0.08);
+  assert.equal(kept.transactionCostSource, 'canonical_signature_stream');
 });

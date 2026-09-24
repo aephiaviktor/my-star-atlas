@@ -28,7 +28,7 @@ test('Scanning, Mining, and Cargo use date-matched history instead of current fl
 });
 
 test('historical required crew overrides current composition for date-matched per-crew results', () => {
-  const matches = main.match(/const totalRequiredCrew = historicalRental\?\.requiredCrew \?\? fleet\?\.totalRequiredCrew \?\? null;/g) || [];
+  const matches = main.match(/const totalRequiredCrew = historicalRental\?\.requiredCrew \?\? fleet\?\.totalRequiredCrew \?\? storedComposition\?\.totalRequiredCrew \?\? null;/g) || [];
   assert.equal(matches.length, 3);
   assert.match(main, /netProfitPerCrew: Number\.isFinite\(netProfitAtlas\) && Number\.isFinite\(totalRequiredCrew\)/);
   assert.match(main, /crewSnapshotSource: historicalRental\?\.crewSnapshotSource/);
